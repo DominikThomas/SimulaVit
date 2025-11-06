@@ -54,13 +54,13 @@ public class CubeFace
 
                     // First triangle (bottom-left)
                     triangles[triangleIndex++] = v0;
+                    triangles[triangleIndex++] = v3;
                     triangles[triangleIndex++] = v1;
-                    triangles[triangleIndex++] = v3; // Note: Correct winding order is crucial!
 
                     // Second triangle (top-right)
                     triangles[triangleIndex++] = v3;
-                    triangles[triangleIndex++] = v1;
                     triangles[triangleIndex++] = v2;
+                    triangles[triangleIndex++] = v1;
                 }
 
                 vertexIndex++;
