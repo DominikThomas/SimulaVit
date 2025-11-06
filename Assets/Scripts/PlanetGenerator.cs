@@ -39,29 +39,47 @@ public class PlanetGenerator : MonoBehaviour
 
     void GeneratePlanet()
     {
-        // 1. Array to store all the vertices (points in 3D space)
-        Vector3[] vertices = new Vector3[resolution * resolution * 6];
+        Vector3[] faceDirections = new Vector3[] {
+        Vector3.up,
+        Vector3.down,
+        Vector3.left,
+        Vector3.right,
+        Vector3.forward,
+        Vector3.back
+    };
 
-        // 2. Array to store the triangles (which vertices form a face)
-        int[] triangles = new int[(resolution - 1) * (resolution - 1) * 6 * 2 * 3]; // Calculate the required size
+        // Use Lists as they are easier to resize when combining data
+        System.Collections.Generic.List<Vector3> allVertices = new System.Collections.Generic.List<Vector3>();
+        System.Collections.Generic.List<int> allTriangles = new System.Collections.Generic.List<int>();
 
-        // --- Core Mesh Generation Logic (This is the complex part) ---
+        // This tracks the base index for the vertices of the NEXT face.
+        int currentVertexOffset = 0;
 
-        // This is where you would iterate through the 6 faces of the cube,
-        // create a grid of (resolution x resolution) vertices on each face,
-        // and then generate the triangles for that face.
+        // --- Generate and Assemble ---
+        foreach (Vector3 dir in faceDirections)
+        {
+            CubeFace face = new CubeFace(dir);
+            MeshData faceData = face.GenerateMeshData(resolution);
 
-        // After generating the flat cube vertices, you must "normalize" them:
-        // for (int i = 0; i < vertices.Length; i++) {
-        //     vertices[i] = vertices[i].normalized * radius;
-        // }
+            // 1. Add Vertices: Simply append all vertices from the face
+            allVertices.AddRange(faceData.vertices);
 
-        // --- End of Core Logic Placeholder ---
+            // 2. Add Triangles: Crucially, we must offset the indices!
+            // The face's indices (v0, v1, v2, v3) are relative to its own small array.
+            // We must add the total number of vertices already in the full mesh.
+            for (int i = 0; i < faceData.triangles.Length; i++)
+            {
+                allTriangles.Add(faceData.triangles[i] + currentVertexOffset);
+            }
 
-        // 3. Apply the data to the mesh
+            // 3. Update Offset: Move the offset marker to the end of the combined list
+            currentVertexOffset += faceData.vertices.Length;
+        }
+
+        // 4. Apply the data to the mesh
         mesh.Clear();
-        // mesh.vertices = vertices;
-        // mesh.triangles = triangles;
-        mesh.RecalculateNormals(); // Important for lighting!
+        mesh.vertices = allVertices.ToArray();
+        mesh.triangles = allTriangles.ToArray(); // Now we assign the combined triangles!
+        mesh.RecalculateNormals();
     }
 }
