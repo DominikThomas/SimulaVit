@@ -68,7 +68,7 @@ public class PlanetGenerator : MonoBehaviour
         foreach (Vector3 dir in faceDirections)
         {
             CubeFace face = new CubeFace(dir);
-            MeshData faceData = face.GenerateMeshData(resolution);
+            MeshData faceData = face.GenerateMeshData(resolution, radius);
 
             // 1. Add Vertices: Simply append all vertices from the face
             allVertices.AddRange(faceData.vertices);

@@ -16,7 +16,7 @@ public class CubeFace
     }
 
     // New method that returns both vertices and triangle indices
-    public MeshData GenerateMeshData(int resolution)
+    public MeshData GenerateMeshData(int resolution, float radius)
     {
         // 1. Initialize lists to store data
         Vector3[] vertices = new Vector3[resolution * resolution];
@@ -36,7 +36,9 @@ public class CubeFace
                                       (percent.y * 2 - 1) * axisB;
 
                 // Set the vertex and normalize it to the sphere surface
-                vertices[vertexIndex] = pointOnCube.normalized;
+                Vector3 pointOnSphere = pointOnCube.normalized * radius; // Multiply by the radius
+
+                vertices[vertexIndex] = pointOnSphere; // Assign the scaled vertex
 
                 // --- TRIANGLE GENERATION ---
                 // We only generate triangles for the bottom and left edges of the grid, 
