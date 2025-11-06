@@ -7,13 +7,14 @@ public class PlanetGenerator : MonoBehaviour
     public int resolution = 10;
     public float radius = 1f;
 
+    public Material planetMaterial;
+
     private MeshFilter meshFilter;
     private Mesh mesh;
 
     void Awake()
     {
-        // 1. Get or Add the MeshFilter component
-        // This component holds the mesh data
+        // 1. Get or Add the MeshFilter component (remains the same)
         meshFilter = gameObject.GetComponent<MeshFilter>();
         if (meshFilter == null)
         {
@@ -21,13 +22,21 @@ public class PlanetGenerator : MonoBehaviour
         }
 
         // 2. Get or Add the MeshRenderer component
-        // This component makes the mesh visible
-        if (gameObject.GetComponent<MeshRenderer>() == null)
+        MeshRenderer meshRenderer = gameObject.GetComponent<MeshRenderer>();
+        if (meshRenderer == null)
         {
-            gameObject.AddComponent<MeshRenderer>().sharedMaterial = new Material(Shader.Find("Standard"));
+            meshRenderer = gameObject.AddComponent<MeshRenderer>();
         }
 
-        // 3. Create and assign a new Mesh object
+        // **CRUCIAL CHANGE:** Assign the saved asset material here
+        if (planetMaterial != null)
+        {
+            meshRenderer.sharedMaterial = planetMaterial;
+        }
+        // NOTE: You can remove the old line that created a temporary material
+        // if you want to rely entirely on this reference.
+
+        // 3. Create and assign a new Mesh object (remains the same)
         mesh = new Mesh();
         meshFilter.sharedMesh = mesh;
     }
