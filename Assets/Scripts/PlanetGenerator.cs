@@ -12,6 +12,15 @@ public class PlanetGenerator : MonoBehaviour
     private MeshFilter meshFilter;
     private Mesh mesh;
 
+    public GameObject replicatorPrefab;
+
+    public float spawnTimer = 0f;
+    public float minSpawnInterval = 5f;
+    public float maxSpawnInterval = 15f;
+    private float timeUntilNextSpawn;
+
+    private int replicatorCount = 0;
+
     void Awake()
     {
         // 1. Get or Add the MeshFilter component (remains the same)
@@ -44,6 +53,21 @@ public class PlanetGenerator : MonoBehaviour
     void Start()
     {
         GeneratePlanet();
+        timeUntilNextSpawn = Random.Range(minSpawnInterval, maxSpawnInterval);
+    }
+
+    void Update()
+    {
+        spawnTimer += Time.deltaTime;
+
+        if (spawnTimer >= timeUntilNextSpawn)
+        {
+            SpawnReplicator();
+
+            // Reset timer and choose a new random interval
+            spawnTimer = 0f;
+            timeUntilNextSpawn = Random.Range(minSpawnInterval, maxSpawnInterval);
+        }
     }
 
     void GeneratePlanet()
@@ -90,5 +114,47 @@ public class PlanetGenerator : MonoBehaviour
         mesh.vertices = allVertices.ToArray();
         mesh.triangles = allTriangles.ToArray(); // Now we assign the combined triangles!
         mesh.RecalculateNormals();
+    }
+
+    void SpawnReplicator()
+    {
+        if (replicatorPrefab == null) { return; }
+
+        // --- 1. Determine the Spawn Direction ---
+        Vector3 spawnDirection;
+
+        if (replicatorCount == 0)
+        {
+            // We use the empirically confirmed visible direction (Vector3.back) as the bias.
+            // blendFactor of 0.7 means 70% chance of facing 'back', 30% random spread.
+            spawnDirection = GetBiasedRandomDirection(Vector3.back, 0.7f);
+        }
+        else
+        {
+            // This is a subsequent replicator—spawn completely randomly
+            spawnDirection = Random.onUnitSphere;
+        }
+
+        // --- 2. Calculate Position and Instantiate ---
+        float surfaceOffset = 0.05f;
+        Vector3 spawnPoint = spawnDirection * (radius + surfaceOffset);
+
+        // Spawn the object
+        GameObject newReplicator = Instantiate(replicatorPrefab, spawnPoint, Quaternion.identity);
+
+        // --- 3. Increment the Counter ---
+        replicatorCount++;
+    }
+
+    Vector3 GetBiasedRandomDirection(Vector3 biasDirection, float blendFactor)
+    {
+        // Generate a completely random vector on the sphere
+        Vector3 randomDirection = Random.onUnitSphere;
+
+        // Blend the random direction with the strong bias direction (Vector3.back).
+        // The blendFactor (e.g., 0.8) ensures 80% of the vector points 'back'.
+        Vector3 biasedDirection = Vector3.Lerp(randomDirection, biasDirection, blendFactor).normalized;
+
+        return biasedDirection;
     }
 }

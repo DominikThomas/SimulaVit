@@ -1,4 +1,5 @@
 using UnityEngine;
+using System.Collections; // Needed for Coroutines
 
 public class ReplicatorMovement : MonoBehaviour
 {
@@ -12,6 +13,69 @@ public class ReplicatorMovement : MonoBehaviour
     public float maxTimeBetweenTurns = 3f; // Max seconds before a new random direction is chosen
 
     private float currentYaw = 0f;
+
+    // NEW: Quicker Ramp-Up Duration
+    public float flareUpDuration = 0.5f; // Time from zero to peak (0.5 seconds is very quick)
+    public float dimDownDuration = 2.0f; // Time from peak to normal (Stays the same)
+
+    private Light replicatorLight;
+    private float originalIntensity;
+    public float flarePeakMultiplier = 2.0f;
+    public float flareDuration = 2.0f; // Total time for the effect
+
+    void Awake()
+    {
+        replicatorLight = GetComponent<Light>();
+        if (replicatorLight != null)
+        {
+            originalIntensity = replicatorLight.intensity;
+
+            // CRUCIAL CHANGE 1: Set light intensity to 0 before starting the sequence
+            replicatorLight.intensity = 0f;
+
+            StartCoroutine(LightFlareSequence());
+        }
+    }
+
+    // Coroutine to control the light's intensity over time
+    IEnumerator LightFlareSequence()
+    {
+        float timer = 0f;
+        float peakIntensity = originalIntensity * flarePeakMultiplier;
+
+        // 1. PHASE 1: Fade In and Flare Up (0% to 200% intensity)
+        // Duration uses the new, shorter flareUpDuration
+        while (timer < flareUpDuration)
+        {
+            timer += Time.deltaTime;
+            float t = timer / flareUpDuration; // t goes from 0 to 1
+
+            // The intensity now ramps from 0 up to the Peak Intensity
+            replicatorLight.intensity = Mathf.Lerp(0f, peakIntensity, t);
+
+            yield return null;
+        }
+
+        // Ensure it hits the peak value exactly
+        replicatorLight.intensity = peakIntensity;
+
+        // 2. PHASE 2: Dim Down (200% to 100% intensity)
+        // Duration uses the longer dimDownDuration
+        timer = 0f;
+        while (timer < dimDownDuration)
+        {
+            timer += Time.deltaTime;
+            float t = timer / dimDownDuration; // t goes from 0 to 1
+
+            // The intensity ramps down from Peak Intensity back to Original Intensity
+            replicatorLight.intensity = Mathf.Lerp(peakIntensity, originalIntensity, t);
+
+            yield return null;
+        }
+
+        // Final sanity check
+        replicatorLight.intensity = originalIntensity;
+    }
 
     void Start()
     {
