@@ -139,8 +139,12 @@ public class PlanetGenerator : MonoBehaviour
         float surfaceOffset = 0.05f;
         Vector3 spawnPoint = spawnDirection * (radius + surfaceOffset);
 
-        // Spawn the object
-        GameObject newReplicator = Instantiate(replicatorPrefab, spawnPoint, Quaternion.identity);
+        // --- CRUCIAL CHANGE: Use the Instantiate overload that includes the parent transform ---
+        // The arguments are: (Prefab, Position, Rotation, Parent Transform)
+        GameObject newReplicator = Instantiate(replicatorPrefab, spawnPoint, Quaternion.identity, this.transform);
+
+        // The old SetParent call is now redundant and should be REMOVED or commented out.
+        // REMOVED: newReplicator.transform.SetParent(this.transform); 
 
         // --- 3. Increment the Counter ---
         replicatorCount++;

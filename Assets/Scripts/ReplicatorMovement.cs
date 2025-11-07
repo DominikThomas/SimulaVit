@@ -4,7 +4,7 @@ using System.Collections; // Needed for Coroutines
 public class ReplicatorMovement : MonoBehaviour
 {
     // Public variables to control movement
-    public float planetRadius = 4.0f; // Manually set this to match PlanetGenerator for now
+    private float planetRadius;
     public float movementSpeed = 0.5f; // How fast it moves across the surface
     public float turningSpeed = 5.0f; // How quickly it changes direction (degrees per second)
 
@@ -25,6 +25,19 @@ public class ReplicatorMovement : MonoBehaviour
 
     void Awake()
     {
+        PlanetGenerator generator = GetComponentInParent<PlanetGenerator>();
+        if (generator != null)
+        {
+            // 2. Read the actual radius from the generator.
+            planetRadius = generator.radius;
+        }
+        else
+        {
+            // Fallback for safety, though it shouldn't happen
+            Debug.LogError("Replicator spawned without a PlanetGenerator parent. Defaulting radius to 1.0f.");
+            planetRadius = 1.0f;
+        }
+
         replicatorLight = GetComponent<Light>();
         if (replicatorLight != null)
         {
@@ -132,10 +145,9 @@ public class ReplicatorMovement : MonoBehaviour
     {
         // This function is still crucial for fixing the position and orientation every frame.
         Vector3 directionToSurface = transform.position.normalized;
-        float surfaceOffset = 0.05f;
 
         // 1. Fix Position (Ensuring it's always at the right distance)
-        transform.position = directionToSurface * (planetRadius + surfaceOffset);
+        transform.position = directionToSurface * (planetRadius * 1.01f);
 
         // 2. Fix Rotation (Ensuring its local UP is always the surface normal)
         // The most stable way to orient an object on a sphere:
