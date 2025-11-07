@@ -3,7 +3,7 @@ using UnityEngine;
 public class PlanetGenerator : MonoBehaviour
 {
     // Public variables allow you to adjust these values in the Unity Inspector
-    [Range(1, 240)] // A slider for easy adjustment in the Inspector
+    [Range(3, 240)] // A slider for easy adjustment in the Inspector
     public int resolution = 10;
     public float radius = 1f;
 

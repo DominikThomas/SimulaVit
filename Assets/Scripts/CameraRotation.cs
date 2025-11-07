@@ -5,7 +5,8 @@ public class CameraRotation : MonoBehaviour
 {
     // Public variables to control rotation speed and distance
     public float rotationSpeed = 1.0f; // Adjusted for New Input System delta
-    public float distance = 10.0f;
+    public float distanceBuffer = 6.0f;
+    private float orbitDistance; // The calculated final distance
 
     // NEW: Reference to the Input Actions Asset
     public InputActionAsset controls;
@@ -24,6 +25,21 @@ public class CameraRotation : MonoBehaviour
 
     void Awake()
     {
+        // 1. Find the PlanetGenerator script (assuming it's on the parent 'Planet System')
+        PlanetGenerator generator = FindObjectOfType<PlanetGenerator>();
+
+        if (generator != null)
+        {
+            // 2. Calculate the orbit distance: Planet Radius + Buffer
+            // This ensures the camera is always 'distanceBuffer' units away from the surface.
+            orbitDistance = generator.radius + distanceBuffer;
+        }
+        else
+        {
+            // Fallback for safety
+            orbitDistance = 10.0f;
+            Debug.LogError("PlanetGenerator not found for camera orbit distance. Defaulting to 10.0f.");
+        }
         // Find the actions defined in the asset
         lookDeltaAction = controls.FindActionMap("Camera").FindAction("LookDelta");
         orbitActivateAction = controls.FindActionMap("Camera").FindAction("OrbitActivate");
@@ -66,9 +82,11 @@ public class CameraRotation : MonoBehaviour
             currentX = Mathf.Clamp(currentX, -80f, 80f);
         }
 
-        // 2. Calculate and apply new position and rotation (Remains similar to before)
+        // 2. Calculate and apply new position and rotation
         Quaternion rotation = Quaternion.Euler(currentX, currentY, 0);
-        Vector3 position = rotation * new Vector3(0.0f, 0.0f, -distance);
+
+        // CRUCIAL CHANGE: Use orbitDistance instead of the hardcoded 'distance'
+        Vector3 position = rotation * new Vector3(0.0f, 0.0f, -orbitDistance);
 
         transform.rotation = rotation;
         transform.position = target + position;
