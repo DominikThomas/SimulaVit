@@ -1,0 +1,55 @@
+{
+    "version": 1,
+    "name": "CameraRotation",
+    "maps": [
+        {
+            "name": "Camera",
+            "id": "5d8d6e19-8c91-4acc-80be-8618fdc930c1",
+            "actions": [
+                {
+                    "name": "LookDelta",
+                    "type": "Value",
+                    "id": "962e72eb-8a40-4930-8ad7-4be8a3f8b1b9",
+                    "expectedControlType": "Vector2",
+                    "processors": "",
+                    "interactions": "",
+                    "initialStateCheck": true
+                },
+                {
+                    "name": "OrbitActivate",
+                    "type": "Button",
+                    "id": "3190e50e-8a2b-4626-9ec8-75e66c752612",
+                    "expectedControlType": "",
+                    "processors": "",
+                    "interactions": "",
+                    "initialStateCheck": false
+                }
+            ],
+            "bindings": [
+                {
+                    "name": "",
+                    "id": "2f347f3c-d2d2-4716-92f9-9e7d0c1162e2",
+                    "path": "<Mouse>/delta",
+                    "interactions": "",
+                    "processors": "ScaleVector2(x=0.05,y=0.01)",
+                    "groups": "",
+                    "action": "LookDelta",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "6f05e74f-2847-4ba7-bf0c-634c0802e5c9",
+                    "path": "<Mouse>/leftButton",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "",
+                    "action": "OrbitActivate",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                }
+            ]
+        }
+    ],
+    "controlSchemes": []
+}

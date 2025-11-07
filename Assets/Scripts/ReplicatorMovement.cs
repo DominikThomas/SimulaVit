@@ -147,7 +147,7 @@ public class ReplicatorMovement : MonoBehaviour
         Vector3 directionToSurface = transform.position.normalized;
 
         // 1. Fix Position (Ensuring it's always at the right distance)
-        transform.position = directionToSurface * (planetRadius * 1.01f);
+        transform.position = directionToSurface * (planetRadius * 1.001f);
 
         // 2. Fix Rotation (Ensuring its local UP is always the surface normal)
         // The most stable way to orient an object on a sphere:
