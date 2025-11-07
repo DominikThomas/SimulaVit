@@ -26,19 +26,29 @@ public class CameraRotation : MonoBehaviour
     void Awake()
     {
         // 1. Find the PlanetGenerator script (assuming it's on the parent 'Planet System')
-        PlanetGenerator generator = FindObjectOfType<PlanetGenerator>();
+        GameObject planetObject = GameObject.FindWithTag("Planet");
 
-        if (generator != null)
+        if (planetObject != null)
         {
-            // 2. Calculate the orbit distance: Planet Radius + Buffer
-            // This ensures the camera is always 'distanceBuffer' units away from the surface.
-            orbitDistance = generator.radius + distanceBuffer;
+            PlanetGenerator generator = planetObject.GetComponent<PlanetGenerator>();
+
+            if (generator != null)
+            {
+                // 2. Calculate the orbit distance: Planet Radius + Buffer
+                orbitDistance = generator.radius + distanceBuffer;
+            }
+            else
+            {
+                // Fallback for safety if tag exists but script does not
+                orbitDistance = 10.0f;
+                Debug.LogError("PlanetGenerator script not found on GameObject tagged 'Planet'. Defaulting to 10.0f.");
+            }
         }
         else
         {
-            // Fallback for safety
+            // Fallback if no object is found with the correct tag
             orbitDistance = 10.0f;
-            Debug.LogError("PlanetGenerator not found for camera orbit distance. Defaulting to 10.0f.");
+            Debug.LogError("GameObject with tag 'Planet' not found. Defaulting camera orbit distance to 10.0f.");
         }
         // Find the actions defined in the asset
         lookDeltaAction = controls.FindActionMap("Camera").FindAction("LookDelta");

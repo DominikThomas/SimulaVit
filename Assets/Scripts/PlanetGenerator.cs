@@ -14,13 +14,11 @@ public class PlanetGenerator : MonoBehaviour
 
     public GameObject replicatorPrefab;
 
-    public float spawnTimer = 0f;
-    public float minSpawnInterval = 5f;
-    public float maxSpawnInterval = 15f;
-    private float timeUntilNextSpawn;
-
     private int replicatorCount = 0;
 
+    private Vector3[] allPlanetVertices;
+
+    public float baseSpawnProbabilityPerVertex = 0.000005f; // Must be VERY small now! (e.g., 0.000005f)
     void Awake()
     {
         // 1. Get or Add the MeshFilter component (remains the same)
@@ -53,21 +51,65 @@ public class PlanetGenerator : MonoBehaviour
     void Start()
     {
         GeneratePlanet();
-        timeUntilNextSpawn = Random.Range(minSpawnInterval, maxSpawnInterval);
     }
 
     void Update()
     {
-        spawnTimer += Time.deltaTime;
-
-        if (spawnTimer >= timeUntilNextSpawn)
+        // Check only if the mesh has been generated and vertices are available
+        if (allPlanetVertices == null || allPlanetVertices.Length == 0)
         {
-            SpawnReplicator();
-
-            // Reset timer and choose a new random interval
-            spawnTimer = 0f;
-            timeUntilNextSpawn = Random.Range(minSpawnInterval, maxSpawnInterval);
+            return;
         }
+
+        // Iterate through every vertex on the planet's surface
+        for (int i = 0; i < allPlanetVertices.Length; i++)
+        {
+            Vector3 vertexPosition = allPlanetVertices[i];
+
+            // Use the vertex position's direction (normalized) for the spawn spot
+            Vector3 spotDirection = vertexPosition.normalized;
+
+            // FUTURE: float localProbability = CalculateLocalProbability(spotDirection);
+            float localProbability = baseSpawnProbabilityPerVertex;
+
+            // Check if a spawn should occur at THIS vertex this frame.
+            if (Random.value < localProbability)
+            {
+                // If the check passes, spawn a replicator near this specific spot.
+                SpawnReplicatorAtSpot(spotDirection);
+                // NOTE: The loop continues, allowing simultaneous spawning at other vertices.
+
+                // OPTIONAL: Break out of the loop after the first spawn to limit 
+                // the max number of replicators spawned per frame (for performance).
+                // break; 
+            }
+        }
+    }
+
+    void SpawnReplicatorAtSpot(Vector3 spotDirection)
+    {
+        if (replicatorPrefab == null) { return; }
+
+        Vector3 spawnDirection;
+
+        // --- Special case: FIRST replicator spawn must be camera-biased ---
+        if (replicatorCount == 0)
+        {
+            spawnDirection = GetBiasedRandomDirection(Vector3.back, 0.7f);
+        }
+        else
+        {
+            // General Case: Spawn precisely at the given vertex location (no scatter needed)
+            // If you want a small jitter around the vertex, you can re-introduce the scatter.
+            spawnDirection = spotDirection;
+        }
+
+        // --- (Rest of the instantiation and parenting logic remains the same) ---
+        float surfaceOffset = 0.05f;
+        Vector3 spawnPoint = spawnDirection * (radius + surfaceOffset);
+
+        GameObject newReplicator = Instantiate(replicatorPrefab, spawnPoint, Quaternion.identity, this.transform);
+        replicatorCount++;
     }
 
     void GeneratePlanet()
@@ -113,6 +155,9 @@ public class PlanetGenerator : MonoBehaviour
         mesh.Clear();
         mesh.vertices = allVertices.ToArray();
         mesh.triangles = allTriangles.ToArray(); // Now we assign the combined triangles!
+     
+        // Cache the vertices for the spawning system
+        allPlanetVertices = allVertices.ToArray();
         mesh.RecalculateNormals();
     }
 
@@ -128,11 +173,17 @@ public class PlanetGenerator : MonoBehaviour
             // We use the empirically confirmed visible direction (Vector3.back) as the bias.
             // blendFactor of 0.7 means 70% chance of facing 'back', 30% random spread.
             spawnDirection = GetBiasedRandomDirection(Vector3.back, 0.7f);
+            // 2. FUTURE STEP: GET TERRAIN PROPERTIES AT THIS SPOT
+            // float elevation = GetElevationAtPoint(spawnDirection); 
+            // float localProbability = baseProbability * (1.0f - elevation); // Example: Less likely on high mountains
         }
         else
         {
             // This is a subsequent replicator—spawn completely randomly
             spawnDirection = Random.onUnitSphere;
+            // 2. FUTURE STEP: GET TERRAIN PROPERTIES AT THIS SPOT
+            // float elevation = GetElevationAtPoint(spawnDirection); 
+            // float localProbability = baseProbability * (1.0f - elevation); // Example: Less likely on high mountains
         }
 
         // --- 2. Calculate Position and Instantiate ---
