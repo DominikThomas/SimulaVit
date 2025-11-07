@@ -26,7 +26,7 @@ RenderSettings:
   m_AmbientIntensity: 1
   m_AmbientMode: 0
   m_SubtractiveShadowColor: {r: 0.42, g: 0.478, b: 0.627, a: 1}
-  m_SkyboxMaterial: {fileID: 2100000, guid: 0c07b7124aa9dba4093f3ab47aa59077, type: 2}
+  m_SkyboxMaterial: {fileID: 2100000, guid: f531e09e2ad2fb440b4eed7605863143, type: 2}
   m_HaloStrength: 0.5
   m_FlareStrength: 1
   m_FlareFadeSpeed: 3
@@ -422,7 +422,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: eee7f655e5979404cabff8cefd535095, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  resolution: 26
+  resolution: 20
   radius: 4
   planetMaterial: {fileID: 2100000, guid: 6d8bf80d9b47fd04e91f3fd2ba433978, type: 2}
   replicatorPrefab: {fileID: 3458587157963405312, guid: 8ea50f86166d4ed43b0abff704e54bbf, type: 3}
