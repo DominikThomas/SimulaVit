@@ -26,7 +26,7 @@ RenderSettings:
   m_AmbientIntensity: 1
   m_AmbientMode: 0
   m_SubtractiveShadowColor: {r: 0.42, g: 0.478, b: 0.627, a: 1}
-  m_SkyboxMaterial: {fileID: 2100000, guid: f531e09e2ad2fb440b4eed7605863143, type: 2}
+  m_SkyboxMaterial: {fileID: 2100000, guid: 369b9ebe3a62b904dbc19bd332b44086, type: 2}
   m_HaloStrength: 0.5
   m_FlareStrength: 1
   m_FlareFadeSpeed: 3
@@ -391,7 +391,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   rotationSpeed: 5
-  distanceBuffer: 6
+  distanceBuffer: 12
   controls: {fileID: -944628639613478452, guid: 540a5b05cf9aabf44a0760b486b09de8, type: 3}
 --- !u!1 &382753101
 GameObject:
@@ -405,7 +405,7 @@ GameObject:
   - component: {fileID: 382753102}
   m_Layer: 0
   m_Name: Planet Generator
-  m_TagString: Untagged
+  m_TagString: Planet
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -423,12 +423,10 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   resolution: 20
-  radius: 4
+  radius: 8
   planetMaterial: {fileID: 2100000, guid: 6d8bf80d9b47fd04e91f3fd2ba433978, type: 2}
   replicatorPrefab: {fileID: 3458587157963405312, guid: 8ea50f86166d4ed43b0abff704e54bbf, type: 3}
-  spawnTimer: 0
-  minSpawnInterval: 3
-  maxSpawnInterval: 6
+  baseSpawnProbabilityPerVertex: 1e-10
 --- !u!4 &382753103
 Transform:
   m_ObjectHideFlags: 0

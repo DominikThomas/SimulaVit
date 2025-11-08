@@ -18,7 +18,7 @@ public class PlanetGenerator : MonoBehaviour
 
     private Vector3[] allPlanetVertices;
 
-    public float baseSpawnProbabilityPerVertex = 0.000005f; // Must be VERY small now! (e.g., 0.000005f)
+    public float baseSpawnProbabilityPerVertex = 0.0000000001f; // Must be VERY small now! (e.g., 0.000005f)
     void Awake()
     {
         // 1. Get or Add the MeshFilter component (remains the same)
@@ -108,7 +108,13 @@ public class PlanetGenerator : MonoBehaviour
         float surfaceOffset = 0.05f;
         Vector3 spawnPoint = spawnDirection * (radius + surfaceOffset);
 
-        GameObject newReplicator = Instantiate(replicatorPrefab, spawnPoint, Quaternion.identity, this.transform);
+        GameObject newReplicatorObject = Instantiate(replicatorPrefab, spawnPoint, Quaternion.identity, this.transform);
+        ReplicatorAgent newAgent = newReplicatorObject.GetComponent<ReplicatorAgent>();
+        if (newAgent != null)
+        {
+            // Use the PlanetGenerator's assigned reference to set the Agent's reference
+            newAgent.replicatorPrefab = replicatorPrefab;
+        }
         replicatorCount++;
     }
 
