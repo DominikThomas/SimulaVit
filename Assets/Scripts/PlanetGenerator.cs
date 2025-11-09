@@ -14,11 +14,16 @@ public class PlanetGenerator : MonoBehaviour
 
     public GameObject replicatorPrefab;
 
-    private int replicatorCount = 0;
+    public int replicatorCount = 0;
 
     private Vector3[] allPlanetVertices;
 
     public float baseSpawnProbabilityPerVertex = 0.0000000001f; // Must be VERY small now! (e.g., 0.000005f)
+
+    [Header("Replicator Density Control")]
+    public float replicatorDensityMultiplier = 0.5f; // How many replicators per vertex (e.g., 0.5 means 1 rep for every 2 vertices)
+    public int maxReplicatorCount = 0; // The calculated population limit
+
     void Awake()
     {
         // 1. Get or Add the MeshFilter component (remains the same)
@@ -55,6 +60,12 @@ public class PlanetGenerator : MonoBehaviour
 
     void Update()
     {
+        // Enforce the global limit on initial spawning
+        if (replicatorCount >= maxReplicatorCount)
+        {
+            return; // Do not check for new spawns if capacity is reached
+        }
+
         // Check only if the mesh has been generated and vertices are available
         if (allPlanetVertices == null || allPlanetVertices.Length == 0)
         {
@@ -165,46 +176,14 @@ public class PlanetGenerator : MonoBehaviour
         // Cache the vertices for the spawning system
         allPlanetVertices = allVertices.ToArray();
         mesh.RecalculateNormals();
-    }
 
-    void SpawnReplicator()
-    {
-        if (replicatorPrefab == null) { return; }
-
-        // --- 1. Determine the Spawn Direction ---
-        Vector3 spawnDirection;
-
-        if (replicatorCount == 0)
+        if (allPlanetVertices != null && allPlanetVertices.Length > 0)
         {
-            // We use the empirically confirmed visible direction (Vector3.back) as the bias.
-            // blendFactor of 0.7 means 70% chance of facing 'back', 30% random spread.
-            spawnDirection = GetBiasedRandomDirection(Vector3.back, 0.7f);
-            // 2. FUTURE STEP: GET TERRAIN PROPERTIES AT THIS SPOT
-            // float elevation = GetElevationAtPoint(spawnDirection); 
-            // float localProbability = baseProbability * (1.0f - elevation); // Example: Less likely on high mountains
+            // Calculate the maximum count as a multiplier of the total vertex count.
+            // The total vertex count is a measure of the surface area at this resolution.
+            maxReplicatorCount = Mathf.FloorToInt(allPlanetVertices.Length * replicatorDensityMultiplier);
+            Debug.Log($"Planet capacity calculated: Max Replicators = {maxReplicatorCount}");
         }
-        else
-        {
-            // This is a subsequent replicator—spawn completely randomly
-            spawnDirection = Random.onUnitSphere;
-            // 2. FUTURE STEP: GET TERRAIN PROPERTIES AT THIS SPOT
-            // float elevation = GetElevationAtPoint(spawnDirection); 
-            // float localProbability = baseProbability * (1.0f - elevation); // Example: Less likely on high mountains
-        }
-
-        // --- 2. Calculate Position and Instantiate ---
-        float surfaceOffset = 0.05f;
-        Vector3 spawnPoint = spawnDirection * (radius + surfaceOffset);
-
-        // --- CRUCIAL CHANGE: Use the Instantiate overload that includes the parent transform ---
-        // The arguments are: (Prefab, Position, Rotation, Parent Transform)
-        GameObject newReplicator = Instantiate(replicatorPrefab, spawnPoint, Quaternion.identity, this.transform);
-
-        // The old SetParent call is now redundant and should be REMOVED or commented out.
-        // REMOVED: newReplicator.transform.SetParent(this.transform); 
-
-        // --- 3. Increment the Counter ---
-        replicatorCount++;
     }
 
     Vector3 GetBiasedRandomDirection(Vector3 biasDirection, float blendFactor)

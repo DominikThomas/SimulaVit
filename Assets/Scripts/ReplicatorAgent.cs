@@ -216,6 +216,25 @@ public class ReplicatorAgent : MonoBehaviour
             yield return null;
         }
 
+        // CRITICAL: Find the PlanetGenerator before destroying the object
+        PlanetGenerator generator = GetComponentInParent<PlanetGenerator>();
+
+        if (generator != null)
+        {
+            // Decrement the global counter
+            // NOTE: generator.replicatorCount must be public for this to work.
+            if (generator.replicatorCount > 0)
+            {
+                generator.replicatorCount--;
+            } 
+            else
+            {
+                // Log a warning if it tries to decrement when already at zero, 
+                // indicating a potential race condition but preventing negative numbers.
+                Debug.LogWarning("Replicator count attempted to decrement when already at zero.");
+            }
+        }
+
         // Final cleanup
         Destroy(gameObject);
     }
@@ -230,9 +249,38 @@ public class ReplicatorAgent : MonoBehaviour
             // Since PlanetGenerator holds the reliable master reference, let's use it.
 
             PlanetGenerator generator = GetComponentInParent<PlanetGenerator>();
+
+            if (generator != null && generator.replicatorCount >= generator.maxReplicatorCount)
+            {
+                // Capacity reached, abort replication
+                return;
+            }
+
             if (generator != null && generator.replicatorPrefab != null)
             {
                 replicatorPrefab = generator.replicatorPrefab;
+
+                // The new agent's direction will be near the parent's current position
+                Vector3 replicationDirection = transform.position.normalized;
+
+                // Use a slight random offset for the new agent's position
+                Vector3 offset = Random.onUnitSphere * 0.01f;
+                Vector3 spawnPoint = transform.position + offset;
+
+                // Instantiate the new agent
+                GameObject baby = Instantiate(replicatorPrefab, spawnPoint, Quaternion.identity, transform.parent);
+
+                // CRITICAL FIX: Increment the global counter immediately after successful spawn
+                if (generator != null)
+                {
+                    generator.replicatorCount++;
+                }
+
+                // Get the baby's agent script
+                ReplicatorAgent babyAgent = baby.GetComponent<ReplicatorAgent>();
+
+                // Pass on properties and allow for mutation
+                Mutate(babyAgent);
             }
             else
             {
@@ -240,22 +288,6 @@ public class ReplicatorAgent : MonoBehaviour
                 return; // Stop the replication process to prevent crash
             }
         }
-
-        // The new agent's direction will be near the parent's current position
-        Vector3 replicationDirection = transform.position.normalized;
-
-        // Use a slight random offset for the new agent's position
-        Vector3 offset = Random.onUnitSphere * 0.01f;
-        Vector3 spawnPoint = transform.position + offset;
-
-        // Instantiate the new agent
-        GameObject baby = Instantiate(replicatorPrefab, spawnPoint, Quaternion.identity, transform.parent);
-
-        // Get the baby's agent script
-        ReplicatorAgent babyAgent = baby.GetComponent<ReplicatorAgent>();
-
-        // Pass on properties and allow for mutation
-        Mutate(babyAgent);
     }
 
     void Mutate(ReplicatorAgent baby)
