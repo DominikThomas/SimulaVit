@@ -11,7 +11,6 @@ public class ReplicatorAgent : MonoBehaviour
     public float deathProbabilityPerSecond = 0.005f; // Chance of spontaneous death (0.5% per second)
 
     [Header("Agent Properties")]
-    public float baseMovementSpeed = 0.5f; // Renamed from movementSpeed
     public float reproductionProbability = 0.2f; // Chance to replicate per second
     public Color baseColor = Color.white;
 
@@ -172,20 +171,34 @@ public class ReplicatorAgent : MonoBehaviour
 
     void MaintainOnSurface()
     {
-        // This function is still crucial for fixing the position and orientation every frame.
-        Vector3 directionToSurface = transform.position.normalized;
+        // The direction pointing from the planet center to the replicator position
+        Vector3 surfaceNormal = transform.position.normalized;
 
-        // 1. Fix Position (Ensuring it's always at the right distance)
-        transform.position = directionToSurface * (planetRadius * 1.001f);
+        // 1. Fix Position: Ensure it's always at the right distance
+        // Using 1.001f factor for a slight hover above the mesh
+        transform.position = surfaceNormal * (planetRadius * 1.001f);
 
-        // 2. Fix Rotation (Ensuring its local UP is always the surface normal)
-        // The most stable way to orient an object on a sphere:
-        // Force the UP vector (local Y) to be the direction away from the center (directionToSurface).
+        // 2. Fix Rotation (Orientation): This is the critical change.
 
-        // We use Quaternion.Slerp to smoothly blend to the new orientation
-        // This is often more stable than direct assignment.
-        Quaternion targetRotation = Quaternion.FromToRotation(transform.up, directionToSurface) * transform.rotation;
-        transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, 0.5f); // 0.5f is a blend factor
+        // A. Calculate a stable forward direction. 
+        // Project the agent's current forward vector onto the plane perpendicular to the surface normal.
+        // This forces the forward direction to be perfectly horizontal to the surface.
+        Vector3 projectedForward = Vector3.ProjectOnPlane(transform.forward, surfaceNormal).normalized;
+
+        // B. If projectedForward is zero (e.g., exactly at the pole), use a fallback.
+        if (projectedForward == Vector3.zero)
+        {
+            // Fallback: Use the right vector for stability
+            projectedForward = transform.right;
+        }
+
+        // C. Use LookRotation to perfectly orient the agent:
+        // Its up direction is the surfaceNormal, and its forward is the projectedForward.
+        Quaternion targetRotation = Quaternion.LookRotation(projectedForward, surfaceNormal);
+
+        // D. Apply the rotation smoothly.
+        transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, Time.deltaTime * 10f);
+        // Using Time.deltaTime * 10f ensures the correction speed scales with frame rate.
     }
 
     IEnumerator DieAndFade()
@@ -241,60 +254,57 @@ public class ReplicatorAgent : MonoBehaviour
 
     void Replicate()
     {
-        // CRITICAL: Robust Check for Self-Reference
+        PlanetGenerator generator = GetComponentInParent<PlanetGenerator>();
+
+        // 1. CAPACITY CHECK (Should be the first check)
+        if (generator != null)
+        {
+            // Use the soft cap logic (e.g., 10% overshoot) to prevent population lock
+            float hardCap = generator.maxReplicatorCount * 1.10f;
+            if (generator.replicatorCount >= hardCap)
+            {
+                return; // Abort replication if hard limit is reached
+            }
+        }
+
+        // 2. PREFAB FALLBACK CHECK (Only assigns the reference if it's missing)
         if (replicatorPrefab == null)
         {
-            // Fallback: If the Inspector slot is empty, we MUST find the original prefab.
-            // The most reliable way is often to check the parent's script, if it holds the reference.
-            // Since PlanetGenerator holds the reliable master reference, let's use it.
-
-            PlanetGenerator generator = GetComponentInParent<PlanetGenerator>();
-
-            if (generator != null && generator.replicatorCount >= generator.maxReplicatorCount)
-            {
-                // Capacity reached, abort replication
-                return;
-            }
-
             if (generator != null && generator.replicatorPrefab != null)
             {
                 replicatorPrefab = generator.replicatorPrefab;
-
-                // The new agent's direction will be near the parent's current position
-                Vector3 replicationDirection = transform.position.normalized;
-
-                // Use a slight random offset for the new agent's position
-                Vector3 offset = Random.onUnitSphere * 0.01f;
-                Vector3 spawnPoint = transform.position + offset;
-
-                // Instantiate the new agent
-                GameObject baby = Instantiate(replicatorPrefab, spawnPoint, Quaternion.identity, transform.parent);
-
-                // CRITICAL FIX: Increment the global counter immediately after successful spawn
-                if (generator != null)
-                {
-                    generator.replicatorCount++;
-                }
-
-                // Get the baby's agent script
-                ReplicatorAgent babyAgent = baby.GetComponent<ReplicatorAgent>();
-
-                // Pass on properties and allow for mutation
-                Mutate(babyAgent);
             }
             else
             {
-                Debug.LogError("FATAL ERROR: replicatorPrefab is unassigned and PlanetGenerator cannot provide a fallback reference.");
-                return; // Stop the replication process to prevent crash
+                Debug.LogError("FATAL: Cannot replicate because replicatorPrefab is unassigned.");
+                return; // Abort if we can't get the reference
             }
         }
+
+        // --- CORE REPLICATION LOGIC STARTS HERE (ALWAYS RUNS IF CHECKS PASS) ---
+
+        // 3. Increment Counter
+        if (generator != null)
+        {
+            generator.replicatorCount++;
+        }
+
+        // 4. Calculate Spawn Point
+        Vector3 offset = Random.onUnitSphere * 0.01f;
+        Vector3 spawnPoint = transform.position + offset;
+
+        // 5. Instantiate and Mutate
+        GameObject baby = Instantiate(replicatorPrefab, spawnPoint, Quaternion.identity, transform.parent);
+
+        ReplicatorAgent babyAgent = baby.GetComponent<ReplicatorAgent>();
+        Mutate(babyAgent);
     }
 
     void Mutate(ReplicatorAgent baby)
     {
         // 1. Inherit properties from the parent
         baby.maxLifespan = maxLifespan;
-        baby.baseMovementSpeed = baseMovementSpeed;
+        baby.movementSpeed = movementSpeed;
         baby.reproductionProbability = reproductionProbability;
 
         // 2. Introduce a random mutation factor (e.g., up to 10% deviation)
@@ -304,7 +314,7 @@ public class ReplicatorAgent : MonoBehaviour
         baby.maxLifespan *= 1f + Random.Range(-mutationFactor, mutationFactor);
 
         // Mutate Speed: e.g., slightly faster or slower
-        baby.baseMovementSpeed *= 1f + Random.Range(-mutationFactor, mutationFactor);
+        baby.movementSpeed *= 1f + Random.Range(-mutationFactor, mutationFactor);
 
         // Mutate Color: Tie properties to visual feedback (H S V shift)
         Color.RGBToHSV(baseColor, out float h, out float s, out float v);
@@ -321,7 +331,6 @@ public class ReplicatorAgent : MonoBehaviour
         0.5f, 1f, // Saturation min/max (Avoid pale/grey colors)
         0.7f, 1f  // Value min/max (Avoid very dark colors)
         );
-
 
         // Apply the new color immediately
         baby.GetComponent<MeshRenderer>().material.color = baby.baseColor;
