@@ -422,7 +422,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: eee7f655e5979404cabff8cefd535095, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  resolution: 20
+  resolution: 30
   radius: 8
   planetMaterial: {fileID: 2100000, guid: 6d8bf80d9b47fd04e91f3fd2ba433978, type: 2}
   replicatorPrefab: {fileID: 3458587157963405312, guid: 8ea50f86166d4ed43b0abff704e54bbf, type: 3}

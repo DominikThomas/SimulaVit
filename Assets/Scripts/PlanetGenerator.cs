@@ -136,35 +136,37 @@ public class PlanetGenerator : MonoBehaviour
     {
         for (int i = 0; i < spawnsToAttempt; i++)
         {
-            // For now, randomly select a vertex from the cached array.
+            // Get the actual DEFORMED vertex position.
             int randomIndex = Random.Range(0, allPlanetVertices.Length);
 
-            // Pass the actual position vector, NOT the normalized direction vector.
+            // CRITICAL CHANGE: Use the full position vector, NOT the normalized direction vector.
             Vector3 actualSpawnPosition = allPlanetVertices[randomIndex];
 
             SpawnReplicatorAtSpot(actualSpawnPosition);
         }
     }
 
-    void SpawnReplicatorAtSpot(Vector3 spawnPosition)
+    void SpawnReplicatorAtSpot(Vector3 spawnPosition) // Changed parameter name for clarity
     {
         if (replicatorPrefab == null) { return; }
 
         Vector3 finalPosition;
+        Vector3 spawnDirection = spawnPosition.normalized; // The vector for rotation and offset
 
         // --- Special case: FIRST replicator spawn must be camera-biased ---
         if (replicatorCount == 0)
         {
-            // For the first agent, we use the old base-radius calculation for position.
-            Vector3 spawnDirection = GetBiasedRandomDirection(Vector3.back, 0.7f);
+            // Keep the old logic for the first spawn based on camera position
+            spawnDirection = GetBiasedRandomDirection(Vector3.back, 0.7f);
             float surfaceOffset = 0.05f;
             finalPosition = spawnDirection * (radius + surfaceOffset);
         }
         else
         {
-            // General Case: Use the actual deformed vertex position passed in.
-            // Add a small initial offset to ensure the agent is *just* outside the MeshCollider.
-            finalPosition = spawnPosition + spawnPosition.normalized * 0.005f;
+            // General Case: Use the actual deformed position.
+            // Reset buffer to a stable, small value.
+            float initialOffset = 0.01f;
+            finalPosition = spawnPosition + spawnDirection * initialOffset;
         }
 
         // 4. Instantiate and Parent

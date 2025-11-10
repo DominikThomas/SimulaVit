@@ -15,12 +15,12 @@ public class ReplicatorAgent : MonoBehaviour
     public Color baseColor = Color.white;
 
     [Header("Movement & Surface")]
-    // Increase the default to 0.01f (1cm for a 1-meter radius planet)
+    // New public variable for clean tuning (default 0.05f is safe)
     public float surfaceHoverOffset = 0.05f;
 
     // Public variables to control movement
     private float planetRadius;
-    public float movementSpeed = 0.5f; // How fast it moves across the surface
+    public float movementSpeed = 0.05f; // How fast it moves across the surface
     public float turningSpeed = 5.0f; // How quickly it changes direction (degrees per second)
 
     private float targetYaw = 0f; // The angle (in degrees) the replicator is trying to reach
@@ -107,108 +107,144 @@ public class ReplicatorAgent : MonoBehaviour
 
     void Start()
     {
-        // Ensure the replicator starts on the surface
-        MaintainOnSurface();
+        // Initialize planetRadius
+        PlanetGenerator generator = FindObjectOfType<PlanetGenerator>();
+        if (generator != null)
+        {
+            planetRadius = generator.radius;
+        }
 
-        // 2. CRITICAL FIX: Give the replicator a random starting rotation (Yaw)
-        // Rotate around its local 'up' vector (which is the surface normal)
-        float randomStartRotation = Random.Range(0f, 360f);
-        transform.Rotate(transform.up, randomStartRotation, Space.World);
+        // Start the Coroutine to safely handle surface maintenance
+        StartCoroutine(SurfaceMaintainer());
     }
 
     void Update()
     {
         age += Time.deltaTime;
 
-        // Death Check: If lifespan is exceeded OR if random chance triggers death
+        // --- LOGIC THAT MUST RUN EVERY FRAME ---
+
+        // Death Check
         if (age > maxLifespan || Random.value < deathProbabilityPerSecond * Time.deltaTime)
         {
             StartCoroutine(DieAndFade());
         }
 
-        // Replication Check (handled in Update for per-second probability)
+        // Replication Check
         if (Random.value < reproductionProbability * Time.deltaTime)
         {
             Replicate();
         }
 
-        HandleMovement();
-        MaintainOnSurface();
+        // REMOVE HandleMovement() from here! It runs in the coroutine.
     }
 
     // -----------------------------------------------------------------------
 
+    IEnumerator SurfaceMaintainer()
+    {
+        // CRITICAL: Wait for 2 frames to ensure MeshCollider is ready.
+        yield return null;
+        yield return null;
+
+        // Now safely run the positioning and movement logic every frame.
+        while (true)
+        {
+            // 1. Position the agent on the surface and set its rotation (transform.up)
+            MaintainOnSurface();
+
+            // 2. Move the agent (which relies on the rotation set in MaintainOnSurface)
+            HandleMovement();
+
+            yield return null;
+        }
+    }
+
+    // Inside ReplicatorAgent.cs
+
     void HandleMovement()
     {
-        if (Random.value < 0.05f)
+        // 1. Update the Target Turn Speed
+        randomTurnTimer -= Time.deltaTime;
+
+        if (randomTurnTimer <= 0)
         {
-            // 1. Update the Target Yaw (Decision Making remains the same)
-            randomTurnTimer -= Time.deltaTime;
-
-            if (randomTurnTimer <= 0)
-            {
-                // Choose a new random direction target (e.g., +/- 90 degrees from current)
-                targetYaw = Random.Range(-90f, 90f);
-                // Reset the timer for the next decision
-                randomTurnTimer = Random.Range(1f, maxTimeBetweenTurns);
-            }
-
-            // --- CRUCIAL CHANGE: Smooth Angular Blending ---
-
-            // 2. Smooth Turning
-            // Use Mathf.Lerp to smoothly move the 'currentYaw' toward the 'targetYaw'.
-            // Use Time.deltaTime multiplied by a turning factor (e.g., 2) for smoothness.
-            // We use the rotationSpeed to control how quickly it blends.
-            currentYaw = Mathf.Lerp(currentYaw, targetYaw, Time.deltaTime * turningSpeed * 0.1f);
-
-            // 3. Apply the Rotation
-            // Apply only the *change* in yaw this frame, which is the currentYaw itself.
-            // This makes the object constantly rotate while moving forward.
-            transform.Rotate(transform.up, currentYaw * Time.deltaTime, Space.World);
-
-            // 4. Movement (Remains the same)
-            transform.Translate(Vector3.forward * movementSpeed * Time.deltaTime, Space.Self);
-
-            // 5. Check if we have completed the turn goal
-            // If the currentYaw is very close to the targetYaw, reset the target to prevent continuous small rotations.
-            if (Mathf.Abs(currentYaw - targetYaw) < 0.1f)
-            {
-                targetYaw = 0f;
-            }
+            // Choose a new random turn speed (-90 to +90 degrees *per second*)
+            targetYaw = Random.Range(-90f, 90f);
+            randomTurnTimer = Random.Range(1f, maxTimeBetweenTurns);
         }
+
+        // 2. Smoothly update the *current turn speed* (angular velocity)
+        currentYaw = Mathf.Lerp(currentYaw, targetYaw, Time.deltaTime * turningSpeed * 0.1f);
     }
 
     void MaintainOnSurface()
     {
-        // The Raycast distance should be the distance from the agent to the planet center, plus a buffer.
-        // transform.position.magnitude is the distance from the origin (center) to the agent.
-        float raycastDistance = transform.position.magnitude * 2f;
+        // 1. Skip if position is invalid (safety check for coroutine timing)
+        if (transform.position.sqrMagnitude < 0.1f)
+        {
+            return;
+        }
 
-        Ray ray = new Ray(transform.position, -transform.position.normalized);
+        // 2. Reverse Raycast (stable physics check)
+        Vector3 directionFromCenter = transform.position.normalized;
+        float maxSafeDistance = planetRadius * 3f;
+        Vector3 rayStartPoint = directionFromCenter * maxSafeDistance;
+        Ray ray = new Ray(rayStartPoint, -directionFromCenter);
         RaycastHit hit;
+        float raycastDistance = maxSafeDistance * 2f;
 
-        // Use the dynamic raycast distance
         if (Physics.Raycast(ray, out hit, raycastDistance))
         {
-            // Set position to the point hit by the raycast, plus a small hover offset.
-            transform.position = hit.point + hit.normal * surfaceHoverOffset;
-
-            // Use hit.normal for the surface direction (it's more accurate than position.normalized)
             Vector3 surfaceNormal = hit.normal;
 
-            // 2. Fix Rotation (Orientation): Use the hit normal for rotation
-            Quaternion targetRotation = Quaternion.FromToRotation(transform.up, surfaceNormal) * transform.rotation;
-            transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, 0.5f); // 0.5f is a blend factor
+            // 3. --- CALCULATE ROTATION ---
+
+            // Project current 'forward' onto the ground plane (hit.normal)
+            Vector3 projectedForward = Vector3.ProjectOnPlane(transform.forward, surfaceNormal);
+
+            // Apply the 'yaw' rotation (from HandleMovement) around the surface normal
+            Quaternion yawRotation = Quaternion.AngleAxis(currentYaw * Time.deltaTime, surfaceNormal);
+            Vector3 finalForward = yawRotation * projectedForward;
+
+            // Create the target rotation (facing 'finalForward', with 'surfaceNormal' as UP)
+            Quaternion targetRotation = Quaternion.LookRotation(finalForward, surfaceNormal);
+
+            // 4. --- CALCULATE MOVEMENT & INTENDED POSITION ---
+
+            // Calculate movement vector
+            Vector3 moveVector = finalForward.normalized * movementSpeed * Time.deltaTime;
+
+            // Calculate the *intended* next position (ground + move + hover)
+            Vector3 intendedPosition = hit.point + moveVector + (surfaceNormal * surfaceHoverOffset);
+
+            // 5. --- APPLY TRANSFORM WITH CRITICAL SMOOTHING ---
+
+            // CRITICAL FIX 1: Smooth the position (Linear Interpolation)
+            // Lerp from current position to the intended position. Factor of 20f provides fast, stable snapping.
+            transform.position = Vector3.Lerp(transform.position, intendedPosition, Time.deltaTime * 20f);
+
+            // CRITICAL FIX 2: Smooth the rotation (Spherical Linear Interpolation)
+            // This dampens rotation jitter and stops the light flashing. Factor of 10f is stable.
+            transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, Time.deltaTime * 10f);
         }
         else
         {
-            // Fallback: Use the old method if the Raycast fails (e.g., very high speed)
-            Vector3 directionToSurface = transform.position.normalized;
-            transform.position = directionToSurface * (planetRadius * (1+surfaceHoverOffset));
-            // Rotation Slerp using directionToSurface (old logic)
-            Quaternion targetRotation = Quaternion.FromToRotation(transform.up, directionToSurface) * transform.rotation;
-            transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, 0.5f);
+            // This should not be hit now, but it's a safe fallback.
+            Debug.LogError("CRITICAL FAILURE: Reverse Raycast failed.", gameObject);
         }
+    }
+
+    void SetMaterialRenderingModeToFade(Material material)
+    {
+        material.SetOverrideTag("RenderType", "Transparent");
+        material.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+        material.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+        material.SetInt("_ZWrite", 0);
+        material.DisableKeyword("_ALPHATEST_ON");
+        material.EnableKeyword("_ALPHABLEND_ON");
+        material.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+        material.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
     }
 
     IEnumerator DieAndFade()
@@ -221,23 +257,31 @@ public class ReplicatorAgent : MonoBehaviour
         float fadeDuration = 3.0f;
         float startTime = Time.time;
 
+        // CRITICAL FIX: Prepare the material for transparency
+        SetMaterialRenderingModeToFade(renderer.material);
+
         // Store original color/intensity
         Color startColor = renderer.material.color;
         float startIntensity = agentLight.intensity;
+
+        // Define the target color: The original RGB but with Alpha set to 0 (fully transparent)
+        Color targetColor = startColor;
+        targetColor.a = 0f;
 
         while (Time.time < startTime + fadeDuration)
         {
             float t = (Time.time - startTime) / fadeDuration;
 
-            // Slowing Speed (Slowing movement down before disabling it fully)
-            // If movement is still enabled at the start, you can modify movementSpeed here.
-
-            // Fading Color and Light to Zero
-            renderer.material.color = Color.Lerp(startColor, Color.clear, t);
+            // Fading to transparency (interpolating the alpha channel from 1 to 0)
+            renderer.material.color = Color.Lerp(startColor, targetColor, t);
             agentLight.intensity = Mathf.Lerp(startIntensity, 0f, t);
 
             yield return null;
         }
+
+        // Final application of zero alpha/intensity and cleanup
+        renderer.material.color = targetColor;
+        agentLight.intensity = 0f;
 
         // CRITICAL: Find the PlanetGenerator before destroying the object
         PlanetGenerator generator = GetComponentInParent<PlanetGenerator>();
@@ -245,15 +289,12 @@ public class ReplicatorAgent : MonoBehaviour
         if (generator != null)
         {
             // Decrement the global counter
-            // NOTE: generator.replicatorCount must be public for this to work.
             if (generator.replicatorCount > 0)
             {
                 generator.replicatorCount--;
-            } 
+            }
             else
             {
-                // Log a warning if it tries to decrement when already at zero, 
-                // indicating a potential race condition but preventing negative numbers.
                 Debug.LogWarning("Replicator count attempted to decrement when already at zero.");
             }
         }
