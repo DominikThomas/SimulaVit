@@ -211,6 +211,18 @@ public class ReplicatorAgent : MonoBehaviour
         }
     }
 
+    void SetMaterialRenderingModeToFade(Material material)
+    {
+        material.SetOverrideTag("RenderType", "Transparent");
+        material.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+        material.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+        material.SetInt("_ZWrite", 0);
+        material.DisableKeyword("_ALPHATEST_ON");
+        material.EnableKeyword("_ALPHABLEND_ON");
+        material.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+        material.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+    }
+
     IEnumerator DieAndFade()
     {
         // Disable movement and replication immediately
@@ -221,23 +233,31 @@ public class ReplicatorAgent : MonoBehaviour
         float fadeDuration = 3.0f;
         float startTime = Time.time;
 
+        // CRITICAL FIX: Prepare the material for transparency
+        SetMaterialRenderingModeToFade(renderer.material);
+
         // Store original color/intensity
         Color startColor = renderer.material.color;
         float startIntensity = agentLight.intensity;
+
+        // Define the target color: The original RGB but with Alpha set to 0 (fully transparent)
+        Color targetColor = startColor;
+        targetColor.a = 0f;
 
         while (Time.time < startTime + fadeDuration)
         {
             float t = (Time.time - startTime) / fadeDuration;
 
-            // Slowing Speed (Slowing movement down before disabling it fully)
-            // If movement is still enabled at the start, you can modify movementSpeed here.
-
-            // Fading Color and Light to Zero
-            renderer.material.color = Color.Lerp(startColor, Color.clear, t);
+            // Fading to transparency (interpolating the alpha channel from 1 to 0)
+            renderer.material.color = Color.Lerp(startColor, targetColor, t);
             agentLight.intensity = Mathf.Lerp(startIntensity, 0f, t);
 
             yield return null;
         }
+
+        // Final application of zero alpha/intensity and cleanup
+        renderer.material.color = targetColor;
+        agentLight.intensity = 0f;
 
         // CRITICAL: Find the PlanetGenerator before destroying the object
         PlanetGenerator generator = GetComponentInParent<PlanetGenerator>();
@@ -245,15 +265,12 @@ public class ReplicatorAgent : MonoBehaviour
         if (generator != null)
         {
             // Decrement the global counter
-            // NOTE: generator.replicatorCount must be public for this to work.
             if (generator.replicatorCount > 0)
             {
                 generator.replicatorCount--;
-            } 
+            }
             else
             {
-                // Log a warning if it tries to decrement when already at zero, 
-                // indicating a potential race condition but preventing negative numbers.
                 Debug.LogWarning("Replicator count attempted to decrement when already at zero.");
             }
         }
