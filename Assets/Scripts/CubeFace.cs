@@ -36,7 +36,7 @@ public class CubeFace
                                       (percent.y * 2 - 1) * axisB;
 
                 // Set the vertex and normalize it to the sphere surface
-                Vector3 pointOnSphere = pointOnCube.normalized * radius; // Multiply by the radius
+                Vector3 pointOnSphere = pointOnCube.normalized;
 
                 vertices[vertexIndex] = pointOnSphere; // Assign the scaled vertex
 

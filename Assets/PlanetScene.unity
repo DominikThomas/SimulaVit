@@ -426,7 +426,16 @@ MonoBehaviour:
   radius: 8
   planetMaterial: {fileID: 2100000, guid: 6d8bf80d9b47fd04e91f3fd2ba433978, type: 2}
   replicatorPrefab: {fileID: 3458587157963405312, guid: 8ea50f86166d4ed43b0abff704e54bbf, type: 3}
-  baseSpawnProbabilityPerVertex: 1e-10
+  replicatorCount: 0
+  spawnCheckInterval: 1
+  baseVertexSpawnProbabilityPerSecond: 0.0001
+  replicatorDensityMultiplier: 4
+  maxReplicatorCount: 0
+  noiseMagnitude: 0.1
+  noiseRoughness: 5
+  numLayers: 4
+  persistence: 0.5
+  noiseOffset: {x: 1, y: 1, z: 1}
 --- !u!4 &382753103
 Transform:
   m_ObjectHideFlags: 0

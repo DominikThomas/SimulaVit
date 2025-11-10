@@ -18,11 +18,24 @@ public class PlanetGenerator : MonoBehaviour
 
     private Vector3[] allPlanetVertices;
 
-    public float baseSpawnProbabilityPerVertex = 0.0000000001f; // Must be VERY small now! (e.g., 0.000005f)
+    [Header("Scheduled Spawning")]
+    public float spawnCheckInterval = 1.0f; // Check for new initial spawns every X seconds
+    private float spawnTimer = 0f;
+
+    // Base probability for initial *external* spawning (per vertex, per second)
+    // Use a very small number for scarce spawning.
+    public float baseVertexSpawnProbabilityPerSecond = 0.0000001f;
 
     [Header("Replicator Density Control")]
     public float replicatorDensityMultiplier = 0.5f; // How many replicators per vertex (e.g., 0.5 means 1 rep for every 2 vertices)
     public int maxReplicatorCount = 0; // The calculated population limit
+
+    [Header("Terrain Generation")]
+    public float noiseMagnitude = 0.1f; // How tall the mountains are (e.g., 10% of radius)
+    public float noiseRoughness = 1.0f; // Controls the frequency/scale of the features
+    public int numLayers = 4; // How many layers of noise to combine (for complex terrain)
+    public float persistence = 0.5f; // How much each subsequent layer contributes
+    public Vector3 noiseOffset = Vector3.one; // Used to change the terrain pattern
 
     void Awake()
     {
@@ -40,6 +53,13 @@ public class PlanetGenerator : MonoBehaviour
             meshRenderer = gameObject.AddComponent<MeshRenderer>();
         }
 
+        // **NEW**: 3. Get or Add the MeshCollider component
+        MeshCollider meshCollider = gameObject.GetComponent<MeshCollider>();
+        if (meshCollider == null)
+        {
+            meshCollider = gameObject.AddComponent<MeshCollider>();
+        }
+
         // **CRUCIAL CHANGE:** Assign the saved asset material here
         if (planetMaterial != null)
         {
@@ -48,9 +68,12 @@ public class PlanetGenerator : MonoBehaviour
         // NOTE: You can remove the old line that created a temporary material
         // if you want to rely entirely on this reference.
 
-        // 3. Create and assign a new Mesh object (remains the same)
+        // 4. Create and assign a new Mesh object (remains the same)
         mesh = new Mesh();
         meshFilter.sharedMesh = mesh;
+
+        // **NEW**: 5. Assign the mesh to the collider (done automatically when sharedMesh is set)
+        // You'll explicitly assign the collider mesh in GeneratePlanet() for safety.
     }
 
     void Start()
@@ -60,70 +83,96 @@ public class PlanetGenerator : MonoBehaviour
 
     void Update()
     {
-        // Enforce the global limit on initial spawning
-        if (replicatorCount >= maxReplicatorCount)
-        {
-            return; // Do not check for new spawns if capacity is reached
-        }
+        // The Update loop now only handles the timer for the spawn cycle.
+        spawnTimer -= Time.deltaTime;
 
-        // Check only if the mesh has been generated and vertices are available
-        if (allPlanetVertices == null || allPlanetVertices.Length == 0)
+        if (spawnTimer <= 0f)
+        {
+            RunScheduledSpawnCycle();
+            spawnTimer = spawnCheckInterval; // Reset timer
+        }
+    }
+    void RunScheduledSpawnCycle()
+    {
+        // Check 1: Ensure we have vertices and are below max capacity
+        if (allPlanetVertices == null || replicatorCount >= maxReplicatorCount)
         {
             return;
         }
 
-        // Iterate through every vertex on the planet's surface
-        for (int i = 0; i < allPlanetVertices.Length; i++)
+        // 1. Calculate the total chance (expected number of spawns) across the planet
+        // This value can now be greater than 1.0
+        float totalChance = allPlanetVertices.Length * baseVertexSpawnProbabilityPerSecond * spawnCheckInterval;
+
+        // 2. Determine the number of spawns to attempt this cycle:
+
+        // A. Guaranteed Spawns (the integer part of the chance)
+        int guaranteedSpawns = Mathf.FloorToInt(totalChance);
+
+        // B. Fractional Chance (the remainder, e.g., if totalChance is 3.7, this is 0.7)
+        float fractionalChance = totalChance - guaranteedSpawns;
+
+        // Start with the guaranteed number
+        int spawnsToAttempt = guaranteedSpawns;
+
+        // C. Probabilistic Spawn: Use the fractional chance for one additional spawn
+        if (Random.value < fractionalChance)
         {
-            Vector3 vertexPosition = allPlanetVertices[i];
+            spawnsToAttempt++;
+        }
 
-            // Use the vertex position's direction (normalized) for the spawn spot
-            Vector3 spotDirection = vertexPosition.normalized;
+        // 3. Clamp to ensure we don't exceed the capacity
+        int maxAllowedSpawns = maxReplicatorCount - replicatorCount;
+        int finalSpawnsToAttempt = Mathf.Min(spawnsToAttempt, maxAllowedSpawns);
 
-            // FUTURE: float localProbability = CalculateLocalProbability(spotDirection);
-            float localProbability = baseSpawnProbabilityPerVertex;
-
-            // Check if a spawn should occur at THIS vertex this frame.
-            if (Random.value < localProbability)
-            {
-                // If the check passes, spawn a replicator near this specific spot.
-                SpawnReplicatorAtSpot(spotDirection);
-                // NOTE: The loop continues, allowing simultaneous spawning at other vertices.
-
-                // OPTIONAL: Break out of the loop after the first spawn to limit 
-                // the max number of replicators spawned per frame (for performance).
-                // break; 
-            }
+        // 4. Spawn at the targeted spots
+        if (finalSpawnsToAttempt > 0)
+        {
+            SpawnAtBestWeightedSpots(finalSpawnsToAttempt);
         }
     }
 
-    void SpawnReplicatorAtSpot(Vector3 spotDirection)
+    void SpawnAtBestWeightedSpots(int spawnsToAttempt)
+    {
+        for (int i = 0; i < spawnsToAttempt; i++)
+        {
+            // For now, randomly select a vertex from the cached array.
+            int randomIndex = Random.Range(0, allPlanetVertices.Length);
+
+            // Pass the actual position vector, NOT the normalized direction vector.
+            Vector3 actualSpawnPosition = allPlanetVertices[randomIndex];
+
+            SpawnReplicatorAtSpot(actualSpawnPosition);
+        }
+    }
+
+    void SpawnReplicatorAtSpot(Vector3 spawnPosition)
     {
         if (replicatorPrefab == null) { return; }
 
-        Vector3 spawnDirection;
+        Vector3 finalPosition;
 
         // --- Special case: FIRST replicator spawn must be camera-biased ---
         if (replicatorCount == 0)
         {
-            spawnDirection = GetBiasedRandomDirection(Vector3.back, 0.7f);
+            // For the first agent, we use the old base-radius calculation for position.
+            Vector3 spawnDirection = GetBiasedRandomDirection(Vector3.back, 0.7f);
+            float surfaceOffset = 0.05f;
+            finalPosition = spawnDirection * (radius + surfaceOffset);
         }
         else
         {
-            // General Case: Spawn precisely at the given vertex location (no scatter needed)
-            // If you want a small jitter around the vertex, you can re-introduce the scatter.
-            spawnDirection = spotDirection;
+            // General Case: Use the actual deformed vertex position passed in.
+            // Add a small initial offset to ensure the agent is *just* outside the MeshCollider.
+            finalPosition = spawnPosition + spawnPosition.normalized * 0.005f;
         }
 
-        // --- (Rest of the instantiation and parenting logic remains the same) ---
-        float surfaceOffset = 0.05f;
-        Vector3 spawnPoint = spawnDirection * (radius + surfaceOffset);
+        // 4. Instantiate and Parent
+        GameObject newReplicatorObject = Instantiate(replicatorPrefab, finalPosition, Quaternion.identity, this.transform);
 
-        GameObject newReplicatorObject = Instantiate(replicatorPrefab, spawnPoint, Quaternion.identity, this.transform);
         ReplicatorAgent newAgent = newReplicatorObject.GetComponent<ReplicatorAgent>();
         if (newAgent != null)
         {
-            // Use the PlanetGenerator's assigned reference to set the Agent's reference
             newAgent.replicatorPrefab = replicatorPrefab;
         }
         replicatorCount++;
@@ -151,14 +200,29 @@ public class PlanetGenerator : MonoBehaviour
         foreach (Vector3 dir in faceDirections)
         {
             CubeFace face = new CubeFace(dir);
-            MeshData faceData = face.GenerateMeshData(resolution, radius);
+            MeshData faceData = face.GenerateMeshData(resolution, radius); // CubeFace now returns a UNIT sphere
 
-            // 1. Add Vertices: Simply append all vertices from the face
-            allVertices.AddRange(faceData.vertices);
+            // CRITICAL CHANGE: DEFORM THE VERTICES HERE
+            for (int i = 0; i < faceData.vertices.Length; i++)
+            {
+                Vector3 pointOnUnitSphere = faceData.vertices[i];
+
+                // 1. Calculate the final noise value for this point
+                float height = CalculateNoise(pointOnUnitSphere);
+
+                // 2. Determine the final distance from center
+                // Base Radius + (Noise value (0 to 1) * Magnitude)
+                float displacement = radius * (1f + height * noiseMagnitude);
+
+                // 3. Deform the vertex
+                faceData.vertices[i] = pointOnUnitSphere * displacement;
+
+                // 4. Add the now-deformed vertex to the final list
+                allVertices.Add(faceData.vertices[i]);
+            }
 
             // 2. Add Triangles: Crucially, we must offset the indices!
-            // The face's indices (v0, v1, v2, v3) are relative to its own small array.
-            // We must add the total number of vertices already in the full mesh.
+            // ... (rest of the triangle appending logic remains the same) ...
             for (int i = 0; i < faceData.triangles.Length; i++)
             {
                 allTriangles.Add(faceData.triangles[i] + currentVertexOffset);
@@ -171,19 +235,25 @@ public class PlanetGenerator : MonoBehaviour
         // 4. Apply the data to the mesh
         mesh.Clear();
         mesh.vertices = allVertices.ToArray();
-        mesh.triangles = allTriangles.ToArray(); // Now we assign the combined triangles!
-     
+        mesh.triangles = allTriangles.ToArray();
+
         // Cache the vertices for the spawning system
         allPlanetVertices = allVertices.ToArray();
+
+        // Add this line to ensure proper bounding box calculation
+        mesh.RecalculateBounds();
         mesh.RecalculateNormals();
 
-        if (allPlanetVertices != null && allPlanetVertices.Length > 0)
+        // **CRITICAL**: Assign the newly generated mesh to the MeshCollider
+        MeshCollider meshCollider = GetComponent<MeshCollider>();
+        if (meshCollider != null)
         {
-            // Calculate the maximum count as a multiplier of the total vertex count.
-            // The total vertex count is a measure of the surface area at this resolution.
-            maxReplicatorCount = Mathf.FloorToInt(allPlanetVertices.Length * replicatorDensityMultiplier);
-            Debug.Log($"Planet capacity calculated: Max Replicators = {maxReplicatorCount}");
+            meshCollider.sharedMesh = mesh;
         }
+
+        maxReplicatorCount = Mathf.FloorToInt(Mathf.Pow(radius, 3) * replicatorDensityMultiplier);
+        Debug.Log($"Planet capacity calculated: Max Replicators = {maxReplicatorCount}");
+
     }
 
     Vector3 GetBiasedRandomDirection(Vector3 biasDirection, float blendFactor)
@@ -196,5 +266,37 @@ public class PlanetGenerator : MonoBehaviour
         Vector3 biasedDirection = Vector3.Lerp(randomDirection, biasDirection, blendFactor).normalized;
 
         return biasedDirection;
+    }
+
+    public float CalculateNoise(Vector3 pointOnSphere)
+    {
+        float noiseValue = 0;
+        float frequency = noiseRoughness;
+        float amplitude = 1;
+        float maxPossibleHeight = 0;
+
+        for (int i = 0; i < numLayers; i++)
+        {
+            // Replace 'Noise.Evaluate' with your actual 3D noise function (e.g., Simplex or Perlin3D)
+            // float singleLayerNoise = Noise.Evaluate(pointOnSphere * frequency + noiseOffset); 
+
+            // --- TEMPORARY Placeholder for Noise.Evaluate ---
+            // For testing, if you don't have a 3D noise class, you can temporarily use this:
+            float singleLayerNoise = Mathf.PerlinNoise(pointOnSphere.x * frequency + noiseOffset.x, pointOnSphere.y * frequency + noiseOffset.y);
+            // This 2D version will cause seams, but confirms the logic works.
+            // ---------------------------------------------------
+
+            // Normalize the noise from (-1 to 1) to (0 to 1)
+            singleLayerNoise = (singleLayerNoise + 1) * 0.5f;
+
+            noiseValue += singleLayerNoise * amplitude;
+            maxPossibleHeight += amplitude;
+
+            amplitude *= persistence;
+            frequency *= 2; // Increase frequency (making features smaller)
+        }
+
+        // Normalize the final noise value
+        return noiseValue / maxPossibleHeight;
     }
 }

@@ -14,6 +14,10 @@ public class ReplicatorAgent : MonoBehaviour
     public float reproductionProbability = 0.2f; // Chance to replicate per second
     public Color baseColor = Color.white;
 
+    [Header("Movement & Surface")]
+    // Increase the default to 0.01f (1cm for a 1-meter radius planet)
+    public float surfaceHoverOffset = 0.05f;
+
     // Public variables to control movement
     private float planetRadius;
     public float movementSpeed = 0.5f; // How fast it moves across the surface
@@ -105,6 +109,11 @@ public class ReplicatorAgent : MonoBehaviour
     {
         // Ensure the replicator starts on the surface
         MaintainOnSurface();
+
+        // 2. CRITICAL FIX: Give the replicator a random starting rotation (Yaw)
+        // Rotate around its local 'up' vector (which is the surface normal)
+        float randomStartRotation = Random.Range(0f, 360f);
+        transform.Rotate(transform.up, randomStartRotation, Space.World);
     }
 
     void Update()
@@ -171,34 +180,35 @@ public class ReplicatorAgent : MonoBehaviour
 
     void MaintainOnSurface()
     {
-        // The direction pointing from the planet center to the replicator position
-        Vector3 surfaceNormal = transform.position.normalized;
+        // The Raycast distance should be the distance from the agent to the planet center, plus a buffer.
+        // transform.position.magnitude is the distance from the origin (center) to the agent.
+        float raycastDistance = transform.position.magnitude * 2f;
 
-        // 1. Fix Position: Ensure it's always at the right distance
-        // Using 1.001f factor for a slight hover above the mesh
-        transform.position = surfaceNormal * (planetRadius * 1.001f);
+        Ray ray = new Ray(transform.position, -transform.position.normalized);
+        RaycastHit hit;
 
-        // 2. Fix Rotation (Orientation): This is the critical change.
-
-        // A. Calculate a stable forward direction. 
-        // Project the agent's current forward vector onto the plane perpendicular to the surface normal.
-        // This forces the forward direction to be perfectly horizontal to the surface.
-        Vector3 projectedForward = Vector3.ProjectOnPlane(transform.forward, surfaceNormal).normalized;
-
-        // B. If projectedForward is zero (e.g., exactly at the pole), use a fallback.
-        if (projectedForward == Vector3.zero)
+        // Use the dynamic raycast distance
+        if (Physics.Raycast(ray, out hit, raycastDistance))
         {
-            // Fallback: Use the right vector for stability
-            projectedForward = transform.right;
+            // Set position to the point hit by the raycast, plus a small hover offset.
+            transform.position = hit.point + hit.normal * surfaceHoverOffset;
+
+            // Use hit.normal for the surface direction (it's more accurate than position.normalized)
+            Vector3 surfaceNormal = hit.normal;
+
+            // 2. Fix Rotation (Orientation): Use the hit normal for rotation
+            Quaternion targetRotation = Quaternion.FromToRotation(transform.up, surfaceNormal) * transform.rotation;
+            transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, 0.5f); // 0.5f is a blend factor
         }
-
-        // C. Use LookRotation to perfectly orient the agent:
-        // Its up direction is the surfaceNormal, and its forward is the projectedForward.
-        Quaternion targetRotation = Quaternion.LookRotation(projectedForward, surfaceNormal);
-
-        // D. Apply the rotation smoothly.
-        transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, Time.deltaTime * 10f);
-        // Using Time.deltaTime * 10f ensures the correction speed scales with frame rate.
+        else
+        {
+            // Fallback: Use the old method if the Raycast fails (e.g., very high speed)
+            Vector3 directionToSurface = transform.position.normalized;
+            transform.position = directionToSurface * (planetRadius * (1+surfaceHoverOffset));
+            // Rotation Slerp using directionToSurface (old logic)
+            Quaternion targetRotation = Quaternion.FromToRotation(transform.up, directionToSurface) * transform.rotation;
+            transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, 0.5f);
+        }
     }
 
     IEnumerator DieAndFade()
