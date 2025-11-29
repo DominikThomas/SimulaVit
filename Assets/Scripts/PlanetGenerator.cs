@@ -277,26 +277,22 @@ public class PlanetGenerator : MonoBehaviour
 
         for (int i = 0; i < numLayers; i++)
         {
-            // Replace 'Noise.Evaluate' with your actual 3D noise function (e.g., Simplex or Perlin3D)
-            // float singleLayerNoise = Noise.Evaluate(pointOnSphere * frequency + noiseOffset); 
+            // --- FIX: Use 3D Noise instead of 2D ---
+            // We pass the full (x, y, z) vector adjusted by frequency and offset
+            Vector3 samplePoint = pointOnSphere * frequency + noiseOffset;
+            float singleLayerNoise = SimpleNoise.Evaluate(samplePoint);
 
-            // --- TEMPORARY Placeholder for Noise.Evaluate ---
-            // For testing, if you don't have a 3D noise class, you can temporarily use this:
-            float singleLayerNoise = Mathf.PerlinNoise(pointOnSphere.x * frequency + noiseOffset.x, pointOnSphere.y * frequency + noiseOffset.y);
-            // This 2D version will cause seams, but confirms the logic works.
-            // ---------------------------------------------------
-
-            // Normalize the noise from (-1 to 1) to (0 to 1)
+            // Normalize from (-1 to 1) to (0 to 1) if strictly needed, 
+            // though SimpleNoise often returns approx -1 to 1 range.
             singleLayerNoise = (singleLayerNoise + 1) * 0.5f;
 
             noiseValue += singleLayerNoise * amplitude;
             maxPossibleHeight += amplitude;
 
             amplitude *= persistence;
-            frequency *= 2; // Increase frequency (making features smaller)
+            frequency *= 2;
         }
 
-        // Normalize the final noise value
         return noiseValue / maxPossibleHeight;
     }
 }
