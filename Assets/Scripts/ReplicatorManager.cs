@@ -1,0 +1,191 @@
+using UnityEngine;
+using System.Collections.Generic;
+
+public class ReplicatorManager : MonoBehaviour
+{
+    [Header("Settings")]
+    public Mesh replicatorMesh;
+    public Material replicatorMaterial;
+    public PlanetGenerator planetGenerator;
+
+    [Header("Population")]
+    public int initialSpawnCount = 100;
+    public int maxPopulation = 5000;
+
+    [Header("Simulation")]
+    public float moveSpeed = 0.5f;
+    public float turnSpeed = 2.0f;
+
+    // The master list of all agents
+    private List<Replicator> agents = new List<Replicator>();
+
+    // Data structures for GPU Instancing
+    private List<Matrix4x4> matrices = new List<Matrix4x4>();
+    private List<Vector4> colors = new List<Vector4>(); // Shader uses Vector4 for Color
+    private MaterialPropertyBlock propertyBlock;
+
+    void Start()
+    {
+        // Initialize Instancing data
+        propertyBlock = new MaterialPropertyBlock();
+
+        // --- FIX: Pre-allocate the color array size to the maximum population ---
+        // This prevents the warning about exceeding array size.
+        List<Vector4> dummyColors = new List<Vector4>(maxPopulation);
+        for (int i = 0; i < maxPopulation; i++)
+        {
+            dummyColors.Add(Vector4.zero); // Fill with placeholder data
+        }
+
+        // Note: Using a fixed ID for the color property is safest
+        int baseColorID = Shader.PropertyToID("_BaseColor");
+
+        // This is the line that pre-allocates the buffer size on the GPU:
+        propertyBlock.SetVectorArray(baseColorID, dummyColors);
+        // -----------------------------------------------------------------------
+
+        // Spawn initial population
+        for (int i = 0; i < initialSpawnCount; i++)
+        {
+            SpawnAgent();
+        }
+    }
+
+    void Update()
+    {
+        UpdateAgents();
+        RenderAgents();
+    }
+
+    void SpawnAgent()
+    {
+        if (agents.Count >= maxPopulation) return;
+
+        // Pick a random point on the sphere
+        Vector3 randomDir = Random.onUnitSphere;
+
+        // Use the Generator's math to find the height! No Raycast needed.
+        float height = GetSurfaceHeight(randomDir);
+        Vector3 pos = randomDir * height;
+
+        Quaternion rot = Quaternion.LookRotation(Vector3.ProjectOnPlane(Random.onUnitSphere, randomDir), randomDir);
+
+        // Create the data object
+        Replicator newAgent = new Replicator(pos, rot, Random.Range(20f, 40f), Random.ColorHSV());
+        agents.Add(newAgent);
+    }
+
+    float GetSurfaceHeight(Vector3 direction)
+    {
+        // Ask the PlanetGenerator for the noise value at this direction
+        float noise = planetGenerator.CalculateNoise(direction);
+
+        // Reconstruct the radius math: Base + (Noise * Magnitude)
+        // Note: You might need to make these variables public in PlanetGenerator
+        float displacement = planetGenerator.radius * (1f + noise * planetGenerator.noiseMagnitude);
+
+        // Add the hover offset
+        return displacement + 0.05f;
+    }
+
+    void UpdateAgents()
+    {
+        float dt = Time.deltaTime;
+
+        // Iterate backwards so we can remove dead agents easily
+        for (int i = agents.Count - 1; i >= 0; i--)
+        {
+            Replicator agent = agents[i];
+
+            // 1. Age & Death
+            agent.age += dt;
+            if (agent.age > agent.maxLifespan)
+            {
+                agents.RemoveAt(i);
+                continue;
+            }
+
+            // 2. Replication (Simple chance)
+            if (Random.value < 0.001f) // 0.1% chance per frame
+            {
+                SpawnAgent(); // Should spawn near parent, but random for now
+            }
+
+            // 3. Movement Logic (Rotate around the sphere center)
+            // Get current "Up"
+            Vector3 surfaceNormal = agent.position.normalized;
+
+            // Move "forward" relative to the sphere surface
+            // We rotate the position vector around an axis perpendicular to movement
+            Vector3 forward = agent.rotation * Vector3.forward;
+
+            // Rotate the agent's position around the planet center
+            // This moves them across the surface without needing physics
+            Quaternion travelRot = Quaternion.AngleAxis(moveSpeed * dt * 50f / planetGenerator.radius, Vector3.Cross(surfaceNormal, forward));
+            Vector3 newPosDirection = travelRot * agent.position;
+
+            // 4. Snap to Surface Height (The math replacement for Raycasts)
+            float height = GetSurfaceHeight(newPosDirection.normalized);
+            agent.position = newPosDirection.normalized * height;
+
+            // 5. Align Rotation
+            Vector3 newNormal = agent.position.normalized;
+            Quaternion targetRot = Quaternion.LookRotation(Vector3.ProjectOnPlane(forward, newNormal), newNormal);
+            agent.rotation = Quaternion.Slerp(agent.rotation, targetRot, dt * 5f);
+        }
+    }
+
+    void RenderAgents()
+    {
+        // Unity can only draw 1023 instances per call. We must batch them.
+        matrices.Clear();
+        colors.Clear();
+
+        for (int i = 0; i < agents.Count; i++)
+        {
+            Replicator a = agents[i];
+
+            // Create the matrix for this agent (Position, Rotation, Scale)
+            matrices.Add(Matrix4x4.TRS(a.position, a.rotation, Vector3.one * 0.06f)); // Scale adjusted here
+            colors.Add(a.color);
+
+            // Draw when the batch is full
+            if (matrices.Count == 1023)
+            {
+                FlushBatch();
+            }
+        }
+
+        // Draw remaining agents
+        if (matrices.Count > 0)
+        {
+            FlushBatch();
+        }
+    }
+
+    void FlushBatch()
+    {
+        // Fix for URP: The property is often "_BaseColor", not "_Color"
+        // We set BOTH to be safe, so it works in any pipeline.
+        int baseColorID = Shader.PropertyToID("_BaseColor");
+        int colorID = Shader.PropertyToID("_Color");
+
+        // Try setting the URP property name
+        propertyBlock.SetVectorArray(baseColorID, colors);
+
+        // Also set the Standard property name (just in case)
+        propertyBlock.SetVectorArray(colorID, colors);
+
+        Graphics.DrawMeshInstanced(
+            replicatorMesh,
+            0,
+            replicatorMaterial,
+            matrices,
+            propertyBlock,
+            UnityEngine.Rendering.ShadowCastingMode.On
+        );
+
+        matrices.Clear();
+        colors.Clear();
+    }
+}

@@ -12,24 +12,6 @@ public class PlanetGenerator : MonoBehaviour
     private MeshFilter meshFilter;
     private Mesh mesh;
 
-    public GameObject replicatorPrefab;
-
-    public int replicatorCount = 0;
-
-    private Vector3[] allPlanetVertices;
-
-    [Header("Scheduled Spawning")]
-    public float spawnCheckInterval = 1.0f; // Check for new initial spawns every X seconds
-    private float spawnTimer = 0f;
-
-    // Base probability for initial *external* spawning (per vertex, per second)
-    // Use a very small number for scarce spawning.
-    public float baseVertexSpawnProbabilityPerSecond = 0.0000001f;
-
-    [Header("Replicator Density Control")]
-    public float replicatorDensityMultiplier = 0.5f; // How many replicators per vertex (e.g., 0.5 means 1 rep for every 2 vertices)
-    public int maxReplicatorCount = 0; // The calculated population limit
-
     [Header("Terrain Generation")]
     public float noiseMagnitude = 0.1f; // How tall the mountains are (e.g., 10% of radius)
     public float noiseRoughness = 1.0f; // Controls the frequency/scale of the features
@@ -79,103 +61,6 @@ public class PlanetGenerator : MonoBehaviour
     void Start()
     {
         GeneratePlanet();
-    }
-
-    void Update()
-    {
-        // The Update loop now only handles the timer for the spawn cycle.
-        spawnTimer -= Time.deltaTime;
-
-        if (spawnTimer <= 0f)
-        {
-            RunScheduledSpawnCycle();
-            spawnTimer = spawnCheckInterval; // Reset timer
-        }
-    }
-    void RunScheduledSpawnCycle()
-    {
-        // Check 1: Ensure we have vertices and are below max capacity
-        if (allPlanetVertices == null || replicatorCount >= maxReplicatorCount)
-        {
-            return;
-        }
-
-        // 1. Calculate the total chance (expected number of spawns) across the planet
-        // This value can now be greater than 1.0
-        float totalChance = allPlanetVertices.Length * baseVertexSpawnProbabilityPerSecond * spawnCheckInterval;
-
-        // 2. Determine the number of spawns to attempt this cycle:
-
-        // A. Guaranteed Spawns (the integer part of the chance)
-        int guaranteedSpawns = Mathf.FloorToInt(totalChance);
-
-        // B. Fractional Chance (the remainder, e.g., if totalChance is 3.7, this is 0.7)
-        float fractionalChance = totalChance - guaranteedSpawns;
-
-        // Start with the guaranteed number
-        int spawnsToAttempt = guaranteedSpawns;
-
-        // C. Probabilistic Spawn: Use the fractional chance for one additional spawn
-        if (Random.value < fractionalChance)
-        {
-            spawnsToAttempt++;
-        }
-
-        // 3. Clamp to ensure we don't exceed the capacity
-        int maxAllowedSpawns = maxReplicatorCount - replicatorCount;
-        int finalSpawnsToAttempt = Mathf.Min(spawnsToAttempt, maxAllowedSpawns);
-
-        // 4. Spawn at the targeted spots
-        if (finalSpawnsToAttempt > 0)
-        {
-            SpawnAtBestWeightedSpots(finalSpawnsToAttempt);
-        }
-    }
-
-    void SpawnAtBestWeightedSpots(int spawnsToAttempt)
-    {
-        for (int i = 0; i < spawnsToAttempt; i++)
-        {
-            // For now, randomly select a vertex from the cached array.
-            int randomIndex = Random.Range(0, allPlanetVertices.Length);
-
-            // Pass the actual position vector, NOT the normalized direction vector.
-            Vector3 actualSpawnPosition = allPlanetVertices[randomIndex];
-
-            SpawnReplicatorAtSpot(actualSpawnPosition);
-        }
-    }
-
-    void SpawnReplicatorAtSpot(Vector3 spawnPosition)
-    {
-        if (replicatorPrefab == null) { return; }
-
-        Vector3 finalPosition;
-
-        // --- Special case: FIRST replicator spawn must be camera-biased ---
-        if (replicatorCount == 0)
-        {
-            // For the first agent, we use the old base-radius calculation for position.
-            Vector3 spawnDirection = GetBiasedRandomDirection(Vector3.back, 0.7f);
-            float surfaceOffset = 0.05f;
-            finalPosition = spawnDirection * (radius + surfaceOffset);
-        }
-        else
-        {
-            // General Case: Use the actual deformed vertex position passed in.
-            // Add a small initial offset to ensure the agent is *just* outside the MeshCollider.
-            finalPosition = spawnPosition + spawnPosition.normalized * 0.005f;
-        }
-
-        // 4. Instantiate and Parent
-        GameObject newReplicatorObject = Instantiate(replicatorPrefab, finalPosition, Quaternion.identity, this.transform);
-
-        ReplicatorAgent newAgent = newReplicatorObject.GetComponent<ReplicatorAgent>();
-        if (newAgent != null)
-        {
-            newAgent.replicatorPrefab = replicatorPrefab;
-        }
-        replicatorCount++;
     }
 
     void GeneratePlanet()
@@ -237,9 +122,6 @@ public class PlanetGenerator : MonoBehaviour
         mesh.vertices = allVertices.ToArray();
         mesh.triangles = allTriangles.ToArray();
 
-        // Cache the vertices for the spawning system
-        allPlanetVertices = allVertices.ToArray();
-
         // Add this line to ensure proper bounding box calculation
         mesh.RecalculateBounds();
         mesh.RecalculateNormals();
@@ -250,9 +132,6 @@ public class PlanetGenerator : MonoBehaviour
         {
             meshCollider.sharedMesh = mesh;
         }
-
-        maxReplicatorCount = Mathf.FloorToInt(Mathf.Pow(radius, 3) * replicatorDensityMultiplier);
-        Debug.Log($"Planet capacity calculated: Max Replicators = {maxReplicatorCount}");
 
     }
 
