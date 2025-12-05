@@ -29,20 +29,22 @@ public class ReplicatorManager : MonoBehaviour
         // Initialize Instancing data
         propertyBlock = new MaterialPropertyBlock();
 
-        // --- FIX: Pre-allocate the color array size to the maximum population ---
-        // This prevents the warning about exceeding array size.
-        List<Vector4> dummyColors = new List<Vector4>(maxPopulation);
-        for (int i = 0; i < maxPopulation; i++)
-        {
-            dummyColors.Add(Vector4.zero); // Fill with placeholder data
-        }
+        // --- FIX: Pre-allocate BOTH color properties to max size ---
+        // We must initialize every property we plan to use in FlushBatch.
+        Vector4[] maxColors = new Vector4[maxPopulation];
 
-        // Note: Using a fixed ID for the color property is safest
+        // Fill with default white so they aren't invisible if something goes wrong
+        for (int i = 0; i < maxColors.Length; i++) maxColors[i] = Vector4.one;
+
         int baseColorID = Shader.PropertyToID("_BaseColor");
+        int colorID = Shader.PropertyToID("_Color");
 
-        // This is the line that pre-allocates the buffer size on the GPU:
-        propertyBlock.SetVectorArray(baseColorID, dummyColors);
-        // -----------------------------------------------------------------------
+        // 1. Allocate for URP
+        propertyBlock.SetVectorArray(baseColorID, maxColors);
+
+        // 2. Allocate for Standard/Built-in (This was missing!)
+        propertyBlock.SetVectorArray(colorID, maxColors);
+        // -----------------------------------------------------------
 
         // Spawn initial population
         for (int i = 0; i < initialSpawnCount; i++)
@@ -165,24 +167,27 @@ public class ReplicatorManager : MonoBehaviour
 
     void FlushBatch()
     {
-        // Fix for URP: The property is often "_BaseColor", not "_Color"
-        // We set BOTH to be safe, so it works in any pipeline.
         int baseColorID = Shader.PropertyToID("_BaseColor");
         int colorID = Shader.PropertyToID("_Color");
 
-        // Try setting the URP property name
+        // FIX 1: Use the standard 2-argument overload for SetVectorArray.
+        // We pass the List directly. This fixes the "4 arguments" error.
         propertyBlock.SetVectorArray(baseColorID, colors);
-
-        // Also set the Standard property name (just in case)
         propertyBlock.SetVectorArray(colorID, colors);
 
+        // FIX 2: Provide ALL arguments explicitly to match the List<Matrix4x4> overload.
+        // Previous errors occurred because we skipped the 'bool' or 'layer' arguments.
         Graphics.DrawMeshInstanced(
             replicatorMesh,
             0,
             replicatorMaterial,
-            matrices,
+            matrices,           // This is your List<Matrix4x4>
             propertyBlock,
-            UnityEngine.Rendering.ShadowCastingMode.On
+            UnityEngine.Rendering.ShadowCastingMode.Off,
+            true,               // receiveShadows (Required boolean)
+            0,                  // layer (Required int)
+            null,               // camera
+            UnityEngine.Rendering.LightProbeUsage.Off
         );
 
         matrices.Clear();
