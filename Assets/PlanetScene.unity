@@ -477,10 +477,10 @@ MonoBehaviour:
   replicatorMesh: {fileID: 10207, guid: 0000000000000000e000000000000000, type: 0}
   replicatorMaterial: {fileID: 2100000, guid: a9e716d40c93b5146914146207f7287a, type: 2}
   planetGenerator: {fileID: 382753102}
-  initialSpawnCount: 100
-  maxPopulation: 5000
-  moveSpeed: 0.5
-  turnSpeed: 2
+  initialSpawnCount: 10
+  maxPopulation: 50000
+  moveSpeed: 0.3
+  turnSpeed: 100
 --- !u!4 &1064713444
 Transform:
   m_ObjectHideFlags: 0

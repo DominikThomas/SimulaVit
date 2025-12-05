@@ -63,18 +63,37 @@ public class ReplicatorManager : MonoBehaviour
     {
         if (agents.Count >= maxPopulation) return;
 
-        // Pick a random point on the sphere
-        Vector3 randomDir = Random.onUnitSphere;
+        Vector3 randomDir;
 
-        // Use the Generator's math to find the height! No Raycast needed.
+        if (agents.Count > 0)
+        {
+            // Population exists: Pick a random existing agent to be the 'parent'
+            Replicator parent = agents[Random.Range(0, agents.Count)];
+
+            // Spawn near the parent's current position direction (currentDirection)
+            // The spawnSpread controls how tightly they cluster. Try 0.5f first.
+            const float spawnSpread = 0.5f;
+            randomDir = parent.currentDirection + Random.insideUnitSphere * spawnSpread;
+            randomDir = randomDir.normalized; // Normalize back to the sphere surface
+        }
+        else
+        {
+            // Initial population: Spawn randomly across the sphere
+            randomDir = Random.onUnitSphere;
+        }
+
+        // 1. Calculate height
         float height = GetSurfaceHeight(randomDir);
-        Vector3 pos = randomDir * height;
 
-        Quaternion rot = Quaternion.LookRotation(Vector3.ProjectOnPlane(Random.onUnitSphere, randomDir), randomDir);
+        // 2. Determine position and rotation
+        Vector3 spawnPosition = randomDir * height;
 
-        // Create the data object
-        Replicator newAgent = new Replicator(pos, rot, Random.Range(20f, 40f), Random.ColorHSV());
-        agents.Add(newAgent);
+        // Align the rotation
+        Quaternion spawnRotation = Quaternion.FromToRotation(Vector3.up, randomDir);
+        spawnRotation *= Quaternion.Euler(0, Random.Range(0f, 360f), 0);
+
+        // 3. Create the new agent
+        agents.Add(new Replicator(spawnPosition, spawnRotation, 30f, Color.white));
     }
 
     float GetSurfaceHeight(Vector3 direction)
