@@ -357,8 +357,8 @@ MonoBehaviour:
     m_Bits: 1
   m_VolumeTrigger: {fileID: 0}
   m_VolumeFrameworkUpdateModeOption: 2
-  m_RenderPostProcessing: 0
-  m_Antialiasing: 0
+  m_RenderPostProcessing: 1
+  m_Antialiasing: 1
   m_AntialiasingQuality: 2
   m_StopNaN: 0
   m_Dithering: 0
@@ -477,10 +477,12 @@ MonoBehaviour:
   replicatorMesh: {fileID: 10207, guid: 0000000000000000e000000000000000, type: 0}
   replicatorMaterial: {fileID: 2100000, guid: a9e716d40c93b5146914146207f7287a, type: 2}
   planetGenerator: {fileID: 382753102}
-  initialSpawnCount: 10
+  initialSpawnCount: 2
   maxPopulation: 50000
-  moveSpeed: 0.3
+  baseAgentColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
+  moveSpeed: 0.08
   turnSpeed: 100
+  spawnSpread: 0
 --- !u!4 &1064713444
 Transform:
   m_ObjectHideFlags: 0
