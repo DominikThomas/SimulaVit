@@ -12,7 +12,6 @@ public class ReplicatorManager : MonoBehaviour
     public int initialSpawnCount = 100;
     public int maxPopulation = 5000;
 
-    // Base color is standard, script handles the brightness
     public Color baseAgentColor = Color.cyan;
 
     [Header("Simulation")]
@@ -21,27 +20,17 @@ public class ReplicatorManager : MonoBehaviour
     public float spawnSpread = 0.5f;
 
     private List<Replicator> agents = new List<Replicator>();
-    private List<Matrix4x4> matrices = new List<Matrix4x4>();
-    private List<Vector4> colors = new List<Vector4>();
+
+    // Arrays for Batching (reused to avoid GC)
+    private Matrix4x4[] matrixBatch = new Matrix4x4[1023];
+    private Vector4[] colorBatch = new Vector4[1023];
     private MaterialPropertyBlock propertyBlock;
 
     void Start()
     {
         propertyBlock = new MaterialPropertyBlock();
 
-        // Initialize buffer to max size to prevent warnings
-        Vector4[] maxColors = new Vector4[maxPopulation];
-        for (int i = 0; i < maxColors.Length; i++) maxColors[i] = Vector4.one;
-
-        // We need to pre-allocate for Emission as well!
-        int baseColorID = Shader.PropertyToID("_BaseColor");
-        int colorID = Shader.PropertyToID("_Color");
-        int emissionID = Shader.PropertyToID("_EmissionColor");
-
-        propertyBlock.SetVectorArray(baseColorID, maxColors);
-        propertyBlock.SetVectorArray(colorID, maxColors);
-        propertyBlock.SetVectorArray(emissionID, maxColors);
-
+        // Spawn initial population
         for (int i = 0; i < initialSpawnCount; i++)
         {
             SpawnAgent();
@@ -78,8 +67,14 @@ public class ReplicatorManager : MonoBehaviour
         spawnRotation = Quaternion.FromToRotation(Vector3.up, randomDir);
         spawnRotation *= Quaternion.Euler(0, Random.Range(0f, 360f), 0);
 
-        // Spawn with the base color
-        agents.Add(new Replicator(spawnPosition, spawnRotation, Random.Range(20f, 40f), baseAgentColor));
+        float newLifespan = Random.Range(30f, 60f);
+
+        Replicator newAgent = new Replicator(spawnPosition, spawnRotation, newLifespan, baseAgentColor);
+
+        // FIX #1: Give a large random starting age to significantly desynchronize death times
+        newAgent.age = Random.Range(0f, newLifespan * 0.5f);
+
+        agents.Add(newAgent);
     }
 
     float GetSurfaceHeight(Vector3 direction)
@@ -102,15 +97,15 @@ public class ReplicatorManager : MonoBehaviour
             agent.age += dt;
             float lifeRemaining = agent.maxLifespan - agent.age;
 
-            // --- VISUALS: CALCULATE FLARE & FADE ---
-            agent.color = CalculateAgentColor(agent.age, lifeRemaining);
-
-            // Death Check
+            // Check for death
             if (agent.age > agent.maxLifespan)
             {
                 agents.RemoveAt(i);
                 continue;
             }
+
+            // --- VISUALS: COLOR CALCULATION ---
+            agent.color = CalculateAgentColor(agent.age, lifeRemaining);
 
             // 2. REPLICATION
             if (Random.value < 0.001f)
@@ -137,86 +132,93 @@ public class ReplicatorManager : MonoBehaviour
         }
     }
 
-    // --- NEW HELPER FOR FLARE & FLICKER ---
     Color CalculateAgentColor(float age, float lifeRemaining)
     {
-        float intensity = 1.0f; // Default brightness
+        float intensity = 1.0f;
+        float alpha = 1.0f;
 
-        // 1. FLARE UP (Birth)
-        // For the first 1.5 seconds, intensity bursts from 10 down to 1
-        if (age < 1.5f)
+        // PRIORITIZE DEATH: If dying, force dimming and transparency fade.
+        if (lifeRemaining < 3.0f)
         {
+            // Smooth dimming from 1.0 to 0.0 over the last 3 seconds
+            float t = Mathf.Clamp01(lifeRemaining / 3.0f);
+
+            // Intensity fades the glow/color.
+            intensity = Mathf.Lerp(0.01f, 1.0f, t);
+
+            // Alpha fades the visibility of the mesh itself.
+            alpha = Mathf.Lerp(0f, 1.0f, t);
+        }
+        else if (age < 1.5f)
+        {
+            // Flare up on birth
             float t = age / 1.5f;
-            intensity = Mathf.Lerp(8.0f, 1.0f, t); // Start super bright (8x)
-        }
-        // 2. FLICKER & DIM (Death)
-        // In the last 3 seconds, fade out and flicker
-        else if (lifeRemaining < 3.0f)
-        {
-            float t = lifeRemaining / 3.0f; // 0 is dead, 1 is start of death
-
-            // Dim down linearly
-            intensity = Mathf.Lerp(0f, 1.0f, t);
+            intensity = Mathf.Lerp(8.0f, 1.0f, t);
         }
 
-        // Create the final color.
-        // We multiply the base color by the intensity. 
-        // Values > 1.0 create HDR colors which trigger the Glow/Bloom.
+        // Apply color and intensity
         Color finalColor = baseAgentColor * intensity;
 
-        // Keep alpha for transparency (optional, depending on shader)
-        finalColor.a = (lifeRemaining < 3.0f) ? (lifeRemaining / 3.0f) : 1.0f;
+        // Set the transparency of the color
+        finalColor.a = alpha;
 
         return finalColor;
     }
 
     void RenderAgents()
     {
-        matrices.Clear();
-        colors.Clear();
+        int batchCount = 0;
 
         for (int i = 0; i < agents.Count; i++)
         {
             Replicator a = agents[i];
 
-            matrices.Add(Matrix4x4.TRS(a.position, a.rotation, Vector3.one * 0.1f));
-            colors.Add(a.color);
+            matrixBatch[batchCount] = Matrix4x4.TRS(a.position, a.rotation, Vector3.one * 0.1f);
+            colorBatch[batchCount] = a.color;
 
-            if (matrices.Count == 1023)
+            batchCount++;
+
+            if (batchCount == 1023)
             {
-                FlushBatch();
+                FlushBatch(batchCount);
+                batchCount = 0;
             }
         }
 
-        if (matrices.Count > 0)
+        if (batchCount > 0)
         {
-            FlushBatch();
+            FlushBatch(batchCount);
         }
     }
 
-    void FlushBatch()
+    void FlushBatch(int count)
     {
         int baseColorID = Shader.PropertyToID("_BaseColor");
         int colorID = Shader.PropertyToID("_Color");
-        // NEW: We must override the Emission Color too!
         int emissionID = Shader.PropertyToID("_EmissionColor");
 
-        Vector4[] colorArray = colors.ToArray();
+        // CRITICAL FIX: Clear the unused portion of the color array to transparent black.
+        // This overwrites any old, bright color data that might be sitting 
+        // in the buffer when the list shrinks or shifts.
+        Vector4 transparentBlack = Vector4.zero;
+        for (int i = count; i < 1023; i++)
+        {
+            // Set the color to fully transparent and black in the unused slots
+            colorBatch[i] = transparentBlack;
+        }
 
-        // Set Base Color (Albedo)
-        propertyBlock.SetVectorArray(baseColorID, colorArray);
-        propertyBlock.SetVectorArray(colorID, colorArray);
-
-        // Set Emission Color (The Glow)
-        // Since our 'colorArray' contains HDR values (brightness > 1), 
-        // passing it to Emission will create the exact Flare/Dim effect we want.
-        propertyBlock.SetVectorArray(emissionID, colorArray);
+        // Now, call the two-parameter function you have access to. 
+        // The array is now "safe" because we cleared the garbage data it contains.
+        propertyBlock.SetVectorArray(baseColorID, colorBatch);
+        propertyBlock.SetVectorArray(colorID, colorBatch);
+        propertyBlock.SetVectorArray(emissionID, colorBatch);
 
         Graphics.DrawMeshInstanced(
             replicatorMesh,
             0,
             replicatorMaterial,
-            matrices,
+            matrixBatch,
+            count, // Tell Unity exactly how many matrices to draw
             propertyBlock,
             UnityEngine.Rendering.ShadowCastingMode.Off,
             true,
@@ -224,8 +226,5 @@ public class ReplicatorManager : MonoBehaviour
             null,
             UnityEngine.Rendering.LightProbeUsage.Off
         );
-
-        matrices.Clear();
-        colors.Clear();
     }
 }
