@@ -1,5 +1,7 @@
 using UnityEngine;
 using System.Collections.Generic;
+using Unity.Jobs;
+using Unity.Collections;
 
 public class ReplicatorManager : MonoBehaviour
 {
@@ -10,17 +12,17 @@ public class ReplicatorManager : MonoBehaviour
 
     [Header("Population")]
     public int initialSpawnCount = 100;
-    public int maxPopulation = 5000;
+    public int maxPopulation = 50000;
 
     public Color baseAgentColor = Color.cyan;
 
     [Header("Simulation")]
-    public float moveSpeed = 4.0f; // Adjusted based on our previous talk
+    public float moveSpeed = 4.0f;
     public float turnSpeed = 2.0f;
     public float spawnSpread = 0.5f;
 
     [Range(0f, 0.1f)]
-    public float reproductionRate = 0.001f; // Higher = more babies
+    public float reproductionRate = 0.001f;
 
     public float minLifespan = 30f;
     public float maxLifespan = 60f;
@@ -30,28 +32,176 @@ public class ReplicatorManager : MonoBehaviour
 
     [SerializeField] private int activeAgentCount;
 
-    // Arrays for Batching (reused to avoid GC)
+    // Arrays for Batching
     private Matrix4x4[] matrixBatch = new Matrix4x4[1023];
     private Vector4[] colorBatch = new Vector4[1023];
     private MaterialPropertyBlock propertyBlock;
 
+    // --- JOB STRUCT DEFINITION ---
+    public struct ReplicatorUpdateJob : IJobParallelFor
+    {
+        public NativeArray<Vector3> Positions;
+        public NativeArray<Quaternion> Rotations;
+
+        // Simulation parameters
+        public float DeltaTime;
+        public float MoveSpeed;
+        public float TurnSpeed;
+        public float Radius;
+        public float TimeVal;
+
+        // --- NEW: Noise Parameters for Surface Snap ---
+        public float NoiseMagnitude;
+        public float NoiseRoughness;
+        public Vector3 NoiseOffset;
+        public int NumLayers;
+        public float Persistence;
+
+        public void Execute(int index)
+        {
+            Vector3 pos = Positions[index];
+            Quaternion rot = Rotations[index];
+            Vector3 surfaceNormal = pos.normalized;
+
+            // 1. Turning (Pseudo-random noise)
+            float noiseVal = Mathf.Sin(pos.x * 0.5f + TimeVal) * Mathf.Cos(pos.z * 0.5f + TimeVal);
+            float turnAmount = noiseVal * TurnSpeed * DeltaTime * 20f;
+            rot = rot * Quaternion.AngleAxis(turnAmount, surfaceNormal);
+
+            // 2. Movement (Arc across sphere)
+            Vector3 forward = rot * Vector3.forward;
+            Quaternion travelRot = Quaternion.AngleAxis(MoveSpeed * DeltaTime / Radius, Vector3.Cross(surfaceNormal, forward));
+
+            // Get the new direction vector (normalized)
+            Vector3 newDirection = (travelRot * pos).normalized;
+
+            // 3. HEIGHT SNAP (The Missing Fix!)
+            // We calculate the terrain height right here in the thread
+            float terrainNoise = CalculateNoise(newDirection);
+            float displacement = Radius * (1f + terrainNoise * NoiseMagnitude);
+
+            // Apply height + slight offset so they sit ON the ground, not IN it
+            Vector3 newPos = newDirection * (displacement + 0.05f);
+
+            // 4. Rotation Alignment
+            Vector3 newNormal = newPos.normalized;
+            Quaternion targetRot = Quaternion.LookRotation(Vector3.ProjectOnPlane(forward, newNormal), newNormal);
+            rot = Quaternion.Slerp(rot, targetRot, DeltaTime * 5f);
+
+            Positions[index] = newPos;
+            Rotations[index] = rot;
+        }
+
+        // Helper function to replicate PlanetGenerator.CalculateNoise inside the Job
+        private float CalculateNoise(Vector3 point)
+        {
+            float noiseValue = 0;
+            float frequency = NoiseRoughness;
+            float amplitude = 1;
+            float maxPossibleHeight = 0;
+
+            for (int i = 0; i < NumLayers; i++)
+            {
+                // We call SimpleNoise directly. Since it's a static class, this is allowed!
+                Vector3 samplePoint = point * frequency + NoiseOffset;
+                float singleLayerNoise = SimpleNoise.Evaluate(samplePoint);
+                singleLayerNoise = (singleLayerNoise + 1) * 0.5f;
+
+                noiseValue += singleLayerNoise * amplitude;
+                maxPossibleHeight += amplitude;
+
+                amplitude *= Persistence;
+                frequency *= 2;
+            }
+
+            return noiseValue / maxPossibleHeight;
+        }
+    }
+
     void Start()
     {
         propertyBlock = new MaterialPropertyBlock();
-
-        // Spawn initial population
-        for (int i = 0; i < initialSpawnCount; i++)
-        {
-            SpawnAgent();
-        }
+        for (int i = 0; i < initialSpawnCount; i++) SpawnAgent();
     }
 
     void Update()
     {
-        UpdateAgents();
+        UpdateLifecycle();
+        RunMovementJob();
         RenderAgents();
-
         activeAgentCount = agents.Count;
+    }
+
+    void UpdateLifecycle()
+    {
+        float dt = Time.deltaTime;
+
+        for (int i = agents.Count - 1; i >= 0; i--)
+        {
+            Replicator agent = agents[i];
+            agent.age += dt;
+
+            if (agent.age > agent.maxLifespan)
+            {
+                agents.RemoveAt(i);
+                continue;
+            }
+
+            float lifeRemaining = agent.maxLifespan - agent.age;
+            agent.color = CalculateAgentColor(agent.age, lifeRemaining);
+
+            if (Random.value < reproductionRate)
+            {
+                SpawnAgent();
+            }
+        }
+    }
+
+    void RunMovementJob()
+    {
+        int count = agents.Count;
+        if (count == 0) return;
+
+        NativeArray<Vector3> jobPositions = new NativeArray<Vector3>(count, Allocator.TempJob);
+        NativeArray<Quaternion> jobRotations = new NativeArray<Quaternion>(count, Allocator.TempJob);
+
+        for (int i = 0; i < count; i++)
+        {
+            jobPositions[i] = agents[i].position;
+            jobRotations[i] = agents[i].rotation;
+        }
+
+        ReplicatorUpdateJob job = new ReplicatorUpdateJob
+        {
+            Positions = jobPositions,
+            Rotations = jobRotations,
+            DeltaTime = Time.deltaTime,
+            MoveSpeed = moveSpeed,
+            TurnSpeed = turnSpeed,
+            Radius = planetGenerator.radius,
+            TimeVal = Time.time,
+
+            // Pass Planet Settings to Job
+            NoiseMagnitude = planetGenerator.noiseMagnitude,
+            NoiseRoughness = planetGenerator.noiseRoughness,
+            NoiseOffset = planetGenerator.noiseOffset,
+            NumLayers = planetGenerator.numLayers,
+            Persistence = planetGenerator.persistence
+        };
+
+        JobHandle handle = job.Schedule(count, 32);
+        handle.Complete();
+
+        for (int i = 0; i < count; i++)
+        {
+            var agent = agents[i];
+            agent.position = jobPositions[i];
+            agent.rotation = jobRotations[i];
+            agent.currentDirection = agent.position.normalized;
+        }
+
+        jobPositions.Dispose();
+        jobRotations.Dispose();
     }
 
     void SpawnAgent()
@@ -79,10 +229,7 @@ public class ReplicatorManager : MonoBehaviour
         spawnRotation *= Quaternion.Euler(0, Random.Range(0f, 360f), 0);
 
         float newLifespan = Random.Range(minLifespan, maxLifespan);
-
         Replicator newAgent = new Replicator(spawnPosition, spawnRotation, newLifespan, baseAgentColor);
-
-        // FIX #1: Give a large random starting age to significantly desynchronize death times
         newAgent.age = Random.Range(0f, newLifespan * 0.5f);
 
         agents.Add(newAgent);
@@ -95,101 +242,38 @@ public class ReplicatorManager : MonoBehaviour
         return displacement + 0.05f;
     }
 
-    void UpdateAgents()
-    {
-        float dt = Time.deltaTime;
-        float radius = planetGenerator.radius;
-
-        for (int i = agents.Count - 1; i >= 0; i--)
-        {
-            Replicator agent = agents[i];
-
-            // 1. AGE LOGIC
-            agent.age += dt;
-            float lifeRemaining = agent.maxLifespan - agent.age;
-
-            // Check for death
-            if (agent.age > agent.maxLifespan)
-            {
-                agents.RemoveAt(i);
-                continue;
-            }
-
-            // --- VISUALS: COLOR CALCULATION ---
-            agent.color = CalculateAgentColor(agent.age, lifeRemaining);
-
-            // 2. REPLICATION
-            if (Random.value < reproductionRate)
-            {
-                SpawnAgent();
-            }
-
-            // 3. MOVEMENT
-            Vector3 surfaceNormal = agent.position.normalized;
-            float randomTurn = Random.Range(-10f, 10f) * turnSpeed * dt;
-            Quaternion turnRot = Quaternion.AngleAxis(randomTurn, surfaceNormal);
-            agent.rotation = turnRot * agent.rotation;
-            Vector3 forward = agent.rotation * Vector3.forward;
-            Quaternion travelRot = Quaternion.AngleAxis(moveSpeed * dt / radius, Vector3.Cross(surfaceNormal, forward));
-            Vector3 newPosDirection = travelRot * agent.position;
-
-            // 4. POSITION SNAP
-            float height = GetSurfaceHeight(newPosDirection.normalized);
-            agent.position = newPosDirection.normalized * height;
-
-            // 5. ROTATION ALIGN
-            Vector3 newNormal = agent.position.normalized;
-            Quaternion targetRot = Quaternion.LookRotation(Vector3.ProjectOnPlane(forward, newNormal), newNormal);
-            agent.rotation = Quaternion.Slerp(agent.rotation, targetRot, dt * 5f);
-
-            agent.currentDirection = agent.position.normalized;
-        }
-    }
-
     Color CalculateAgentColor(float age, float lifeRemaining)
     {
         float intensity = 1.0f;
         float alpha = 1.0f;
 
-        // PRIORITIZE DEATH: If dying, force dimming and transparency fade.
         if (lifeRemaining < 3.0f)
         {
-            // Smooth dimming from 1.0 to 0.0 over the last 3 seconds
             float t = Mathf.Clamp01(lifeRemaining / 3.0f);
-
-            // Intensity fades the glow/color.
             intensity = Mathf.Lerp(0.01f, 1.0f, t);
-
-            // Alpha fades the visibility of the mesh itself.
             alpha = Mathf.Lerp(0f, 1.0f, t);
         }
         else if (age < 1.5f)
         {
-            // Flare up on birth
             float t = age / 1.5f;
             intensity = Mathf.Lerp(8.0f, 1.0f, t);
         }
 
-        // Apply color and intensity
         Color finalColor = baseAgentColor * intensity;
-
-        // Set the transparency of the color
         finalColor.a = alpha;
-
         return finalColor;
     }
 
     void RenderAgents()
     {
         int batchCount = 0;
+        int totalAgents = agents.Count;
 
-        for (int i = 0; i < agents.Count; i++)
+        for (int i = 0; i < totalAgents; i++)
         {
             Replicator a = agents[i];
-
             matrixBatch[batchCount] = Matrix4x4.TRS(a.position, a.rotation, Vector3.one * 0.1f);
             colorBatch[batchCount] = a.color;
-
             batchCount++;
 
             if (batchCount == 1023)
@@ -211,18 +295,12 @@ public class ReplicatorManager : MonoBehaviour
         int colorID = Shader.PropertyToID("_Color");
         int emissionID = Shader.PropertyToID("_EmissionColor");
 
-        // CRITICAL FIX: Clear the unused portion of the color array to transparent black.
-        // This overwrites any old, bright color data that might be sitting 
-        // in the buffer when the list shrinks or shifts.
         Vector4 transparentBlack = Vector4.zero;
         for (int i = count; i < 1023; i++)
         {
-            // Set the color to fully transparent and black in the unused slots
             colorBatch[i] = transparentBlack;
         }
 
-        // Now, call the two-parameter function you have access to. 
-        // The array is now "safe" because we cleared the garbage data it contains.
         propertyBlock.SetVectorArray(baseColorID, colorBatch);
         propertyBlock.SetVectorArray(colorID, colorBatch);
         propertyBlock.SetVectorArray(emissionID, colorBatch);
@@ -232,7 +310,7 @@ public class ReplicatorManager : MonoBehaviour
             0,
             replicatorMaterial,
             matrixBatch,
-            count, // Tell Unity exactly how many matrices to draw
+            count,
             propertyBlock,
             UnityEngine.Rendering.ShadowCastingMode.Off,
             true,
