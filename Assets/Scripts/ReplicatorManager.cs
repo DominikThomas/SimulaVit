@@ -15,11 +15,20 @@ public class ReplicatorManager : MonoBehaviour
     public Color baseAgentColor = Color.cyan;
 
     [Header("Simulation")]
-    public float moveSpeed = 0.5f;
+    public float moveSpeed = 4.0f; // Adjusted based on our previous talk
     public float turnSpeed = 2.0f;
     public float spawnSpread = 0.5f;
 
+    [Range(0f, 0.1f)]
+    public float reproductionRate = 0.001f; // Higher = more babies
+
+    public float minLifespan = 30f;
+    public float maxLifespan = 60f;
+
+    [Header("Debug")]
     private List<Replicator> agents = new List<Replicator>();
+
+    [SerializeField] private int activeAgentCount;
 
     // Arrays for Batching (reused to avoid GC)
     private Matrix4x4[] matrixBatch = new Matrix4x4[1023];
@@ -41,6 +50,8 @@ public class ReplicatorManager : MonoBehaviour
     {
         UpdateAgents();
         RenderAgents();
+
+        activeAgentCount = agents.Count;
     }
 
     void SpawnAgent()
@@ -67,7 +78,7 @@ public class ReplicatorManager : MonoBehaviour
         spawnRotation = Quaternion.FromToRotation(Vector3.up, randomDir);
         spawnRotation *= Quaternion.Euler(0, Random.Range(0f, 360f), 0);
 
-        float newLifespan = Random.Range(30f, 60f);
+        float newLifespan = Random.Range(minLifespan, maxLifespan);
 
         Replicator newAgent = new Replicator(spawnPosition, spawnRotation, newLifespan, baseAgentColor);
 
@@ -108,7 +119,7 @@ public class ReplicatorManager : MonoBehaviour
             agent.color = CalculateAgentColor(agent.age, lifeRemaining);
 
             // 2. REPLICATION
-            if (Random.value < 0.001f)
+            if (Random.value < reproductionRate)
             {
                 SpawnAgent();
             }

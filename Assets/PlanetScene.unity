@@ -490,6 +490,10 @@ MonoBehaviour:
   moveSpeed: 4
   turnSpeed: 200
   spawnSpread: 0
+  reproductionRate: 0.001
+  minLifespan: 30
+  maxLifespan: 60
+  agents: []
 --- !u!4 &1064713444
 Transform:
   m_ObjectHideFlags: 0
