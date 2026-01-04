@@ -115,8 +115,11 @@ public class ReplicatorManager : MonoBehaviour
 
             // 3. MOVEMENT
             Vector3 surfaceNormal = agent.position.normalized;
+            float randomTurn = Random.Range(-10f, 10f) * turnSpeed * dt;
+            Quaternion turnRot = Quaternion.AngleAxis(randomTurn, surfaceNormal);
+            agent.rotation = turnRot * agent.rotation;
             Vector3 forward = agent.rotation * Vector3.forward;
-            Quaternion travelRot = Quaternion.AngleAxis(moveSpeed * dt * 50f / radius, Vector3.Cross(surfaceNormal, forward));
+            Quaternion travelRot = Quaternion.AngleAxis(moveSpeed * dt / radius, Vector3.Cross(surfaceNormal, forward));
             Vector3 newPosDirection = travelRot * agent.position;
 
             // 4. POSITION SNAP

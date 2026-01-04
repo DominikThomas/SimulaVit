@@ -487,8 +487,8 @@ MonoBehaviour:
   initialSpawnCount: 2
   maxPopulation: 50000
   baseAgentColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
-  moveSpeed: 0.08
-  turnSpeed: 100
+  moveSpeed: 4
+  turnSpeed: 200
   spawnSpread: 0
 --- !u!4 &1064713444
 Transform:
