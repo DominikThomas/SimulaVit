@@ -208,11 +208,13 @@ public class SunSkyRotator : MonoBehaviour
         Shader litShader = Shader.Find("Universal Render Pipeline/Lit");
         if (litShader != null)
         {
-            Material material = new Material(litShader);
-            material.SetFloat("_Metallic", sunMetallic);
-            material.SetFloat("_Smoothness", sunSurfaceSmoothness);
-            material.EnableKeyword("_EMISSION");
-            return material;
+            Material litMaterial = new Material(litShader);
+            litMaterial.SetColor("_BaseColor", sunColor);
+            litMaterial.SetFloat("_Metallic", sunMetallic);
+            litMaterial.SetFloat("_Smoothness", sunSurfaceSmoothness);
+            litMaterial.EnableKeyword("_EMISSION");
+            litMaterial.SetColor("_EmissionColor", sunColor * sunEmissionIntensity);
+            return litMaterial;
         }
 
         Shader unlitShader = Shader.Find("Universal Render Pipeline/Unlit");
