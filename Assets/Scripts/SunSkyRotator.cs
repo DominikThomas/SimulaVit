@@ -11,6 +11,9 @@ public class SunSkyRotator : MonoBehaviour
     public float sunDistance = 250f;
     public float sunScale = 8f;
     public Color sunColor = new Color(1f, 0.9f, 0.6f, 1f);
+    [Range(0f, 1f)] public float sunSurfaceSmoothness = 0.95f;
+    [Range(0f, 1f)] public float sunMetallic = 0.1f;
+    [Min(0f)] public float sunEmissionIntensity = 12f;
 
     [Header("Skybox")]
     public bool rotateSkybox = true;
@@ -114,19 +117,54 @@ public class SunSkyRotator : MonoBehaviour
         Renderer sunRenderer = generatedSunObject.GetComponent<Renderer>();
         if (sunRenderer != null)
         {
-            Shader sunShader = Shader.Find("Universal Render Pipeline/Unlit");
-            if (sunShader == null)
+            Material sunMaterial = BuildSunMaterial();
+            if (sunMaterial != null)
             {
-                sunShader = Shader.Find("Unlit/Color");
-            }
-
-            if (sunShader != null)
-            {
-                Material sunMaterial = new Material(sunShader);
-                sunMaterial.color = sunColor;
                 sunRenderer.material = sunMaterial;
+                sunRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                sunRenderer.receiveShadows = false;
             }
         }
+    }
+
+
+    Material BuildSunMaterial()
+    {
+        Shader litShader = Shader.Find("Universal Render Pipeline/Lit");
+        if (litShader != null)
+        {
+            Material litMaterial = new Material(litShader);
+            litMaterial.SetColor("_BaseColor", sunColor);
+            litMaterial.SetFloat("_Metallic", sunMetallic);
+            litMaterial.SetFloat("_Smoothness", sunSurfaceSmoothness);
+            litMaterial.EnableKeyword("_EMISSION");
+            litMaterial.SetColor("_EmissionColor", sunColor * sunEmissionIntensity);
+            return litMaterial;
+        }
+
+        Shader unlitShader = Shader.Find("Universal Render Pipeline/Unlit");
+        if (unlitShader == null)
+        {
+            unlitShader = Shader.Find("Unlit/Color");
+        }
+
+        if (unlitShader == null)
+        {
+            return null;
+        }
+
+        Material unlitMaterial = new Material(unlitShader);
+        Color hdrColor = sunColor * sunEmissionIntensity;
+        if (unlitMaterial.HasProperty("_BaseColor"))
+        {
+            unlitMaterial.SetColor("_BaseColor", hdrColor);
+        }
+        else if (unlitMaterial.HasProperty("_Color"))
+        {
+            unlitMaterial.SetColor("_Color", hdrColor);
+        }
+
+        return unlitMaterial;
     }
 
     void UpdateSunVisualPosition()
