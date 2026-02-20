@@ -488,9 +488,9 @@ MonoBehaviour:
   maxPopulation: 50000
   baseAgentColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
   moveSpeed: 4
-  turnSpeed: 200
+  turnSpeed: 20
   spawnSpread: 0
-  reproductionRate: 0.001
+  reproductionRate: 0.1
   minLifespan: 30
   maxLifespan: 60
   activeAgentCount: 0

@@ -14,6 +14,7 @@ public class CameraRotation : MonoBehaviour
     // Private variables to hold the specific actions
     private InputAction lookDeltaAction;
     private InputAction orbitActivateAction;
+    private InputActionMap cameraActionMap;
 
     private float currentX = 0.0f;
     private float currentY = 0.0f;
@@ -50,9 +51,31 @@ public class CameraRotation : MonoBehaviour
             orbitDistance = 10.0f;
             Debug.LogError("GameObject with tag 'Planet' not found. Defaulting camera orbit distance to 10.0f.");
         }
+        if (controls == null)
+        {
+            Debug.LogError("CameraRotation is missing InputActionAsset reference.");
+            enabled = false;
+            return;
+        }
+
+        cameraActionMap = controls.FindActionMap("Camera", true);
+        if (cameraActionMap == null)
+        {
+            Debug.LogError("Camera action map not found in InputActionAsset.");
+            enabled = false;
+            return;
+        }
+
         // Find the actions defined in the asset
-        lookDeltaAction = controls.FindActionMap("Camera").FindAction("LookDelta");
-        orbitActivateAction = controls.FindActionMap("Camera").FindAction("OrbitActivate");
+        lookDeltaAction = cameraActionMap.FindAction("LookDelta", true);
+        orbitActivateAction = cameraActionMap.FindAction("OrbitActivate", true);
+
+        if (lookDeltaAction == null || orbitActivateAction == null)
+        {
+            Debug.LogError("CameraRotation is missing LookDelta or OrbitActivate actions.");
+            enabled = false;
+            return;
+        }
 
         // Subscribe to the OrbitActivate action press and release events
         orbitActivateAction.performed += ctx => isOrbiting = true;
@@ -62,13 +85,19 @@ public class CameraRotation : MonoBehaviour
     void OnEnable()
     {
         // Enable all actions when the script becomes active
-        controls.FindActionMap("Camera").Enable();
+        if (cameraActionMap != null)
+        {
+            cameraActionMap.Enable();
+        }
     }
 
     void OnDisable()
     {
         // Disable all actions when the script is deactivated
-        controls.FindActionMap("Camera").Disable();
+        if (cameraActionMap != null)
+        {
+            cameraActionMap.Disable();
+        }
     }
 
     void Update()
