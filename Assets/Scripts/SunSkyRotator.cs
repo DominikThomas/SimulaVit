@@ -14,6 +14,8 @@ public class SunSkyRotator : MonoBehaviour
 
     [Header("Skybox")]
     public bool rotateSkybox = true;
+    [Tooltip("Use -1 to match the light orbit direction for this skybox shader.")]
+    public float skyboxRotationMultiplier = -1f;
     public Material skyboxOverride;
 
     private Quaternion initialRotation;
@@ -42,7 +44,7 @@ public class SunSkyRotator : MonoBehaviour
         if (rotateSkybox && runtimeSkybox != null && runtimeSkybox.HasFloat("_Rotation"))
         {
             float current = runtimeSkybox.GetFloat("_Rotation");
-            runtimeSkybox.SetFloat("_Rotation", current + orbitDegreesPerSecond * dt);
+            runtimeSkybox.SetFloat("_Rotation", current + orbitDegreesPerSecond * skyboxRotationMultiplier * dt);
         }
 
         UpdateSunVisualPosition();

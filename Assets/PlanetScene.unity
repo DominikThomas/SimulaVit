@@ -265,6 +265,7 @@ MonoBehaviour:
   sunScale: 8
   sunColor: {r: 1, g: 0.9, b: 0.6, a: 1}
   rotateSkybox: 1
+  skyboxRotationMultiplier: -1
   skyboxOverride: {fileID: 0}
 --- !u!1 &370080324
 GameObject:
