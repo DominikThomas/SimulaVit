@@ -130,6 +130,7 @@ GameObject:
   - component: {fileID: 313342986}
   - component: {fileID: 313342985}
   - component: {fileID: 313342987}
+  - component: {fileID: 313342988}
   m_Layer: 0
   m_Name: Directional Light
   m_TagString: Untagged
@@ -246,6 +247,25 @@ MonoBehaviour:
   m_ShadowLayerMask: 1
   m_RenderingLayers: 1
   m_ShadowRenderingLayers: 1
+--- !u!114 &313342988
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 313342984}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 80cb922ebf554173b44e2f7f969dcfc6, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  orbitDegreesPerSecond: 0.75
+  orbitAxis: {x: 0, y: 1, z: 0}
+  sunDistance: 250
+  sunScale: 8
+  sunColor: {r: 1, g: 0.9, b: 0.6, a: 1}
+  rotateSkybox: 1
+  skyboxOverride: {fileID: 0}
 --- !u!1 &370080324
 GameObject:
   m_ObjectHideFlags: 0

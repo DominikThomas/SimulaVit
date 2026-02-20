@@ -37,6 +37,16 @@ public class ReplicatorManager : MonoBehaviour
     private Vector4[] colorBatch = new Vector4[1023];
     private MaterialPropertyBlock propertyBlock;
 
+    // Reused job buffers to avoid per-frame NativeArray allocations.
+    private NativeArray<Vector3> jobPositions;
+    private NativeArray<Quaternion> jobRotations;
+    private int jobCapacity;
+
+    // Cache shader property IDs once.
+    private static readonly int BaseColorID = Shader.PropertyToID("_BaseColor");
+    private static readonly int ColorID = Shader.PropertyToID("_Color");
+    private static readonly int EmissionID = Shader.PropertyToID("_EmissionColor");
+
     // --- JOB STRUCT DEFINITION ---
     public struct ReplicatorUpdateJob : IJobParallelFor
     {
@@ -135,6 +145,7 @@ public class ReplicatorManager : MonoBehaviour
     void UpdateLifecycle()
     {
         float dt = Time.deltaTime;
+        float reproductionChance = reproductionRate * dt;
 
         for (int i = agents.Count - 1; i >= 0; i--)
         {
@@ -150,7 +161,7 @@ public class ReplicatorManager : MonoBehaviour
             float lifeRemaining = agent.maxLifespan - agent.age;
             agent.color = CalculateAgentColor(agent.age, lifeRemaining);
 
-            if (Random.value < reproductionRate)
+            if (Random.value < reproductionChance)
             {
                 SpawnAgent();
             }
@@ -162,13 +173,12 @@ public class ReplicatorManager : MonoBehaviour
         int count = agents.Count;
         if (count == 0) return;
 
-        NativeArray<Vector3> jobPositions = new NativeArray<Vector3>(count, Allocator.TempJob);
-        NativeArray<Quaternion> jobRotations = new NativeArray<Quaternion>(count, Allocator.TempJob);
+        EnsureJobBufferCapacity(count);
 
         for (int i = 0; i < count; i++)
         {
-            jobPositions[i] = agents[i].position;
-            jobRotations[i] = agents[i].rotation;
+            this.jobPositions[i] = agents[i].position;
+            this.jobRotations[i] = agents[i].rotation;
         }
 
         ReplicatorUpdateJob job = new ReplicatorUpdateJob
@@ -199,9 +209,24 @@ public class ReplicatorManager : MonoBehaviour
             agent.rotation = jobRotations[i];
             agent.currentDirection = agent.position.normalized;
         }
+    }
 
-        jobPositions.Dispose();
-        jobRotations.Dispose();
+    void EnsureJobBufferCapacity(int requiredCount)
+    {
+        if (jobCapacity >= requiredCount) return;
+
+        if (jobPositions.IsCreated) jobPositions.Dispose();
+        if (jobRotations.IsCreated) jobRotations.Dispose();
+
+        jobCapacity = Mathf.NextPowerOfTwo(requiredCount);
+        jobPositions = new NativeArray<Vector3>(jobCapacity, Allocator.Persistent);
+        jobRotations = new NativeArray<Quaternion>(jobCapacity, Allocator.Persistent);
+    }
+
+    void OnDestroy()
+    {
+        if (jobPositions.IsCreated) jobPositions.Dispose();
+        if (jobRotations.IsCreated) jobRotations.Dispose();
     }
 
     void SpawnAgent()
@@ -291,19 +316,15 @@ public class ReplicatorManager : MonoBehaviour
 
     void FlushBatch(int count)
     {
-        int baseColorID = Shader.PropertyToID("_BaseColor");
-        int colorID = Shader.PropertyToID("_Color");
-        int emissionID = Shader.PropertyToID("_EmissionColor");
-
         Vector4 transparentBlack = Vector4.zero;
         for (int i = count; i < 1023; i++)
         {
             colorBatch[i] = transparentBlack;
         }
 
-        propertyBlock.SetVectorArray(baseColorID, colorBatch);
-        propertyBlock.SetVectorArray(colorID, colorBatch);
-        propertyBlock.SetVectorArray(emissionID, colorBatch);
+        propertyBlock.SetVectorArray(BaseColorID, colorBatch);
+        propertyBlock.SetVectorArray(ColorID, colorBatch);
+        propertyBlock.SetVectorArray(EmissionID, colorBatch);
 
         Graphics.DrawMeshInstanced(
             replicatorMesh,
