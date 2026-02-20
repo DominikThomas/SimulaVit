@@ -493,7 +493,7 @@ MonoBehaviour:
   reproductionRate: 0.001
   minLifespan: 30
   maxLifespan: 60
-  agents: []
+  activeAgentCount: 0
 --- !u!4 &1064713444
 Transform:
   m_ObjectHideFlags: 0
