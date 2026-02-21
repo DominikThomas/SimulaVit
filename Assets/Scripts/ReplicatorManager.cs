@@ -27,11 +27,29 @@ public class ReplicatorManager : MonoBehaviour
     public float minLifespan = 30f;
     public float maxLifespan = 60f;
 
+    [Header("Spontaneous Spawning")]
+    [Tooltip("Keeps attempting random world spawns even when all replicators die out.")]
+    public bool enableSpontaneousSpawning = true;
+    [Range(0.05f, 10f)]
+    [Tooltip("Seconds between random spawn attempts.")]
+    public float spawnAttemptInterval = 1.0f;
+    [Range(0f, 1f)]
+    [Tooltip("Base chance for each random spawn attempt.")]
+    public float spontaneousSpawnChance = 0.02f;
+    [Range(0f, 60f)]
+    [Tooltip("Guarantees at least one spontaneous spawn before this many seconds elapse.")]
+    public float guaranteedFirstSpawnWithinSeconds = 10f;
+    [Range(0f, 1f)]
+    [Tooltip("0 = land-only bias, 0.5 = balanced, 1 = sea-only bias (when ocean is enabled).")]
+    public float seaSpawnPreference = 0.5f;
+
     [Header("Debug")]
     private List<Replicator> agents = new List<Replicator>();
 
     [SerializeField] private int activeAgentCount;
     private bool isInitialized;
+    private float spawnAttemptTimer;
+    private bool firstSpontaneousSpawnHappened;
 
     // Arrays for Batching
     private Matrix4x4[] matrixBatch = new Matrix4x4[1023];
@@ -158,7 +176,7 @@ public class ReplicatorManager : MonoBehaviour
         propertyBlock = new MaterialPropertyBlock();
         isInitialized = true;
 
-        for (int i = 0; i < initialSpawnCount; i++) SpawnAgent();
+        for (int i = 0; i < initialSpawnCount; i++) SpawnAgentAtRandomLocation();
     }
 
     void Update()
@@ -166,9 +184,80 @@ public class ReplicatorManager : MonoBehaviour
         if (!isInitialized) return;
 
         UpdateLifecycle();
+        HandleSpontaneousSpawning();
         RunMovementJob();
         RenderAgents();
         activeAgentCount = agents.Count;
+    }
+
+    void HandleSpontaneousSpawning()
+    {
+        if (!enableSpontaneousSpawning) return;
+
+        if (!firstSpontaneousSpawnHappened && Time.timeSinceLevelLoad >= guaranteedFirstSpawnWithinSeconds)
+        {
+            if (SpawnAgentAtRandomLocation())
+            {
+                firstSpontaneousSpawnHappened = true;
+            }
+        }
+
+        float interval = Mathf.Max(0.05f, spawnAttemptInterval);
+        spawnAttemptTimer += Time.deltaTime;
+
+        while (spawnAttemptTimer >= interval)
+        {
+            spawnAttemptTimer -= interval;
+
+            if (TryRandomSpontaneousSpawn())
+            {
+                firstSpontaneousSpawnHappened = true;
+            }
+        }
+    }
+
+    bool TryRandomSpontaneousSpawn()
+    {
+        if (agents.Count >= maxPopulation) return false;
+
+        Vector3 randomDir = Random.onUnitSphere;
+        bool isSeaLocation = IsSeaLocation(randomDir);
+
+        float locationMultiplier = GetLocationSpawnMultiplier(isSeaLocation);
+        float spawnChance = Mathf.Clamp01(spontaneousSpawnChance * locationMultiplier);
+
+        if (Random.value >= spawnChance)
+        {
+            return false;
+        }
+
+        return SpawnAgentAtDirection(randomDir);
+    }
+
+    float GetLocationSpawnMultiplier(bool isSeaLocation)
+    {
+        if (!planetGenerator.OceanEnabled)
+        {
+            return 1f;
+        }
+
+        float seaWeight = Mathf.Clamp01(seaSpawnPreference);
+        float landWeight = 1f - seaWeight;
+        float selectedWeight = isSeaLocation ? seaWeight : landWeight;
+
+        // 0.5 means unbiased (multiplier = 1). 1.0 means sea-only, 0.0 means land-only.
+        return selectedWeight / 0.5f;
+    }
+
+    bool IsSeaLocation(Vector3 direction)
+    {
+        if (!planetGenerator.OceanEnabled)
+        {
+            return false;
+        }
+
+        float noise = planetGenerator.CalculateNoise(direction.normalized);
+        return noise < planetGenerator.OceanThresholdNoise;
     }
 
     void UpdateLifecycle()
@@ -192,7 +281,7 @@ public class ReplicatorManager : MonoBehaviour
 
             if (Random.value < reproductionChance)
             {
-                SpawnAgent();
+                SpawnAgentFromPopulation();
             }
         }
     }
@@ -261,13 +350,11 @@ public class ReplicatorManager : MonoBehaviour
         if (jobRotations.IsCreated) jobRotations.Dispose();
     }
 
-    void SpawnAgent()
+    bool SpawnAgentFromPopulation()
     {
-        if (agents.Count >= maxPopulation) return;
+        if (agents.Count >= maxPopulation) return false;
 
         Vector3 randomDir;
-        Vector3 spawnPosition;
-        Quaternion spawnRotation;
 
         if (agents.Count > 0)
         {
@@ -280,6 +367,23 @@ public class ReplicatorManager : MonoBehaviour
             randomDir = Random.onUnitSphere;
         }
 
+        return SpawnAgentAtDirection(randomDir);
+    }
+
+    bool SpawnAgentAtRandomLocation()
+    {
+        if (agents.Count >= maxPopulation) return false;
+        return SpawnAgentAtDirection(Random.onUnitSphere);
+    }
+
+    bool SpawnAgentAtDirection(Vector3 direction)
+    {
+        if (agents.Count >= maxPopulation) return false;
+
+        Vector3 randomDir = direction.normalized;
+        Vector3 spawnPosition;
+        Quaternion spawnRotation;
+
         float height = GetSurfaceHeight(randomDir);
         spawnPosition = randomDir * height;
         spawnRotation = Quaternion.FromToRotation(Vector3.up, randomDir);
@@ -290,6 +394,7 @@ public class ReplicatorManager : MonoBehaviour
         newAgent.age = Random.Range(0f, newLifespan * 0.5f);
 
         agents.Add(newAgent);
+        return true;
     }
 
     float GetSurfaceHeight(Vector3 direction)
