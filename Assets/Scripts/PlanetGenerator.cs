@@ -23,6 +23,14 @@ public class PlanetGenerator : MonoBehaviour
     [Range(0f, 1f)] public float oceanDepth = 0.35f;
     public Material oceanMaterial;
 
+    [Header("Randomization")]
+    public bool randomizeOnStart = false;
+    public bool useRandomSeed = true;
+    public int randomSeed = 12345;
+    public Vector2 noiseMagnitudeRange = new Vector2(0.05f, 0.2f);
+    public Vector2 noiseRoughnessRange = new Vector2(1.5f, 6f);
+    public Vector2 oceanCoverageRange = new Vector2(25f, 60f);
+
     private MeshFilter meshFilter;
     private Mesh mesh;
 
@@ -56,7 +64,27 @@ public class PlanetGenerator : MonoBehaviour
 
     void Start()
     {
+        if (randomizeOnStart)
+        {
+            RandomizeGenerationSettings();
+        }
+
         GeneratePlanet();
+    }
+
+    void RandomizeGenerationSettings()
+    {
+        if (!useRandomSeed)
+        {
+            Random.InitState(randomSeed);
+        }
+
+        noiseMagnitude = Random.Range(Mathf.Min(noiseMagnitudeRange.x, noiseMagnitudeRange.y), Mathf.Max(noiseMagnitudeRange.x, noiseMagnitudeRange.y));
+        noiseRoughness = Random.Range(Mathf.Min(noiseRoughnessRange.x, noiseRoughnessRange.y), Mathf.Max(noiseRoughnessRange.x, noiseRoughnessRange.y));
+        oceanCoveragePercent = Random.Range(
+            Mathf.Clamp(Mathf.Min(oceanCoverageRange.x, oceanCoverageRange.y), 20f, 70f),
+            Mathf.Clamp(Mathf.Max(oceanCoverageRange.x, oceanCoverageRange.y), 20f, 70f)
+        );
     }
 
     void SetupOceanLayer()
