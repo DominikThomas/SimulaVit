@@ -274,6 +274,9 @@ MonoBehaviour:
   nightColor: {r: 0.2, g: 0.25, b: 0.35, a: 1}
   horizonBand: 0.3
   colorShiftStrength: 1
+  dayEmissionMultiplier: 1
+  nightEmissionMultiplier: 0.35
+  horizonEmissionBoost: 0.3
   rotateSkybox: 1
   skyboxRotationMultiplier: -1
   skyboxOverride: {fileID: 0}

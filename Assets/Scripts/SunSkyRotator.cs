@@ -25,6 +25,11 @@ public class SunSkyRotator : MonoBehaviour
     [Range(0.01f, 1f)] public float horizonBand = 0.3f;
     [Range(0f, 1f)] public float colorShiftStrength = 1f;
 
+    [Header("Emission Balancing")]
+    [Range(0f, 2f)] public float dayEmissionMultiplier = 1f;
+    [Range(0f, 2f)] public float nightEmissionMultiplier = 0.35f;
+    [Range(0f, 2f)] public float horizonEmissionBoost = 0.3f;
+
     [Header("Skybox")]
     public bool rotateSkybox = true;
     [Tooltip("Use -1 to match the light orbit direction for this skybox shader.")]
@@ -130,7 +135,7 @@ public class SunSkyRotator : MonoBehaviour
     {
         if (runtimeSunMaterial == null) return;
 
-        Color shiftedColor = EvaluateSunShiftedColor();
+        EvaluateSunAppearance(out Color shiftedColor, out float emissionMultiplier);
 
         if (runtimeSunMaterial.HasProperty("_BaseColor"))
         {
@@ -142,39 +147,42 @@ public class SunSkyRotator : MonoBehaviour
         }
         if (runtimeSunMaterial.HasProperty("_EmissionColor"))
         {
-            runtimeSunMaterial.SetColor("_EmissionColor", shiftedColor * sunEmissionIntensity);
+            runtimeSunMaterial.SetColor("_EmissionColor", shiftedColor * sunEmissionIntensity * emissionMultiplier);
         }
     }
 
-    Color EvaluateSunShiftedColor()
+    void EvaluateSunAppearance(out Color shiftedColor, out float emissionMultiplier)
     {
         SetupViewerReference();
 
         Vector3 center = planetCenter != null ? planetCenter.position : Vector3.zero;
         Vector3 sunDirection = (-transform.forward).normalized;
 
-        // Fallback if no viewer is available.
         if (viewer == null)
         {
-            return Color.Lerp(sunColor, dayColor * sunColor, colorShiftStrength);
+            shiftedColor = Color.Lerp(sunColor, dayColor * sunColor, colorShiftStrength);
+            emissionMultiplier = dayEmissionMultiplier;
+            return;
         }
 
-        // Camera direction from planet center.
         Vector3 viewDirection = (viewer.position - center).normalized;
 
-        // >0 means sun is on visible hemisphere from camera, <0 behind planet.
-        float facing = Vector3.Dot(viewDirection, sunDirection);
+        // +1 = sun centered in visible hemisphere, 0 = horizon line, -1 = fully behind planet.
+        float elevation = Vector3.Dot(viewDirection, sunDirection);
 
-        // Horizon factor peaks when facing is near 0 (sun near horizon from camera view).
-        float horizonFactor = 1f - Mathf.Clamp01(Mathf.Abs(facing) / Mathf.Max(0.0001f, horizonBand));
+        // Keep daytime color only on visible side.
+        float dayAmount = Mathf.Clamp01(elevation);
 
-        // Day amount on visible side, night amount on hidden side.
-        float dayAmount = Mathf.Clamp01((facing + 1f) * 0.5f);
+        // Warm horizon tint strongest when elevation is near 0.
+        float horizonFactor = 1f - Mathf.Clamp01(Mathf.Abs(elevation) / Mathf.Max(0.0001f, horizonBand));
 
         Color baseColor = Color.Lerp(nightColor, dayColor, dayAmount);
-        Color finalShifted = Color.Lerp(baseColor, horizonColor, horizonFactor);
+        Color horizonShifted = Color.Lerp(baseColor, horizonColor, horizonFactor);
 
-        return Color.Lerp(sunColor, finalShifted * sunColor, colorShiftStrength);
+        shiftedColor = Color.Lerp(sunColor, horizonShifted * sunColor, colorShiftStrength);
+
+        emissionMultiplier = Mathf.Lerp(nightEmissionMultiplier, dayEmissionMultiplier, dayAmount);
+        emissionMultiplier += horizonFactor * horizonEmissionBoost;
     }
 
     Material BuildSunMaterial()
