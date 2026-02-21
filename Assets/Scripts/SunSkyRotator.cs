@@ -20,14 +20,13 @@ public class SunSkyRotator : MonoBehaviour
     public Transform viewer;
     public Color horizonColor = new Color(1f, 0.45f, 0.2f, 1f);
     public Color dayColor = new Color(1f, 0.95f, 0.75f, 1f);
-    public Color nightColor = new Color(0.2f, 0.25f, 0.35f, 1f);
     [Tooltip("How wide the sunrise/sunset band is around the horizon line.")]
     [Range(0.01f, 1f)] public float horizonBand = 0.3f;
     [Range(0f, 1f)] public float colorShiftStrength = 1f;
 
     [Header("Emission Balancing")]
     [Range(0f, 2f)] public float dayEmissionMultiplier = 1f;
-    [Range(0f, 2f)] public float nightEmissionMultiplier = 0.35f;
+    [Range(0f, 2f)] public float behindPlanetEmissionMultiplier = 0.8f;
     [Range(0f, 2f)] public float horizonEmissionBoost = 0.3f;
 
     [Header("Skybox")]
@@ -176,12 +175,14 @@ public class SunSkyRotator : MonoBehaviour
         // Warm horizon tint strongest when elevation is near 0.
         float horizonFactor = 1f - Mathf.Clamp01(Mathf.Abs(elevation) / Mathf.Max(0.0001f, horizonBand));
 
-        Color baseColor = Color.Lerp(nightColor, dayColor, dayAmount);
-        Color horizonShifted = Color.Lerp(baseColor, horizonColor, horizonFactor);
+        // Behind the planet: keep a reddish horizon-like tone (no separate night tint).
+        Color behindPlanetColor = horizonColor;
+        Color visibleColor = Color.Lerp(dayColor, horizonColor, horizonFactor);
+        Color finalColor = elevation < 0f ? behindPlanetColor : visibleColor;
 
-        shiftedColor = Color.Lerp(sunColor, horizonShifted * sunColor, colorShiftStrength);
+        shiftedColor = Color.Lerp(sunColor, finalColor * sunColor, colorShiftStrength);
 
-        emissionMultiplier = Mathf.Lerp(nightEmissionMultiplier, dayEmissionMultiplier, dayAmount);
+        emissionMultiplier = elevation < 0f ? behindPlanetEmissionMultiplier : dayEmissionMultiplier;
         emissionMultiplier += horizonFactor * horizonEmissionBoost;
     }
 

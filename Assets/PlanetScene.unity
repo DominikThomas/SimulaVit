@@ -271,11 +271,10 @@ MonoBehaviour:
   viewer: {fileID: 370080327}
   horizonColor: {r: 1, g: 0.45, b: 0.2, a: 1}
   dayColor: {r: 1, g: 0.95, b: 0.75, a: 1}
-  nightColor: {r: 0.2, g: 0.25, b: 0.35, a: 1}
   horizonBand: 0.3
   colorShiftStrength: 1
   dayEmissionMultiplier: 1
-  nightEmissionMultiplier: 0.35
+  behindPlanetEmissionMultiplier: 0.8
   horizonEmissionBoost: 0.3
   rotateSkybox: 1
   skyboxRotationMultiplier: -1
