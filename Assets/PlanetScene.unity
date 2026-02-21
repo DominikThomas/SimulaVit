@@ -267,6 +267,17 @@ MonoBehaviour:
   sunSurfaceSmoothness: 0.95
   sunMetallic: 0.1
   sunEmissionIntensity: 12
+  planetCenter: {fileID: 382753103}
+  viewer: {fileID: 370080327}
+  planetRadius: 8
+  horizonTriggerOffsetDegrees: 0
+  horizonTransitionDegrees: 6
+  horizonColor: {r: 1, g: 0.45, b: 0.2, a: 1}
+  dayColor: {r: 1, g: 0.95, b: 0.75, a: 1}
+  colorShiftStrength: 1
+  dayEmissionMultiplier: 1
+  behindPlanetEmissionMultiplier: 0.8
+  horizonEmissionBoost: 0.3
   rotateSkybox: 1
   skyboxRotationMultiplier: -1
   skyboxOverride: {fileID: 0}

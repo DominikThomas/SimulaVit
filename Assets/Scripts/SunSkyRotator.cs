@@ -15,6 +15,23 @@ public class SunSkyRotator : MonoBehaviour
     [Range(0f, 1f)] public float sunMetallic = 0.1f;
     [Min(0f)] public float sunEmissionIntensity = 12f;
 
+    [Header("Camera-Relative Color Shift")]
+    public Transform planetCenter;
+    public Transform viewer;
+    [Min(0.001f)] public float planetRadius = 8f;
+    [Tooltip("Adjust sunrise/sunset trigger around the planet limb. + values trigger earlier, - values later.")]
+    public float horizonTriggerOffsetDegrees = 0f;
+    [Tooltip("Angular width of the warm sunrise/sunset band around horizon.")]
+    [Range(0.1f, 25f)] public float horizonTransitionDegrees = 6f;
+    public Color horizonColor = new Color(1f, 0.45f, 0.2f, 1f);
+    public Color dayColor = new Color(1f, 0.95f, 0.75f, 1f);
+    [Range(0f, 1f)] public float colorShiftStrength = 1f;
+
+    [Header("Emission Balancing")]
+    [Range(0f, 2f)] public float dayEmissionMultiplier = 1f;
+    [Range(0f, 2f)] public float behindPlanetEmissionMultiplier = 0.8f;
+    [Range(0f, 2f)] public float horizonEmissionBoost = 0.3f;
+
     [Header("Skybox")]
     public bool rotateSkybox = true;
     [Tooltip("Use -1 to match the light orbit direction for this skybox shader.")]
@@ -26,21 +43,26 @@ public class SunSkyRotator : MonoBehaviour
 
     private Material originalSkybox;
     private Material runtimeSkybox;
+
     private GameObject generatedSunObject;
+    private Material runtimeSunMaterial;
 
     void Start()
     {
         initialRotation = transform.rotation;
+        SetupViewerReference();
+        ResolvePlanetRadius();
         SetupSkybox();
         CreateSunVisual();
         UpdateSunVisualPosition();
+        UpdateSunVisualAppearance();
     }
 
     void Update()
     {
         float dt = Time.deltaTime;
-        accumulatedOrbitAngle += orbitDegreesPerSecond * dt;
 
+        accumulatedOrbitAngle += orbitDegreesPerSecond * dt;
         Quaternion orbitRotation = Quaternion.AngleAxis(accumulatedOrbitAngle, orbitAxis.normalized);
         transform.rotation = orbitRotation * initialRotation;
 
@@ -51,6 +73,7 @@ public class SunSkyRotator : MonoBehaviour
         }
 
         UpdateSunVisualPosition();
+        UpdateSunVisualAppearance();
     }
 
     void OnDestroy()
@@ -60,28 +83,27 @@ public class SunSkyRotator : MonoBehaviour
             RenderSettings.skybox = originalSkybox;
         }
 
-        if (generatedSunObject != null)
-        {
-            if (Application.isPlaying)
-            {
-                Destroy(generatedSunObject);
-            }
-            else
-            {
-                DestroyImmediate(generatedSunObject);
-            }
-        }
+        DestroyRuntimeObject(generatedSunObject);
+        DestroyRuntimeObject(runtimeSunMaterial);
+        DestroyRuntimeObject(runtimeSkybox);
+    }
 
-        if (runtimeSkybox != null)
+    void SetupViewerReference()
+    {
+        if (viewer == null && Camera.main != null)
         {
-            if (Application.isPlaying)
-            {
-                Destroy(runtimeSkybox);
-            }
-            else
-            {
-                DestroyImmediate(runtimeSkybox);
-            }
+            viewer = Camera.main.transform;
+        }
+    }
+
+    void ResolvePlanetRadius()
+    {
+        if (planetCenter == null) return;
+
+        PlanetGenerator generator = planetCenter.GetComponent<PlanetGenerator>();
+        if (generator != null)
+        {
+            planetRadius = Mathf.Max(0.001f, generator.radius);
         }
     }
 
@@ -100,46 +122,103 @@ public class SunSkyRotator : MonoBehaviour
         generatedSunObject = GameObject.CreatePrimitive(PrimitiveType.Sphere);
         generatedSunObject.name = "Sun Visual";
         generatedSunObject.transform.localScale = Vector3.one * sunScale;
-
-        SphereCollider sphereCollider = generatedSunObject.GetComponent<SphereCollider>();
-        if (sphereCollider != null)
-        {
-            if (Application.isPlaying)
-            {
-                Destroy(sphereCollider);
-            }
-            else
-            {
-                DestroyImmediate(sphereCollider);
-            }
-        }
+        RemoveCollider(generatedSunObject);
 
         Renderer sunRenderer = generatedSunObject.GetComponent<Renderer>();
         if (sunRenderer != null)
         {
-            Material sunMaterial = BuildSunMaterial();
-            if (sunMaterial != null)
+            runtimeSunMaterial = BuildSunMaterial();
+            if (runtimeSunMaterial != null)
             {
-                sunRenderer.material = sunMaterial;
+                sunRenderer.sharedMaterial = runtimeSunMaterial;
                 sunRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
                 sunRenderer.receiveShadows = false;
             }
         }
     }
 
+    void UpdateSunVisualPosition()
+    {
+        if (generatedSunObject == null) return;
+
+        Vector3 center = planetCenter != null ? planetCenter.position : Vector3.zero;
+        generatedSunObject.transform.position = center - transform.forward * sunDistance;
+        generatedSunObject.transform.localScale = Vector3.one * sunScale;
+    }
+
+    void UpdateSunVisualAppearance()
+    {
+        if (runtimeSunMaterial == null) return;
+
+        EvaluateSunAppearance(out Color shiftedColor, out float emissionMultiplier);
+
+        if (runtimeSunMaterial.HasProperty("_BaseColor"))
+        {
+            runtimeSunMaterial.SetColor("_BaseColor", shiftedColor);
+        }
+        if (runtimeSunMaterial.HasProperty("_Color"))
+        {
+            runtimeSunMaterial.SetColor("_Color", shiftedColor);
+        }
+        if (runtimeSunMaterial.HasProperty("_EmissionColor"))
+        {
+            runtimeSunMaterial.SetColor("_EmissionColor", shiftedColor * sunEmissionIntensity * emissionMultiplier);
+        }
+    }
+
+    void EvaluateSunAppearance(out Color shiftedColor, out float emissionMultiplier)
+    {
+        SetupViewerReference();
+
+        Vector3 center = planetCenter != null ? planetCenter.position : Vector3.zero;
+        if (viewer == null)
+        {
+            shiftedColor = Color.Lerp(sunColor, dayColor * sunColor, colorShiftStrength);
+            emissionMultiplier = dayEmissionMultiplier;
+            return;
+        }
+
+        Vector3 cameraPos = viewer.position;
+        Vector3 toCenter = center - cameraPos;
+        float distanceToCenter = toCenter.magnitude;
+        Vector3 centerDir = toCenter.normalized;
+
+        Vector3 sunPosition = center - transform.forward * sunDistance;
+        Vector3 sunDir = (sunPosition - cameraPos).normalized;
+
+        float angleToSunFromCenterDir = Vector3.Angle(centerDir, sunDir); // degrees
+        float planetAngularRadius = Mathf.Asin(Mathf.Clamp01(planetRadius / Mathf.Max(distanceToCenter, planetRadius + 0.001f))) * Mathf.Rad2Deg;
+        float horizonAngle = planetAngularRadius + horizonTriggerOffsetDegrees;
+        float deltaFromHorizon = angleToSunFromCenterDir - horizonAngle;
+
+        bool behindPlanet = deltaFromHorizon < 0f;
+        float transition = Mathf.Max(0.1f, horizonTransitionDegrees);
+
+        // Warm tint strongest right around horizon crossing.
+        float horizonFactor = 1f - Mathf.Clamp01(Mathf.Abs(deltaFromHorizon) / transition);
+
+        // Day factor rises as sun moves above horizon line.
+        float dayAmount = Mathf.Clamp01(deltaFromHorizon / transition);
+
+        Color visibleColor = Color.Lerp(dayColor, horizonColor, horizonFactor);
+        Color finalColor = behindPlanet ? horizonColor : Color.Lerp(horizonColor, visibleColor, dayAmount);
+
+        shiftedColor = Color.Lerp(sunColor, finalColor * sunColor, colorShiftStrength);
+
+        emissionMultiplier = behindPlanet ? behindPlanetEmissionMultiplier : Mathf.Lerp(behindPlanetEmissionMultiplier, dayEmissionMultiplier, dayAmount);
+        emissionMultiplier += horizonFactor * horizonEmissionBoost;
+    }
 
     Material BuildSunMaterial()
     {
         Shader litShader = Shader.Find("Universal Render Pipeline/Lit");
         if (litShader != null)
         {
-            Material litMaterial = new Material(litShader);
-            litMaterial.SetColor("_BaseColor", sunColor);
-            litMaterial.SetFloat("_Metallic", sunMetallic);
-            litMaterial.SetFloat("_Smoothness", sunSurfaceSmoothness);
-            litMaterial.EnableKeyword("_EMISSION");
-            litMaterial.SetColor("_EmissionColor", sunColor * sunEmissionIntensity);
-            return litMaterial;
+            Material material = new Material(litShader);
+            material.SetFloat("_Metallic", sunMetallic);
+            material.SetFloat("_Smoothness", sunSurfaceSmoothness);
+            material.EnableKeyword("_EMISSION");
+            return material;
         }
 
         Shader unlitShader = Shader.Find("Universal Render Pipeline/Unlit");
@@ -148,29 +227,31 @@ public class SunSkyRotator : MonoBehaviour
             unlitShader = Shader.Find("Unlit/Color");
         }
 
-        if (unlitShader == null)
-        {
-            return null;
-        }
+        if (unlitShader == null) return null;
 
-        Material unlitMaterial = new Material(unlitShader);
-        Color hdrColor = sunColor * sunEmissionIntensity;
-        if (unlitMaterial.HasProperty("_BaseColor"))
-        {
-            unlitMaterial.SetColor("_BaseColor", hdrColor);
-        }
-        else if (unlitMaterial.HasProperty("_Color"))
-        {
-            unlitMaterial.SetColor("_Color", hdrColor);
-        }
-
-        return unlitMaterial;
+        Material fallback = new Material(unlitShader);
+        fallback.EnableKeyword("_EMISSION");
+        return fallback;
     }
 
-    void UpdateSunVisualPosition()
+    void RemoveCollider(GameObject target)
     {
-        if (generatedSunObject == null) return;
+        SphereCollider collider = target.GetComponent<SphereCollider>();
+        if (collider == null) return;
+        DestroyRuntimeObject(collider);
+    }
 
-        generatedSunObject.transform.position = (-transform.forward * sunDistance);
+    void DestroyRuntimeObject(Object obj)
+    {
+        if (obj == null) return;
+
+        if (Application.isPlaying)
+        {
+            Destroy(obj);
+        }
+        else
+        {
+            DestroyImmediate(obj);
+        }
     }
 }
