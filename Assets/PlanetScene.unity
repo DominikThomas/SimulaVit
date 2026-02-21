@@ -269,9 +269,11 @@ MonoBehaviour:
   sunEmissionIntensity: 12
   planetCenter: {fileID: 382753103}
   viewer: {fileID: 370080327}
+  planetRadius: 8
+  horizonTriggerOffsetDegrees: 0
+  horizonTransitionDegrees: 6
   horizonColor: {r: 1, g: 0.45, b: 0.2, a: 1}
   dayColor: {r: 1, g: 0.95, b: 0.75, a: 1}
-  horizonBand: 0.3
   colorShiftStrength: 1
   dayEmissionMultiplier: 1
   behindPlanetEmissionMultiplier: 0.8

@@ -18,10 +18,13 @@ public class SunSkyRotator : MonoBehaviour
     [Header("Camera-Relative Color Shift")]
     public Transform planetCenter;
     public Transform viewer;
+    [Min(0.001f)] public float planetRadius = 8f;
+    [Tooltip("Adjust sunrise/sunset trigger around the planet limb. + values trigger earlier, - values later.")]
+    public float horizonTriggerOffsetDegrees = 0f;
+    [Tooltip("Angular width of the warm sunrise/sunset band around horizon.")]
+    [Range(0.1f, 25f)] public float horizonTransitionDegrees = 6f;
     public Color horizonColor = new Color(1f, 0.45f, 0.2f, 1f);
     public Color dayColor = new Color(1f, 0.95f, 0.75f, 1f);
-    [Tooltip("How wide the sunrise/sunset band is around the horizon line.")]
-    [Range(0.01f, 1f)] public float horizonBand = 0.3f;
     [Range(0f, 1f)] public float colorShiftStrength = 1f;
 
     [Header("Emission Balancing")]
@@ -48,6 +51,7 @@ public class SunSkyRotator : MonoBehaviour
     {
         initialRotation = transform.rotation;
         SetupViewerReference();
+        ResolvePlanetRadius();
         SetupSkybox();
         CreateSunVisual();
         UpdateSunVisualPosition();
@@ -92,6 +96,17 @@ public class SunSkyRotator : MonoBehaviour
         }
     }
 
+    void ResolvePlanetRadius()
+    {
+        if (planetCenter == null) return;
+
+        PlanetGenerator generator = planetCenter.GetComponent<PlanetGenerator>();
+        if (generator != null)
+        {
+            planetRadius = Mathf.Max(0.001f, generator.radius);
+        }
+    }
+
     void SetupSkybox()
     {
         originalSkybox = RenderSettings.skybox;
@@ -126,7 +141,8 @@ public class SunSkyRotator : MonoBehaviour
     {
         if (generatedSunObject == null) return;
 
-        generatedSunObject.transform.position = -transform.forward * sunDistance;
+        Vector3 center = planetCenter != null ? planetCenter.position : Vector3.zero;
+        generatedSunObject.transform.position = center - transform.forward * sunDistance;
         generatedSunObject.transform.localScale = Vector3.one * sunScale;
     }
 
@@ -155,8 +171,6 @@ public class SunSkyRotator : MonoBehaviour
         SetupViewerReference();
 
         Vector3 center = planetCenter != null ? planetCenter.position : Vector3.zero;
-        Vector3 sunDirection = (-transform.forward).normalized;
-
         if (viewer == null)
         {
             shiftedColor = Color.Lerp(sunColor, dayColor * sunColor, colorShiftStrength);
@@ -164,25 +178,34 @@ public class SunSkyRotator : MonoBehaviour
             return;
         }
 
-        Vector3 viewDirection = (viewer.position - center).normalized;
+        Vector3 cameraPos = viewer.position;
+        Vector3 toCenter = center - cameraPos;
+        float distanceToCenter = toCenter.magnitude;
+        Vector3 centerDir = toCenter.normalized;
 
-        // +1 = sun centered in visible hemisphere, 0 = horizon line, -1 = fully behind planet.
-        float elevation = Vector3.Dot(viewDirection, sunDirection);
+        Vector3 sunPosition = center - transform.forward * sunDistance;
+        Vector3 sunDir = (sunPosition - cameraPos).normalized;
 
-        // Keep daytime color only on visible side.
-        float dayAmount = Mathf.Clamp01(elevation);
+        float angleToSunFromCenterDir = Vector3.Angle(centerDir, sunDir); // degrees
+        float planetAngularRadius = Mathf.Asin(Mathf.Clamp01(planetRadius / Mathf.Max(distanceToCenter, planetRadius + 0.001f))) * Mathf.Rad2Deg;
+        float horizonAngle = planetAngularRadius + horizonTriggerOffsetDegrees;
+        float deltaFromHorizon = angleToSunFromCenterDir - horizonAngle;
 
-        // Warm horizon tint strongest when elevation is near 0.
-        float horizonFactor = 1f - Mathf.Clamp01(Mathf.Abs(elevation) / Mathf.Max(0.0001f, horizonBand));
+        bool behindPlanet = deltaFromHorizon < 0f;
+        float transition = Mathf.Max(0.1f, horizonTransitionDegrees);
 
-        // Behind the planet: keep a reddish horizon-like tone (no separate night tint).
-        Color behindPlanetColor = horizonColor;
+        // Warm tint strongest right around horizon crossing.
+        float horizonFactor = 1f - Mathf.Clamp01(Mathf.Abs(deltaFromHorizon) / transition);
+
+        // Day factor rises as sun moves above horizon line.
+        float dayAmount = Mathf.Clamp01(deltaFromHorizon / transition);
+
         Color visibleColor = Color.Lerp(dayColor, horizonColor, horizonFactor);
-        Color finalColor = elevation < 0f ? behindPlanetColor : visibleColor;
+        Color finalColor = behindPlanet ? horizonColor : Color.Lerp(horizonColor, visibleColor, dayAmount);
 
         shiftedColor = Color.Lerp(sunColor, finalColor * sunColor, colorShiftStrength);
 
-        emissionMultiplier = elevation < 0f ? behindPlanetEmissionMultiplier : dayEmissionMultiplier;
+        emissionMultiplier = behindPlanet ? behindPlanetEmissionMultiplier : Mathf.Lerp(behindPlanetEmissionMultiplier, dayEmissionMultiplier, dayAmount);
         emissionMultiplier += horizonFactor * horizonEmissionBoost;
     }
 
