@@ -59,6 +59,9 @@ public class ReplicatorManager : MonoBehaviour
     // Reused job buffers to avoid per-frame NativeArray allocations.
     private NativeArray<Vector3> jobPositions;
     private NativeArray<Quaternion> jobRotations;
+    private NativeArray<float> jobSeeds;
+    private NativeArray<float> jobMoveSpeedMultipliers;
+    private NativeArray<float> jobTurnSpeedMultipliers;
     private int jobCapacity;
 
     // Cache shader property IDs once.
@@ -71,6 +74,9 @@ public class ReplicatorManager : MonoBehaviour
     {
         public NativeArray<Vector3> Positions;
         public NativeArray<Quaternion> Rotations;
+        public NativeArray<float> Seeds;
+        public NativeArray<float> MoveSpeedMultipliers;
+        public NativeArray<float> TurnSpeedMultipliers;
 
         // Simulation parameters
         public float DeltaTime;
@@ -95,14 +101,38 @@ public class ReplicatorManager : MonoBehaviour
             Quaternion rot = Rotations[index];
             Vector3 surfaceNormal = pos.normalized;
 
-            // 1. Turning (Pseudo-random noise)
-            float noiseVal = Mathf.Sin(pos.x * 0.5f + TimeVal) * Mathf.Cos(pos.z * 0.5f + TimeVal);
-            float turnAmount = noiseVal * TurnSpeed * DeltaTime * 20f;
-            rot = rot * Quaternion.AngleAxis(turnAmount, surfaceNormal);
+            // 1. Turning (Per-agent pseudo-random walk)
+            float seed = Seeds[index];
+            float baseTurn = TurnSpeed * TurnSpeedMultipliers[index];
+            float timePhase = TimeVal * (0.9f + seed * 0.35f);
+            float turnNoiseA = Mathf.Sin(seed * 12.37f + timePhase * 1.13f + pos.x * 0.33f);
+            float turnNoiseB = Mathf.Cos(seed * 7.91f - timePhase * 0.71f + pos.z * 0.27f);
+            float turnNoiseC = Mathf.Sin(seed * 3.17f + timePhase * 1.91f + pos.y * 0.41f);
+            float turnAmount = (turnNoiseA + turnNoiseB + turnNoiseC) * 0.3333f * baseTurn * DeltaTime * 30f;
+            rot = Quaternion.AngleAxis(turnAmount, surfaceNormal) * rot;
 
             // 2. Movement (Arc across sphere)
             Vector3 forward = rot * Vector3.forward;
-            Quaternion travelRot = Quaternion.AngleAxis(MoveSpeed * DeltaTime / Radius, Vector3.Cross(surfaceNormal, forward));
+            float localMoveSpeed = MoveSpeed * MoveSpeedMultipliers[index];
+            Vector3 travelAxis = Vector3.Cross(surfaceNormal, forward);
+            float axisMag = travelAxis.magnitude;
+
+            if (axisMag > 0.0001f)
+            {
+                travelAxis /= axisMag;
+            }
+            else
+            {
+                // Fallback tangent axis if we're nearly parallel with surface normal.
+                travelAxis = Vector3.Cross(surfaceNormal, Vector3.right);
+                if (travelAxis.sqrMagnitude < 0.0001f)
+                {
+                    travelAxis = Vector3.Cross(surfaceNormal, Vector3.forward);
+                }
+                travelAxis.Normalize();
+            }
+
+            Quaternion travelRot = Quaternion.AngleAxis(localMoveSpeed * DeltaTime / Radius, travelAxis);
 
             // Get the new direction vector (normalized)
             Vector3 newDirection = (travelRot * pos).normalized;
@@ -297,12 +327,18 @@ public class ReplicatorManager : MonoBehaviour
         {
             this.jobPositions[i] = agents[i].position;
             this.jobRotations[i] = agents[i].rotation;
+            this.jobSeeds[i] = agents[i].movementSeed;
+            this.jobMoveSpeedMultipliers[i] = agents[i].moveSpeedMultiplier;
+            this.jobTurnSpeedMultipliers[i] = agents[i].turnSpeedMultiplier;
         }
 
         ReplicatorUpdateJob job = new ReplicatorUpdateJob
         {
             Positions = jobPositions,
             Rotations = jobRotations,
+            Seeds = jobSeeds,
+            MoveSpeedMultipliers = jobMoveSpeedMultipliers,
+            TurnSpeedMultipliers = jobTurnSpeedMultipliers,
             DeltaTime = Time.deltaTime,
             MoveSpeed = moveSpeed,
             TurnSpeed = turnSpeed,
@@ -338,16 +374,25 @@ public class ReplicatorManager : MonoBehaviour
 
         if (jobPositions.IsCreated) jobPositions.Dispose();
         if (jobRotations.IsCreated) jobRotations.Dispose();
+        if (jobSeeds.IsCreated) jobSeeds.Dispose();
+        if (jobMoveSpeedMultipliers.IsCreated) jobMoveSpeedMultipliers.Dispose();
+        if (jobTurnSpeedMultipliers.IsCreated) jobTurnSpeedMultipliers.Dispose();
 
         jobCapacity = Mathf.NextPowerOfTwo(requiredCount);
         jobPositions = new NativeArray<Vector3>(jobCapacity, Allocator.Persistent);
         jobRotations = new NativeArray<Quaternion>(jobCapacity, Allocator.Persistent);
+        jobSeeds = new NativeArray<float>(jobCapacity, Allocator.Persistent);
+        jobMoveSpeedMultipliers = new NativeArray<float>(jobCapacity, Allocator.Persistent);
+        jobTurnSpeedMultipliers = new NativeArray<float>(jobCapacity, Allocator.Persistent);
     }
 
     void OnDestroy()
     {
         if (jobPositions.IsCreated) jobPositions.Dispose();
         if (jobRotations.IsCreated) jobRotations.Dispose();
+        if (jobSeeds.IsCreated) jobSeeds.Dispose();
+        if (jobMoveSpeedMultipliers.IsCreated) jobMoveSpeedMultipliers.Dispose();
+        if (jobTurnSpeedMultipliers.IsCreated) jobTurnSpeedMultipliers.Dispose();
     }
 
     bool SpawnAgentFromPopulation()
@@ -390,7 +435,17 @@ public class ReplicatorManager : MonoBehaviour
         spawnRotation *= Quaternion.Euler(0, Random.Range(0f, 360f), 0);
 
         float newLifespan = Random.Range(minLifespan, maxLifespan);
-        Replicator newAgent = new Replicator(spawnPosition, spawnRotation, newLifespan, baseAgentColor);
+        float movementSeed = Random.value * 1000f;
+        float moveMultiplier = Random.Range(0.75f, 1.25f);
+        float turnMultiplier = Random.Range(0.65f, 1.55f);
+        Replicator newAgent = new Replicator(
+            spawnPosition,
+            spawnRotation,
+            newLifespan,
+            baseAgentColor,
+            movementSeed,
+            moveMultiplier,
+            turnMultiplier);
         newAgent.age = Random.Range(0f, newLifespan * 0.5f);
 
         agents.Add(newAgent);

@@ -12,14 +12,27 @@ public class Replicator
     // Movement data
     public Vector3 velocity;
     public Vector3 currentDirection; // Normalized position (direction from center)
+    public float movementSeed;
+    public float moveSpeedMultiplier;
+    public float turnSpeedMultiplier;
 
     // Constructor
-    public Replicator(Vector3 pos, Quaternion rot, float lifespan, Color col)
+    public Replicator(
+        Vector3 pos,
+        Quaternion rot,
+        float lifespan,
+        Color col,
+        float seed,
+        float moveMul,
+        float turnMul)
     {
         position = pos;
         rotation = rot;
         maxLifespan = lifespan;
         color = col;
+        movementSeed = seed;
+        moveSpeedMultiplier = moveMul;
+        turnSpeedMultiplier = turnMul;
         age = 0;
         currentDirection = pos.normalized;
     }
