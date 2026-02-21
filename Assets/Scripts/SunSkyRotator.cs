@@ -15,17 +15,15 @@ public class SunSkyRotator : MonoBehaviour
     [Range(0f, 1f)] public float sunMetallic = 0.1f;
     [Min(0f)] public float sunEmissionIntensity = 12f;
 
-    [Header("Sunrise / Sunset Color Shift")]
+    [Header("Camera-Relative Color Shift")]
+    public Transform planetCenter;
+    public Transform viewer;
     public Color horizonColor = new Color(1f, 0.45f, 0.2f, 1f);
-    public Color zenithColor = new Color(1f, 0.95f, 0.75f, 1f);
+    public Color dayColor = new Color(1f, 0.95f, 0.75f, 1f);
     public Color nightColor = new Color(0.2f, 0.25f, 0.35f, 1f);
-    [Tooltip("0 = always horizon color, 1 = full day/night color cycle.")]
+    [Tooltip("How wide the sunrise/sunset band is around the horizon line.")]
+    [Range(0.01f, 1f)] public float horizonBand = 0.3f;
     [Range(0f, 1f)] public float colorShiftStrength = 1f;
-
-    [Header("Debug")]
-    [Tooltip("Freeze cycle and set a manual time of day for quick testing in Play Mode.")]
-    public bool useManualCycle;
-    [Range(0f, 1f)] public float manualCycle01;
 
     [Header("Skybox")]
     public bool rotateSkybox = true;
@@ -45,6 +43,7 @@ public class SunSkyRotator : MonoBehaviour
     void Start()
     {
         initialRotation = transform.rotation;
+        SetupViewerReference();
         SetupSkybox();
         CreateSunVisual();
         UpdateSunVisualPosition();
@@ -55,17 +54,14 @@ public class SunSkyRotator : MonoBehaviour
     {
         float dt = Time.deltaTime;
 
-        if (!useManualCycle)
-        {
-            accumulatedOrbitAngle += orbitDegreesPerSecond * dt;
-            Quaternion orbitRotation = Quaternion.AngleAxis(accumulatedOrbitAngle, orbitAxis.normalized);
-            transform.rotation = orbitRotation * initialRotation;
+        accumulatedOrbitAngle += orbitDegreesPerSecond * dt;
+        Quaternion orbitRotation = Quaternion.AngleAxis(accumulatedOrbitAngle, orbitAxis.normalized);
+        transform.rotation = orbitRotation * initialRotation;
 
-            if (rotateSkybox && runtimeSkybox != null && runtimeSkybox.HasFloat("_Rotation"))
-            {
-                float current = runtimeSkybox.GetFloat("_Rotation");
-                runtimeSkybox.SetFloat("_Rotation", current + orbitDegreesPerSecond * skyboxRotationMultiplier * dt);
-            }
+        if (rotateSkybox && runtimeSkybox != null && runtimeSkybox.HasFloat("_Rotation"))
+        {
+            float current = runtimeSkybox.GetFloat("_Rotation");
+            runtimeSkybox.SetFloat("_Rotation", current + orbitDegreesPerSecond * skyboxRotationMultiplier * dt);
         }
 
         UpdateSunVisualPosition();
@@ -82,6 +78,14 @@ public class SunSkyRotator : MonoBehaviour
         DestroyRuntimeObject(generatedSunObject);
         DestroyRuntimeObject(runtimeSunMaterial);
         DestroyRuntimeObject(runtimeSkybox);
+    }
+
+    void SetupViewerReference()
+    {
+        if (viewer == null && Camera.main != null)
+        {
+            viewer = Camera.main.transform;
+        }
     }
 
     void SetupSkybox()
@@ -144,18 +148,33 @@ public class SunSkyRotator : MonoBehaviour
 
     Color EvaluateSunShiftedColor()
     {
-        // Use cycle phase for color shifting so it always changes over time regardless of orbit axis.
-        float cycle01 = useManualCycle
-            ? manualCycle01
-            : 0.5f + 0.5f * Mathf.Sin(accumulatedOrbitAngle * Mathf.Deg2Rad);
+        SetupViewerReference();
 
-        Color daylightColor = Color.Lerp(horizonColor, zenithColor, cycle01);
-        Color colorWithNight = Color.Lerp(nightColor, daylightColor, cycle01);
+        Vector3 center = planetCenter != null ? planetCenter.position : Vector3.zero;
+        Vector3 sunDirection = (-transform.forward).normalized;
 
-        float horizonBoost = 1f - Mathf.Abs(cycle01 * 2f - 1f);
-        Color shiftedColor = Color.Lerp(colorWithNight, horizonColor, horizonBoost * 0.35f * colorShiftStrength);
+        // Fallback if no viewer is available.
+        if (viewer == null)
+        {
+            return Color.Lerp(sunColor, dayColor * sunColor, colorShiftStrength);
+        }
 
-        return Color.Lerp(sunColor, shiftedColor * sunColor, colorShiftStrength);
+        // Camera direction from planet center.
+        Vector3 viewDirection = (viewer.position - center).normalized;
+
+        // >0 means sun is on visible hemisphere from camera, <0 behind planet.
+        float facing = Vector3.Dot(viewDirection, sunDirection);
+
+        // Horizon factor peaks when facing is near 0 (sun near horizon from camera view).
+        float horizonFactor = 1f - Mathf.Clamp01(Mathf.Abs(facing) / Mathf.Max(0.0001f, horizonBand));
+
+        // Day amount on visible side, night amount on hidden side.
+        float dayAmount = Mathf.Clamp01((facing + 1f) * 0.5f);
+
+        Color baseColor = Color.Lerp(nightColor, dayColor, dayAmount);
+        Color finalShifted = Color.Lerp(baseColor, horizonColor, horizonFactor);
+
+        return Color.Lerp(sunColor, finalShifted * sunColor, colorShiftStrength);
     }
 
     Material BuildSunMaterial()

@@ -267,12 +267,13 @@ MonoBehaviour:
   sunSurfaceSmoothness: 0.95
   sunMetallic: 0.1
   sunEmissionIntensity: 12
+  planetCenter: {fileID: 382753103}
+  viewer: {fileID: 370080327}
   horizonColor: {r: 1, g: 0.45, b: 0.2, a: 1}
-  zenithColor: {r: 1, g: 0.95, b: 0.75, a: 1}
+  dayColor: {r: 1, g: 0.95, b: 0.75, a: 1}
   nightColor: {r: 0.2, g: 0.25, b: 0.35, a: 1}
+  horizonBand: 0.3
   colorShiftStrength: 1
-  useManualCycle: 0
-  manualCycle01: 0
   rotateSkybox: 1
   skyboxRotationMultiplier: -1
   skyboxOverride: {fileID: 0}
