@@ -16,7 +16,7 @@ public class CubeFace
     }
 
     // New method that returns both vertices and triangle indices
-    public MeshData GenerateMeshData(int resolution, float radius)
+    public MeshData GenerateMeshData(int resolution)
     {
         // 1. Initialize lists to store data
         Vector3[] vertices = new Vector3[resolution * resolution];

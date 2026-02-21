@@ -31,6 +31,7 @@ public class ReplicatorManager : MonoBehaviour
     private List<Replicator> agents = new List<Replicator>();
 
     [SerializeField] private int activeAgentCount;
+    private bool isInitialized;
 
     // Arrays for Batching
     private Matrix4x4[] matrixBatch = new Matrix4x4[1023];
@@ -124,18 +125,29 @@ public class ReplicatorManager : MonoBehaviour
                 frequency *= 2;
             }
 
-            return noiseValue / maxPossibleHeight;
+            return maxPossibleHeight > 0f ? noiseValue / maxPossibleHeight : 0f;
         }
     }
 
     void Start()
     {
+        if (replicatorMesh == null || replicatorMaterial == null || planetGenerator == null)
+        {
+            Debug.LogError("ReplicatorManager is missing required references (mesh/material/planetGenerator).", this);
+            enabled = false;
+            return;
+        }
+
         propertyBlock = new MaterialPropertyBlock();
+        isInitialized = true;
+
         for (int i = 0; i < initialSpawnCount; i++) SpawnAgent();
     }
 
     void Update()
     {
+        if (!isInitialized) return;
+
         UpdateLifecycle();
         RunMovementJob();
         RenderAgents();
