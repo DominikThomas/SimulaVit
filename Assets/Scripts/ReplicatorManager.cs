@@ -30,11 +30,13 @@ public class ReplicatorManager : MonoBehaviour
     [Header("Spontaneous Spawning")]
     [Tooltip("Keeps attempting random world spawns even when all replicators die out.")]
     public bool enableSpontaneousSpawning = true;
+    [Range(0.05f, 10f)]
     [Tooltip("Seconds between random spawn attempts.")]
     public float spawnAttemptInterval = 1.0f;
     [Range(0f, 1f)]
     [Tooltip("Base chance for each random spawn attempt.")]
     public float spontaneousSpawnChance = 0.02f;
+    [Range(0f, 60f)]
     [Tooltip("Guarantees at least one spontaneous spawn before this many seconds elapse.")]
     public float guaranteedFirstSpawnWithinSeconds = 10f;
     [Range(0f, 1f)]
