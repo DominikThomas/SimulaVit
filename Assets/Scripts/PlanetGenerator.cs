@@ -85,7 +85,7 @@ public class PlanetGenerator : MonoBehaviour
         foreach (Vector3 dir in faceDirections)
         {
             CubeFace face = new CubeFace(dir);
-            MeshData faceData = face.GenerateMeshData(resolution, radius); // CubeFace now returns a UNIT sphere
+            MeshData faceData = face.GenerateMeshData(resolution); // CubeFace now returns a UNIT sphere
 
             // CRITICAL CHANGE: DEFORM THE VERTICES HERE
             for (int i = 0; i < faceData.vertices.Length; i++)
@@ -135,18 +135,6 @@ public class PlanetGenerator : MonoBehaviour
 
     }
 
-    Vector3 GetBiasedRandomDirection(Vector3 biasDirection, float blendFactor)
-    {
-        // Generate a completely random vector on the sphere
-        Vector3 randomDirection = Random.onUnitSphere;
-
-        // Blend the random direction with the strong bias direction (Vector3.back).
-        // The blendFactor (e.g., 0.8) ensures 80% of the vector points 'back'.
-        Vector3 biasedDirection = Vector3.Lerp(randomDirection, biasDirection, blendFactor).normalized;
-
-        return biasedDirection;
-    }
-
     public float CalculateNoise(Vector3 pointOnSphere)
     {
         float noiseValue = 0;
@@ -172,6 +160,6 @@ public class PlanetGenerator : MonoBehaviour
             frequency *= 2;
         }
 
-        return noiseValue / maxPossibleHeight;
+        return maxPossibleHeight > 0f ? noiseValue / maxPossibleHeight : 0f;
     }
 }
