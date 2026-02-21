@@ -34,9 +34,9 @@ public class PlanetGenerator : MonoBehaviour
 
     void Awake()
     {
-        meshFilter = gameObject.GetComponent<MeshFilter>() ?? gameObject.AddComponent<MeshFilter>();
-        MeshRenderer meshRenderer = gameObject.GetComponent<MeshRenderer>() ?? gameObject.AddComponent<MeshRenderer>();
-        MeshCollider meshCollider = gameObject.GetComponent<MeshCollider>() ?? gameObject.AddComponent<MeshCollider>();
+        meshFilter = GetOrAddComponent<MeshFilter>(gameObject);
+        MeshRenderer meshRenderer = GetOrAddComponent<MeshRenderer>(gameObject);
+        MeshCollider meshCollider = GetOrAddComponent<MeshCollider>(gameObject);
 
         if (planetMaterial != null)
         {
@@ -66,8 +66,8 @@ public class PlanetGenerator : MonoBehaviour
         oceanObj.transform.SetParent(transform, false);
         oceanObj.layer = gameObject.layer;
 
-        oceanMeshFilter = oceanObj.GetComponent<MeshFilter>() ?? oceanObj.AddComponent<MeshFilter>();
-        oceanMeshRenderer = oceanObj.GetComponent<MeshRenderer>() ?? oceanObj.AddComponent<MeshRenderer>();
+        oceanMeshFilter = GetOrAddComponent<MeshFilter>(oceanObj);
+        oceanMeshRenderer = GetOrAddComponent<MeshRenderer>(oceanObj);
 
         if (oceanMesh == null)
         {
@@ -219,6 +219,18 @@ public class PlanetGenerator : MonoBehaviour
         }
 
         return radius * (1f + finalNoise * noiseMagnitude);
+    }
+
+
+    static T GetOrAddComponent<T>(GameObject target) where T : Component
+    {
+        T component = target.GetComponent<T>();
+        if (component == null)
+        {
+            component = target.AddComponent<T>();
+        }
+
+        return component;
     }
 
     public float CalculateNoise(Vector3 pointOnSphere)
