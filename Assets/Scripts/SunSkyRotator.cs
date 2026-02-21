@@ -6,6 +6,8 @@ public class SunSkyRotator : MonoBehaviour
     [Header("Orbit")]
     public float orbitDegreesPerSecond = 0.75f;
     public Vector3 orbitAxis = Vector3.up;
+    [Tooltip("Keeps the sun path on the great-circle plane perpendicular to the orbit axis (equator-like path).")]
+    public bool keepOrbitOnEquator = true;
 
     [Header("Sun Visual")]
     public float sunDistance = 250f;
@@ -40,6 +42,7 @@ public class SunSkyRotator : MonoBehaviour
 
     private Quaternion initialRotation;
     private float accumulatedOrbitAngle;
+    private Vector3 initialOrbitForward;
 
     private Material originalSkybox;
     private Material runtimeSkybox;
@@ -50,6 +53,7 @@ public class SunSkyRotator : MonoBehaviour
     void Start()
     {
         initialRotation = transform.rotation;
+        CacheInitialOrbitForward();
         SetupViewerReference();
         ResolvePlanetRadius();
         SetupSkybox();
@@ -61,10 +65,20 @@ public class SunSkyRotator : MonoBehaviour
     void Update()
     {
         float dt = Time.deltaTime;
+        Vector3 axis = GetOrbitAxis();
 
         accumulatedOrbitAngle += orbitDegreesPerSecond * dt;
-        Quaternion orbitRotation = Quaternion.AngleAxis(accumulatedOrbitAngle, orbitAxis.normalized);
-        transform.rotation = orbitRotation * initialRotation;
+        Quaternion orbitRotation = Quaternion.AngleAxis(accumulatedOrbitAngle, axis);
+
+        if (keepOrbitOnEquator)
+        {
+            Vector3 orbitForward = orbitRotation * initialOrbitForward;
+            transform.rotation = Quaternion.LookRotation(orbitForward, axis);
+        }
+        else
+        {
+            transform.rotation = orbitRotation * initialRotation;
+        }
 
         if (rotateSkybox && runtimeSkybox != null && runtimeSkybox.HasFloat("_Rotation"))
         {
@@ -74,6 +88,33 @@ public class SunSkyRotator : MonoBehaviour
 
         UpdateSunVisualPosition();
         UpdateSunVisualAppearance();
+    }
+
+    void CacheInitialOrbitForward()
+    {
+        Vector3 axis = GetOrbitAxis();
+        Vector3 projectedForward = Vector3.ProjectOnPlane(initialRotation * Vector3.forward, axis);
+
+        if (projectedForward.sqrMagnitude < 0.0001f)
+        {
+            projectedForward = Vector3.Cross(axis, Vector3.right);
+            if (projectedForward.sqrMagnitude < 0.0001f)
+            {
+                projectedForward = Vector3.Cross(axis, Vector3.forward);
+            }
+        }
+
+        initialOrbitForward = projectedForward.normalized;
+    }
+
+    Vector3 GetOrbitAxis()
+    {
+        if (orbitAxis.sqrMagnitude < 0.0001f)
+        {
+            return Vector3.up;
+        }
+
+        return orbitAxis.normalized;
     }
 
     void OnDestroy()
