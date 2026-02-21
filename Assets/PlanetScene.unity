@@ -464,18 +464,24 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: eee7f655e5979404cabff8cefd535095, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  resolution: 82
+  resolution: 90
   radius: 8
   planetMaterial: {fileID: 2100000, guid: 6d8bf80d9b47fd04e91f3fd2ba433978, type: 2}
-  noiseMagnitude: 0.4
+  noiseMagnitude: 0.5
   noiseRoughness: 1
   numLayers: 4
   persistence: 0.5
   noiseOffset: {x: 1, y: 1, z: 1}
   enableOcean: 1
-  oceanCoveragePercent: 60
+  oceanCoveragePercent: 45
   oceanDepth: 0.35
   oceanMaterial: {fileID: 2100000, guid: 46dc3c30d5ba4a64c9711ded62b7dd02, type: 2}
+  randomizeOnStart: 0
+  useRandomSeed: 1
+  randomSeed: 12345
+  noiseMagnitudeRange: {x: 0.05, y: 0.2}
+  noiseRoughnessRange: {x: 1.5, y: 6}
+  oceanCoverageRange: {x: 25, y: 60}
 --- !u!4 &382753103
 Transform:
   m_ObjectHideFlags: 0
@@ -532,6 +538,11 @@ MonoBehaviour:
   reproductionRate: 0.1
   minLifespan: 30
   maxLifespan: 60
+  enableSpontaneousSpawning: 1
+  spawnAttemptInterval: 1
+  spontaneousSpawnChance: 0.5
+  guaranteedFirstSpawnWithinSeconds: 10
+  seaSpawnPreference: 1
   activeAgentCount: 0
 --- !u!4 &1064713444
 Transform:
