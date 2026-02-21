@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -208,7 +207,7 @@ public class PlanetGenerator : MonoBehaviour
         }
 
         float[] sorted = samples.ToArray();
-        Array.Sort(sorted);
+        System.Array.Sort(sorted);
 
         float clampedCoverage = Mathf.Clamp(coveragePercent, 20f, 70f) / 100f;
         int index = Mathf.Clamp(Mathf.RoundToInt((sorted.Length - 1) * clampedCoverage), 0, sorted.Length - 1);
