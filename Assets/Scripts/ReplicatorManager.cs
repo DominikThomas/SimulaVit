@@ -31,6 +31,7 @@ public class ReplicatorManager : MonoBehaviour
     private List<Replicator> agents = new List<Replicator>();
 
     [SerializeField] private int activeAgentCount;
+    private bool isInitialized;
 
     // Arrays for Batching
     private Matrix4x4[] matrixBatch = new Matrix4x4[1023];
@@ -66,6 +67,9 @@ public class ReplicatorManager : MonoBehaviour
         public Vector3 NoiseOffset;
         public int NumLayers;
         public float Persistence;
+        public float OceanThreshold;
+        public float OceanDepth;
+        public bool OceanEnabled;
 
         public void Execute(int index)
         {
@@ -88,7 +92,7 @@ public class ReplicatorManager : MonoBehaviour
             // 3. HEIGHT SNAP (The Missing Fix!)
             // We calculate the terrain height right here in the thread
             float terrainNoise = CalculateNoise(newDirection);
-            float displacement = Radius * (1f + terrainNoise * NoiseMagnitude);
+            float displacement = GetSurfaceRadiusFromNoise(terrainNoise);
 
             // Apply height + slight offset so they sit ON the ground, not IN it
             Vector3 newPos = newDirection * (displacement + 0.05f);
@@ -100,6 +104,20 @@ public class ReplicatorManager : MonoBehaviour
 
             Positions[index] = newPos;
             Rotations[index] = rot;
+        }
+
+        private float GetSurfaceRadiusFromNoise(float noise)
+        {
+            float finalNoise = noise;
+
+            if (OceanEnabled && noise < OceanThreshold)
+            {
+                float t = OceanThreshold > 0f ? Mathf.Clamp01(noise / OceanThreshold) : 0f;
+                float minNoise = OceanThreshold * (1f - OceanDepth);
+                finalNoise = Mathf.Lerp(minNoise, OceanThreshold, t);
+            }
+
+            return Radius * (1f + finalNoise * NoiseMagnitude);
         }
 
         // Helper function to replicate PlanetGenerator.CalculateNoise inside the Job
@@ -124,18 +142,29 @@ public class ReplicatorManager : MonoBehaviour
                 frequency *= 2;
             }
 
-            return noiseValue / maxPossibleHeight;
+            return maxPossibleHeight > 0f ? noiseValue / maxPossibleHeight : 0f;
         }
     }
 
     void Start()
     {
+        if (replicatorMesh == null || replicatorMaterial == null || planetGenerator == null)
+        {
+            Debug.LogError("ReplicatorManager is missing required references (mesh/material/planetGenerator).", this);
+            enabled = false;
+            return;
+        }
+
         propertyBlock = new MaterialPropertyBlock();
+        isInitialized = true;
+
         for (int i = 0; i < initialSpawnCount; i++) SpawnAgent();
     }
 
     void Update()
     {
+        if (!isInitialized) return;
+
         UpdateLifecycle();
         RunMovementJob();
         RenderAgents();
@@ -196,7 +225,10 @@ public class ReplicatorManager : MonoBehaviour
             NoiseRoughness = planetGenerator.noiseRoughness,
             NoiseOffset = planetGenerator.noiseOffset,
             NumLayers = planetGenerator.numLayers,
-            Persistence = planetGenerator.persistence
+            Persistence = planetGenerator.persistence,
+            OceanThreshold = planetGenerator.OceanThresholdNoise,
+            OceanDepth = planetGenerator.oceanDepth,
+            OceanEnabled = planetGenerator.OceanEnabled
         };
 
         JobHandle handle = job.Schedule(count, 32);
@@ -262,8 +294,7 @@ public class ReplicatorManager : MonoBehaviour
 
     float GetSurfaceHeight(Vector3 direction)
     {
-        float noise = planetGenerator.CalculateNoise(direction);
-        float displacement = planetGenerator.radius * (1f + noise * planetGenerator.noiseMagnitude);
+        float displacement = planetGenerator.GetSurfaceRadius(direction);
         return displacement + 0.05f;
     }
 

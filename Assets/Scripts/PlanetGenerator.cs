@@ -1,61 +1,57 @@
+using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 public class PlanetGenerator : MonoBehaviour
 {
-    // Public variables allow you to adjust these values in the Unity Inspector
-    [Range(3, 240)] // A slider for easy adjustment in the Inspector
+    [Range(3, 240)]
     public int resolution = 10;
     public float radius = 1f;
-
     public Material planetMaterial;
+
+    [Header("Terrain Generation")]
+    public float noiseMagnitude = 0.1f;
+    public float noiseRoughness = 1.0f;
+    public int numLayers = 4;
+    public float persistence = 0.5f;
+    public Vector3 noiseOffset = Vector3.one;
+
+    [Header("Ocean")]
+    public bool enableOcean = true;
+    [Range(20f, 70f)] public float oceanCoveragePercent = 45f;
+    [Tooltip("How much of the mountain height range can sink below sea level.")]
+    [Range(0f, 1f)] public float oceanDepth = 0.35f;
+    public Material oceanMaterial;
 
     private MeshFilter meshFilter;
     private Mesh mesh;
 
-    [Header("Terrain Generation")]
-    public float noiseMagnitude = 0.1f; // How tall the mountains are (e.g., 10% of radius)
-    public float noiseRoughness = 1.0f; // Controls the frequency/scale of the features
-    public int numLayers = 4; // How many layers of noise to combine (for complex terrain)
-    public float persistence = 0.5f; // How much each subsequent layer contributes
-    public Vector3 noiseOffset = Vector3.one; // Used to change the terrain pattern
+    private MeshFilter oceanMeshFilter;
+    private MeshRenderer oceanMeshRenderer;
+    private Mesh oceanMesh;
+
+    private float oceanNoiseThreshold;
 
     void Awake()
     {
-        // 1. Get or Add the MeshFilter component (remains the same)
-        meshFilter = gameObject.GetComponent<MeshFilter>();
-        if (meshFilter == null)
-        {
-            meshFilter = gameObject.AddComponent<MeshFilter>();
-        }
+        meshFilter = gameObject.GetComponent<MeshFilter>() ?? gameObject.AddComponent<MeshFilter>();
+        MeshRenderer meshRenderer = gameObject.GetComponent<MeshRenderer>() ?? gameObject.AddComponent<MeshRenderer>();
+        MeshCollider meshCollider = gameObject.GetComponent<MeshCollider>() ?? gameObject.AddComponent<MeshCollider>();
 
-        // 2. Get or Add the MeshRenderer component
-        MeshRenderer meshRenderer = gameObject.GetComponent<MeshRenderer>();
-        if (meshRenderer == null)
-        {
-            meshRenderer = gameObject.AddComponent<MeshRenderer>();
-        }
-
-        // **NEW**: 3. Get or Add the MeshCollider component
-        MeshCollider meshCollider = gameObject.GetComponent<MeshCollider>();
-        if (meshCollider == null)
-        {
-            meshCollider = gameObject.AddComponent<MeshCollider>();
-        }
-
-        // **CRUCIAL CHANGE:** Assign the saved asset material here
         if (planetMaterial != null)
         {
             meshRenderer.sharedMaterial = planetMaterial;
         }
-        // NOTE: You can remove the old line that created a temporary material
-        // if you want to rely entirely on this reference.
 
-        // 4. Create and assign a new Mesh object (remains the same)
-        mesh = new Mesh();
+        mesh = new Mesh { name = "Planet Terrain" };
         meshFilter.sharedMesh = mesh;
 
-        // **NEW**: 5. Assign the mesh to the collider (done automatically when sharedMesh is set)
-        // You'll explicitly assign the collider mesh in GeneratePlanet() for safety.
+        if (meshCollider != null)
+        {
+            meshCollider.sharedMesh = mesh;
+        }
+
+        SetupOceanLayer();
     }
 
     void Start()
@@ -63,88 +59,166 @@ public class PlanetGenerator : MonoBehaviour
         GeneratePlanet();
     }
 
+    void SetupOceanLayer()
+    {
+        Transform existing = transform.Find("Ocean Layer");
+        GameObject oceanObj = existing != null ? existing.gameObject : new GameObject("Ocean Layer");
+        oceanObj.transform.SetParent(transform, false);
+        oceanObj.layer = gameObject.layer;
+
+        oceanMeshFilter = oceanObj.GetComponent<MeshFilter>() ?? oceanObj.AddComponent<MeshFilter>();
+        oceanMeshRenderer = oceanObj.GetComponent<MeshRenderer>() ?? oceanObj.AddComponent<MeshRenderer>();
+
+        if (oceanMesh == null)
+        {
+            oceanMesh = new Mesh { name = "Planet Ocean" };
+        }
+
+        oceanMeshFilter.sharedMesh = oceanMesh;
+        if (oceanMaterial != null)
+        {
+            oceanMeshRenderer.sharedMaterial = oceanMaterial;
+        }
+    }
+
     void GeneratePlanet()
     {
-        Vector3[] faceDirections = new Vector3[] {
-        Vector3.up,
-        Vector3.down,
-        Vector3.left,
-        Vector3.right,
-        Vector3.forward,
-        Vector3.back
-    };
+        Vector3[] faceDirections =
+        {
+            Vector3.up,
+            Vector3.down,
+            Vector3.left,
+            Vector3.right,
+            Vector3.forward,
+            Vector3.back
+        };
 
-        // Use Lists as they are easier to resize when combining data
-        System.Collections.Generic.List<Vector3> allVertices = new System.Collections.Generic.List<Vector3>();
-        System.Collections.Generic.List<int> allTriangles = new System.Collections.Generic.List<int>();
+        List<Vector3> unitVertices = new List<Vector3>();
+        List<float> noiseSamples = new List<float>();
+        List<int> allTriangles = new List<int>();
 
-        // This tracks the base index for the vertices of the NEXT face.
         int currentVertexOffset = 0;
 
-        // --- Generate and Assemble ---
         foreach (Vector3 dir in faceDirections)
         {
             CubeFace face = new CubeFace(dir);
-            MeshData faceData = face.GenerateMeshData(resolution, radius); // CubeFace now returns a UNIT sphere
+            MeshData faceData = face.GenerateMeshData(resolution);
 
-            // CRITICAL CHANGE: DEFORM THE VERTICES HERE
             for (int i = 0; i < faceData.vertices.Length; i++)
             {
                 Vector3 pointOnUnitSphere = faceData.vertices[i];
-
-                // 1. Calculate the final noise value for this point
-                float height = CalculateNoise(pointOnUnitSphere);
-
-                // 2. Determine the final distance from center
-                // Base Radius + (Noise value (0 to 1) * Magnitude)
-                float displacement = radius * (1f + height * noiseMagnitude);
-
-                // 3. Deform the vertex
-                faceData.vertices[i] = pointOnUnitSphere * displacement;
-
-                // 4. Add the now-deformed vertex to the final list
-                allVertices.Add(faceData.vertices[i]);
+                unitVertices.Add(pointOnUnitSphere);
+                noiseSamples.Add(CalculateNoise(pointOnUnitSphere));
             }
 
-            // 2. Add Triangles: Crucially, we must offset the indices!
-            // ... (rest of the triangle appending logic remains the same) ...
             for (int i = 0; i < faceData.triangles.Length; i++)
             {
                 allTriangles.Add(faceData.triangles[i] + currentVertexOffset);
             }
 
-            // 3. Update Offset: Move the offset marker to the end of the combined list
             currentVertexOffset += faceData.vertices.Length;
         }
 
-        // 4. Apply the data to the mesh
-        mesh.Clear();
-        mesh.vertices = allVertices.ToArray();
-        mesh.triangles = allTriangles.ToArray();
+        oceanNoiseThreshold = CalculateNoiseThreshold(noiseSamples, oceanCoveragePercent);
 
-        // Add this line to ensure proper bounding box calculation
+        Vector3[] terrainVertices = new Vector3[unitVertices.Count];
+        Vector3[] oceanVertices = new Vector3[unitVertices.Count];
+
+        for (int i = 0; i < unitVertices.Count; i++)
+        {
+            Vector3 dir = unitVertices[i];
+            float terrainRadius = GetSurfaceRadiusFromNoise(noiseSamples[i]);
+            float seaRadius = GetOceanRadius();
+
+            terrainVertices[i] = dir * terrainRadius;
+            oceanVertices[i] = dir * seaRadius;
+        }
+
+        mesh.Clear();
+        mesh.vertices = terrainVertices;
+        mesh.triangles = allTriangles.ToArray();
         mesh.RecalculateBounds();
         mesh.RecalculateNormals();
 
-        // **CRITICAL**: Assign the newly generated mesh to the MeshCollider
         MeshCollider meshCollider = GetComponent<MeshCollider>();
         if (meshCollider != null)
         {
             meshCollider.sharedMesh = mesh;
         }
 
+        if (oceanMesh == null)
+        {
+            oceanMesh = new Mesh { name = "Planet Ocean" };
+        }
+
+        oceanMesh.Clear();
+        oceanMesh.vertices = oceanVertices;
+        oceanMesh.triangles = allTriangles.ToArray();
+        oceanMesh.RecalculateBounds();
+        oceanMesh.RecalculateNormals();
+
+        if (oceanMeshFilter != null)
+        {
+            oceanMeshFilter.sharedMesh = oceanMesh;
+        }
+
+        if (oceanMeshRenderer != null)
+        {
+            oceanMeshRenderer.enabled = enableOcean;
+            if (oceanMaterial != null)
+            {
+                oceanMeshRenderer.sharedMaterial = oceanMaterial;
+            }
+        }
     }
 
-    Vector3 GetBiasedRandomDirection(Vector3 biasDirection, float blendFactor)
+    float CalculateNoiseThreshold(List<float> samples, float coveragePercent)
     {
-        // Generate a completely random vector on the sphere
-        Vector3 randomDirection = Random.onUnitSphere;
+        if (samples == null || samples.Count == 0)
+        {
+            return 0f;
+        }
 
-        // Blend the random direction with the strong bias direction (Vector3.back).
-        // The blendFactor (e.g., 0.8) ensures 80% of the vector points 'back'.
-        Vector3 biasedDirection = Vector3.Lerp(randomDirection, biasDirection, blendFactor).normalized;
+        float[] sorted = samples.ToArray();
+        Array.Sort(sorted);
 
-        return biasedDirection;
+        float clampedCoverage = Mathf.Clamp(coveragePercent, 20f, 70f) / 100f;
+        int index = Mathf.Clamp(Mathf.RoundToInt((sorted.Length - 1) * clampedCoverage), 0, sorted.Length - 1);
+        return sorted[index];
+    }
+
+    public bool OceanEnabled => enableOcean;
+    public float OceanThresholdNoise => oceanNoiseThreshold;
+
+    public float GetOceanRadius()
+    {
+        if (!enableOcean)
+        {
+            return radius;
+        }
+
+        return radius * (1f + oceanNoiseThreshold * noiseMagnitude);
+    }
+
+    public float GetSurfaceRadius(Vector3 pointOnSphere)
+    {
+        float noise = CalculateNoise(pointOnSphere.normalized);
+        return GetSurfaceRadiusFromNoise(noise);
+    }
+
+    public float GetSurfaceRadiusFromNoise(float noise)
+    {
+        float seaNoise = oceanNoiseThreshold;
+        float finalNoise = noise;
+
+        if (enableOcean && noise < seaNoise)
+        {
+            float t = seaNoise > 0f ? Mathf.Clamp01(noise / seaNoise) : 0f;
+            float minNoise = seaNoise * (1f - oceanDepth);
+            finalNoise = Mathf.Lerp(minNoise, seaNoise, t);
+        }
+
+        return radius * (1f + finalNoise * noiseMagnitude);
     }
 
     public float CalculateNoise(Vector3 pointOnSphere)
@@ -156,13 +230,8 @@ public class PlanetGenerator : MonoBehaviour
 
         for (int i = 0; i < numLayers; i++)
         {
-            // --- FIX: Use 3D Noise instead of 2D ---
-            // We pass the full (x, y, z) vector adjusted by frequency and offset
             Vector3 samplePoint = pointOnSphere * frequency + noiseOffset;
             float singleLayerNoise = SimpleNoise.Evaluate(samplePoint);
-
-            // Normalize from (-1 to 1) to (0 to 1) if strictly needed, 
-            // though SimpleNoise often returns approx -1 to 1 range.
             singleLayerNoise = (singleLayerNoise + 1) * 0.5f;
 
             noiseValue += singleLayerNoise * amplitude;
@@ -172,6 +241,6 @@ public class PlanetGenerator : MonoBehaviour
             frequency *= 2;
         }
 
-        return noiseValue / maxPossibleHeight;
+        return maxPossibleHeight > 0f ? noiseValue / maxPossibleHeight : 0f;
     }
 }
