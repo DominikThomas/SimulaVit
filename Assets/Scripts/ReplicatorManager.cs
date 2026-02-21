@@ -21,8 +21,8 @@ public class ReplicatorManager : MonoBehaviour
     public float turnSpeed = 2.0f;
     public float spawnSpread = 0.5f;
 
-    [Range(0f, 0.1f)]
-    public float reproductionRate = 0.001f;
+    [Range(0f, 1f)]
+    public float reproductionRate = 0.1f;
 
     public float minLifespan = 30f;
     public float maxLifespan = 60f;
