@@ -261,6 +261,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   orbitDegreesPerSecond: 0.75
   orbitAxis: {x: 0, y: 1, z: 0}
+  keepOrbitOnEquator: 1
   sunDistance: 250
   sunScale: 8
   sunColor: {r: 1, g: 0.9, b: 0.6, a: 1}
@@ -532,8 +533,8 @@ MonoBehaviour:
   initialSpawnCount: 2
   maxPopulation: 50000
   baseAgentColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
-  moveSpeed: 4
-  turnSpeed: 20
+  moveSpeed: 10
+  turnSpeed: 15
   spawnSpread: 0
   reproductionRate: 0.1
   minLifespan: 30
@@ -543,6 +544,10 @@ MonoBehaviour:
   spontaneousSpawnChance: 0.5
   guaranteedFirstSpawnWithinSeconds: 10
   seaSpawnPreference: 1
+  defaultSpawnOnlyInSea: 1
+  defaultReplicateOnlyInSea: 1
+  defaultMoveOnlyInSea: 0
+  defaultSurfaceMoveSpeedMultiplier: 0.4
   activeAgentCount: 0
 --- !u!4 &1064713444
 Transform:

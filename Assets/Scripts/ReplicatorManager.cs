@@ -72,6 +72,7 @@ public class ReplicatorManager : MonoBehaviour
     private NativeArray<Quaternion> jobRotations;
     private NativeArray<bool> jobMoveOnlyInSea;
     private NativeArray<float> jobSurfaceMoveSpeedMultipliers;
+    private NativeArray<float> jobMovementSeeds;
     private int jobCapacity;
 
     // Cache shader property IDs once.
@@ -86,6 +87,7 @@ public class ReplicatorManager : MonoBehaviour
         public NativeArray<Quaternion> Rotations;
         public NativeArray<bool> MoveOnlyInSea;
         public NativeArray<float> SurfaceMoveSpeedMultipliers;
+        public NativeArray<float> MovementSeeds;
 
         // Simulation parameters
         public float DeltaTime;
@@ -110,13 +112,19 @@ public class ReplicatorManager : MonoBehaviour
             Quaternion rot = Rotations[index];
             Vector3 surfaceNormal = pos.normalized;
 
-            // 1. Turning (Pseudo-random noise)
-            float noiseVal = Mathf.Sin(pos.x * 0.5f + TimeVal) * Mathf.Cos(pos.z * 0.5f + TimeVal);
-            float turnAmount = noiseVal * TurnSpeed * DeltaTime * 20f;
-            rot = rot * Quaternion.AngleAxis(turnAmount, surfaceNormal);
+            // 1. Turning (per-agent noise with independent phase offsets)
+            float seed = MovementSeeds[index];
+            float turnNoiseA = SimpleNoise.Evaluate(surfaceNormal * 3.1f + new Vector3(seed, TimeVal * 0.31f, 0f));
+            float turnNoiseB = SimpleNoise.Evaluate(surfaceNormal * 4.7f + new Vector3(TimeVal * 0.19f, seed * 1.37f, 0f));
+            float turnNoise = Mathf.Clamp(turnNoiseA + turnNoiseB, -1f, 1f);
+            float turnAmount = turnNoise * TurnSpeed * DeltaTime * 35f;
+            rot = Quaternion.AngleAxis(turnAmount, surfaceNormal) * rot;
 
             // 2. Movement (Arc across sphere)
             Vector3 forward = rot * Vector3.forward;
+            Vector3 lateralAxis = Vector3.Cross(surfaceNormal, forward);
+            float wobble = SimpleNoise.Evaluate(surfaceNormal * 6.2f + new Vector3(MovementSeeds[index] * 0.73f, 0f, TimeVal * 0.43f));
+            forward = (forward + lateralAxis * wobble * 0.35f).normalized;
 
             bool moveOnlyInSea = MoveOnlyInSea[index];
             float currentNoise = CalculateNoise(surfaceNormal);
@@ -330,6 +338,7 @@ public class ReplicatorManager : MonoBehaviour
             this.jobRotations[i] = agents[i].rotation;
             this.jobMoveOnlyInSea[i] = agents[i].traits.moveOnlyInSea;
             this.jobSurfaceMoveSpeedMultipliers[i] = Mathf.Max(0.01f, agents[i].traits.surfaceMoveSpeedMultiplier);
+            this.jobMovementSeeds[i] = agents[i].movementSeed;
         }
 
         ReplicatorUpdateJob job = new ReplicatorUpdateJob
@@ -338,6 +347,7 @@ public class ReplicatorManager : MonoBehaviour
             Rotations = jobRotations,
             MoveOnlyInSea = jobMoveOnlyInSea,
             SurfaceMoveSpeedMultipliers = jobSurfaceMoveSpeedMultipliers,
+            MovementSeeds = jobMovementSeeds,
             DeltaTime = Time.deltaTime,
             MoveSpeed = moveSpeed,
             TurnSpeed = turnSpeed,
@@ -375,12 +385,14 @@ public class ReplicatorManager : MonoBehaviour
         if (jobRotations.IsCreated) jobRotations.Dispose();
         if (jobMoveOnlyInSea.IsCreated) jobMoveOnlyInSea.Dispose();
         if (jobSurfaceMoveSpeedMultipliers.IsCreated) jobSurfaceMoveSpeedMultipliers.Dispose();
+        if (jobMovementSeeds.IsCreated) jobMovementSeeds.Dispose();
 
         jobCapacity = Mathf.NextPowerOfTwo(requiredCount);
         jobPositions = new NativeArray<Vector3>(jobCapacity, Allocator.Persistent);
         jobRotations = new NativeArray<Quaternion>(jobCapacity, Allocator.Persistent);
         jobMoveOnlyInSea = new NativeArray<bool>(jobCapacity, Allocator.Persistent);
         jobSurfaceMoveSpeedMultipliers = new NativeArray<float>(jobCapacity, Allocator.Persistent);
+        jobMovementSeeds = new NativeArray<float>(jobCapacity, Allocator.Persistent);
     }
 
     void OnDestroy()
@@ -389,6 +401,7 @@ public class ReplicatorManager : MonoBehaviour
         if (jobRotations.IsCreated) jobRotations.Dispose();
         if (jobMoveOnlyInSea.IsCreated) jobMoveOnlyInSea.Dispose();
         if (jobSurfaceMoveSpeedMultipliers.IsCreated) jobSurfaceMoveSpeedMultipliers.Dispose();
+        if (jobMovementSeeds.IsCreated) jobMovementSeeds.Dispose();
     }
 
     bool SpawnAgentFromPopulation(Replicator parent)
@@ -435,7 +448,8 @@ public class ReplicatorManager : MonoBehaviour
         spawnRotation *= Quaternion.Euler(0, Random.Range(0f, 360f), 0);
 
         float newLifespan = Random.Range(minLifespan, maxLifespan);
-        Replicator newAgent = new Replicator(spawnPosition, spawnRotation, newLifespan, baseAgentColor, traits);
+        float movementSeed = Random.Range(-1000f, 1000f);
+        Replicator newAgent = new Replicator(spawnPosition, spawnRotation, newLifespan, baseAgentColor, traits, movementSeed);
         newAgent.age = parent == null ? Random.Range(0f, newLifespan * 0.5f) : 0f;
 
         agents.Add(newAgent);
