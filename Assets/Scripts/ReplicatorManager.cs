@@ -101,20 +101,41 @@ public class ReplicatorManager : MonoBehaviour
             Quaternion rot = Rotations[index];
             Vector3 surfaceNormal = pos.normalized;
 
-            // 1. Turning (Per-agent pseudo-random walk)
+            // 1. Turning + tangent random-walk direction
             float seed = Seeds[index];
-            float baseTurn = TurnSpeed * TurnSpeedMultipliers[index];
-            float timePhase = TimeVal * (0.9f + seed * 0.35f);
-            float turnNoiseA = Mathf.Sin(seed * 12.37f + timePhase * 1.13f + pos.x * 0.33f);
-            float turnNoiseB = Mathf.Cos(seed * 7.91f - timePhase * 0.71f + pos.z * 0.27f);
-            float turnNoiseC = Mathf.Sin(seed * 3.17f + timePhase * 1.91f + pos.y * 0.41f);
-            float turnAmount = (turnNoiseA + turnNoiseB + turnNoiseC) * 0.3333f * baseTurn * DeltaTime * 30f;
-            rot = Quaternion.AngleAxis(turnAmount, surfaceNormal) * rot;
+            float localMoveSpeed = MoveSpeed * MoveSpeedMultipliers[index];
+            float localTurn = TurnSpeed * TurnSpeedMultipliers[index];
+
+            Vector3 forward = rot * Vector3.forward;
+            Vector3 tangentForward = Vector3.ProjectOnPlane(forward, surfaceNormal);
+            if (tangentForward.sqrMagnitude < 0.0001f)
+            {
+                tangentForward = Vector3.Cross(surfaceNormal, Vector3.right);
+                if (tangentForward.sqrMagnitude < 0.0001f)
+                {
+                    tangentForward = Vector3.Cross(surfaceNormal, Vector3.forward);
+                }
+            }
+            tangentForward.Normalize();
+
+            Vector3 tangentRight = Vector3.Cross(surfaceNormal, tangentForward).normalized;
+            float timePhase = TimeVal * (0.65f + seed * 0.85f);
+            float noiseA = Mathf.Sin(seed * 19.73f + timePhase * 1.17f + pos.x * 0.23f);
+            float noiseB = Mathf.Cos(seed * 11.29f - timePhase * 1.63f + pos.z * 0.19f);
+            float noiseC = Mathf.Sin(seed * 5.41f + timePhase * 0.91f + pos.y * 0.31f);
+
+            Vector3 randomTargetDir = tangentForward * noiseA + tangentRight * (noiseB + noiseC);
+            if (randomTargetDir.sqrMagnitude < 0.0001f)
+            {
+                randomTargetDir = tangentForward;
+            }
+            randomTargetDir.Normalize();
+
+            float directionBlend = Mathf.Clamp01(localTurn * DeltaTime * 2.0f);
+            Vector3 moveDir = Vector3.Slerp(tangentForward, randomTargetDir, directionBlend).normalized;
 
             // 2. Movement (Arc across sphere)
-            Vector3 forward = rot * Vector3.forward;
-            float localMoveSpeed = MoveSpeed * MoveSpeedMultipliers[index];
-            Vector3 travelAxis = Vector3.Cross(surfaceNormal, forward);
+            Vector3 travelAxis = Vector3.Cross(surfaceNormal, moveDir);
             float axisMag = travelAxis.magnitude;
 
             if (axisMag > 0.0001f)
@@ -123,8 +144,7 @@ public class ReplicatorManager : MonoBehaviour
             }
             else
             {
-                // Fallback tangent axis if we're nearly parallel with surface normal.
-                travelAxis = Vector3.Cross(surfaceNormal, Vector3.right);
+                travelAxis = Vector3.Cross(surfaceNormal, tangentRight);
                 if (travelAxis.sqrMagnitude < 0.0001f)
                 {
                     travelAxis = Vector3.Cross(surfaceNormal, Vector3.forward);
@@ -147,7 +167,7 @@ public class ReplicatorManager : MonoBehaviour
 
             // 4. Rotation Alignment
             Vector3 newNormal = newPos.normalized;
-            Quaternion targetRot = Quaternion.LookRotation(Vector3.ProjectOnPlane(forward, newNormal), newNormal);
+            Quaternion targetRot = Quaternion.LookRotation(Vector3.ProjectOnPlane(moveDir, newNormal), newNormal);
             rot = Quaternion.Slerp(rot, targetRot, DeltaTime * 5f);
 
             Positions[index] = newPos;
@@ -435,7 +455,7 @@ public class ReplicatorManager : MonoBehaviour
         spawnRotation *= Quaternion.Euler(0, Random.Range(0f, 360f), 0);
 
         float newLifespan = Random.Range(minLifespan, maxLifespan);
-        float movementSeed = Random.value * 1000f;
+        float movementSeed = Random.value;
         float moveMultiplier = Random.Range(0.75f, 1.25f);
         float turnMultiplier = Random.Range(0.65f, 1.55f);
         Replicator newAgent = new Replicator(
