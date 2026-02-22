@@ -9,6 +9,7 @@ public class ReplicatorManager : MonoBehaviour
     public Mesh replicatorMesh;
     public Material replicatorMaterial;
     public PlanetGenerator planetGenerator;
+    [Tooltip("Required. If left empty, the manager will try to auto-find a PlanetResourceMap in the scene.")]
     public PlanetResourceMap planetResourceMap;
 
     [Header("Population")]
@@ -213,11 +214,33 @@ public class ReplicatorManager : MonoBehaviour
         }
     }
 
+    void ResolvePlanetResourceMapReference()
+    {
+        if (planetResourceMap != null)
+        {
+            return;
+        }
+
+        planetResourceMap = GetComponent<PlanetResourceMap>();
+
+        if (planetResourceMap == null && planetGenerator != null)
+        {
+            planetResourceMap = planetGenerator.GetComponent<PlanetResourceMap>();
+        }
+
+        if (planetResourceMap == null)
+        {
+            planetResourceMap = FindObjectOfType<PlanetResourceMap>();
+        }
+    }
+
     void Start()
     {
+        ResolvePlanetResourceMapReference();
+
         if (replicatorMesh == null || replicatorMaterial == null || planetGenerator == null || planetResourceMap == null)
         {
-            Debug.LogError("ReplicatorManager is missing required references (mesh/material/planetGenerator/planetResourceMap).", this);
+            Debug.LogError("ReplicatorManager is missing required references (mesh/material/planetGenerator/planetResourceMap). Assign PlanetResourceMap in Inspector or add it to the PlanetGenerator object.", this);
             enabled = false;
             return;
         }
@@ -459,6 +482,16 @@ public class ReplicatorManager : MonoBehaviour
         jobMoveOnlyInSea = new NativeArray<bool>(jobCapacity, Allocator.Persistent);
         jobSurfaceMoveSpeedMultipliers = new NativeArray<float>(jobCapacity, Allocator.Persistent);
         jobMovementSeeds = new NativeArray<float>(jobCapacity, Allocator.Persistent);
+    }
+
+    void Reset()
+    {
+        if (planetGenerator == null)
+        {
+            planetGenerator = FindObjectOfType<PlanetGenerator>();
+        }
+
+        ResolvePlanetResourceMapReference();
     }
 
     void OnDestroy()
