@@ -43,6 +43,17 @@ public class ReplicatorManager : MonoBehaviour
     [Tooltip("0 = land-only bias, 0.5 = balanced, 1 = sea-only bias (when ocean is enabled).")]
     public float seaSpawnPreference = 0.5f;
 
+    [Header("Default Traits")]
+    [Tooltip("If enabled, newly created replicators can only be spawned in sea locations.")]
+    public bool defaultSpawnOnlyInSea = true;
+    [Tooltip("If enabled, replicators only reproduce while currently in the sea.")]
+    public bool defaultReplicateOnlyInSea = true;
+    [Tooltip("If enabled, replicators stay in the sea and do not move onto land.")]
+    public bool defaultMoveOnlyInSea = false;
+    [Range(0.01f, 1f)]
+    [Tooltip("Movement speed multiplier used by replicators while on land/surface.")]
+    public float defaultSurfaceMoveSpeedMultiplier = 0.4f;
+
     [Header("Debug")]
     private List<Replicator> agents = new List<Replicator>();
 
@@ -59,6 +70,8 @@ public class ReplicatorManager : MonoBehaviour
     // Reused job buffers to avoid per-frame NativeArray allocations.
     private NativeArray<Vector3> jobPositions;
     private NativeArray<Quaternion> jobRotations;
+    private NativeArray<bool> jobMoveOnlyInSea;
+    private NativeArray<float> jobSurfaceMoveSpeedMultipliers;
     private int jobCapacity;
 
     // Cache shader property IDs once.
@@ -71,6 +84,8 @@ public class ReplicatorManager : MonoBehaviour
     {
         public NativeArray<Vector3> Positions;
         public NativeArray<Quaternion> Rotations;
+        public NativeArray<bool> MoveOnlyInSea;
+        public NativeArray<float> SurfaceMoveSpeedMultipliers;
 
         // Simulation parameters
         public float DeltaTime;
@@ -102,12 +117,28 @@ public class ReplicatorManager : MonoBehaviour
 
             // 2. Movement (Arc across sphere)
             Vector3 forward = rot * Vector3.forward;
-            Quaternion travelRot = Quaternion.AngleAxis(MoveSpeed * DeltaTime / Radius, Vector3.Cross(surfaceNormal, forward));
+
+            bool moveOnlyInSea = MoveOnlyInSea[index];
+            float currentNoise = CalculateNoise(surfaceNormal);
+            bool currentlyInSea = !OceanEnabled || currentNoise < OceanThreshold;
+            float speedMultiplier = currentlyInSea ? 1f : SurfaceMoveSpeedMultipliers[index];
+
+            Quaternion travelRot = Quaternion.AngleAxis((MoveSpeed * speedMultiplier) * DeltaTime / Radius, Vector3.Cross(surfaceNormal, forward));
 
             // Get the new direction vector (normalized)
             Vector3 newDirection = (travelRot * pos).normalized;
 
-            // 3. HEIGHT SNAP (The Missing Fix!)
+            if (OceanEnabled && moveOnlyInSea)
+            {
+                float nextNoise = CalculateNoise(newDirection);
+                bool nextInSea = nextNoise < OceanThreshold;
+                if (!nextInSea)
+                {
+                    newDirection = surfaceNormal;
+                }
+            }
+
+            // 3. HEIGHT SNAP
             // We calculate the terrain height right here in the thread
             float terrainNoise = CalculateNoise(newDirection);
             float displacement = GetSurfaceRadiusFromNoise(terrainNoise);
@@ -231,7 +262,7 @@ public class ReplicatorManager : MonoBehaviour
             return false;
         }
 
-        return SpawnAgentAtDirection(randomDir);
+        return SpawnAgentAtDirection(randomDir, CreateDefaultTraits(), null);
     }
 
     float GetLocationSpawnMultiplier(bool isSeaLocation)
@@ -281,7 +312,7 @@ public class ReplicatorManager : MonoBehaviour
 
             if (Random.value < reproductionChance)
             {
-                SpawnAgentFromPopulation();
+                SpawnAgentFromPopulation(agent);
             }
         }
     }
@@ -297,12 +328,16 @@ public class ReplicatorManager : MonoBehaviour
         {
             this.jobPositions[i] = agents[i].position;
             this.jobRotations[i] = agents[i].rotation;
+            this.jobMoveOnlyInSea[i] = agents[i].traits.moveOnlyInSea;
+            this.jobSurfaceMoveSpeedMultipliers[i] = Mathf.Max(0.01f, agents[i].traits.surfaceMoveSpeedMultiplier);
         }
 
         ReplicatorUpdateJob job = new ReplicatorUpdateJob
         {
             Positions = jobPositions,
             Rotations = jobRotations,
+            MoveOnlyInSea = jobMoveOnlyInSea,
+            SurfaceMoveSpeedMultipliers = jobSurfaceMoveSpeedMultipliers,
             DeltaTime = Time.deltaTime,
             MoveSpeed = moveSpeed,
             TurnSpeed = turnSpeed,
@@ -338,49 +373,59 @@ public class ReplicatorManager : MonoBehaviour
 
         if (jobPositions.IsCreated) jobPositions.Dispose();
         if (jobRotations.IsCreated) jobRotations.Dispose();
+        if (jobMoveOnlyInSea.IsCreated) jobMoveOnlyInSea.Dispose();
+        if (jobSurfaceMoveSpeedMultipliers.IsCreated) jobSurfaceMoveSpeedMultipliers.Dispose();
 
         jobCapacity = Mathf.NextPowerOfTwo(requiredCount);
         jobPositions = new NativeArray<Vector3>(jobCapacity, Allocator.Persistent);
         jobRotations = new NativeArray<Quaternion>(jobCapacity, Allocator.Persistent);
+        jobMoveOnlyInSea = new NativeArray<bool>(jobCapacity, Allocator.Persistent);
+        jobSurfaceMoveSpeedMultipliers = new NativeArray<float>(jobCapacity, Allocator.Persistent);
     }
 
     void OnDestroy()
     {
         if (jobPositions.IsCreated) jobPositions.Dispose();
         if (jobRotations.IsCreated) jobRotations.Dispose();
+        if (jobMoveOnlyInSea.IsCreated) jobMoveOnlyInSea.Dispose();
+        if (jobSurfaceMoveSpeedMultipliers.IsCreated) jobSurfaceMoveSpeedMultipliers.Dispose();
     }
 
-    bool SpawnAgentFromPopulation()
+    bool SpawnAgentFromPopulation(Replicator parent)
     {
         if (agents.Count >= maxPopulation) return false;
 
-        Vector3 randomDir;
-
-        if (agents.Count > 0)
+        if (parent.traits.replicateOnlyInSea && !IsSeaLocation(parent.currentDirection))
         {
-            Replicator parent = agents[Random.Range(0, agents.Count)];
-            randomDir = parent.currentDirection + Random.insideUnitSphere * spawnSpread;
-            randomDir = randomDir.normalized;
-        }
-        else
-        {
-            randomDir = Random.onUnitSphere;
+            return false;
         }
 
-        return SpawnAgentAtDirection(randomDir);
+        Vector3 randomDir = parent.currentDirection + Random.insideUnitSphere * spawnSpread;
+        randomDir = randomDir.normalized;
+
+        return SpawnAgentAtDirection(randomDir, parent.traits, parent);
     }
 
     bool SpawnAgentAtRandomLocation()
     {
         if (agents.Count >= maxPopulation) return false;
-        return SpawnAgentAtDirection(Random.onUnitSphere);
+        return SpawnAgentAtDirection(Random.onUnitSphere, CreateDefaultTraits(), null);
     }
 
-    bool SpawnAgentAtDirection(Vector3 direction)
+    bool SpawnAgentAtDirection(Vector3 direction, Replicator.Traits traits, Replicator parent)
     {
         if (agents.Count >= maxPopulation) return false;
 
         Vector3 randomDir = direction.normalized;
+
+        if (traits.spawnOnlyInSea)
+        {
+            if (!TryFindSeaDirection(randomDir, out randomDir))
+            {
+                return false;
+            }
+        }
+
         Vector3 spawnPosition;
         Quaternion spawnRotation;
 
@@ -390,11 +435,46 @@ public class ReplicatorManager : MonoBehaviour
         spawnRotation *= Quaternion.Euler(0, Random.Range(0f, 360f), 0);
 
         float newLifespan = Random.Range(minLifespan, maxLifespan);
-        Replicator newAgent = new Replicator(spawnPosition, spawnRotation, newLifespan, baseAgentColor);
-        newAgent.age = Random.Range(0f, newLifespan * 0.5f);
+        Replicator newAgent = new Replicator(spawnPosition, spawnRotation, newLifespan, baseAgentColor, traits);
+        newAgent.age = parent == null ? Random.Range(0f, newLifespan * 0.5f) : 0f;
 
         agents.Add(newAgent);
         return true;
+    }
+
+    Replicator.Traits CreateDefaultTraits()
+    {
+        return new Replicator.Traits(
+            defaultSpawnOnlyInSea,
+            defaultReplicateOnlyInSea,
+            defaultMoveOnlyInSea,
+            Mathf.Max(0.01f, defaultSurfaceMoveSpeedMultiplier)
+        );
+    }
+
+    bool TryFindSeaDirection(Vector3 preferredDirection, out Vector3 seaDirection)
+    {
+        const int maxAttempts = 12;
+
+        Vector3 candidate = preferredDirection.normalized;
+        if (IsSeaLocation(candidate))
+        {
+            seaDirection = candidate;
+            return true;
+        }
+
+        for (int i = 0; i < maxAttempts; i++)
+        {
+            candidate = Random.onUnitSphere;
+            if (IsSeaLocation(candidate))
+            {
+                seaDirection = candidate;
+                return true;
+            }
+        }
+
+        seaDirection = preferredDirection.normalized;
+        return !planetGenerator.OceanEnabled;
     }
 
     float GetSurfaceHeight(Vector3 direction)
