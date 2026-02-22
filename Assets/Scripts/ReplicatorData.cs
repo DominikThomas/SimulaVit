@@ -30,15 +30,17 @@ public class Replicator
     // Movement data
     public Vector3 velocity;
     public Vector3 currentDirection; // Normalized position (direction from center)
+    public float movementSeed;
 
     // Constructor
-    public Replicator(Vector3 pos, Quaternion rot, float lifespan, Color col, Traits traits)
+    public Replicator(Vector3 pos, Quaternion rot, float lifespan, Color col, Traits traits, float movementSeed)
     {
         position = pos;
         rotation = rot;
         maxLifespan = lifespan;
         color = col;
         this.traits = traits;
+        this.movementSeed = movementSeed;
         age = 0;
         currentDirection = pos.normalized;
     }
