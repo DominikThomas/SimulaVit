@@ -7,6 +7,7 @@ public enum ResourceType
 {
     CO2,
     O2,
+    OrganicC,
     H2S,
     S0,
     P,
@@ -70,6 +71,7 @@ public class PlanetResourceMap : MonoBehaviour
 
     private float[] co2;
     private float[] o2;
+    private float[] organicC;
     private float[] h2s;
     private float[] s0;
     private float[] p;
@@ -152,6 +154,24 @@ public class PlanetResourceMap : MonoBehaviour
         arr[cell] = Mathf.Max(0f, arr[cell] + delta);
     }
 
+    public bool IsVolatile(ResourceType t)
+    {
+        return t == ResourceType.CO2 || t == ResourceType.O2;
+    }
+
+    public bool IsOceanCell(int cell)
+    {
+        if (!isInitialized || !IsCellValid(cell) || planetGenerator == null || cellDirections == null)
+        {
+            return false;
+        }
+
+        Vector3 dir = cellDirections[cell];
+        float oceanRadius = planetGenerator.GetOceanRadius();
+        float surfaceRadius = planetGenerator.GetSurfaceRadius(dir);
+        return surfaceRadius < oceanRadius;
+    }
+
     /// <summary>
     /// Insolation approximation in [0..1]: max(0, dot(surfaceNormal, sunDirection)).
     /// Expects a world position or direction; this method normalizes either into a direction from the planet center.
@@ -201,6 +221,7 @@ public class PlanetResourceMap : MonoBehaviour
 
         co2 = new float[cellCount];
         o2 = new float[cellCount];
+        organicC = new float[cellCount];
         h2s = new float[cellCount];
         s0 = new float[cellCount];
         p = new float[cellCount];
@@ -218,6 +239,7 @@ public class PlanetResourceMap : MonoBehaviour
 
             co2[cell] = baselineCO2;
             o2[cell] = baselineO2;
+            organicC[cell] = 0f;
             s0[cell] = baselineS0;
 
             float phosphorusNoise = SampleResourceNoise(dir, new Vector3(13.7f, -4.2f, 9.9f));
@@ -364,6 +386,7 @@ public class PlanetResourceMap : MonoBehaviour
         {
             case ResourceType.CO2: return co2;
             case ResourceType.O2: return o2;
+            case ResourceType.OrganicC: return organicC;
             case ResourceType.H2S: return h2s;
             case ResourceType.S0: return s0;
             case ResourceType.P: return p;
@@ -453,6 +476,7 @@ public class PlanetResourceMap : MonoBehaviour
         {
             case ResourceType.CO2: return Mathf.Max(0.0001f, baselineCO2);
             case ResourceType.O2: return Mathf.Max(0.0001f, baselineO2);
+            case ResourceType.OrganicC: return 1f;
             case ResourceType.H2S: return Mathf.Max(0.0001f, ventStrength);
             case ResourceType.S0: return Mathf.Max(0.0001f, baselineS0);
             case ResourceType.P: return Mathf.Max(0.0001f, phosphorusScale);
