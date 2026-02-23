@@ -348,21 +348,21 @@ public class ReplicatorManager : MonoBehaviour
         string replicatorsText =
             "Replicators\n" +
             $"Total: {totalAgents}\n" +
-            $"Chemosynthesis: {chemosynthAgentCount} ({chemosynthPct:0.0}%)";
+            $"<color=#FFD54A>Chemosynthesis:</color> {chemosynthAgentCount} ({chemosynthPct:0.0}%)";
 
         if (photosynthAgentCount > 0)
         {
-            replicatorsText += $"\nPhotosynthesis: {photosynthAgentCount} ({photosynthPct:0.0}%)";
+            replicatorsText += $"\n<color=#79E07E>Photosynthesis:</color> {photosynthAgentCount} ({photosynthPct:0.0}%)";
         }
 
         if (saprotrophAgentCount > 0)
         {
-            replicatorsText += $"\nSaprotroph: {saprotrophAgentCount} ({saprotrophPct:0.0}%)";
+            replicatorsText += $"\n<color=#62B0FF>Saprotroph:</color> {saprotrophAgentCount} ({saprotrophPct:0.0}%)";
         }
 
-        const float panelWidth = 335f;
-        const float padding = 12f;
-        const float lineHeight = 20f;
+        const float panelWidth = 270f;
+        const float padding = 8f;
+        const float lineHeight = 16f;
         float rightX = Screen.width - panelWidth - padding;
 
         float atmosphereHeight = (atmosphereText.Split('\n').Length * lineHeight) + (padding * 2f);
@@ -386,8 +386,8 @@ public class ReplicatorManager : MonoBehaviour
 
         hudStyle = new GUIStyle(GUI.skin.label)
         {
-            fontSize = 14,
-            richText = false,
+            fontSize = 12,
+            richText = true,
             alignment = TextAnchor.UpperLeft,
             normal =
             {
