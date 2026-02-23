@@ -108,11 +108,16 @@ public class ReplicatorManager : MonoBehaviour
     [Header("Debug")]
     public bool colorByEnergy = false;
     [Range(0.05f, 4f)] public float energyVisualMultiplier = 1f;
+    [Header("HUD")]
+    [Tooltip("Draw a small runtime overlay with population and atmosphere stats.")]
+    public bool showSimulationHud = true;
     private List<Replicator> agents = new List<Replicator>();
 
     [SerializeField] private int chemosynthAgentCount;
     [SerializeField] private int photosynthAgentCount;
     [SerializeField] private int saprotrophAgentCount;
+    private GUIStyle hudStyle;
+    private GUIStyle hudBackgroundStyle;
     private bool isInitialized;
     private float spawnAttemptTimer;
     private bool firstSpontaneousSpawnHappened;
@@ -329,6 +334,94 @@ public class ReplicatorManager : MonoBehaviour
         LogMetabolismDebugThrottled();
     }
 
+    void OnGUI()
+    {
+        if (!showSimulationHud || !isInitialized)
+        {
+            return;
+        }
+
+        EnsureHudStyles();
+
+        int totalAgents = agents.Count;
+        float photosynthPct = totalAgents > 0 ? (photosynthAgentCount * 100f) / totalAgents : 0f;
+        float chemosynthPct = totalAgents > 0 ? (chemosynthAgentCount * 100f) / totalAgents : 0f;
+        float saprotrophPct = totalAgents > 0 ? (saprotrophAgentCount * 100f) / totalAgents : 0f;
+
+        float globalCo2 = planetResourceMap != null ? planetResourceMap.debugGlobalCO2 : 0f;
+        float globalO2 = planetResourceMap != null ? planetResourceMap.debugGlobalO2 : 0f;
+        float atmosphereTotal = Mathf.Max(0.0001f, globalCo2 + globalO2);
+        float co2Pct = (globalCo2 / atmosphereTotal) * 100f;
+        float o2Pct = (globalO2 / atmosphereTotal) * 100f;
+
+        string atmosphereText =
+            "Atmosphere (global average)\n" +
+            $"CO2: {globalCo2:0.000} ({co2Pct:0.0}%)\n" +
+            $"O2: {globalO2:0.000} ({o2Pct:0.0}%)";
+
+        string replicatorsText =
+            "Replicators\n" +
+            $"Total: {totalAgents}\n" +
+            $"<color=#FFD54A>Chemosynthesis:</color> {chemosynthAgentCount} ({chemosynthPct:0.0}%)";
+
+        if (photosynthAgentCount > 0)
+        {
+            replicatorsText += $"\n<color=#79E07E>Photosynthesis:</color> {photosynthAgentCount} ({photosynthPct:0.0}%)";
+        }
+
+        if (saprotrophAgentCount > 0)
+        {
+            replicatorsText += $"\n<color=#62B0FF>Saprotroph:</color> {saprotrophAgentCount} ({saprotrophPct:0.0}%)";
+        }
+
+        const float panelWidth = 189f;
+        const float padding = 8f;
+        const float lineHeight = 16f;
+        float rightX = Screen.width - panelWidth - padding;
+
+        float atmosphereHeight = (atmosphereText.Split('\n').Length * lineHeight) + (padding * 2f);
+        float replicatorHeight = (replicatorsText.Split('\n').Length * lineHeight) + (padding * 2f);
+
+        Rect atmosphereRect = new Rect(rightX, padding, panelWidth, atmosphereHeight);
+        GUI.Box(atmosphereRect, GUIContent.none, hudBackgroundStyle);
+        GUI.Label(new Rect(atmosphereRect.x + padding, atmosphereRect.y + padding, panelWidth - 2f * padding, atmosphereHeight - 2f * padding), atmosphereText, hudStyle);
+
+        Rect replicatorRect = new Rect(rightX, Screen.height - replicatorHeight - padding, panelWidth, replicatorHeight);
+        GUI.Box(replicatorRect, GUIContent.none, hudBackgroundStyle);
+        GUI.Label(new Rect(replicatorRect.x + padding, replicatorRect.y + padding, panelWidth - 2f * padding, replicatorHeight - 2f * padding), replicatorsText, hudStyle);
+    }
+
+    void EnsureHudStyles()
+    {
+        if (hudStyle != null && hudBackgroundStyle != null)
+        {
+            return;
+        }
+
+        hudStyle = new GUIStyle(GUI.skin.label)
+        {
+            fontSize = 12,
+            richText = true,
+            alignment = TextAnchor.UpperLeft,
+            normal =
+            {
+                textColor = Color.white
+            }
+        };
+
+        Texture2D backgroundTexture = new Texture2D(1, 1);
+        backgroundTexture.SetPixel(0, 0, new Color(0f, 0f, 0f, 0.55f));
+        backgroundTexture.Apply();
+
+        hudBackgroundStyle = new GUIStyle(GUI.skin.box)
+        {
+            normal =
+            {
+                background = backgroundTexture
+            }
+        };
+    }
+
 
     void UpdateMetabolismCounts()
     {
@@ -342,13 +435,13 @@ public class ReplicatorManager : MonoBehaviour
             {
                 photo++;
             }
-            else if (agents[i].metabolism == MetabolismType.Saprotrophy)
+            else if (agents[i].metabolism == MetabolismType.SulfurChemosynthesis)
             {
-                sapro++;
+                chemo++;
             }
             else
             {
-                chemo++;
+                sapro++;
             }
         }
 
