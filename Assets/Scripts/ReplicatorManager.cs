@@ -216,6 +216,16 @@ public class ReplicatorManager : MonoBehaviour
 
     void ResolvePlanetResourceMapReference()
     {
+        if (planetGenerator == null)
+        {
+            planetGenerator = GetComponent<PlanetGenerator>();
+        }
+
+        if (planetGenerator == null)
+        {
+            planetGenerator = FindObjectOfType<PlanetGenerator>();
+        }
+
         if (planetResourceMap != null)
         {
             return;
@@ -226,6 +236,12 @@ public class ReplicatorManager : MonoBehaviour
         if (planetResourceMap == null && planetGenerator != null)
         {
             planetResourceMap = planetGenerator.GetComponent<PlanetResourceMap>();
+
+            if (planetResourceMap == null)
+            {
+                planetResourceMap = planetGenerator.gameObject.AddComponent<PlanetResourceMap>();
+                Debug.Log("ReplicatorManager auto-added PlanetResourceMap to the PlanetGenerator object.", planetGenerator);
+            }
         }
 
         if (planetResourceMap == null)
@@ -240,7 +256,7 @@ public class ReplicatorManager : MonoBehaviour
 
         if (replicatorMesh == null || replicatorMaterial == null || planetGenerator == null || planetResourceMap == null)
         {
-            Debug.LogError("ReplicatorManager is missing required references (mesh/material/planetGenerator/planetResourceMap). Assign PlanetResourceMap in Inspector or add it to the PlanetGenerator object.", this);
+            Debug.LogError("ReplicatorManager is missing required references (mesh/material/planetGenerator/planetResourceMap). Assign PlanetResourceMap in Inspector. It can also be auto-added to the PlanetGenerator object if one exists in scene.", this);
             enabled = false;
             return;
         }
