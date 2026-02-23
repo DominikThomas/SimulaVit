@@ -34,6 +34,12 @@ public class ReplicatorManager : MonoBehaviour
     public float moveEnergyCostPerSecond = 0.05f;
     public float replicationEnergyCost = 0.5f;
     public float basalEnergyCostPerSecond = 0.01f;
+    [Tooltip("CO2 consumed per metabolism tick for default chemosynthesis.")]
+    public float chemosynthesisCo2NeedPerTick = 0.02f;
+    [Tooltip("H2S consumed per metabolism tick for default chemosynthesis. Kept low because H2S is vent-localized.")]
+    public float chemosynthesisH2sNeedPerTick = 0.001f;
+    [Tooltip("Energy granted when one full chemosynthesis reaction tick is completed.")]
+    public float chemosynthesisEnergyPerTick = 0.3f;
 
     [Header("Spontaneous Spawning")]
     [Tooltip("Keeps attempting random world spawns even when all replicators die out.")]
@@ -401,12 +407,14 @@ public class ReplicatorManager : MonoBehaviour
             Replicator agent = agents[i];
             int cellIndex = PlanetGridIndexing.DirectionToCellIndex(agent.position.normalized, resolution);
 
-            const float co2Need = 0.02f;
-            const float h2sNeed = 0.01f;
+            float co2Need = Mathf.Max(0f, chemosynthesisCo2NeedPerTick);
+            float h2sNeed = Mathf.Max(0f, chemosynthesisH2sNeedPerTick);
 
             float co2Available = planetResourceMap.Get(ResourceType.CO2, cellIndex);
             float h2sAvailable = planetResourceMap.Get(ResourceType.H2S, cellIndex);
-            float pulledRatio = Mathf.Min(1f, Mathf.Min(co2Need <= 0f ? 1f : co2Available / co2Need, h2sNeed <= 0f ? 1f : h2sAvailable / h2sNeed));
+            float co2Ratio = co2Need <= Mathf.Epsilon ? 1f : co2Available / co2Need;
+            float h2sRatio = h2sNeed <= Mathf.Epsilon ? 1f : h2sAvailable / h2sNeed;
+            float pulledRatio = Mathf.Clamp01(Mathf.Min(co2Ratio, h2sRatio));
 
             if (pulledRatio > 0f)
             {
@@ -417,7 +425,7 @@ public class ReplicatorManager : MonoBehaviour
                 planetResourceMap.Add(ResourceType.H2S, cellIndex, -h2sConsumed);
                 planetResourceMap.Add(ResourceType.S0, cellIndex, h2sConsumed);
 
-                float producedEnergy = (co2Consumed + h2sConsumed) * 10f;
+                float producedEnergy = Mathf.Max(0f, chemosynthesisEnergyPerTick) * pulledRatio;
                 agent.energy += producedEnergy;
             }
 
