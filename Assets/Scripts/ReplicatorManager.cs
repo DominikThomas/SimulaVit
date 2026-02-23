@@ -41,6 +41,15 @@ public class ReplicatorManager : MonoBehaviour
     [Tooltip("Energy granted when one full chemosynthesis reaction tick is completed.")]
     public float chemosynthesisEnergyPerTick = 0.3f;
 
+    [Header("Spawn Resource Bias")]
+    public bool biasSpawnsToChemosynthesisResources = true;
+    [Range(1, 64)] public int spawnResourceProbeAttempts = 12;
+    [Tooltip("How strongly spontaneous/initial spawn chance scales with local H2S.")]
+    public float h2sSpawnBiasWeight = 2.5f;
+    [Tooltip("How strongly spontaneous/initial spawn chance scales with local CO2.")]
+    public float co2SpawnBiasWeight = 0.5f;
+
+
     [Header("Spontaneous Spawning")]
     [Tooltip("Keeps attempting random world spawns even when all replicators die out.")]
     public bool enableSpontaneousSpawning = true;
@@ -315,7 +324,7 @@ public class ReplicatorManager : MonoBehaviour
     {
         if (agents.Count >= maxPopulation) return false;
 
-        Vector3 randomDir = Random.onUnitSphere;
+        Vector3 randomDir = GetSpawnDirectionCandidate();
         bool isSeaLocation = IsSeaLocation(randomDir);
 
         float locationMultiplier = GetLocationSpawnMultiplier(isSeaLocation);
@@ -327,6 +336,49 @@ public class ReplicatorManager : MonoBehaviour
         }
 
         return SpawnAgentAtDirection(randomDir, CreateDefaultTraits(), null);
+    }
+
+
+    Vector3 GetSpawnDirectionCandidate()
+    {
+        if (!biasSpawnsToChemosynthesisResources || planetResourceMap == null || planetGenerator == null)
+        {
+            return Random.onUnitSphere;
+        }
+
+        int attempts = Mathf.Max(1, spawnResourceProbeAttempts);
+        Vector3 bestDirection = Random.onUnitSphere;
+        float bestScore = -1f;
+
+        for (int i = 0; i < attempts; i++)
+        {
+            Vector3 candidate = Random.onUnitSphere;
+            float score = GetChemosynthesisSpawnScore(candidate);
+            if (score > bestScore)
+            {
+                bestScore = score;
+                bestDirection = candidate;
+            }
+        }
+
+        return bestDirection;
+    }
+
+    float GetChemosynthesisSpawnScore(Vector3 direction)
+    {
+        int resolution = Mathf.Max(1, planetGenerator.resolution);
+        int cellIndex = PlanetGridIndexing.DirectionToCellIndex(direction.normalized, resolution);
+
+        float co2Need = Mathf.Max(0.0001f, chemosynthesisCo2NeedPerTick);
+        float h2sNeed = Mathf.Max(0.0001f, chemosynthesisH2sNeedPerTick);
+
+        float co2Availability = planetResourceMap.Get(ResourceType.CO2, cellIndex) / co2Need;
+        float h2sAvailability = planetResourceMap.Get(ResourceType.H2S, cellIndex) / h2sNeed;
+
+        float weighted = (Mathf.Max(0f, co2SpawnBiasWeight) * co2Availability)
+                       + (Mathf.Max(0f, h2sSpawnBiasWeight) * h2sAvailability);
+
+        return weighted;
     }
 
     float GetLocationSpawnMultiplier(bool isSeaLocation)
@@ -545,7 +597,8 @@ public class ReplicatorManager : MonoBehaviour
     bool SpawnAgentAtRandomLocation()
     {
         if (agents.Count >= maxPopulation) return false;
-        return SpawnAgentAtDirection(Random.onUnitSphere, CreateDefaultTraits(), null);
+        Vector3 dir = GetSpawnDirectionCandidate();
+        return SpawnAgentAtDirection(dir, CreateDefaultTraits(), null);
     }
 
     bool SpawnAgentAtDirection(Vector3 direction, Replicator.Traits traits, Replicator parent)

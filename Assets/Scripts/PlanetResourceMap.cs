@@ -1,4 +1,7 @@
 using UnityEngine;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 public enum ResourceType
 {
@@ -46,6 +49,9 @@ public class PlanetResourceMap : MonoBehaviour
     public bool drawDebugPoints = true;
     [Range(8, 8192)] public int debugMaxPoints = 512;
     public float debugPointSize = 0.05f;
+    [Tooltip("Show text labels with per-tile values for sampled debug points (Scene view only).")]
+    public bool drawDebugLabels = false;
+    [Range(1, 256)] public int debugLabelMaxPoints = 48;
 
     private int resolution;
     private Vector3[] cellDirections;
@@ -329,6 +335,12 @@ public class PlanetResourceMap : MonoBehaviour
         EnsureDebugGradient();
     }
 
+
+    private string BuildDebugLabelText(int cellIndex)
+    {
+        return $"{debugViewType}: {Get(debugViewType, cellIndex):0.###}\nCO2: {Get(ResourceType.CO2, cellIndex):0.###}\nH2S: {Get(ResourceType.H2S, cellIndex):0.###}\nS0: {Get(ResourceType.S0, cellIndex):0.###}";
+    }
+
     private void OnDrawGizmosSelected()
     {
         if (!drawDebugPoints)
@@ -360,6 +372,8 @@ public class PlanetResourceMap : MonoBehaviour
         float range = Mathf.Max(0.0001f, maxValue - minValue);
         int stride = Mathf.Max(1, Mathf.CeilToInt((float)array.Length / Mathf.Max(1, debugMaxPoints)));
 
+        int labelStride = Mathf.Max(1, Mathf.CeilToInt((float)array.Length / Mathf.Max(1, debugLabelMaxPoints)));
+
         for (int i = 0; i < array.Length; i += stride)
         {
             float t = (array[i] - minValue) / range;
@@ -369,6 +383,14 @@ public class PlanetResourceMap : MonoBehaviour
             float surfaceRadius = planetGenerator != null ? planetGenerator.GetSurfaceRadius(dir) : 1f;
             Vector3 world = transform.position + dir * surfaceRadius;
             Gizmos.DrawSphere(world, debugPointSize);
+
+#if UNITY_EDITOR
+            if (drawDebugLabels && i % labelStride == 0)
+            {
+                Handles.color = Gizmos.color;
+                Handles.Label(world + dir * (debugPointSize * 1.6f), BuildDebugLabelText(i));
+            }
+#endif
         }
     }
 }
