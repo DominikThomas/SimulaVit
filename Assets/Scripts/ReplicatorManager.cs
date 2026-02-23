@@ -42,6 +42,9 @@ public class ReplicatorManager : MonoBehaviour
     public float chemosynthesisEnergyPerTick = 0.3f;
     [Tooltip("Fractional mutation chance on reproduction that flips metabolism type.")]
     [Range(0f, 1f)] public float metabolismMutationChance = 0.01f;
+    [Header("Metabolism Unlock")]
+    [Tooltip("If true, Photosynthesis can mutate back to chemosynthesis. Default false.")]
+    public bool allowReverseMetabolismMutation = false;
     [Tooltip("Maximum CO2 consumed per metabolism tick at full insolation (1.0).")]
     public float photosynthesisCo2PerTickAtFullInsolation = 0.02f;
     [Tooltip("Energy gained per unit CO2 consumed by photosynthesis.")]
@@ -94,6 +97,7 @@ public class ReplicatorManager : MonoBehaviour
     private float spawnAttemptTimer;
     private bool firstSpontaneousSpawnHappened;
     private float metabolismTickTimer;
+    private float metabolismDebugLogTimer;
 
     // Arrays for Batching
     private Matrix4x4[] matrixBatch = new Matrix4x4[1023];
@@ -240,7 +244,7 @@ public class ReplicatorManager : MonoBehaviour
     {
         if (planetGenerator == null)
         {
-            planetGenerator = GetComponent<PlanetGenerator>();
+            planetGenerator = GetComponentInParent<PlanetGenerator>();
         }
 
         if (planetGenerator == null)
@@ -299,6 +303,7 @@ public class ReplicatorManager : MonoBehaviour
         RunMovementJob();
         RenderAgents();
         UpdateMetabolismCounts();
+        LogMetabolismDebugThrottled();
     }
 
 
@@ -321,6 +326,21 @@ public class ReplicatorManager : MonoBehaviour
 
         chemosynthAgentCount = chemo;
         photosynthAgentCount = photo;
+    }
+
+
+
+    void LogMetabolismDebugThrottled()
+    {
+        metabolismDebugLogTimer += Time.deltaTime;
+        if (metabolismDebugLogTimer < 3f)
+        {
+            return;
+        }
+
+        metabolismDebugLogTimer = 0f;
+        bool unlocked = planetGenerator != null && planetGenerator.PhotosynthesisUnlocked;
+        Debug.Log($"Metabolism: chemo={chemosynthAgentCount} photo={photosynthAgentCount} unlocked={unlocked}");
     }
 
     void HandleSpontaneousSpawning()
@@ -647,9 +667,17 @@ public class ReplicatorManager : MonoBehaviour
         MetabolismType childMetabolism = parent.metabolism;
         if (Random.value < Mathf.Clamp01(metabolismMutationChance))
         {
-            childMetabolism = childMetabolism == MetabolismType.SulfurChemosynthesis
-                ? MetabolismType.Photosynthesis
-                : MetabolismType.SulfurChemosynthesis;
+            if (parent.metabolism == MetabolismType.SulfurChemosynthesis)
+            {
+                if (planetGenerator != null && planetGenerator.PhotosynthesisUnlocked)
+                {
+                    childMetabolism = MetabolismType.Photosynthesis;
+                }
+            }
+            else if (allowReverseMetabolismMutation)
+            {
+                childMetabolism = MetabolismType.SulfurChemosynthesis;
+            }
         }
 
         return SpawnAgentAtDirection(randomDir, parent.traits, parent, childMetabolism);
