@@ -97,10 +97,16 @@ public class ReplicatorManager : MonoBehaviour
     [Header("Debug")]
     public bool colorByEnergy = false;
     [Range(0.05f, 4f)] public float energyVisualMultiplier = 1f;
+    [Header("HUD")]
+    [Tooltip("Draw a small runtime overlay with population and atmosphere stats.")]
+    public bool showSimulationHud = true;
     private List<Replicator> agents = new List<Replicator>();
 
     [SerializeField] private int chemosynthAgentCount;
     [SerializeField] private int photosynthAgentCount;
+    [SerializeField] private int saprotrophAgentCount;
+    private GUIStyle hudStyle;
+    private GUIStyle hudBackgroundStyle;
     private bool isInitialized;
     private float spawnAttemptTimer;
     private bool firstSpontaneousSpawnHappened;
@@ -314,11 +320,78 @@ public class ReplicatorManager : MonoBehaviour
         LogMetabolismDebugThrottled();
     }
 
+    void OnGUI()
+    {
+        if (!showSimulationHud || !isInitialized)
+        {
+            return;
+        }
+
+        EnsureHudStyles();
+
+        int totalAgents = agents.Count;
+        float photosynthPct = totalAgents > 0 ? (photosynthAgentCount * 100f) / totalAgents : 0f;
+        float chemosynthPct = totalAgents > 0 ? (chemosynthAgentCount * 100f) / totalAgents : 0f;
+        float saprotrophPct = totalAgents > 0 ? (saprotrophAgentCount * 100f) / totalAgents : 0f;
+
+        float globalCo2 = planetResourceMap != null ? planetResourceMap.debugGlobalCO2 : 0f;
+        float globalO2 = planetResourceMap != null ? planetResourceMap.debugGlobalO2 : 0f;
+        float atmosphereTotal = Mathf.Max(0.0001f, globalCo2 + globalO2);
+        float co2Pct = (globalCo2 / atmosphereTotal) * 100f;
+        float o2Pct = (globalO2 / atmosphereTotal) * 100f;
+
+        string hudText =
+            "Replicators\n" +
+            $"Total: {totalAgents}\n" +
+            $"Chemosynthesis: {chemosynthAgentCount} ({chemosynthPct:0.0}%)\n" +
+            $"Photosynthesis: {photosynthAgentCount} ({photosynthPct:0.0}%)\n" +
+            $"Saprotroph: {saprotrophAgentCount} ({saprotrophPct:0.0}%)\n\n" +
+            "Atmosphere (global average)\n" +
+            $"CO2: {globalCo2:0.000} ({co2Pct:0.0}%)\n" +
+            $"O2: {globalO2:0.000} ({o2Pct:0.0}%)";
+
+        Rect panelRect = new Rect(12f, 12f, 335f, 190f);
+        GUI.Box(panelRect, GUIContent.none, hudBackgroundStyle);
+        GUI.Label(new Rect(24f, 24f, panelRect.width - 24f, panelRect.height - 24f), hudText, hudStyle);
+    }
+
+    void EnsureHudStyles()
+    {
+        if (hudStyle != null && hudBackgroundStyle != null)
+        {
+            return;
+        }
+
+        hudStyle = new GUIStyle(GUI.skin.label)
+        {
+            fontSize = 14,
+            richText = false,
+            alignment = TextAnchor.UpperLeft,
+            normal =
+            {
+                textColor = Color.white
+            }
+        };
+
+        Texture2D backgroundTexture = new Texture2D(1, 1);
+        backgroundTexture.SetPixel(0, 0, new Color(0f, 0f, 0f, 0.55f));
+        backgroundTexture.Apply();
+
+        hudBackgroundStyle = new GUIStyle(GUI.skin.box)
+        {
+            normal =
+            {
+                background = backgroundTexture
+            }
+        };
+    }
+
 
     void UpdateMetabolismCounts()
     {
         int chemo = 0;
         int photo = 0;
+        int saprotroph = 0;
 
         for (int i = 0; i < agents.Count; i++)
         {
@@ -326,14 +399,19 @@ public class ReplicatorManager : MonoBehaviour
             {
                 photo++;
             }
-            else
+            else if (agents[i].metabolism == MetabolismType.SulfurChemosynthesis)
             {
                 chemo++;
+            }
+            else
+            {
+                saprotroph++;
             }
         }
 
         chemosynthAgentCount = chemo;
         photosynthAgentCount = photo;
+        saprotrophAgentCount = saprotroph;
     }
 
 
