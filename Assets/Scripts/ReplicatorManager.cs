@@ -88,7 +88,8 @@ public class ReplicatorManager : MonoBehaviour
     [Range(0.05f, 4f)] public float energyVisualMultiplier = 1f;
     private List<Replicator> agents = new List<Replicator>();
 
-    [SerializeField] private int activeAgentCount;
+    [SerializeField] private int chemosynthAgentCount;
+    [SerializeField] private int photosynthAgentCount;
     private bool isInitialized;
     private float spawnAttemptTimer;
     private bool firstSpontaneousSpawnHappened;
@@ -297,7 +298,29 @@ public class ReplicatorManager : MonoBehaviour
         HandleSpontaneousSpawning();
         RunMovementJob();
         RenderAgents();
-        activeAgentCount = agents.Count;
+        UpdateMetabolismCounts();
+    }
+
+
+    void UpdateMetabolismCounts()
+    {
+        int chemo = 0;
+        int photo = 0;
+
+        for (int i = 0; i < agents.Count; i++)
+        {
+            if (agents[i].metabolism == MetabolismType.Photosynthesis)
+            {
+                photo++;
+            }
+            else
+            {
+                chemo++;
+            }
+        }
+
+        chemosynthAgentCount = chemo;
+        photosynthAgentCount = photo;
     }
 
     void HandleSpontaneousSpawning()
