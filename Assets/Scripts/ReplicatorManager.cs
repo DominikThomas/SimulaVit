@@ -50,6 +50,14 @@ public class ReplicatorManager : MonoBehaviour
     [Tooltip("Energy gained per unit CO2 consumed by photosynthesis.")]
     public float photosynthesisEnergyPerCo2 = 12f;
 
+    [Header("Photosynth Storage/Respiration")]
+    [Tooltip("Fraction of photosynth production stored as organic carbon.")]
+    public float photosynthStoreFraction = 0.3f;
+    public float maxOrganicCStore = 1.0f;
+    public float nightRespirationCPerTick = 0.01f;
+    public float nightRespirationEnergyPerC = 0.05f;
+    public float nightRespirationO2PerC = 0.02f;
+
     [Header("Spawn Resource Bias")]
     public bool biasSpawnsToChemosynthesisResources = true;
     [Range(1, 64)] public int spawnResourceProbeAttempts = 12;
@@ -468,6 +476,7 @@ public class ReplicatorManager : MonoBehaviour
 
             if (agent.age > agent.maxLifespan)
             {
+                DepositDeathOrganicC(agent);
                 agents.RemoveAt(i);
                 continue;
             }
@@ -511,22 +520,53 @@ public class ReplicatorManager : MonoBehaviour
 
             if (agent.metabolism == MetabolismType.Photosynthesis)
             {
-                // Photosynthesis model (simple and stable):
-                // co2Need = maxPerTick * insolation
-                // energyGain = co2Consumed * energyPerCo2
-                // O2 byproduct equals CO2 consumed (1:1 simplified stoichiometry)
                 float insolation = Mathf.Clamp01(planetResourceMap.GetInsolation(dir));
-                float co2Need = Mathf.Max(0f, photosynthesisCo2PerTickAtFullInsolation) * insolation;
-                float co2Available = planetResourceMap.Get(ResourceType.CO2, cellIndex);
-                float co2Consumed = Mathf.Min(co2Need, co2Available);
 
-                if (co2Consumed > 0f)
+                if (insolation > 0f)
                 {
-                    planetResourceMap.Add(ResourceType.CO2, cellIndex, -co2Consumed);
-                    planetResourceMap.Add(ResourceType.O2, cellIndex, co2Consumed);
+                    // Photosynthesis model (simple and stable):
+                    // co2Need = maxPerTick * insolation
+                    // energyGain = co2Consumed * energyPerCo2
+                    // O2 byproduct equals CO2 consumed (1:1 simplified stoichiometry)
+                    float co2Need = Mathf.Max(0f, photosynthesisCo2PerTickAtFullInsolation) * insolation;
+                    float co2Available = planetResourceMap.Get(ResourceType.CO2, cellIndex);
+                    float co2Consumed = Mathf.Min(co2Need, co2Available);
 
-                    float producedEnergy = co2Consumed * Mathf.Max(0f, photosynthesisEnergyPerCo2);
-                    agent.energy += producedEnergy;
+                    if (co2Consumed > 0f)
+                    {
+                        planetResourceMap.Add(ResourceType.CO2, cellIndex, -co2Consumed);
+                        planetResourceMap.Add(ResourceType.O2, cellIndex, co2Consumed);
+
+                        float producedEnergy = co2Consumed * Mathf.Max(0f, photosynthesisEnergyPerCo2);
+                        agent.energy += producedEnergy;
+
+                        float storedOrganicC = Mathf.Max(0f, photosynthStoreFraction) * co2Consumed;
+                        float maxStore = Mathf.Max(0f, maxOrganicCStore);
+                        agent.organicCStore = Mathf.Clamp(agent.organicCStore + storedOrganicC, 0f, maxStore);
+                    }
+                }
+                else if (agent.organicCStore > 0f)
+                {
+                    float cUsed = Mathf.Min(Mathf.Max(0f, nightRespirationCPerTick), agent.organicCStore);
+                    float o2PerC = Mathf.Max(0f, nightRespirationO2PerC);
+
+                    if (cUsed > 0f && o2PerC > 0f)
+                    {
+                        float o2Needed = cUsed * o2PerC;
+                        float o2Available = planetResourceMap.Get(ResourceType.O2, cellIndex);
+                        float o2Ratio = o2Needed <= Mathf.Epsilon ? 1f : Mathf.Clamp01(o2Available / o2Needed);
+                        cUsed *= o2Ratio;
+                    }
+
+                    if (cUsed > 0f)
+                    {
+                        float o2Consumed = Mathf.Max(0f, nightRespirationO2PerC) * cUsed;
+                        planetResourceMap.Add(ResourceType.O2, cellIndex, -o2Consumed);
+                        planetResourceMap.Add(ResourceType.CO2, cellIndex, cUsed);
+
+                        agent.organicCStore = Mathf.Max(0f, agent.organicCStore - cUsed);
+                        agent.energy += cUsed * Mathf.Max(0f, nightRespirationEnergyPerC);
+                    }
                 }
             }
             else
@@ -558,8 +598,33 @@ public class ReplicatorManager : MonoBehaviour
 
             if (agent.energy <= 0f)
             {
+                DepositDeathOrganicC(agent);
                 agents.RemoveAt(i);
             }
+        }
+    }
+
+    void DepositDeathOrganicC(Replicator agent)
+    {
+        if (planetResourceMap == null || planetGenerator == null)
+        {
+            return;
+        }
+
+        float stored = Mathf.Max(0f, agent.organicCStore);
+        if (stored <= 0f)
+        {
+            return;
+        }
+
+        int resolution = Mathf.Max(1, planetGenerator.resolution);
+        int cellIndex = PlanetGridIndexing.DirectionToCellIndex(agent.position.normalized, resolution);
+        float depositFraction = Random.Range(0.5f, 1f);
+        float depositAmount = stored * depositFraction;
+
+        if (depositAmount > 0f)
+        {
+            planetResourceMap.Add(ResourceType.OrganicC, cellIndex, depositAmount);
         }
     }
 

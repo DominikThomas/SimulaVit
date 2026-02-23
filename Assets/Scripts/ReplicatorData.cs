@@ -34,6 +34,8 @@ public class Replicator
     public Traits traits;
     public float energy;
     public float size;
+    public float organicCStore;
+    public float speedFactor;
     public MetabolismType metabolism;
 
     // Movement data
@@ -52,6 +54,8 @@ public class Replicator
         this.movementSeed = movementSeed;
         energy = 0f;
         size = 1f;
+        organicCStore = 0f;
+        speedFactor = 1f;
         age = 0;
         this.metabolism = metabolism;
         currentDirection = pos.normalized;
