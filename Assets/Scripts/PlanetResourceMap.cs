@@ -43,6 +43,13 @@ public class PlanetResourceMap : MonoBehaviour
     [Range(0f, 1f)] public float ventThreshold = 0.75f;
     public float ventStrength = 2f;
 
+    [Header("Vents")]
+    public bool enableVentReplenishment = true;
+    public float ventTickSeconds = 0.5f;
+    public float ventH2SPerTick = 0.02f;
+    public float ventH2SMax = 1.0f;
+    public bool ventsOnlyBelowSeaLevel = false;
+
     [Header("Debug Preview")]
     public ResourceType debugViewType = ResourceType.CO2;
     public Gradient debugGradient;
@@ -54,6 +61,9 @@ public class PlanetResourceMap : MonoBehaviour
     [Range(1, 256)] public int debugLabelMaxPoints = 48;
     [Tooltip("If enabled, colors are normalized against per-resource expected ranges instead of current frame min/max.")]
     public bool debugUseAbsoluteScale = true;
+    [Tooltip("Draws known vent cells in a distinct color.")]
+    public bool drawVentDebugPoints = false;
+    public Color ventDebugColor = Color.magenta;
 
     private int resolution;
     private Vector3[] cellDirections;
@@ -68,6 +78,11 @@ public class PlanetResourceMap : MonoBehaviour
     private float[] ca;
 
     private bool isInitialized;
+    private byte[] ventMask;
+    private int[] ventCells;
+    private float ventTimer;
+
+    public int VentCount => ventCells != null ? ventCells.Length : 0;
 
     private void Awake()
     {
@@ -97,6 +112,23 @@ public class PlanetResourceMap : MonoBehaviour
     private void Start()
     {
         InitializeIfNeeded();
+    }
+
+    private void Update()
+    {
+        if (!isInitialized || !enableVentReplenishment)
+        {
+            return;
+        }
+
+        float tickSeconds = Mathf.Max(0.0001f, ventTickSeconds);
+        ventTimer += Time.deltaTime;
+
+        while (ventTimer >= tickSeconds)
+        {
+            ventTimer -= tickSeconds;
+            ApplyVentReplenishment();
+        }
     }
 
     public float Get(ResourceType t, int cell)
@@ -176,7 +208,9 @@ public class PlanetResourceMap : MonoBehaviour
         si = new float[cellCount];
         ca = new float[cellCount];
         cellDirections = new Vector3[cellCount];
+        ventMask = new byte[cellCount];
 
+        int ventCount = 0;
         for (int cell = 0; cell < cellCount; cell++)
         {
             Vector3 dir = CellIndexToDirection(cell, resolution);
@@ -197,10 +231,76 @@ public class PlanetResourceMap : MonoBehaviour
             ca[cell] = Mathf.Max(0f, baselineCa + calciumPatchScale * (calciumNoise - 0.5f));
 
             float ventNoise = HighFrequencyNoise(dir);
-            h2s[cell] = ventNoise > ventThreshold ? (ventNoise - ventThreshold) * ventStrength : 0f;
+            bool isVent = ventNoise > ventThreshold;
+            h2s[cell] = isVent ? (ventNoise - ventThreshold) * ventStrength : 0f;
+
+            if (isVent)
+            {
+                ventMask[cell] = 1;
+                ventCount++;
+            }
         }
 
+        ventCells = new int[ventCount];
+        int ventWrite = 0;
+        for (int cell = 0; cell < cellCount; cell++)
+        {
+            if (ventMask[cell] != 0)
+            {
+                ventCells[ventWrite++] = cell;
+            }
+        }
+
+        ventTimer = 0f;
         isInitialized = true;
+        Debug.Log($"Initialized {VentCount} vents", this);
+    }
+
+    private void ApplyVentReplenishment()
+    {
+        if (!enableVentReplenishment || !isInitialized || ventCells == null || ventCells.Length == 0)
+        {
+            return;
+        }
+
+        float perTick = Mathf.Max(0f, ventH2SPerTick);
+        if (Mathf.Approximately(perTick, 0f))
+        {
+            return;
+        }
+
+        bool applyCap = ventH2SMax > 0f;
+        float oceanRadius = 0f;
+        if (ventsOnlyBelowSeaLevel && planetGenerator != null)
+        {
+            oceanRadius = planetGenerator.GetOceanRadius();
+        }
+
+        for (int i = 0; i < ventCells.Length; i++)
+        {
+            int cell = ventCells[i];
+
+            if (ventsOnlyBelowSeaLevel)
+            {
+                if (planetGenerator == null)
+                {
+                    continue;
+                }
+
+                Vector3 dir = cellDirections[cell];
+                float surfaceRadius = planetGenerator.GetSurfaceRadius(dir);
+                if (surfaceRadius >= oceanRadius)
+                {
+                    continue;
+                }
+            }
+
+            Add(ResourceType.H2S, cell, perTick);
+            if (applyCap)
+            {
+                h2s[cell] = Mathf.Min(h2s[cell], ventH2SMax);
+            }
+        }
     }
 
     private float SampleResourceNoise(Vector3 dir, Vector3 offset)
@@ -335,6 +435,9 @@ public class PlanetResourceMap : MonoBehaviour
         }
 
         EnsureDebugGradient();
+
+        ventTickSeconds = Mathf.Max(0.0001f, ventTickSeconds);
+        ventH2SPerTick = Mathf.Max(0f, ventH2SPerTick);
     }
 
 
@@ -421,6 +524,12 @@ public class PlanetResourceMap : MonoBehaviour
                 Handles.Label(world + dir * (debugPointSize * 1.6f), BuildDebugLabelText(i));
             }
 #endif
+
+            if (drawVentDebugPoints && ventMask != null && ventMask[i] != 0)
+            {
+                Gizmos.color = ventDebugColor;
+                Gizmos.DrawWireSphere(world, debugPointSize * 1.25f);
+            }
         }
     }
 }
