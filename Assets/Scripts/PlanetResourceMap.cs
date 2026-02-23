@@ -51,6 +51,16 @@ public class PlanetResourceMap : MonoBehaviour
     public float ventH2SMax = 1.0f;
     public bool ventsOnlyBelowSeaLevel = false;
 
+    [Header("Atmosphere Mixing")]
+    public bool enableAtmosphereMixing = true;
+    public float atmosphereTickSeconds = 0.5f;
+    public float landExchangeRate = 0.25f;
+    public float oceanExchangeRate = 0.05f;
+
+    [Header("Atmosphere Debug")]
+    public float debugGlobalCO2;
+    public float debugGlobalO2;
+
     [Header("Debug Preview")]
     public ResourceType debugViewType = ResourceType.CO2;
     public Gradient debugGradient;
@@ -82,7 +92,9 @@ public class PlanetResourceMap : MonoBehaviour
     private bool isInitialized;
     private byte[] ventMask;
     private int[] ventCells;
+    private byte[] oceanMask;
     private float ventTimer;
+    private float atmosphereTimer;
 
     public int VentCount => ventCells != null ? ventCells.Length : 0;
 
@@ -118,18 +130,33 @@ public class PlanetResourceMap : MonoBehaviour
 
     private void Update()
     {
-        if (!isInitialized || !enableVentReplenishment)
+        if (!isInitialized)
         {
             return;
         }
 
-        float tickSeconds = Mathf.Max(0.0001f, ventTickSeconds);
-        ventTimer += Time.deltaTime;
-
-        while (ventTimer >= tickSeconds)
+        if (enableVentReplenishment)
         {
-            ventTimer -= tickSeconds;
-            ApplyVentReplenishment();
+            float ventTick = Mathf.Max(0.0001f, ventTickSeconds);
+            ventTimer += Time.deltaTime;
+
+            while (ventTimer >= ventTick)
+            {
+                ventTimer -= ventTick;
+                ApplyVentReplenishment();
+            }
+        }
+
+        if (enableAtmosphereMixing)
+        {
+            float atmosphereTick = Mathf.Max(0.0001f, atmosphereTickSeconds);
+            atmosphereTimer += Time.deltaTime;
+
+            while (atmosphereTimer >= atmosphereTick)
+            {
+                atmosphereTimer -= atmosphereTick;
+                ApplyAtmosphereMixing();
+            }
         }
     }
 
@@ -161,15 +188,12 @@ public class PlanetResourceMap : MonoBehaviour
 
     public bool IsOceanCell(int cell)
     {
-        if (!isInitialized || !IsCellValid(cell) || planetGenerator == null || cellDirections == null)
+        if (!isInitialized || !IsCellValid(cell) || oceanMask == null)
         {
             return false;
         }
 
-        Vector3 dir = cellDirections[cell];
-        float oceanRadius = planetGenerator.GetOceanRadius();
-        float surfaceRadius = planetGenerator.GetSurfaceRadius(dir);
-        return surfaceRadius < oceanRadius;
+        return oceanMask[cell] != 0;
     }
 
     /// <summary>
@@ -230,12 +254,17 @@ public class PlanetResourceMap : MonoBehaviour
         ca = new float[cellCount];
         cellDirections = new Vector3[cellCount];
         ventMask = new byte[cellCount];
+        oceanMask = new byte[cellCount];
 
         int ventCount = 0;
+        float oceanRadius = planetGenerator.GetOceanRadius();
         for (int cell = 0; cell < cellCount; cell++)
         {
             Vector3 dir = CellIndexToDirection(cell, resolution);
             cellDirections[cell] = dir;
+
+            float surfaceRadius = planetGenerator.GetSurfaceRadius(dir);
+            oceanMask[cell] = surfaceRadius < oceanRadius ? (byte)1 : (byte)0;
 
             co2[cell] = baselineCO2;
             o2[cell] = baselineO2;
@@ -274,8 +303,77 @@ public class PlanetResourceMap : MonoBehaviour
         }
 
         ventTimer = 0f;
+        atmosphereTimer = 0f;
+        UpdateAtmosphereDebugMeans();
         isInitialized = true;
         Debug.Log($"Initialized {VentCount} vents", this);
+    }
+
+    private void ApplyAtmosphereMixing()
+    {
+        if (!enableAtmosphereMixing || !isInitialized || co2 == null || o2 == null || oceanMask == null)
+        {
+            return;
+        }
+
+        int cellCount = co2.Length;
+        if (cellCount == 0)
+        {
+            debugGlobalCO2 = 0f;
+            debugGlobalO2 = 0f;
+            return;
+        }
+
+        float totalCO2 = 0f;
+        float totalO2 = 0f;
+        for (int cell = 0; cell < cellCount; cell++)
+        {
+            totalCO2 += co2[cell];
+            totalO2 += o2[cell];
+        }
+
+        float invCellCount = 1f / cellCount;
+        float globalCO2 = totalCO2 * invCellCount;
+        float globalO2 = totalO2 * invCellCount;
+
+        float landRate = Mathf.Max(0f, landExchangeRate);
+        float oceanRate = Mathf.Max(0f, oceanExchangeRate);
+
+        for (int cell = 0; cell < cellCount; cell++)
+        {
+            float exchangeRate = oceanMask[cell] != 0 ? oceanRate : landRate;
+
+            float mixedCO2 = co2[cell] + exchangeRate * (globalCO2 - co2[cell]);
+            float mixedO2 = o2[cell] + exchangeRate * (globalO2 - o2[cell]);
+
+            co2[cell] = Mathf.Max(0f, mixedCO2);
+            o2[cell] = Mathf.Max(0f, mixedO2);
+        }
+
+        debugGlobalCO2 = globalCO2;
+        debugGlobalO2 = globalO2;
+    }
+
+    private void UpdateAtmosphereDebugMeans()
+    {
+        if (co2 == null || o2 == null || co2.Length == 0)
+        {
+            debugGlobalCO2 = 0f;
+            debugGlobalO2 = 0f;
+            return;
+        }
+
+        float totalCO2 = 0f;
+        float totalO2 = 0f;
+        for (int cell = 0; cell < co2.Length; cell++)
+        {
+            totalCO2 += co2[cell];
+            totalO2 += o2[cell];
+        }
+
+        float invCellCount = 1f / co2.Length;
+        debugGlobalCO2 = totalCO2 * invCellCount;
+        debugGlobalO2 = totalO2 * invCellCount;
     }
 
     private void ApplyVentReplenishment()
@@ -461,6 +559,9 @@ public class PlanetResourceMap : MonoBehaviour
 
         ventTickSeconds = Mathf.Max(0.0001f, ventTickSeconds);
         ventH2SPerTick = Mathf.Max(0f, ventH2SPerTick);
+        atmosphereTickSeconds = Mathf.Max(0.0001f, atmosphereTickSeconds);
+        landExchangeRate = Mathf.Max(0f, landExchangeRate);
+        oceanExchangeRate = Mathf.Max(0f, oceanExchangeRate);
     }
 
 
