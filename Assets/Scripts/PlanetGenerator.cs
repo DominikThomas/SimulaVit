@@ -32,7 +32,7 @@ public class PlanetGenerator : MonoBehaviour
 
     [Header("Biology Unlocks")]
     [Tooltip("Seconds after simulation start when Photosynthesis mutation becomes possible.")]
-    public float photosynthesisUnlockSeconds = 60f;
+    public float photosynthesisUnlockSeconds = 30f;
 
     private MeshFilter meshFilter;
     private Mesh mesh;
