@@ -40,8 +40,8 @@ public class PlanetResourceMap : MonoBehaviour
 
     [Header("H2S Vent Spots")]
     public float ventFrequency = 12f;
-    [Range(0f, 1f)] public float ventThreshold = 0.84f;
-    public float ventStrength = 1.2f;
+    [Range(0f, 1f)] public float ventThreshold = 0.75f;
+    public float ventStrength = 2f;
 
     [Header("Debug Preview")]
     public ResourceType debugViewType = ResourceType.CO2;
