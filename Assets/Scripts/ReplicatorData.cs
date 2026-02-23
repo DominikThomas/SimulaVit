@@ -26,6 +26,8 @@ public class Replicator
     public float maxLifespan;
     public Color color;
     public Traits traits;
+    public float energy;
+    public float size;
 
     // Movement data
     public Vector3 velocity;
@@ -41,6 +43,8 @@ public class Replicator
         color = col;
         this.traits = traits;
         this.movementSeed = movementSeed;
+        energy = 0f;
+        size = 1f;
         age = 0;
         currentDirection = pos.normalized;
     }

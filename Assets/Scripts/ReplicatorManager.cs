@@ -9,6 +9,8 @@ public class ReplicatorManager : MonoBehaviour
     public Mesh replicatorMesh;
     public Material replicatorMaterial;
     public PlanetGenerator planetGenerator;
+    [Tooltip("Required. If left empty, the manager will try to auto-find a PlanetResourceMap in the scene.")]
+    public PlanetResourceMap planetResourceMap;
 
     [Header("Population")]
     public int initialSpawnCount = 100;
@@ -26,6 +28,27 @@ public class ReplicatorManager : MonoBehaviour
 
     public float minLifespan = 30f;
     public float maxLifespan = 60f;
+
+    [Header("Metabolism")]
+    public float metabolismTickSeconds = 0.5f;
+    public float moveEnergyCostPerSecond = 0.05f;
+    public float replicationEnergyCost = 0.5f;
+    public float basalEnergyCostPerSecond = 0.01f;
+    [Tooltip("CO2 consumed per metabolism tick for default chemosynthesis.")]
+    public float chemosynthesisCo2NeedPerTick = 0.02f;
+    [Tooltip("H2S consumed per metabolism tick for default chemosynthesis. Kept low because H2S is vent-localized.")]
+    public float chemosynthesisH2sNeedPerTick = 0.001f;
+    [Tooltip("Energy granted when one full chemosynthesis reaction tick is completed.")]
+    public float chemosynthesisEnergyPerTick = 0.3f;
+
+    [Header("Spawn Resource Bias")]
+    public bool biasSpawnsToChemosynthesisResources = true;
+    [Range(1, 64)] public int spawnResourceProbeAttempts = 12;
+    [Tooltip("How strongly spontaneous/initial spawn chance scales with local H2S.")]
+    public float h2sSpawnBiasWeight = 2.5f;
+    [Tooltip("How strongly spontaneous/initial spawn chance scales with local CO2.")]
+    public float co2SpawnBiasWeight = 0.5f;
+
 
     [Header("Spontaneous Spawning")]
     [Tooltip("Keeps attempting random world spawns even when all replicators die out.")]
@@ -55,12 +78,15 @@ public class ReplicatorManager : MonoBehaviour
     public float defaultSurfaceMoveSpeedMultiplier = 0.4f;
 
     [Header("Debug")]
+    public bool colorByEnergy = false;
+    [Range(0.05f, 4f)] public float energyVisualMultiplier = 1f;
     private List<Replicator> agents = new List<Replicator>();
 
     [SerializeField] private int activeAgentCount;
     private bool isInitialized;
     private float spawnAttemptTimer;
     private bool firstSpontaneousSpawnHappened;
+    private float metabolismTickTimer;
 
     // Arrays for Batching
     private Matrix4x4[] matrixBatch = new Matrix4x4[1023];
@@ -203,11 +229,49 @@ public class ReplicatorManager : MonoBehaviour
         }
     }
 
+    void ResolvePlanetResourceMapReference()
+    {
+        if (planetGenerator == null)
+        {
+            planetGenerator = GetComponent<PlanetGenerator>();
+        }
+
+        if (planetGenerator == null)
+        {
+            planetGenerator = FindObjectOfType<PlanetGenerator>();
+        }
+
+        if (planetResourceMap != null)
+        {
+            return;
+        }
+
+        planetResourceMap = GetComponent<PlanetResourceMap>();
+
+        if (planetResourceMap == null && planetGenerator != null)
+        {
+            planetResourceMap = planetGenerator.GetComponent<PlanetResourceMap>();
+
+            if (planetResourceMap == null)
+            {
+                planetResourceMap = planetGenerator.gameObject.AddComponent<PlanetResourceMap>();
+                Debug.Log("ReplicatorManager auto-added PlanetResourceMap to the PlanetGenerator object.", planetGenerator);
+            }
+        }
+
+        if (planetResourceMap == null)
+        {
+            planetResourceMap = FindObjectOfType<PlanetResourceMap>();
+        }
+    }
+
     void Start()
     {
-        if (replicatorMesh == null || replicatorMaterial == null || planetGenerator == null)
+        ResolvePlanetResourceMapReference();
+
+        if (replicatorMesh == null || replicatorMaterial == null || planetGenerator == null || planetResourceMap == null)
         {
-            Debug.LogError("ReplicatorManager is missing required references (mesh/material/planetGenerator).", this);
+            Debug.LogError("ReplicatorManager is missing required references (mesh/material/planetGenerator/planetResourceMap). Assign PlanetResourceMap in Inspector. It can also be auto-added to the PlanetGenerator object if one exists in scene.", this);
             enabled = false;
             return;
         }
@@ -223,6 +287,7 @@ public class ReplicatorManager : MonoBehaviour
         if (!isInitialized) return;
 
         UpdateLifecycle();
+        TickMetabolism();
         HandleSpontaneousSpawning();
         RunMovementJob();
         RenderAgents();
@@ -259,7 +324,7 @@ public class ReplicatorManager : MonoBehaviour
     {
         if (agents.Count >= maxPopulation) return false;
 
-        Vector3 randomDir = Random.onUnitSphere;
+        Vector3 randomDir = GetSpawnDirectionCandidate();
         bool isSeaLocation = IsSeaLocation(randomDir);
 
         float locationMultiplier = GetLocationSpawnMultiplier(isSeaLocation);
@@ -271,6 +336,49 @@ public class ReplicatorManager : MonoBehaviour
         }
 
         return SpawnAgentAtDirection(randomDir, CreateDefaultTraits(), null);
+    }
+
+
+    Vector3 GetSpawnDirectionCandidate()
+    {
+        if (!biasSpawnsToChemosynthesisResources || planetResourceMap == null || planetGenerator == null)
+        {
+            return Random.onUnitSphere;
+        }
+
+        int attempts = Mathf.Max(1, spawnResourceProbeAttempts);
+        Vector3 bestDirection = Random.onUnitSphere;
+        float bestScore = -1f;
+
+        for (int i = 0; i < attempts; i++)
+        {
+            Vector3 candidate = Random.onUnitSphere;
+            float score = GetChemosynthesisSpawnScore(candidate);
+            if (score > bestScore)
+            {
+                bestScore = score;
+                bestDirection = candidate;
+            }
+        }
+
+        return bestDirection;
+    }
+
+    float GetChemosynthesisSpawnScore(Vector3 direction)
+    {
+        int resolution = Mathf.Max(1, planetGenerator.resolution);
+        int cellIndex = PlanetGridIndexing.DirectionToCellIndex(direction.normalized, resolution);
+
+        float co2Need = Mathf.Max(0.0001f, chemosynthesisCo2NeedPerTick);
+        float h2sNeed = Mathf.Max(0.0001f, chemosynthesisH2sNeedPerTick);
+
+        float co2Availability = planetResourceMap.Get(ResourceType.CO2, cellIndex) / co2Need;
+        float h2sAvailability = planetResourceMap.Get(ResourceType.H2S, cellIndex) / h2sNeed;
+
+        float weighted = (Mathf.Max(0f, co2SpawnBiasWeight) * co2Availability)
+                       + (Mathf.Max(0f, h2sSpawnBiasWeight) * h2sAvailability);
+
+        return weighted;
     }
 
     float GetLocationSpawnMultiplier(bool isSeaLocation)
@@ -316,11 +424,68 @@ public class ReplicatorManager : MonoBehaviour
             }
 
             float lifeRemaining = agent.maxLifespan - agent.age;
-            agent.color = CalculateAgentColor(agent.age, lifeRemaining);
+            agent.color = CalculateAgentColor(agent.age, lifeRemaining, agent.energy);
 
-            if (Random.value < reproductionChance)
+            if (Random.value < reproductionChance && agent.energy >= replicationEnergyCost)
             {
-                SpawnAgentFromPopulation(agent);
+                if (SpawnAgentFromPopulation(agent))
+                {
+                    agent.energy = Mathf.Max(0f, agent.energy - replicationEnergyCost);
+                }
+            }
+        }
+    }
+
+
+    void TickMetabolism()
+    {
+        float tick = Mathf.Max(0.01f, metabolismTickSeconds);
+        metabolismTickTimer += Time.deltaTime;
+
+        while (metabolismTickTimer >= tick)
+        {
+            metabolismTickTimer -= tick;
+            MetabolismTick(tick);
+        }
+    }
+
+    void MetabolismTick(float dtTick)
+    {
+        int resolution = Mathf.Max(1, planetGenerator.resolution);
+        float totalCost = (Mathf.Max(0f, basalEnergyCostPerSecond) + Mathf.Max(0f, moveEnergyCostPerSecond)) * dtTick;
+
+        for (int i = agents.Count - 1; i >= 0; i--)
+        {
+            Replicator agent = agents[i];
+            int cellIndex = PlanetGridIndexing.DirectionToCellIndex(agent.position.normalized, resolution);
+
+            float co2Need = Mathf.Max(0f, chemosynthesisCo2NeedPerTick);
+            float h2sNeed = Mathf.Max(0f, chemosynthesisH2sNeedPerTick);
+
+            float co2Available = planetResourceMap.Get(ResourceType.CO2, cellIndex);
+            float h2sAvailable = planetResourceMap.Get(ResourceType.H2S, cellIndex);
+            float co2Ratio = co2Need <= Mathf.Epsilon ? 1f : co2Available / co2Need;
+            float h2sRatio = h2sNeed <= Mathf.Epsilon ? 1f : h2sAvailable / h2sNeed;
+            float pulledRatio = Mathf.Clamp01(Mathf.Min(co2Ratio, h2sRatio));
+
+            if (pulledRatio > 0f)
+            {
+                float co2Consumed = co2Need * pulledRatio;
+                float h2sConsumed = h2sNeed * pulledRatio;
+
+                planetResourceMap.Add(ResourceType.CO2, cellIndex, -co2Consumed);
+                planetResourceMap.Add(ResourceType.H2S, cellIndex, -h2sConsumed);
+                planetResourceMap.Add(ResourceType.S0, cellIndex, h2sConsumed);
+
+                float producedEnergy = Mathf.Max(0f, chemosynthesisEnergyPerTick) * pulledRatio;
+                agent.energy += producedEnergy;
+            }
+
+            agent.energy -= totalCost;
+
+            if (agent.energy <= 0f)
+            {
+                agents.RemoveAt(i);
             }
         }
     }
@@ -395,6 +560,16 @@ public class ReplicatorManager : MonoBehaviour
         jobMovementSeeds = new NativeArray<float>(jobCapacity, Allocator.Persistent);
     }
 
+    void Reset()
+    {
+        if (planetGenerator == null)
+        {
+            planetGenerator = FindObjectOfType<PlanetGenerator>();
+        }
+
+        ResolvePlanetResourceMapReference();
+    }
+
     void OnDestroy()
     {
         if (jobPositions.IsCreated) jobPositions.Dispose();
@@ -422,7 +597,8 @@ public class ReplicatorManager : MonoBehaviour
     bool SpawnAgentAtRandomLocation()
     {
         if (agents.Count >= maxPopulation) return false;
-        return SpawnAgentAtDirection(Random.onUnitSphere, CreateDefaultTraits(), null);
+        Vector3 dir = GetSpawnDirectionCandidate();
+        return SpawnAgentAtDirection(dir, CreateDefaultTraits(), null);
     }
 
     bool SpawnAgentAtDirection(Vector3 direction, Replicator.Traits traits, Replicator parent)
@@ -451,6 +627,8 @@ public class ReplicatorManager : MonoBehaviour
         float movementSeed = Random.Range(-1000f, 1000f);
         Replicator newAgent = new Replicator(spawnPosition, spawnRotation, newLifespan, baseAgentColor, traits, movementSeed);
         newAgent.age = parent == null ? Random.Range(0f, newLifespan * 0.5f) : 0f;
+        newAgent.energy = parent == null ? Random.Range(0.1f, 0.5f) : Mathf.Max(0.1f, parent.energy * 0.5f);
+        newAgent.size = 1f;
 
         agents.Add(newAgent);
         return true;
@@ -497,7 +675,7 @@ public class ReplicatorManager : MonoBehaviour
         return displacement + 0.05f;
     }
 
-    Color CalculateAgentColor(float age, float lifeRemaining)
+    Color CalculateAgentColor(float age, float lifeRemaining, float energy)
     {
         float intensity = 1.0f;
         float alpha = 1.0f;
@@ -514,6 +692,12 @@ public class ReplicatorManager : MonoBehaviour
             intensity = Mathf.Lerp(8.0f, 1.0f, t);
         }
 
+        if (colorByEnergy)
+        {
+            float energyScale = Mathf.Clamp01(energy * energyVisualMultiplier);
+            intensity *= Mathf.Lerp(0.2f, 1.5f, energyScale);
+        }
+
         Color finalColor = baseAgentColor * intensity;
         finalColor.a = alpha;
         return finalColor;
@@ -527,7 +711,7 @@ public class ReplicatorManager : MonoBehaviour
         for (int i = 0; i < totalAgents; i++)
         {
             Replicator a = agents[i];
-            matrixBatch[batchCount] = Matrix4x4.TRS(a.position, a.rotation, Vector3.one * 0.1f);
+            matrixBatch[batchCount] = Matrix4x4.TRS(a.position, a.rotation, Vector3.one * (0.1f * Mathf.Max(0.1f, a.size)));
             colorBatch[batchCount] = a.color;
             batchCount++;
 

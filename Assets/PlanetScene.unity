@@ -530,6 +530,7 @@ MonoBehaviour:
   replicatorMesh: {fileID: 10207, guid: 0000000000000000e000000000000000, type: 0}
   replicatorMaterial: {fileID: 2100000, guid: a9e716d40c93b5146914146207f7287a, type: 2}
   planetGenerator: {fileID: 382753102}
+  planetResourceMap: {fileID: 0}
   initialSpawnCount: 2
   maxPopulation: 50000
   baseAgentColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
@@ -539,6 +540,17 @@ MonoBehaviour:
   reproductionRate: 0.1
   minLifespan: 30
   maxLifespan: 60
+  metabolismTickSeconds: 0.5
+  moveEnergyCostPerSecond: 0.05
+  replicationEnergyCost: 0.5
+  basalEnergyCostPerSecond: 0.01
+  chemosynthesisCo2NeedPerTick: 0.02
+  chemosynthesisH2sNeedPerTick: 0.001
+  chemosynthesisEnergyPerTick: 0.7
+  biasSpawnsToChemosynthesisResources: 1
+  spawnResourceProbeAttempts: 12
+  h2sSpawnBiasWeight: 2.5
+  co2SpawnBiasWeight: 0.5
   enableSpontaneousSpawning: 1
   spawnAttemptInterval: 1
   spontaneousSpawnChance: 0.5
@@ -548,6 +560,8 @@ MonoBehaviour:
   defaultReplicateOnlyInSea: 1
   defaultMoveOnlyInSea: 0
   defaultSurfaceMoveSpeedMultiplier: 0.4
+  colorByEnergy: 0
+  energyVisualMultiplier: 1
   activeAgentCount: 0
 --- !u!4 &1064713444
 Transform:

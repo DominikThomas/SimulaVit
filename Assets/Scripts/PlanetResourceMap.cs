@@ -1,4 +1,7 @@
 using UnityEngine;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 public enum ResourceType
 {
@@ -37,8 +40,8 @@ public class PlanetResourceMap : MonoBehaviour
 
     [Header("H2S Vent Spots")]
     public float ventFrequency = 12f;
-    [Range(0f, 1f)] public float ventThreshold = 0.84f;
-    public float ventStrength = 1.2f;
+    [Range(0f, 1f)] public float ventThreshold = 0.75f;
+    public float ventStrength = 2f;
 
     [Header("Debug Preview")]
     public ResourceType debugViewType = ResourceType.CO2;
@@ -46,6 +49,11 @@ public class PlanetResourceMap : MonoBehaviour
     public bool drawDebugPoints = true;
     [Range(8, 8192)] public int debugMaxPoints = 512;
     public float debugPointSize = 0.05f;
+    [Tooltip("Show text labels with per-tile values for sampled debug points (Scene view only).")]
+    public bool drawDebugLabels = false;
+    [Range(1, 256)] public int debugLabelMaxPoints = 48;
+    [Tooltip("If enabled, colors are normalized against per-resource expected ranges instead of current frame min/max.")]
+    public bool debugUseAbsoluteScale = true;
 
     private int resolution;
     private Vector3[] cellDirections;
@@ -329,6 +337,40 @@ public class PlanetResourceMap : MonoBehaviour
         EnsureDebugGradient();
     }
 
+
+    private string BuildDebugLabelText(int cellIndex)
+    {
+        return $"{debugViewType}: {Get(debugViewType, cellIndex):0.###}\nCO2: {Get(ResourceType.CO2, cellIndex):0.###}\nH2S: {Get(ResourceType.H2S, cellIndex):0.###}\nS0: {Get(ResourceType.S0, cellIndex):0.###}";
+    }
+
+
+    private float GetAbsoluteDebugMax(ResourceType type)
+    {
+        switch (type)
+        {
+            case ResourceType.CO2: return Mathf.Max(0.0001f, baselineCO2);
+            case ResourceType.O2: return Mathf.Max(0.0001f, baselineO2);
+            case ResourceType.H2S: return Mathf.Max(0.0001f, ventStrength);
+            case ResourceType.S0: return Mathf.Max(0.0001f, baselineS0);
+            case ResourceType.P: return Mathf.Max(0.0001f, phosphorusScale);
+            case ResourceType.Fe: return Mathf.Max(0.0001f, ironScale);
+            case ResourceType.Si: return Mathf.Max(0.0001f, baselineSi + siliconPatchScale);
+            case ResourceType.Ca: return Mathf.Max(0.0001f, baselineCa + calciumPatchScale);
+            default: return 1f;
+        }
+    }
+
+    private float GetDebugColorT(float value, float minValue, float range)
+    {
+        if (!debugUseAbsoluteScale)
+        {
+            return (value - minValue) / range;
+        }
+
+        float absoluteMax = GetAbsoluteDebugMax(debugViewType);
+        return Mathf.Clamp01(value / absoluteMax);
+    }
+
     private void OnDrawGizmosSelected()
     {
         if (!drawDebugPoints)
@@ -360,15 +402,25 @@ public class PlanetResourceMap : MonoBehaviour
         float range = Mathf.Max(0.0001f, maxValue - minValue);
         int stride = Mathf.Max(1, Mathf.CeilToInt((float)array.Length / Mathf.Max(1, debugMaxPoints)));
 
+        int labelStride = Mathf.Max(1, Mathf.CeilToInt((float)array.Length / Mathf.Max(1, debugLabelMaxPoints)));
+
         for (int i = 0; i < array.Length; i += stride)
         {
-            float t = (array[i] - minValue) / range;
+            float t = GetDebugColorT(array[i], minValue, range);
             Gizmos.color = debugGradient.Evaluate(t);
 
             Vector3 dir = cellDirections[i];
             float surfaceRadius = planetGenerator != null ? planetGenerator.GetSurfaceRadius(dir) : 1f;
             Vector3 world = transform.position + dir * surfaceRadius;
             Gizmos.DrawSphere(world, debugPointSize);
+
+#if UNITY_EDITOR
+            if (drawDebugLabels && i % labelStride == 0)
+            {
+                Handles.color = Gizmos.color;
+                Handles.Label(world + dir * (debugPointSize * 1.6f), BuildDebugLabelText(i));
+            }
+#endif
         }
     }
 }
