@@ -360,7 +360,7 @@ public class ReplicatorManager : MonoBehaviour
             replicatorsText += $"\n<color=#62B0FF>Saprotroph:</color> {saprotrophAgentCount} ({saprotrophPct:0.0}%)";
         }
 
-        const float panelWidth = 270f;
+        const float panelWidth = 189f;
         const float padding = 8f;
         const float lineHeight = 16f;
         float rightX = Screen.width - panelWidth - padding;
