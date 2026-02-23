@@ -34,6 +34,11 @@ public class ReplicatorManager : MonoBehaviour
     public float moveEnergyCostPerSecond = 0.05f;
     public float replicationEnergyCost = 0.5f;
     public float basalEnergyCostPerSecond = 0.01f;
+
+    [Header("Energy -> Speed")]
+    public float energyForFullSpeed = 0.5f;
+    public float minSpeedFactor = 0.15f;
+
     [Tooltip("CO2 consumed per metabolism tick for default chemosynthesis.")]
     public float chemosynthesisCo2NeedPerTick = 0.02f;
     [Tooltip("H2S consumed per metabolism tick for default chemosynthesis. Kept low because H2S is vent-localized.")]
@@ -57,6 +62,12 @@ public class ReplicatorManager : MonoBehaviour
     public float nightRespirationCPerTick = 0.01f;
     public float nightRespirationEnergyPerC = 0.05f;
     public float nightRespirationO2PerC = 0.02f;
+
+    [Header("Saprotrophy")]
+    [Range(0f, 1f)] public float saprotrophyMutationChance = 0.005f;
+    public float saproCPerTick = 0.02f;
+    public float saproO2PerC = 0.02f;
+    public float saproEnergyPerC = 0.06f;
 
     [Header("Spawn Resource Bias")]
     public bool biasSpawnsToChemosynthesisResources = true;
@@ -124,6 +135,7 @@ public class ReplicatorManager : MonoBehaviour
     private NativeArray<bool> jobMoveOnlyInSea;
     private NativeArray<float> jobSurfaceMoveSpeedMultipliers;
     private NativeArray<float> jobMovementSeeds;
+    private NativeArray<float> jobSpeedFactors;
     private int jobCapacity;
 
     // Cache shader property IDs once.
@@ -139,6 +151,7 @@ public class ReplicatorManager : MonoBehaviour
         public NativeArray<bool> MoveOnlyInSea;
         public NativeArray<float> SurfaceMoveSpeedMultipliers;
         public NativeArray<float> MovementSeeds;
+        public NativeArray<float> SpeedFactors;
 
         // Simulation parameters
         public float DeltaTime;
@@ -181,8 +194,9 @@ public class ReplicatorManager : MonoBehaviour
             float currentNoise = CalculateNoise(surfaceNormal);
             bool currentlyInSea = !OceanEnabled || currentNoise < OceanThreshold;
             float speedMultiplier = currentlyInSea ? 1f : SurfaceMoveSpeedMultipliers[index];
+            float speedFactor = SpeedFactors[index];
 
-            Quaternion travelRot = Quaternion.AngleAxis((MoveSpeed * speedMultiplier) * DeltaTime / Radius, Vector3.Cross(surfaceNormal, forward));
+            Quaternion travelRot = Quaternion.AngleAxis((MoveSpeed * speedMultiplier * speedFactor) * DeltaTime / Radius, Vector3.Cross(surfaceNormal, forward));
 
             // Get the new direction vector (normalized)
             Vector3 newDirection = (travelRot * pos).normalized;
@@ -413,7 +427,7 @@ public class ReplicatorManager : MonoBehaviour
     {
         int chemo = 0;
         int photo = 0;
-        int saprotroph = 0;
+        int sapro = 0;
 
         for (int i = 0; i < agents.Count; i++)
         {
@@ -427,13 +441,13 @@ public class ReplicatorManager : MonoBehaviour
             }
             else
             {
-                saprotroph++;
+                sapro++;
             }
         }
 
         chemosynthAgentCount = chemo;
         photosynthAgentCount = photo;
-        saprotrophAgentCount = saprotroph;
+        saprotrophAgentCount = sapro;
     }
 
 
@@ -448,7 +462,7 @@ public class ReplicatorManager : MonoBehaviour
 
         metabolismDebugLogTimer = 0f;
         bool unlocked = planetGenerator != null && planetGenerator.PhotosynthesisUnlocked;
-        Debug.Log($"Metabolism: chemo={chemosynthAgentCount} photo={photosynthAgentCount} unlocked={unlocked}");
+        Debug.Log($"Metabolism: chemo={chemosynthAgentCount} photo={photosynthAgentCount} sapro={saprotrophAgentCount} photoUnlocked={unlocked} saproUnlocked={IsSaprotrophyUnlocked()}");
     }
 
     void HandleSpontaneousSpawning()
@@ -610,7 +624,8 @@ public class ReplicatorManager : MonoBehaviour
     void MetabolismTick(float dtTick)
     {
         int resolution = Mathf.Max(1, planetGenerator.resolution);
-        float totalCost = (Mathf.Max(0f, basalEnergyCostPerSecond) + Mathf.Max(0f, moveEnergyCostPerSecond)) * dtTick;
+        float basalCost = Mathf.Max(0f, basalEnergyCostPerSecond) * dtTick;
+        float safeEnergyForFullSpeed = Mathf.Max(0.0001f, energyForFullSpeed);
 
         for (int i = agents.Count - 1; i >= 0; i--)
         {
@@ -669,6 +684,29 @@ public class ReplicatorManager : MonoBehaviour
                     }
                 }
             }
+            else if (agent.metabolism == MetabolismType.Saprotrophy)
+            {
+                float organicCAvailable = planetResourceMap.Get(ResourceType.OrganicC, cellIndex);
+                float cUsed = Mathf.Min(organicCAvailable, Mathf.Max(0f, saproCPerTick));
+                float o2PerC = Mathf.Max(0f, saproO2PerC);
+
+                if (cUsed > 0f && o2PerC > 0f)
+                {
+                    float o2Needed = cUsed * o2PerC;
+                    float o2Available = planetResourceMap.Get(ResourceType.O2, cellIndex);
+                    float o2Ratio = o2Needed <= Mathf.Epsilon ? 1f : Mathf.Clamp01(o2Available / o2Needed);
+                    cUsed *= o2Ratio;
+                }
+
+                if (cUsed > 0f)
+                {
+                    float o2Consumed = cUsed * o2PerC;
+                    planetResourceMap.Add(ResourceType.OrganicC, cellIndex, -cUsed);
+                    planetResourceMap.Add(ResourceType.O2, cellIndex, -o2Consumed);
+                    planetResourceMap.Add(ResourceType.CO2, cellIndex, cUsed);
+                    agent.energy += cUsed * Mathf.Max(0f, saproEnergyPerC);
+                }
+            }
             else
             {
                 float co2Need = Mathf.Max(0f, chemosynthesisCo2NeedPerTick);
@@ -694,7 +732,9 @@ public class ReplicatorManager : MonoBehaviour
                 }
             }
 
-            agent.energy -= totalCost;
+            agent.speedFactor = Mathf.Clamp(agent.energy / safeEnergyForFullSpeed, minSpeedFactor, 1f);
+            float movementCost = Mathf.Max(0f, moveEnergyCostPerSecond) * dtTick * agent.speedFactor;
+            agent.energy -= (basalCost + movementCost);
 
             if (agent.energy <= 0f)
             {
@@ -742,6 +782,7 @@ public class ReplicatorManager : MonoBehaviour
             this.jobMoveOnlyInSea[i] = agents[i].traits.moveOnlyInSea;
             this.jobSurfaceMoveSpeedMultipliers[i] = Mathf.Max(0.01f, agents[i].traits.surfaceMoveSpeedMultiplier);
             this.jobMovementSeeds[i] = agents[i].movementSeed;
+            this.jobSpeedFactors[i] = Mathf.Clamp(agents[i].speedFactor, minSpeedFactor, 1f);
         }
 
         ReplicatorUpdateJob job = new ReplicatorUpdateJob
@@ -751,6 +792,7 @@ public class ReplicatorManager : MonoBehaviour
             MoveOnlyInSea = jobMoveOnlyInSea,
             SurfaceMoveSpeedMultipliers = jobSurfaceMoveSpeedMultipliers,
             MovementSeeds = jobMovementSeeds,
+            SpeedFactors = jobSpeedFactors,
             DeltaTime = Time.deltaTime,
             MoveSpeed = moveSpeed,
             TurnSpeed = turnSpeed,
@@ -789,6 +831,7 @@ public class ReplicatorManager : MonoBehaviour
         if (jobMoveOnlyInSea.IsCreated) jobMoveOnlyInSea.Dispose();
         if (jobSurfaceMoveSpeedMultipliers.IsCreated) jobSurfaceMoveSpeedMultipliers.Dispose();
         if (jobMovementSeeds.IsCreated) jobMovementSeeds.Dispose();
+        if (jobSpeedFactors.IsCreated) jobSpeedFactors.Dispose();
 
         jobCapacity = Mathf.NextPowerOfTwo(requiredCount);
         jobPositions = new NativeArray<Vector3>(jobCapacity, Allocator.Persistent);
@@ -796,6 +839,7 @@ public class ReplicatorManager : MonoBehaviour
         jobMoveOnlyInSea = new NativeArray<bool>(jobCapacity, Allocator.Persistent);
         jobSurfaceMoveSpeedMultipliers = new NativeArray<float>(jobCapacity, Allocator.Persistent);
         jobMovementSeeds = new NativeArray<float>(jobCapacity, Allocator.Persistent);
+        jobSpeedFactors = new NativeArray<float>(jobCapacity, Allocator.Persistent);
     }
 
     void Reset()
@@ -815,6 +859,7 @@ public class ReplicatorManager : MonoBehaviour
         if (jobMoveOnlyInSea.IsCreated) jobMoveOnlyInSea.Dispose();
         if (jobSurfaceMoveSpeedMultipliers.IsCreated) jobSurfaceMoveSpeedMultipliers.Dispose();
         if (jobMovementSeeds.IsCreated) jobMovementSeeds.Dispose();
+        if (jobSpeedFactors.IsCreated) jobSpeedFactors.Dispose();
     }
 
     bool SpawnAgentFromPopulation(Replicator parent)
@@ -845,7 +890,58 @@ public class ReplicatorManager : MonoBehaviour
             }
         }
 
+        if (childMetabolism != MetabolismType.Saprotrophy
+            && Random.value < Mathf.Clamp01(saprotrophyMutationChance)
+            && CanMutateToSaprotrophy())
+        {
+            childMetabolism = MetabolismType.Saprotrophy;
+        }
+
         return SpawnAgentAtDirection(randomDir, parent.traits, parent, childMetabolism);
+    }
+
+    bool IsSaprotrophyUnlocked()
+    {
+        return planetGenerator != null && planetGenerator.SaprotrophyUnlocked;
+    }
+
+    bool CanMutateToSaprotrophy()
+    {
+        if (!IsSaprotrophyUnlocked() || planetResourceMap == null)
+        {
+            return false;
+        }
+
+        const float minGlobalO2 = 0.01f;
+        const float minGlobalOrganicC = 0.001f;
+
+        float globalO2 = planetResourceMap.debugGlobalO2;
+        float globalOrganicC = EstimateGlobalOrganicC();
+
+        return globalO2 > minGlobalO2 && globalOrganicC > minGlobalOrganicC;
+    }
+
+    float EstimateGlobalOrganicC()
+    {
+        if (planetResourceMap == null || planetGenerator == null)
+        {
+            return 0f;
+        }
+
+        int resolution = Mathf.Max(1, planetGenerator.resolution);
+        int cellCount = PlanetGridIndexing.GetCellCount(resolution);
+        if (cellCount <= 0)
+        {
+            return 0f;
+        }
+
+        float totalOrganicC = 0f;
+        for (int cell = 0; cell < cellCount; cell++)
+        {
+            totalOrganicC += planetResourceMap.Get(ResourceType.OrganicC, cell);
+        }
+
+        return totalOrganicC / cellCount;
     }
 
     bool SpawnAgentAtRandomLocation()
@@ -952,7 +1048,9 @@ public class ReplicatorManager : MonoBehaviour
             intensity *= Mathf.Lerp(0.2f, 1.5f, energyScale);
         }
 
-        Color metabolismBaseColor = metabolism == MetabolismType.Photosynthesis ? Color.green : Color.yellow;
+        Color metabolismBaseColor = metabolism == MetabolismType.Photosynthesis
+            ? Color.green
+            : metabolism == MetabolismType.Saprotrophy ? Color.blue : Color.yellow;
         Color finalColor = metabolismBaseColor * intensity;
         finalColor.a = alpha;
         return finalColor;
