@@ -34,6 +34,11 @@ public class ReplicatorManager : MonoBehaviour
     public float moveEnergyCostPerSecond = 0.05f;
     public float replicationEnergyCost = 0.5f;
     public float basalEnergyCostPerSecond = 0.01f;
+
+    [Header("Energy -> Speed")]
+    public float energyForFullSpeed = 0.5f;
+    public float minSpeedFactor = 0.15f;
+
     [Tooltip("CO2 consumed per metabolism tick for default chemosynthesis.")]
     public float chemosynthesisCo2NeedPerTick = 0.02f;
     [Tooltip("H2S consumed per metabolism tick for default chemosynthesis. Kept low because H2S is vent-localized.")]
@@ -118,6 +123,7 @@ public class ReplicatorManager : MonoBehaviour
     private NativeArray<bool> jobMoveOnlyInSea;
     private NativeArray<float> jobSurfaceMoveSpeedMultipliers;
     private NativeArray<float> jobMovementSeeds;
+    private NativeArray<float> jobSpeedFactors;
     private int jobCapacity;
 
     // Cache shader property IDs once.
@@ -133,6 +139,7 @@ public class ReplicatorManager : MonoBehaviour
         public NativeArray<bool> MoveOnlyInSea;
         public NativeArray<float> SurfaceMoveSpeedMultipliers;
         public NativeArray<float> MovementSeeds;
+        public NativeArray<float> SpeedFactors;
 
         // Simulation parameters
         public float DeltaTime;
@@ -175,8 +182,9 @@ public class ReplicatorManager : MonoBehaviour
             float currentNoise = CalculateNoise(surfaceNormal);
             bool currentlyInSea = !OceanEnabled || currentNoise < OceanThreshold;
             float speedMultiplier = currentlyInSea ? 1f : SurfaceMoveSpeedMultipliers[index];
+            float speedFactor = SpeedFactors[index];
 
-            Quaternion travelRot = Quaternion.AngleAxis((MoveSpeed * speedMultiplier) * DeltaTime / Radius, Vector3.Cross(surfaceNormal, forward));
+            Quaternion travelRot = Quaternion.AngleAxis((MoveSpeed * speedMultiplier * speedFactor) * DeltaTime / Radius, Vector3.Cross(surfaceNormal, forward));
 
             // Get the new direction vector (normalized)
             Vector3 newDirection = (travelRot * pos).normalized;
@@ -510,7 +518,8 @@ public class ReplicatorManager : MonoBehaviour
     void MetabolismTick(float dtTick)
     {
         int resolution = Mathf.Max(1, planetGenerator.resolution);
-        float totalCost = (Mathf.Max(0f, basalEnergyCostPerSecond) + Mathf.Max(0f, moveEnergyCostPerSecond)) * dtTick;
+        float basalCost = Mathf.Max(0f, basalEnergyCostPerSecond) * dtTick;
+        float safeEnergyForFullSpeed = Mathf.Max(0.0001f, energyForFullSpeed);
 
         for (int i = agents.Count - 1; i >= 0; i--)
         {
@@ -594,7 +603,9 @@ public class ReplicatorManager : MonoBehaviour
                 }
             }
 
-            agent.energy -= totalCost;
+            agent.speedFactor = Mathf.Clamp(agent.energy / safeEnergyForFullSpeed, minSpeedFactor, 1f);
+            float movementCost = Mathf.Max(0f, moveEnergyCostPerSecond) * dtTick * agent.speedFactor;
+            agent.energy -= (basalCost + movementCost);
 
             if (agent.energy <= 0f)
             {
@@ -642,6 +653,7 @@ public class ReplicatorManager : MonoBehaviour
             this.jobMoveOnlyInSea[i] = agents[i].traits.moveOnlyInSea;
             this.jobSurfaceMoveSpeedMultipliers[i] = Mathf.Max(0.01f, agents[i].traits.surfaceMoveSpeedMultiplier);
             this.jobMovementSeeds[i] = agents[i].movementSeed;
+            this.jobSpeedFactors[i] = Mathf.Clamp(agents[i].speedFactor, minSpeedFactor, 1f);
         }
 
         ReplicatorUpdateJob job = new ReplicatorUpdateJob
@@ -651,6 +663,7 @@ public class ReplicatorManager : MonoBehaviour
             MoveOnlyInSea = jobMoveOnlyInSea,
             SurfaceMoveSpeedMultipliers = jobSurfaceMoveSpeedMultipliers,
             MovementSeeds = jobMovementSeeds,
+            SpeedFactors = jobSpeedFactors,
             DeltaTime = Time.deltaTime,
             MoveSpeed = moveSpeed,
             TurnSpeed = turnSpeed,
@@ -689,6 +702,7 @@ public class ReplicatorManager : MonoBehaviour
         if (jobMoveOnlyInSea.IsCreated) jobMoveOnlyInSea.Dispose();
         if (jobSurfaceMoveSpeedMultipliers.IsCreated) jobSurfaceMoveSpeedMultipliers.Dispose();
         if (jobMovementSeeds.IsCreated) jobMovementSeeds.Dispose();
+        if (jobSpeedFactors.IsCreated) jobSpeedFactors.Dispose();
 
         jobCapacity = Mathf.NextPowerOfTwo(requiredCount);
         jobPositions = new NativeArray<Vector3>(jobCapacity, Allocator.Persistent);
@@ -696,6 +710,7 @@ public class ReplicatorManager : MonoBehaviour
         jobMoveOnlyInSea = new NativeArray<bool>(jobCapacity, Allocator.Persistent);
         jobSurfaceMoveSpeedMultipliers = new NativeArray<float>(jobCapacity, Allocator.Persistent);
         jobMovementSeeds = new NativeArray<float>(jobCapacity, Allocator.Persistent);
+        jobSpeedFactors = new NativeArray<float>(jobCapacity, Allocator.Persistent);
     }
 
     void Reset()
@@ -715,6 +730,7 @@ public class ReplicatorManager : MonoBehaviour
         if (jobMoveOnlyInSea.IsCreated) jobMoveOnlyInSea.Dispose();
         if (jobSurfaceMoveSpeedMultipliers.IsCreated) jobSurfaceMoveSpeedMultipliers.Dispose();
         if (jobMovementSeeds.IsCreated) jobMovementSeeds.Dispose();
+        if (jobSpeedFactors.IsCreated) jobSpeedFactors.Dispose();
     }
 
     bool SpawnAgentFromPopulation(Replicator parent)
