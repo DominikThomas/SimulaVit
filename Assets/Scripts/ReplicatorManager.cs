@@ -58,6 +58,13 @@ public class ReplicatorManager : MonoBehaviour
     public float nightRespirationEnergyPerC = 0.05f;
     public float nightRespirationO2PerC = 0.02f;
 
+    [Header("Saprotrophy")]
+    public float saprotrophyUnlockSeconds = 120f;
+    [Range(0f, 1f)] public float saprotrophyMutationChance = 0.005f;
+    public float saproCPerTick = 0.02f;
+    public float saproO2PerC = 0.02f;
+    public float saproEnergyPerC = 0.06f;
+
     [Header("Spawn Resource Bias")]
     public bool biasSpawnsToChemosynthesisResources = true;
     [Range(1, 64)] public int spawnResourceProbeAttempts = 12;
@@ -101,6 +108,7 @@ public class ReplicatorManager : MonoBehaviour
 
     [SerializeField] private int chemosynthAgentCount;
     [SerializeField] private int photosynthAgentCount;
+    [SerializeField] private int saprotrophAgentCount;
     private bool isInitialized;
     private float spawnAttemptTimer;
     private bool firstSpontaneousSpawnHappened;
@@ -319,12 +327,17 @@ public class ReplicatorManager : MonoBehaviour
     {
         int chemo = 0;
         int photo = 0;
+        int sapro = 0;
 
         for (int i = 0; i < agents.Count; i++)
         {
             if (agents[i].metabolism == MetabolismType.Photosynthesis)
             {
                 photo++;
+            }
+            else if (agents[i].metabolism == MetabolismType.Saprotrophy)
+            {
+                sapro++;
             }
             else
             {
@@ -334,6 +347,7 @@ public class ReplicatorManager : MonoBehaviour
 
         chemosynthAgentCount = chemo;
         photosynthAgentCount = photo;
+        saprotrophAgentCount = sapro;
     }
 
 
@@ -348,7 +362,7 @@ public class ReplicatorManager : MonoBehaviour
 
         metabolismDebugLogTimer = 0f;
         bool unlocked = planetGenerator != null && planetGenerator.PhotosynthesisUnlocked;
-        Debug.Log($"Metabolism: chemo={chemosynthAgentCount} photo={photosynthAgentCount} unlocked={unlocked}");
+        Debug.Log($"Metabolism: chemo={chemosynthAgentCount} photo={photosynthAgentCount} sapro={saprotrophAgentCount} photoUnlocked={unlocked} saproUnlocked={IsSaprotrophyUnlocked()}");
     }
 
     void HandleSpontaneousSpawning()
@@ -569,6 +583,29 @@ public class ReplicatorManager : MonoBehaviour
                     }
                 }
             }
+            else if (agent.metabolism == MetabolismType.Saprotrophy)
+            {
+                float organicCAvailable = planetResourceMap.Get(ResourceType.OrganicC, cellIndex);
+                float cUsed = Mathf.Min(organicCAvailable, Mathf.Max(0f, saproCPerTick));
+                float o2PerC = Mathf.Max(0f, saproO2PerC);
+
+                if (cUsed > 0f && o2PerC > 0f)
+                {
+                    float o2Needed = cUsed * o2PerC;
+                    float o2Available = planetResourceMap.Get(ResourceType.O2, cellIndex);
+                    float o2Ratio = o2Needed <= Mathf.Epsilon ? 1f : Mathf.Clamp01(o2Available / o2Needed);
+                    cUsed *= o2Ratio;
+                }
+
+                if (cUsed > 0f)
+                {
+                    float o2Consumed = cUsed * o2PerC;
+                    planetResourceMap.Add(ResourceType.OrganicC, cellIndex, -cUsed);
+                    planetResourceMap.Add(ResourceType.O2, cellIndex, -o2Consumed);
+                    planetResourceMap.Add(ResourceType.CO2, cellIndex, cUsed);
+                    agent.energy += cUsed * Mathf.Max(0f, saproEnergyPerC);
+                }
+            }
             else
             {
                 float co2Need = Mathf.Max(0f, chemosynthesisCo2NeedPerTick);
@@ -745,7 +782,58 @@ public class ReplicatorManager : MonoBehaviour
             }
         }
 
+        if (childMetabolism != MetabolismType.Saprotrophy
+            && Random.value < Mathf.Clamp01(saprotrophyMutationChance)
+            && CanMutateToSaprotrophy())
+        {
+            childMetabolism = MetabolismType.Saprotrophy;
+        }
+
         return SpawnAgentAtDirection(randomDir, parent.traits, parent, childMetabolism);
+    }
+
+    bool IsSaprotrophyUnlocked()
+    {
+        return Time.timeSinceLevelLoad >= Mathf.Max(0f, saprotrophyUnlockSeconds);
+    }
+
+    bool CanMutateToSaprotrophy()
+    {
+        if (!IsSaprotrophyUnlocked() || planetResourceMap == null)
+        {
+            return false;
+        }
+
+        const float minGlobalO2 = 0.01f;
+        const float minGlobalOrganicC = 0.001f;
+
+        float globalO2 = planetResourceMap.debugGlobalO2;
+        float globalOrganicC = EstimateGlobalOrganicC();
+
+        return globalO2 > minGlobalO2 && globalOrganicC > minGlobalOrganicC;
+    }
+
+    float EstimateGlobalOrganicC()
+    {
+        if (planetResourceMap == null || planetGenerator == null)
+        {
+            return 0f;
+        }
+
+        int resolution = Mathf.Max(1, planetGenerator.resolution);
+        int cellCount = PlanetGridIndexing.GetCellCount(resolution);
+        if (cellCount <= 0)
+        {
+            return 0f;
+        }
+
+        float totalOrganicC = 0f;
+        for (int cell = 0; cell < cellCount; cell++)
+        {
+            totalOrganicC += planetResourceMap.Get(ResourceType.OrganicC, cell);
+        }
+
+        return totalOrganicC / cellCount;
     }
 
     bool SpawnAgentAtRandomLocation()
@@ -852,7 +940,9 @@ public class ReplicatorManager : MonoBehaviour
             intensity *= Mathf.Lerp(0.2f, 1.5f, energyScale);
         }
 
-        Color metabolismBaseColor = metabolism == MetabolismType.Photosynthesis ? Color.green : Color.yellow;
+        Color metabolismBaseColor = metabolism == MetabolismType.Photosynthesis
+            ? Color.green
+            : metabolism == MetabolismType.Saprotrophy ? Color.blue : Color.yellow;
         Color finalColor = metabolismBaseColor * intensity;
         finalColor.a = alpha;
         return finalColor;
