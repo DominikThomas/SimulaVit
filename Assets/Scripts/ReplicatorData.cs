@@ -3,7 +3,8 @@ using UnityEngine;
 public enum MetabolismType
 {
     SulfurChemosynthesis,
-    Photosynthesis
+    Photosynthesis,
+    Saprotrophy
 }
 
 [System.Serializable]

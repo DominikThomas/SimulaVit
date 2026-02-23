@@ -33,6 +33,8 @@ public class PlanetGenerator : MonoBehaviour
     [Header("Biology Unlocks")]
     [Tooltip("Seconds after simulation start when Photosynthesis mutation becomes possible.")]
     public float photosynthesisUnlockSeconds = 30f;
+    [Tooltip("Seconds after simulation start when Saprotrophy mutation becomes possible.")]
+    public float saprotrophyUnlockSeconds = 60f;
 
     private MeshFilter meshFilter;
     private Mesh mesh;
@@ -221,6 +223,7 @@ public class PlanetGenerator : MonoBehaviour
     public bool OceanEnabled => enableOcean;
     public float OceanThresholdNoise => oceanNoiseThreshold;
     public bool PhotosynthesisUnlocked => Time.timeSinceLevelLoad >= photosynthesisUnlockSeconds;
+    public bool SaprotrophyUnlocked => Time.timeSinceLevelLoad >= saprotrophyUnlockSeconds;
 
     public float GetOceanRadius()
     {
