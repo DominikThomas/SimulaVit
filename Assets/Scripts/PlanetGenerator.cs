@@ -30,6 +30,10 @@ public class PlanetGenerator : MonoBehaviour
     public Vector2 noiseRoughnessRange = new Vector2(1.5f, 6f);
     public Vector2 oceanCoverageRange = new Vector2(25f, 60f);
 
+    [Header("Biology Unlocks")]
+    [Tooltip("Seconds after simulation start when Photosynthesis mutation becomes possible.")]
+    public float photosynthesisUnlockSeconds = 60f;
+
     private MeshFilter meshFilter;
     private Mesh mesh;
 
@@ -216,6 +220,7 @@ public class PlanetGenerator : MonoBehaviour
 
     public bool OceanEnabled => enableOcean;
     public float OceanThresholdNoise => oceanNoiseThreshold;
+    public bool PhotosynthesisUnlocked => Time.timeSinceLevelLoad >= photosynthesisUnlockSeconds;
 
     public float GetOceanRadius()
     {
