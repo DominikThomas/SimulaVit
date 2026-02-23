@@ -340,19 +340,41 @@ public class ReplicatorManager : MonoBehaviour
         float co2Pct = (globalCo2 / atmosphereTotal) * 100f;
         float o2Pct = (globalO2 / atmosphereTotal) * 100f;
 
-        string hudText =
-            "Replicators\n" +
-            $"Total: {totalAgents}\n" +
-            $"Chemosynthesis: {chemosynthAgentCount} ({chemosynthPct:0.0}%)\n" +
-            $"Photosynthesis: {photosynthAgentCount} ({photosynthPct:0.0}%)\n" +
-            $"Saprotroph: {saprotrophAgentCount} ({saprotrophPct:0.0}%)\n\n" +
+        string atmosphereText =
             "Atmosphere (global average)\n" +
             $"CO2: {globalCo2:0.000} ({co2Pct:0.0}%)\n" +
             $"O2: {globalO2:0.000} ({o2Pct:0.0}%)";
 
-        Rect panelRect = new Rect(12f, 12f, 335f, 190f);
-        GUI.Box(panelRect, GUIContent.none, hudBackgroundStyle);
-        GUI.Label(new Rect(24f, 24f, panelRect.width - 24f, panelRect.height - 24f), hudText, hudStyle);
+        string replicatorsText =
+            "Replicators\n" +
+            $"Total: {totalAgents}\n" +
+            $"Chemosynthesis: {chemosynthAgentCount} ({chemosynthPct:0.0}%)";
+
+        if (photosynthAgentCount > 0)
+        {
+            replicatorsText += $"\nPhotosynthesis: {photosynthAgentCount} ({photosynthPct:0.0}%)";
+        }
+
+        if (saprotrophAgentCount > 0)
+        {
+            replicatorsText += $"\nSaprotroph: {saprotrophAgentCount} ({saprotrophPct:0.0}%)";
+        }
+
+        const float panelWidth = 335f;
+        const float padding = 12f;
+        const float lineHeight = 20f;
+        float rightX = Screen.width - panelWidth - padding;
+
+        float atmosphereHeight = (atmosphereText.Split('\n').Length * lineHeight) + (padding * 2f);
+        float replicatorHeight = (replicatorsText.Split('\n').Length * lineHeight) + (padding * 2f);
+
+        Rect atmosphereRect = new Rect(rightX, padding, panelWidth, atmosphereHeight);
+        GUI.Box(atmosphereRect, GUIContent.none, hudBackgroundStyle);
+        GUI.Label(new Rect(atmosphereRect.x + padding, atmosphereRect.y + padding, panelWidth - 2f * padding, atmosphereHeight - 2f * padding), atmosphereText, hudStyle);
+
+        Rect replicatorRect = new Rect(rightX, Screen.height - replicatorHeight - padding, panelWidth, replicatorHeight);
+        GUI.Box(replicatorRect, GUIContent.none, hudBackgroundStyle);
+        GUI.Label(new Rect(replicatorRect.x + padding, replicatorRect.y + padding, panelWidth - 2f * padding, replicatorHeight - 2f * padding), replicatorsText, hudStyle);
     }
 
     void EnsureHudStyles()
