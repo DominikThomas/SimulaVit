@@ -1,5 +1,11 @@
 using UnityEngine;
 
+public enum MetabolismType
+{
+    SulfurChemosynthesis,
+    Photosynthesis
+}
+
 [System.Serializable]
 public class Replicator
 {
@@ -28,6 +34,7 @@ public class Replicator
     public Traits traits;
     public float energy;
     public float size;
+    public MetabolismType metabolism;
 
     // Movement data
     public Vector3 velocity;
@@ -35,7 +42,7 @@ public class Replicator
     public float movementSeed;
 
     // Constructor
-    public Replicator(Vector3 pos, Quaternion rot, float lifespan, Color col, Traits traits, float movementSeed)
+    public Replicator(Vector3 pos, Quaternion rot, float lifespan, Color col, Traits traits, float movementSeed, MetabolismType metabolism)
     {
         position = pos;
         rotation = rot;
@@ -46,6 +53,7 @@ public class Replicator
         energy = 0f;
         size = 1f;
         age = 0;
+        this.metabolism = metabolism;
         currentDirection = pos.normalized;
     }
 }
