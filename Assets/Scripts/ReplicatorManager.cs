@@ -40,6 +40,12 @@ public class ReplicatorManager : MonoBehaviour
     public float chemosynthesisH2sNeedPerTick = 0.001f;
     [Tooltip("Energy granted when one full chemosynthesis reaction tick is completed.")]
     public float chemosynthesisEnergyPerTick = 0.3f;
+    [Tooltip("Fractional mutation chance on reproduction that flips metabolism type.")]
+    [Range(0f, 1f)] public float metabolismMutationChance = 0.01f;
+    [Tooltip("Maximum CO2 consumed per metabolism tick at full insolation (1.0).")]
+    public float photosynthesisCo2PerTickAtFullInsolation = 0.02f;
+    [Tooltip("Energy gained per unit CO2 consumed by photosynthesis.")]
+    public float photosynthesisEnergyPerCo2 = 12f;
 
     [Header("Spawn Resource Bias")]
     public bool biasSpawnsToChemosynthesisResources = true;
@@ -335,7 +341,7 @@ public class ReplicatorManager : MonoBehaviour
             return false;
         }
 
-        return SpawnAgentAtDirection(randomDir, CreateDefaultTraits(), null);
+        return SpawnAgentAtDirection(randomDir, CreateDefaultTraits(), null, MetabolismType.SulfurChemosynthesis);
     }
 
 
@@ -424,7 +430,7 @@ public class ReplicatorManager : MonoBehaviour
             }
 
             float lifeRemaining = agent.maxLifespan - agent.age;
-            agent.color = CalculateAgentColor(agent.age, lifeRemaining, agent.energy);
+            agent.color = CalculateAgentColor(agent.age, lifeRemaining, agent.energy, agent.metabolism);
 
             if (Random.value < reproductionChance && agent.energy >= replicationEnergyCost)
             {
@@ -457,28 +463,52 @@ public class ReplicatorManager : MonoBehaviour
         for (int i = agents.Count - 1; i >= 0; i--)
         {
             Replicator agent = agents[i];
-            int cellIndex = PlanetGridIndexing.DirectionToCellIndex(agent.position.normalized, resolution);
+            Vector3 dir = agent.position.normalized;
+            int cellIndex = PlanetGridIndexing.DirectionToCellIndex(dir, resolution);
 
-            float co2Need = Mathf.Max(0f, chemosynthesisCo2NeedPerTick);
-            float h2sNeed = Mathf.Max(0f, chemosynthesisH2sNeedPerTick);
-
-            float co2Available = planetResourceMap.Get(ResourceType.CO2, cellIndex);
-            float h2sAvailable = planetResourceMap.Get(ResourceType.H2S, cellIndex);
-            float co2Ratio = co2Need <= Mathf.Epsilon ? 1f : co2Available / co2Need;
-            float h2sRatio = h2sNeed <= Mathf.Epsilon ? 1f : h2sAvailable / h2sNeed;
-            float pulledRatio = Mathf.Clamp01(Mathf.Min(co2Ratio, h2sRatio));
-
-            if (pulledRatio > 0f)
+            if (agent.metabolism == MetabolismType.Photosynthesis)
             {
-                float co2Consumed = co2Need * pulledRatio;
-                float h2sConsumed = h2sNeed * pulledRatio;
+                // Photosynthesis model (simple and stable):
+                // co2Need = maxPerTick * insolation
+                // energyGain = co2Consumed * energyPerCo2
+                // O2 byproduct equals CO2 consumed (1:1 simplified stoichiometry)
+                float insolation = Mathf.Clamp01(planetResourceMap.GetInsolation(dir));
+                float co2Need = Mathf.Max(0f, photosynthesisCo2PerTickAtFullInsolation) * insolation;
+                float co2Available = planetResourceMap.Get(ResourceType.CO2, cellIndex);
+                float co2Consumed = Mathf.Min(co2Need, co2Available);
 
-                planetResourceMap.Add(ResourceType.CO2, cellIndex, -co2Consumed);
-                planetResourceMap.Add(ResourceType.H2S, cellIndex, -h2sConsumed);
-                planetResourceMap.Add(ResourceType.S0, cellIndex, h2sConsumed);
+                if (co2Consumed > 0f)
+                {
+                    planetResourceMap.Add(ResourceType.CO2, cellIndex, -co2Consumed);
+                    planetResourceMap.Add(ResourceType.O2, cellIndex, co2Consumed);
 
-                float producedEnergy = Mathf.Max(0f, chemosynthesisEnergyPerTick) * pulledRatio;
-                agent.energy += producedEnergy;
+                    float producedEnergy = co2Consumed * Mathf.Max(0f, photosynthesisEnergyPerCo2);
+                    agent.energy += producedEnergy;
+                }
+            }
+            else
+            {
+                float co2Need = Mathf.Max(0f, chemosynthesisCo2NeedPerTick);
+                float h2sNeed = Mathf.Max(0f, chemosynthesisH2sNeedPerTick);
+
+                float co2Available = planetResourceMap.Get(ResourceType.CO2, cellIndex);
+                float h2sAvailable = planetResourceMap.Get(ResourceType.H2S, cellIndex);
+                float co2Ratio = co2Need <= Mathf.Epsilon ? 1f : co2Available / co2Need;
+                float h2sRatio = h2sNeed <= Mathf.Epsilon ? 1f : h2sAvailable / h2sNeed;
+                float pulledRatio = Mathf.Clamp01(Mathf.Min(co2Ratio, h2sRatio));
+
+                if (pulledRatio > 0f)
+                {
+                    float co2Consumed = co2Need * pulledRatio;
+                    float h2sConsumed = h2sNeed * pulledRatio;
+
+                    planetResourceMap.Add(ResourceType.CO2, cellIndex, -co2Consumed);
+                    planetResourceMap.Add(ResourceType.H2S, cellIndex, -h2sConsumed);
+                    planetResourceMap.Add(ResourceType.S0, cellIndex, h2sConsumed);
+
+                    float producedEnergy = Mathf.Max(0f, chemosynthesisEnergyPerTick) * pulledRatio;
+                    agent.energy += producedEnergy;
+                }
             }
 
             agent.energy -= totalCost;
@@ -591,17 +621,25 @@ public class ReplicatorManager : MonoBehaviour
         Vector3 randomDir = parent.currentDirection + Random.insideUnitSphere * spawnSpread;
         randomDir = randomDir.normalized;
 
-        return SpawnAgentAtDirection(randomDir, parent.traits, parent);
+        MetabolismType childMetabolism = parent.metabolism;
+        if (Random.value < Mathf.Clamp01(metabolismMutationChance))
+        {
+            childMetabolism = childMetabolism == MetabolismType.SulfurChemosynthesis
+                ? MetabolismType.Photosynthesis
+                : MetabolismType.SulfurChemosynthesis;
+        }
+
+        return SpawnAgentAtDirection(randomDir, parent.traits, parent, childMetabolism);
     }
 
     bool SpawnAgentAtRandomLocation()
     {
         if (agents.Count >= maxPopulation) return false;
         Vector3 dir = GetSpawnDirectionCandidate();
-        return SpawnAgentAtDirection(dir, CreateDefaultTraits(), null);
+        return SpawnAgentAtDirection(dir, CreateDefaultTraits(), null, MetabolismType.SulfurChemosynthesis);
     }
 
-    bool SpawnAgentAtDirection(Vector3 direction, Replicator.Traits traits, Replicator parent)
+    bool SpawnAgentAtDirection(Vector3 direction, Replicator.Traits traits, Replicator parent, MetabolismType metabolism)
     {
         if (agents.Count >= maxPopulation) return false;
 
@@ -625,7 +663,7 @@ public class ReplicatorManager : MonoBehaviour
 
         float newLifespan = Random.Range(minLifespan, maxLifespan);
         float movementSeed = Random.Range(-1000f, 1000f);
-        Replicator newAgent = new Replicator(spawnPosition, spawnRotation, newLifespan, baseAgentColor, traits, movementSeed);
+        Replicator newAgent = new Replicator(spawnPosition, spawnRotation, newLifespan, baseAgentColor, traits, movementSeed, metabolism);
         newAgent.age = parent == null ? Random.Range(0f, newLifespan * 0.5f) : 0f;
         newAgent.energy = parent == null ? Random.Range(0.1f, 0.5f) : Mathf.Max(0.1f, parent.energy * 0.5f);
         newAgent.size = 1f;
@@ -675,7 +713,7 @@ public class ReplicatorManager : MonoBehaviour
         return displacement + 0.05f;
     }
 
-    Color CalculateAgentColor(float age, float lifeRemaining, float energy)
+    Color CalculateAgentColor(float age, float lifeRemaining, float energy, MetabolismType metabolism)
     {
         float intensity = 1.0f;
         float alpha = 1.0f;
@@ -698,7 +736,8 @@ public class ReplicatorManager : MonoBehaviour
             intensity *= Mathf.Lerp(0.2f, 1.5f, energyScale);
         }
 
-        Color finalColor = baseAgentColor * intensity;
+        Color metabolismBaseColor = metabolism == MetabolismType.Photosynthesis ? Color.green : Color.yellow;
+        Color finalColor = metabolismBaseColor * intensity;
         finalColor.a = alpha;
         return finalColor;
     }
