@@ -52,6 +52,8 @@ public class PlanetResourceMap : MonoBehaviour
     [Tooltip("Show text labels with per-tile values for sampled debug points (Scene view only).")]
     public bool drawDebugLabels = false;
     [Range(1, 256)] public int debugLabelMaxPoints = 48;
+    [Tooltip("If enabled, colors are normalized against per-resource expected ranges instead of current frame min/max.")]
+    public bool debugUseAbsoluteScale = true;
 
     private int resolution;
     private Vector3[] cellDirections;
@@ -341,6 +343,34 @@ public class PlanetResourceMap : MonoBehaviour
         return $"{debugViewType}: {Get(debugViewType, cellIndex):0.###}\nCO2: {Get(ResourceType.CO2, cellIndex):0.###}\nH2S: {Get(ResourceType.H2S, cellIndex):0.###}\nS0: {Get(ResourceType.S0, cellIndex):0.###}";
     }
 
+
+    private float GetAbsoluteDebugMax(ResourceType type)
+    {
+        switch (type)
+        {
+            case ResourceType.CO2: return Mathf.Max(0.0001f, baselineCO2);
+            case ResourceType.O2: return Mathf.Max(0.0001f, baselineO2);
+            case ResourceType.H2S: return Mathf.Max(0.0001f, ventStrength);
+            case ResourceType.S0: return Mathf.Max(0.0001f, baselineS0);
+            case ResourceType.P: return Mathf.Max(0.0001f, phosphorusScale);
+            case ResourceType.Fe: return Mathf.Max(0.0001f, ironScale);
+            case ResourceType.Si: return Mathf.Max(0.0001f, baselineSi + siliconPatchScale);
+            case ResourceType.Ca: return Mathf.Max(0.0001f, baselineCa + calciumPatchScale);
+            default: return 1f;
+        }
+    }
+
+    private float GetDebugColorT(float value, float minValue, float range)
+    {
+        if (!debugUseAbsoluteScale)
+        {
+            return (value - minValue) / range;
+        }
+
+        float absoluteMax = GetAbsoluteDebugMax(debugViewType);
+        return Mathf.Clamp01(value / absoluteMax);
+    }
+
     private void OnDrawGizmosSelected()
     {
         if (!drawDebugPoints)
@@ -376,7 +406,7 @@ public class PlanetResourceMap : MonoBehaviour
 
         for (int i = 0; i < array.Length; i += stride)
         {
-            float t = (array[i] - minValue) / range;
+            float t = GetDebugColorT(array[i], minValue, range);
             Gizmos.color = debugGradient.Evaluate(t);
 
             Vector3 dir = cellDirections[i];
