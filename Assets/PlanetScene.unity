@@ -531,7 +531,7 @@ MonoBehaviour:
   replicatorMaterial: {fileID: 2100000, guid: a9e716d40c93b5146914146207f7287a, type: 2}
   planetGenerator: {fileID: 382753102}
   planetResourceMap: {fileID: 0}
-  initialSpawnCount: 2
+  initialSpawnCount: 5
   maxPopulation: 50000
   baseAgentColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
   moveSpeed: 10
@@ -560,7 +560,7 @@ MonoBehaviour:
   defaultReplicateOnlyInSea: 1
   defaultMoveOnlyInSea: 0
   defaultSurfaceMoveSpeedMultiplier: 0.4
-  colorByEnergy: 0
+  colorByEnergy: 1
   energyVisualMultiplier: 1
   activeAgentCount: 0
 --- !u!4 &1064713444
