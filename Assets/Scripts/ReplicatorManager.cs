@@ -59,7 +59,6 @@ public class ReplicatorManager : MonoBehaviour
     public float nightRespirationO2PerC = 0.02f;
 
     [Header("Saprotrophy")]
-    public float saprotrophyUnlockSeconds = 120f;
     [Range(0f, 1f)] public float saprotrophyMutationChance = 0.005f;
     public float saproCPerTick = 0.02f;
     public float saproO2PerC = 0.02f;
@@ -794,7 +793,7 @@ public class ReplicatorManager : MonoBehaviour
 
     bool IsSaprotrophyUnlocked()
     {
-        return Time.timeSinceLevelLoad >= Mathf.Max(0f, saprotrophyUnlockSeconds);
+        return planetGenerator != null && planetGenerator.SaprotrophyUnlocked;
     }
 
     bool CanMutateToSaprotrophy()
