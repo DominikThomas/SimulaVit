@@ -102,11 +102,11 @@ public class ReplicatorManager : MonoBehaviour
     public float guaranteedFirstSpawnWithinSeconds = 10f;
     [Range(0f, 1f)]
     [Tooltip("0 = land-only bias, 0.5 = balanced, 1 = sea-only bias (when ocean is enabled).")]
-    public float seaSpawnPreference = 0.5f;
+    public float seaSpawnPreference = 1.0f;
 
     [Header("Default Traits")]
     [Tooltip("If enabled, newly created replicators can only be spawned in sea locations.")]
-    public bool defaultSpawnOnlyInSea = true;
+    public bool defaultSpawnOnlyInSea = false;
     [Tooltip("If enabled, replicators only reproduce while currently in the sea.")]
     public bool defaultReplicateOnlyInSea = true;
     [Tooltip("If enabled, replicators stay in the sea and do not move onto land.")]

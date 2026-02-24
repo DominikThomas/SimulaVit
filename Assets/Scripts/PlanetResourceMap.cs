@@ -61,7 +61,7 @@ public class PlanetResourceMap : MonoBehaviour
     [Tooltip("Very slow fraction of local environmental OrganicC oxidized per atmosphere tick when O2 is available.")]
     [Range(0f, 1f)] public float naturalOxidationFractionPerTick = 0.0005f;
     [Tooltip("Minimum local O2 required before spontaneous oxidation can occur.")]
-    public float naturalOxidationMinO2 = 0.01f;
+    public float naturalOxidationO2HalfSaturation = 0.02f;
 
     [Header("Atmosphere Mixing")]
     public bool enableAtmosphereMixing = true;
@@ -461,42 +461,33 @@ public class PlanetResourceMap : MonoBehaviour
     private void ApplyNaturalOxidation()
     {
         if (!enableNaturalOxidation || !isInitialized || organicC == null || o2 == null || co2 == null)
-        {
             return;
-        }
 
-        float oxidationFraction = Mathf.Clamp01(naturalOxidationFractionPerTick);
-        if (oxidationFraction <= 0f)
-        {
-            return;
-        }
+        float k = Mathf.Max(0f, naturalOxidationFractionPerTick); // think of as per-tick rate
+        if (k <= 0f) return;
 
-        float minO2 = Mathf.Max(0f, naturalOxidationMinO2);
+        // Smooth O2 dependence: half-saturation constant (tunable)
+        float kHalf = Mathf.Max(1e-6f, naturalOxidationO2HalfSaturation); // e.g. 0.02
 
         for (int cell = 0; cell < organicC.Length; cell++)
         {
+            float c = organicC[cell];
+            if (c <= 0f) continue;
+
             float localO2 = o2[cell];
-            if (localO2 <= minO2)
-            {
-                continue;
-            }
+            if (localO2 <= 0f) continue; // only true zero disables oxidation
 
-            float availableOrganicC = organicC[cell];
-            if (availableOrganicC <= 0f)
-            {
-                continue;
-            }
+            // 0..1 factor, ~linear at low O2, saturates at high O2
+            float o2Factor = localO2 / (localO2 + kHalf);
 
-            float desiredOxidation = availableOrganicC * oxidationFraction;
-            float oxidizedCarbon = Mathf.Min(desiredOxidation, localO2, availableOrganicC);
-            if (oxidizedCarbon <= 0f)
-            {
-                continue;
-            }
+            float desired = c * k * o2Factor;
+            float oxidized = Mathf.Min(desired, c, localO2); // 1:1 O2:C in your simplified bookkeeping
 
-            organicC[cell] = Mathf.Max(0f, availableOrganicC - oxidizedCarbon);
-            o2[cell] = Mathf.Max(0f, localO2 - oxidizedCarbon);
-            co2[cell] += oxidizedCarbon;
+            if (oxidized <= 0f) continue;
+
+            organicC[cell] = c - oxidized;
+            o2[cell] = localO2 - oxidized;
+            co2[cell] += oxidized;
         }
     }
 
@@ -640,7 +631,6 @@ public class PlanetResourceMap : MonoBehaviour
         atmosphereTickSeconds = Mathf.Max(0.0001f, atmosphereTickSeconds);
         landExchangeRate = Mathf.Max(0f, landExchangeRate);
         oceanExchangeRate = Mathf.Max(0f, oceanExchangeRate);
-        naturalOxidationMinO2 = Mathf.Max(0f, naturalOxidationMinO2);
         naturalOxidationFractionPerTick = Mathf.Clamp01(naturalOxidationFractionPerTick);
     }
 
