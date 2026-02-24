@@ -879,7 +879,9 @@ public class ReplicatorManager : MonoBehaviour
         {
             if (parent.metabolism == MetabolismType.SulfurChemosynthesis)
             {
-                if (planetGenerator != null && planetGenerator.PhotosynthesisUnlocked)
+                if (planetGenerator != null
+                    && planetGenerator.PhotosynthesisUnlocked
+                    && IsInsolatedLocation(parent.currentDirection))
                 {
                     childMetabolism = MetabolismType.Photosynthesis;
                 }
@@ -903,6 +905,16 @@ public class ReplicatorManager : MonoBehaviour
     bool IsSaprotrophyUnlocked()
     {
         return planetGenerator != null && planetGenerator.SaprotrophyUnlocked;
+    }
+
+    bool IsInsolatedLocation(Vector3 direction)
+    {
+        if (planetResourceMap == null)
+        {
+            return false;
+        }
+
+        return planetResourceMap.GetInsolation(direction.normalized) > 0f;
     }
 
     bool CanMutateToSaprotrophy()
