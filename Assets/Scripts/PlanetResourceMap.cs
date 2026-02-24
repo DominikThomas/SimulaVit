@@ -41,8 +41,12 @@ public class PlanetResourceMap : MonoBehaviour
 
     [Header("H2S Vent Spots")]
     public float ventFrequency = 12f;
-    [Range(0f, 1f)] public float ventThreshold = 0.75f;
-    public float ventStrength = 1.2f;
+
+    [Header("Vent Strength")]
+    public float ventStrengthMin = 0.25f;
+    public float ventStrengthMax = 1.0f;
+    public float ventNoiseScale = 3.0f;
+    [Range(0f, 1f)] public float ventThreshold = 0.85f;
 
     [Header("Vents")]
     public bool enableVentReplenishment = true;
@@ -90,6 +94,7 @@ public class PlanetResourceMap : MonoBehaviour
     private float[] ca;
 
     private bool isInitialized;
+    public float[] ventStrength;
     private byte[] ventMask;
     private int[] ventCells;
     private byte[] oceanMask;
@@ -97,6 +102,8 @@ public class PlanetResourceMap : MonoBehaviour
     private float atmosphereTimer;
 
     public int VentCount => ventCells != null ? ventCells.Length : 0;
+    public int[] VentCells => ventCells;
+    public Vector3[] CellDirs => cellDirections;
 
     private void Awake()
     {
@@ -254,6 +261,7 @@ public class PlanetResourceMap : MonoBehaviour
         ca = new float[cellCount];
         cellDirections = new Vector3[cellCount];
         ventMask = new byte[cellCount];
+        ventStrength = new float[cellCount];
         oceanMask = new byte[cellCount];
 
         int ventCount = 0;
@@ -283,7 +291,18 @@ public class PlanetResourceMap : MonoBehaviour
 
             float ventNoise = HighFrequencyNoise(dir);
             bool isVent = ventNoise > ventThreshold;
-            h2s[cell] = isVent ? (ventNoise - ventThreshold) * ventStrength : 0f;
+            if (isVent)
+            {
+                float strengthT = Mathf.InverseLerp(ventThreshold, 1f, ventNoise);
+                float strength = Mathf.Lerp(ventStrengthMin, ventStrengthMax, Mathf.Clamp01(strengthT));
+                ventStrength[cell] = strength;
+                h2s[cell] = strength;
+            }
+            else
+            {
+                ventStrength[cell] = 0f;
+                h2s[cell] = 0f;
+            }
 
             if (isVent)
             {
@@ -415,7 +434,13 @@ public class PlanetResourceMap : MonoBehaviour
                 }
             }
 
-            Add(ResourceType.H2S, cell, perTick);
+            float cellVentStrength = ventStrength != null && cell < ventStrength.Length ? ventStrength[cell] : 0f;
+            if (cellVentStrength <= 0f)
+            {
+                continue;
+            }
+
+            Add(ResourceType.H2S, cell, perTick * cellVentStrength);
             if (applyCap)
             {
                 h2s[cell] = Mathf.Min(h2s[cell], ventH2SMax);
@@ -436,7 +461,7 @@ public class PlanetResourceMap : MonoBehaviour
 
     private float HighFrequencyNoise(Vector3 dir)
     {
-        Vector3 samplePoint = dir * ventFrequency + new Vector3(17.3f, -9.1f, 5.7f);
+        Vector3 samplePoint = dir * (ventFrequency * Mathf.Max(0.0001f, ventNoiseScale)) + new Vector3(17.3f, -9.1f, 5.7f);
         return (SimpleNoise.Evaluate(samplePoint) + 1f) * 0.5f;
     }
 
@@ -578,7 +603,7 @@ public class PlanetResourceMap : MonoBehaviour
             case ResourceType.CO2: return Mathf.Max(0.0001f, baselineCO2);
             case ResourceType.O2: return Mathf.Max(0.0001f, baselineO2);
             case ResourceType.OrganicC: return 1f;
-            case ResourceType.H2S: return Mathf.Max(0.0001f, ventStrength);
+            case ResourceType.H2S: return Mathf.Max(0.0001f, ventStrengthMax);
             case ResourceType.S0: return Mathf.Max(0.0001f, baselineS0);
             case ResourceType.P: return Mathf.Max(0.0001f, phosphorusScale);
             case ResourceType.Fe: return Mathf.Max(0.0001f, ironScale);
