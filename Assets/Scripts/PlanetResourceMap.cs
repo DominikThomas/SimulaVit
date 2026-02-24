@@ -320,6 +320,9 @@ public class PlanetResourceMap : MonoBehaviour
             }
         }
 
+        int total = cellCount;
+        Debug.Log($"Vents: {ventCount}/{total} = {(100f * ventCount / total):F1}%");
+
         ventCells = new int[ventCount];
         int ventWrite = 0;
         for (int cell = 0; cell < cellCount; cell++)

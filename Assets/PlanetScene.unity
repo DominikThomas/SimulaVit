@@ -541,8 +541,8 @@ MonoBehaviour:
   noiseMagnitudeRange: {x: 0.05, y: 0.2}
   noiseRoughnessRange: {x: 1.5, y: 6}
   oceanCoverageRange: {x: 25, y: 60}
-  photosynthesisUnlockSeconds: 30
-  saprotrophyUnlockSeconds: 60
+  photosynthesisUnlockSeconds: 0
+  saprotrophyUnlockSeconds: 0
 --- !u!4 &382753103
 Transform:
   m_ObjectHideFlags: 0
@@ -593,7 +593,7 @@ MonoBehaviour:
   replicatorMaterial: {fileID: 2100000, guid: a9e716d40c93b5146914146207f7287a, type: 2}
   planetGenerator: {fileID: 382753102}
   planetResourceMap: {fileID: 1222684993}
-  initialSpawnCount: 5
+  initialSpawnCount: 0
   maxPopulation: 50000
   baseAgentColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
   moveSpeed: 10
@@ -609,7 +609,7 @@ MonoBehaviour:
   energyForFullSpeed: 0.5
   minSpeedFactor: 0.15
   chemosynthesisCo2NeedPerTick: 0.02
-  chemosynthesisH2sNeedPerTick: 0.001
+  chemosynthesisH2sNeedPerTick: 0.01
   chemosynthesisEnergyPerTick: 0.7
   metabolismMutationChance: 0.01
   allowReverseMetabolismMutation: 0
@@ -709,7 +709,7 @@ MonoBehaviour:
   ventFrequency: 3
   ventStrengthMin: 0.25
   ventStrengthMax: 1
-  ventNoiseScale: 3
+  ventNoiseScale: 2
   ventThreshold: 0.8
   enableVentReplenishment: 1
   ventTickSeconds: 0.5

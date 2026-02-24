@@ -21,7 +21,7 @@ public class ReplicatorManager : MonoBehaviour
     [Header("Simulation")]
     public float moveSpeed = 4.0f;
     public float turnSpeed = 2.0f;
-    public float spawnSpread = 0.5f;
+    public float spawnSpread = 0.0f;
 
     [Range(0f, 1f)]
     public float reproductionRate = 0.1f;
@@ -108,7 +108,7 @@ public class ReplicatorManager : MonoBehaviour
     [Tooltip("If enabled, newly created replicators can only be spawned in sea locations.")]
     public bool defaultSpawnOnlyInSea = false;
     [Tooltip("If enabled, replicators only reproduce while currently in the sea.")]
-    public bool defaultReplicateOnlyInSea = true;
+    public bool defaultReplicateOnlyInSea = false;
     [Tooltip("If enabled, replicators stay in the sea and do not move onto land.")]
     public bool defaultMoveOnlyInSea = false;
     [Range(0.01f, 1f)]
@@ -808,7 +808,7 @@ public class ReplicatorManager : MonoBehaviour
                     if (fixedC > 0f)
                         agent.organicCStore = Mathf.Clamp(agent.organicCStore + fixedC, 0f, maxStore);
                 }
-                else
+/*                else
                 {
                     // No H2S/CO2 to run chemosynthesis: fall back to aerobic respiration of stored carbon (if O2 exists)
                     AerobicRespireFromStore(
@@ -817,7 +817,7 @@ public class ReplicatorManager : MonoBehaviour
                         Mathf.Max(0f, chemoRespirationCPerTick),
                         o2PerC,
                         energyPerC);
-                }
+                }*/
             }
 
             agent.speedFactor = Mathf.Clamp(agent.energy / safeEnergyForFullSpeed, minSpeedFactor, 1f);
