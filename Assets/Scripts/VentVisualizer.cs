@@ -1,3 +1,4 @@
+using System.Collections;
 using UnityEngine;
 
 [DisallowMultipleComponent]
@@ -39,8 +40,31 @@ public class VentVisualizer : MonoBehaviour
         }
     }
 
-    private void Start()
+    private IEnumerator Start()
     {
+        // wait 1 frame
+        yield return null;
+
+        // wait for PlanetResourceMap init
+        float timeout = 5f; // avoid infinite loop
+        while (timeout > 0f &&
+              (resourceMap == null ||
+               resourceMap.ventStrength == null ||
+               resourceMap.CellDirs == null ||
+               resourceMap.CellDirs.Length == 0 ||
+               resourceMap.VentCells == null))
+        {
+            timeout -= Time.deltaTime;
+            yield return null;
+        }
+
+        if (timeout <= 0f)
+        {
+            Debug.LogWarning("[VentVisualizer] Timed out waiting for PlanetResourceMap initialization.");
+            yield break;
+        }
+
+        Debug.Log($"[VentVisualizer] Ready. Vent count: {resourceMap.VentCells.Length}");
         BuildVentVisuals();
     }
 
@@ -48,6 +72,7 @@ public class VentVisualizer : MonoBehaviour
     {
         if (resourceMap == null || planetGenerator == null || resourceMap.ventStrength == null)
         {
+            Debug.Log($"[VentVisualizer] resourceMap == null || planetGenerator == null || resourceMap.ventStrength == null.");
             return;
         }
 
@@ -55,6 +80,7 @@ public class VentVisualizer : MonoBehaviour
         Vector3[] cellDirs = resourceMap.CellDirs;
         if (cellDirs == null || cellDirs.Length == 0)
         {
+            Debug.Log($"[VentVisualizer] cellDirs == null || cellDirs.Length == 0.");
             return;
         }
 

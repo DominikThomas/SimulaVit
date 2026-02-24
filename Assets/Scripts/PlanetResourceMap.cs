@@ -46,7 +46,7 @@ public class PlanetResourceMap : MonoBehaviour
     public float ventStrengthMin = 0.25f;
     public float ventStrengthMax = 1.0f;
     public float ventNoiseScale = 3.0f;
-    [Range(0f, 1f)] public float ventThreshold = 0.85f;
+    [Range(0f, 1f)] public float ventThreshold = 0.7f;
 
     [Header("Vents")]
     public bool enableVentReplenishment = true;
