@@ -52,8 +52,16 @@ public class PlanetResourceMap : MonoBehaviour
     public bool enableVentReplenishment = true;
     public float ventTickSeconds = 0.5f;
     public float ventH2SPerTick = 0.02f;
+    public float ventCO2PerTick = 0.0025f;
     public float ventH2SMax = 1.0f;
     public bool ventsOnlyBelowSeaLevel = false;
+
+    [Header("Natural Oxidation")]
+    public bool enableNaturalOxidation = true;
+    [Tooltip("Very slow fraction of local environmental OrganicC oxidized per atmosphere tick when O2 is available.")]
+    [Range(0f, 1f)] public float naturalOxidationFractionPerTick = 0.0005f;
+    [Tooltip("Minimum local O2 required before spontaneous oxidation can occur.")]
+    public float naturalOxidationMinO2 = 0.01f;
 
     [Header("Atmosphere Mixing")]
     public bool enableAtmosphereMixing = true;
@@ -163,6 +171,7 @@ public class PlanetResourceMap : MonoBehaviour
             {
                 atmosphereTimer -= atmosphereTick;
                 ApplyAtmosphereMixing();
+                ApplyNaturalOxidation();
             }
         }
     }
@@ -441,10 +450,53 @@ public class PlanetResourceMap : MonoBehaviour
             }
 
             Add(ResourceType.H2S, cell, perTick * cellVentStrength);
+            Add(ResourceType.CO2, cell, Mathf.Max(0f, ventCO2PerTick) * cellVentStrength);
             if (applyCap)
             {
                 h2s[cell] = Mathf.Min(h2s[cell], ventH2SMax);
             }
+        }
+    }
+
+    private void ApplyNaturalOxidation()
+    {
+        if (!enableNaturalOxidation || !isInitialized || organicC == null || o2 == null || co2 == null)
+        {
+            return;
+        }
+
+        float oxidationFraction = Mathf.Clamp01(naturalOxidationFractionPerTick);
+        if (oxidationFraction <= 0f)
+        {
+            return;
+        }
+
+        float minO2 = Mathf.Max(0f, naturalOxidationMinO2);
+
+        for (int cell = 0; cell < organicC.Length; cell++)
+        {
+            float localO2 = o2[cell];
+            if (localO2 <= minO2)
+            {
+                continue;
+            }
+
+            float availableOrganicC = organicC[cell];
+            if (availableOrganicC <= 0f)
+            {
+                continue;
+            }
+
+            float desiredOxidation = availableOrganicC * oxidationFraction;
+            float oxidizedCarbon = Mathf.Min(desiredOxidation, localO2, availableOrganicC);
+            if (oxidizedCarbon <= 0f)
+            {
+                continue;
+            }
+
+            organicC[cell] = Mathf.Max(0f, availableOrganicC - oxidizedCarbon);
+            o2[cell] = Mathf.Max(0f, localO2 - oxidizedCarbon);
+            co2[cell] += oxidizedCarbon;
         }
     }
 
@@ -584,9 +636,12 @@ public class PlanetResourceMap : MonoBehaviour
 
         ventTickSeconds = Mathf.Max(0.0001f, ventTickSeconds);
         ventH2SPerTick = Mathf.Max(0f, ventH2SPerTick);
+        ventCO2PerTick = Mathf.Max(0f, ventCO2PerTick);
         atmosphereTickSeconds = Mathf.Max(0.0001f, atmosphereTickSeconds);
         landExchangeRate = Mathf.Max(0f, landExchangeRate);
         oceanExchangeRate = Mathf.Max(0f, oceanExchangeRate);
+        naturalOxidationMinO2 = Mathf.Max(0f, naturalOxidationMinO2);
+        naturalOxidationFractionPerTick = Mathf.Clamp01(naturalOxidationFractionPerTick);
     }
 
 
