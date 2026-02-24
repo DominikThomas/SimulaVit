@@ -42,7 +42,7 @@ public class PlanetResourceMap : MonoBehaviour
     [Header("H2S Vent Spots")]
     public float ventFrequency = 12f;
     [Range(0f, 1f)] public float ventThreshold = 0.75f;
-    public float ventStrength = 2f;
+    public float ventStrength = 1.2f;
 
     [Header("Vents")]
     public bool enableVentReplenishment = true;
@@ -107,7 +107,7 @@ public class PlanetResourceMap : MonoBehaviour
 
         if (sunSkyRotator == null)
         {
-            sunSkyRotator = FindObjectOfType<SunSkyRotator>();
+            sunSkyRotator = FindFirstObjectByType<SunSkyRotator>();
         }
 
         if (sunLight == null && sunSkyRotator != null)

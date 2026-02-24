@@ -546,22 +546,30 @@ MonoBehaviour:
   moveEnergyCostPerSecond: 0.05
   replicationEnergyCost: 0.5
   basalEnergyCostPerSecond: 0.01
+  energyForFullSpeed: 0.5
+  minSpeedFactor: 0.15
   chemosynthesisCo2NeedPerTick: 0.02
   chemosynthesisH2sNeedPerTick: 0.001
   chemosynthesisEnergyPerTick: 0.7
   metabolismMutationChance: 0.01
   allowReverseMetabolismMutation: 0
   photosynthesisCo2PerTickAtFullInsolation: 0.02
-  photosynthesisEnergyPerCo2: 12
-  photosynthStoreFraction: 0.8
-  maxOrganicCStore: 20
+  photosynthesisEnergyPerCo2: 2
+  aerobicO2PerC: 0.02
+  aerobicEnergyPerC: 0.05
+  photosynthStoreFraction: 1
+  maxOrganicCStore: 10
   nightRespirationCPerTick: 0.01
   nightRespirationEnergyPerC: 0.05
   nightRespirationO2PerC: 0.02
+  chemosynthStoreFraction: 1
+  chemoRespirationCPerTick: 0.01
   saprotrophyMutationChance: 0.005
   saproCPerTick: 0.02
   saproO2PerC: 0.02
   saproEnergyPerC: 0.06
+  saproAssimilationFraction: 0.2
+  saproRespireStoreCPerTick: 0.01
   biasSpawnsToChemosynthesisResources: 1
   spawnResourceProbeAttempts: 12
   h2sSpawnBiasWeight: 2.5
@@ -572,11 +580,12 @@ MonoBehaviour:
   guaranteedFirstSpawnWithinSeconds: 10
   seaSpawnPreference: 1
   defaultSpawnOnlyInSea: 1
-  defaultReplicateOnlyInSea: 1
+  defaultReplicateOnlyInSea: 0
   defaultMoveOnlyInSea: 0
   defaultSurfaceMoveSpeedMultiplier: 0.4
   colorByEnergy: 1
   energyVisualMultiplier: 1
+  showSimulationHud: 1
   chemosynthAgentCount: 0
   photosynthAgentCount: 0
   saprotrophAgentCount: 0
