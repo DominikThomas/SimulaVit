@@ -151,15 +151,17 @@ MonoBehaviour:
   resourceMap: {fileID: 1222684993}
   planetGenerator: {fileID: 382753102}
   parent: {fileID: 0}
-  ventGlowMaterial: {fileID: 2100000, guid: 4c599f27c8ccdde49b2f78e718fed8f5, type: 2}
+  ventGlowMaterial: {fileID: 2100000, guid: fd3b47395b8aac74eb6c82092e0ced9f, type: 2}
   sootPrefab: {fileID: 3282405601032870620, guid: a752e0287c9c41b47b0182c1e99ef265, type: 3}
-  glowRadiusMin: 0.02
-  glowRadiusMax: 0.08
+  glowRadiusMin: 0.05
+  glowRadiusMax: 0.15
   glowEmissionMin: 1
   glowEmissionMax: 6
   surfaceOffset: 0.01
   showLandVents: 1
   showUnderwaterVents: 1
+  clusterAngleMultiplier: 2
+  minClusterStrengthToRender: 0
 --- !u!4 &184847770
 Transform:
   m_ObjectHideFlags: 0

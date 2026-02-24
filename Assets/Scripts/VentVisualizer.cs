@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 
 [DisallowMultipleComponent]
@@ -20,7 +21,17 @@ public class VentVisualizer : MonoBehaviour
     public bool showLandVents = true;
     public bool showUnderwaterVents = true;
 
+    [Header("Vent Clustering")]
+    [Tooltip("Higher merges vents more aggressively into patches. 1–3 is typical.")]
+    public float clusterAngleMultiplier = 2f;
+
+    [Tooltip("Skip tiny clusters (helps remove speckle). 0 disables.")]
+    public float minClusterStrengthToRender = 0f;
+
     private static Mesh markerMesh;
+    private static Mesh quadMesh;
+
+    private int spawnedVentIndex = 0;
 
     private void Awake()
     {
@@ -89,11 +100,29 @@ public class VentVisualizer : MonoBehaviour
 
         if (vents != null && vents.Length > 0)
         {
-            for (int i = 0; i < vents.Length; i++)
+            int resolution = Mathf.Max(2, planetGenerator.resolution);
+
+            // Build clusters
+            List<VentCluster> clusters = BuildClusters(vents, cellDirs, resourceMap.ventStrength, resolution);
+
+            int spawned = 0;
+            for (int k = 0; k < clusters.Count; k++)
             {
-                BuildVentVisual(vents[i], oceanRadius, cellDirs, propertyBlock);
+                var cl = clusters[k];
+
+                if (minClusterStrengthToRender > 0f && cl.strengthMax < minClusterStrengthToRender)
+                    continue;
+
+                SpawnClusterVisual(cl, oceanRadius, propertyBlock);
+                spawned++;
             }
+
+            Debug.Log($"[VentVisualizer] Spawned {spawned} vent clusters (from {vents.Length} vent cells).");
             return;
+        }
+        else
+        {
+            Debug.Log($"[VentVisualizer] No vents exist yet. Count is: {(vents == null ? 0 : vents.Length)}.");
         }
 
         for (int cell = 0; cell < resourceMap.ventStrength.Length; cell++)
@@ -136,11 +165,11 @@ public class VentVisualizer : MonoBehaviour
         GameObject marker = new GameObject($"Vent_{cell}");
         marker.transform.SetParent(parent, true);
         marker.transform.position = worldPos;
-        marker.transform.up = dir;
+        marker.transform.rotation = Quaternion.LookRotation(-dir);
         marker.transform.localScale = Vector3.one * scale;
 
         MeshFilter filter = marker.AddComponent<MeshFilter>();
-        filter.sharedMesh = GetMarkerMesh();
+        filter.sharedMesh = GetQuadMesh();
 
         MeshRenderer renderer = marker.AddComponent<MeshRenderer>();
         if (ventGlowMaterial != null)
@@ -250,4 +279,162 @@ public class VentVisualizer : MonoBehaviour
         Object.DestroyImmediate(primitive);
         return markerMesh;
     }
+
+    private Mesh GetQuadMesh()
+    {
+        if (quadMesh != null)
+            return quadMesh;
+
+        quadMesh = new Mesh();
+        quadMesh.name = "VentQuad";
+
+        quadMesh.vertices = new Vector3[]
+        {
+        new Vector3(-0.5f, -0.5f, 0f),
+        new Vector3( 0.5f, -0.5f, 0f),
+        new Vector3(-0.5f,  0.5f, 0f),
+        new Vector3( 0.5f,  0.5f, 0f)
+        };
+
+        quadMesh.uv = new Vector2[]
+        {
+        new Vector2(0f, 0f),
+        new Vector2(1f, 0f),
+        new Vector2(0f, 1f),
+        new Vector2(1f, 1f)
+        };
+
+        quadMesh.triangles = new int[]
+        {
+        0, 2, 1,
+        2, 3, 1
+        };
+
+        quadMesh.RecalculateNormals();
+        return quadMesh;
+    }
+
+    private class VentCluster
+    {
+        public Vector3 weightedDirSum;
+        public float strengthSum;
+        public float strengthMax;
+        public int count;
+
+        public Vector3 CenterDir
+        {
+            get
+            {
+                if (weightedDirSum.sqrMagnitude <= 1e-12f) return Vector3.up;
+                return weightedDirSum.normalized;
+            }
+        }
+
+        public float NormalizedStrength(float minS, float maxS)
+        {
+            // Use max strength (or sum) to drive emission; max is usually nicer/stable.
+            float s = strengthMax;
+            return Mathf.InverseLerp(minS, maxS, s);
+        }
+    }
+
+    private List<VentCluster> BuildClusters(int[] vents, Vector3[] cellDirs, float[] ventStrength, int resolution)
+    {
+        var clusters = new List<VentCluster>(Mathf.Max(4, vents.Length / 8));
+
+        // Approx tile angular size on unit sphere (very rough but good enough):
+        // For resolution R, a face spans ~90 degrees. Tile ~ (90deg / (R-1)).
+        float safeR = Mathf.Max(2, resolution);
+        float tileAngleRad = (Mathf.PI * 0.5f) / (safeR - 1f);
+        float maxAngle = tileAngleRad * Mathf.Max(0.1f, clusterAngleMultiplier);
+        float cosThreshold = Mathf.Cos(maxAngle);
+
+        for (int i = 0; i < vents.Length; i++)
+        {
+            int cell = vents[i];
+            if (cell < 0 || cell >= cellDirs.Length || cell >= ventStrength.Length) continue;
+
+            float s = ventStrength[cell];
+            if (s <= 0f) continue;
+
+            Vector3 dir = cellDirs[cell].normalized;
+
+            // Assign to an existing cluster if close enough to its center direction.
+            int bestIndex = -1;
+            float bestDot = -1f;
+
+            for (int c = 0; c < clusters.Count; c++)
+            {
+                float d = Vector3.Dot(dir, clusters[c].CenterDir);
+                if (d > cosThreshold && d > bestDot)
+                {
+                    bestDot = d;
+                    bestIndex = c;
+                }
+            }
+
+            if (bestIndex < 0)
+            {
+                var nc = new VentCluster
+                {
+                    weightedDirSum = dir * s,
+                    strengthSum = s,
+                    strengthMax = s,
+                    count = 1
+                };
+                clusters.Add(nc);
+            }
+            else
+            {
+                var cl = clusters[bestIndex];
+                cl.weightedDirSum += dir * s;
+                cl.strengthSum += s;
+                cl.strengthMax = Mathf.Max(cl.strengthMax, s);
+                cl.count++;
+            }
+        }
+
+        return clusters;
+    }
+
+    private void SpawnClusterVisual(VentCluster cl, float oceanRadius, MaterialPropertyBlock propertyBlock)
+    {
+        Vector3 dir = cl.CenterDir;
+
+        float surfaceRadius = planetGenerator.GetSurfaceRadius(dir);
+        bool underwater = surfaceRadius < oceanRadius;
+
+        if ((!underwater && !showLandVents) || (underwater && !showUnderwaterVents))
+            return;
+
+        float normalizedStrength = cl.NormalizedStrength(resourceMap.ventStrengthMin, resourceMap.ventStrengthMax);
+
+        // Scale can depend on strength AND cluster size (count). sqrt gives nice growth.
+        float sizeBoost = Mathf.Sqrt(Mathf.Max(1, cl.count));
+        float scale = Mathf.Lerp(glowRadiusMin, glowRadiusMax, normalizedStrength) * Mathf.Lerp(1f, 1.8f, Mathf.Clamp01((sizeBoost - 1f) / 4f));
+        float emission = Mathf.Lerp(glowEmissionMin, glowEmissionMax, normalizedStrength) * Mathf.Lerp(1f, 1.5f, Mathf.Clamp01((sizeBoost - 1f) / 4f));
+
+        Vector3 worldPos = planetGenerator.transform.position + dir * (surfaceRadius + surfaceOffset);
+
+        GameObject marker = new GameObject($"VentCluster_{spawnedVentIndex++}_n{cl.count}");
+        marker.transform.SetParent(parent, true);
+        marker.transform.position = worldPos;
+        marker.transform.rotation = Quaternion.LookRotation(-dir);
+        marker.transform.localScale = Vector3.one * scale;
+
+        MeshFilter filter = marker.AddComponent<MeshFilter>();
+        filter.sharedMesh = GetQuadMesh();
+
+        MeshRenderer renderer = marker.AddComponent<MeshRenderer>();
+        if (ventGlowMaterial != null)
+            renderer.sharedMaterial = ventGlowMaterial;
+
+        propertyBlock.Clear();
+        propertyBlock.SetColor("_EmissionColor", Color.red * emission);
+        renderer.SetPropertyBlock(propertyBlock);
+
+        if (underwater)
+            AttachSoot(marker.transform, normalizedStrength);
+    }
+
 }
