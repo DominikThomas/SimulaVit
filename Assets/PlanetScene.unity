@@ -714,8 +714,12 @@ MonoBehaviour:
   enableVentReplenishment: 1
   ventTickSeconds: 0.5
   ventH2SPerTick: 0.0002
+  ventCO2PerTick: 0.0025
   ventH2SMax: 1
   ventsOnlyBelowSeaLevel: 0
+  enableNaturalOxidation: 1
+  naturalOxidationFractionPerTick: 0.0005
+  naturalOxidationO2HalfSaturation: 0.02
   enableAtmosphereMixing: 1
   atmosphereTickSeconds: 0.5
   landExchangeRate: 0.25
