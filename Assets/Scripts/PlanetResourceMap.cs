@@ -73,6 +73,12 @@ public class PlanetResourceMap : MonoBehaviour
     public float debugGlobalCO2;
     public float debugGlobalO2;
 
+    [Header("Temperature Model")]
+    public float baseTemp = 0.2f;
+    public float insolationTempGain = 0.3f;
+    public float ventTempGain = 0.6f;
+    [Range(0f, 1f)] public float oceanTempDamping = 0.5f;
+
     [Header("Debug Preview")]
     public ResourceType debugViewType = ResourceType.CO2;
     public Gradient debugGradient;
@@ -224,22 +230,32 @@ public class PlanetResourceMap : MonoBehaviour
     }
 
     /// <summary>
-    /// Simple temperature model:
-    /// temp = base + insolationBoost * insolation - latitudePenalty * |latitude|
-    /// where latitude is in [0..1] from equator (0) to poles (1).
-    /// This intentionally keeps behavior stable and easy to tune.
+    /// Simple normalized temperature model:
+    /// temp = base + insolationGain * insolation + ventGain * ventStrength.
+    /// If a cell is underwater, insolation swings can be damped by oceanTempDamping.
     /// </summary>
-    public float GetTemperature(Vector3 dir)
+    public float GetTemperature(Vector3 dir, int cellIndex = -1)
     {
-        float insolation = GetInsolation(dir);
-        Vector3 n = ResolveSurfaceDirection(dir);
-        float latitude = Mathf.Abs(n.y);
+        Vector3 surfaceDir = ResolveSurfaceDirection(dir);
+        float insolation = Mathf.Clamp01(GetInsolation(surfaceDir));
 
-        const float baseTemperature = 230f;
-        const float insolationBoost = 80f;
-        const float latitudePenalty = 45f;
+        if (cellIndex < 0 && isInitialized && resolution > 0)
+        {
+            cellIndex = PlanetGridIndexing.DirectionToCellIndex(surfaceDir, resolution);
+        }
 
-        return baseTemperature + (insolationBoost * insolation) - (latitudePenalty * latitude);
+        bool underwater = IsOceanCell(cellIndex);
+        float insolationDamping = underwater ? Mathf.Clamp01(oceanTempDamping) : 1f;
+        float insolationTerm = Mathf.Max(0f, insolationTempGain) * insolation * insolationDamping;
+
+        float ventTerm = 0f;
+        if (ventStrength != null && cellIndex >= 0 && cellIndex < ventStrength.Length)
+        {
+            ventTerm = Mathf.Max(0f, ventTempGain) * Mathf.Max(0f, ventStrength[cellIndex]);
+        }
+
+        float temp = baseTemp + insolationTerm + ventTerm;
+        return Mathf.Clamp(temp, 0f, 1.5f);
     }
 
     private void InitializeIfNeeded()

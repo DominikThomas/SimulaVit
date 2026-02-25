@@ -38,6 +38,9 @@ public class Replicator
     public float organicCStore;
     public float speedFactor;
     public MetabolismType metabolism;
+    public float optimalTemp;
+    public float tempTolerance;
+    public float lethalTempMargin;
 
     // Movement data
     public Vector3 velocity;
