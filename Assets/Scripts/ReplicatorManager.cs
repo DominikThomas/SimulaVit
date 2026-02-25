@@ -35,6 +35,15 @@ public class ReplicatorManager : MonoBehaviour
     public float replicationEnergyCost = 0.5f;
     public float basalEnergyCostPerSecond = 0.01f;
 
+    [Header("Carbon-limited Division")]
+    public bool enableCarbonLimitedDivision = true;
+    public float defaultBiomassTarget = 0.2f;
+    [Range(1.2f, 3f)] public float divisionBiomassMultiple = 2.0f;
+    public float divisionEnergyCost = 0.2f;
+    [Range(0.3f, 0.7f)] public float divisionCarbonSplitToChild = 0.5f;
+    public float biomassMutationChance = 0.02f;
+    public float biomassMutationScale = 0.1f;
+
     [Header("Energy -> Speed")]
     public float energyForFullSpeed = 0.5f;
     public float minSpeedFactor = 0.15f;
@@ -126,6 +135,8 @@ public class ReplicatorManager : MonoBehaviour
     [SerializeField] private int chemosynthAgentCount;
     [SerializeField] private int photosynthAgentCount;
     [SerializeField] private int saprotrophAgentCount;
+    [SerializeField] private float averageOrganicCStore;
+    [SerializeField] private int divisionEligibleAgentCount;
     private GUIStyle hudStyle;
     private GUIStyle hudBackgroundStyle;
     private bool isInitialized;
@@ -472,7 +483,7 @@ public class ReplicatorManager : MonoBehaviour
 
         metabolismDebugLogTimer = 0f;
         bool unlocked = planetGenerator != null && planetGenerator.PhotosynthesisUnlocked;
-        Debug.Log($"Metabolism: chemo={chemosynthAgentCount} photo={photosynthAgentCount} sapro={saprotrophAgentCount} photoUnlocked={unlocked} saproUnlocked={IsSaprotrophyUnlocked()}");
+        Debug.Log($"Metabolism: chemo={chemosynthAgentCount} photo={photosynthAgentCount} sapro={saprotrophAgentCount} photoUnlocked={unlocked} saproUnlocked={IsSaprotrophyUnlocked()} avgOrganicC={averageOrganicCStore:F3} divisionEligible={divisionEligibleAgentCount}");
     }
 
     void HandleSpontaneousSpawning()
@@ -516,7 +527,7 @@ public class ReplicatorManager : MonoBehaviour
             return false;
         }
 
-        return SpawnAgentAtDirection(randomDir, CreateDefaultTraits(), null, MetabolismType.SulfurChemosynthesis);
+        return SpawnAgentAtDirection(randomDir, CreateDefaultTraits(), null, MetabolismType.SulfurChemosynthesis, out _);
     }
 
 
@@ -592,6 +603,8 @@ public class ReplicatorManager : MonoBehaviour
     {
         float dt = Time.deltaTime;
         float reproductionChance = reproductionRate * dt;
+        float organicCSum = 0f;
+        int eligibleForDivisionCount = 0;
 
         for (int i = agents.Count - 1; i >= 0; i--)
         {
@@ -608,14 +621,55 @@ public class ReplicatorManager : MonoBehaviour
             float lifeRemaining = agent.maxLifespan - agent.age;
             agent.color = CalculateAgentColor(agent.age, lifeRemaining, agent.energy, agent.metabolism);
 
-            if (Random.value < reproductionChance && agent.energy >= replicationEnergyCost)
+            organicCSum += Mathf.Max(0f, agent.organicCStore);
+
+            bool hasEnergyForDivision = enableCarbonLimitedDivision
+                ? agent.energy >= Mathf.Max(0f, divisionEnergyCost)
+                : agent.energy >= replicationEnergyCost;
+
+            bool hasCarbonForDivision = true;
+            if (enableCarbonLimitedDivision)
             {
-                if (SpawnAgentFromPopulation(agent))
+                float target = Mathf.Max(0.0001f, agent.biomassTarget);
+                float divisionThreshold = Mathf.Max(1f, divisionBiomassMultiple) * target;
+                hasCarbonForDivision = agent.organicCStore >= divisionThreshold;
+                if (hasCarbonForDivision)
                 {
-                    agent.energy = Mathf.Max(0f, agent.energy - replicationEnergyCost);
+                    eligibleForDivisionCount++;
+                }
+            }
+
+            if (Random.value < reproductionChance && hasEnergyForDivision && hasCarbonForDivision)
+            {
+                if (SpawnAgentFromPopulation(agent, out Replicator childAgent))
+                {
+                    if (enableCarbonLimitedDivision)
+                    {
+                        agent.energy = Mathf.Max(0f, agent.energy - Mathf.Max(0f, divisionEnergyCost));
+
+                        float totalC = Mathf.Max(0f, agent.organicCStore);
+                        float toChild = totalC * Mathf.Clamp01(divisionCarbonSplitToChild);
+                        childAgent.organicCStore = Mathf.Clamp(toChild, 0f, maxOrganicCStore);
+                        agent.organicCStore = Mathf.Max(0f, totalC - toChild);
+                    }
+                    else
+                    {
+                        agent.energy = Mathf.Max(0f, agent.energy - replicationEnergyCost);
+                    }
                 }
             }
         }
+
+        if (agents.Count > 0)
+        {
+            averageOrganicCStore = organicCSum / agents.Count;
+        }
+        else
+        {
+            averageOrganicCStore = 0f;
+        }
+
+        divisionEligibleAgentCount = eligibleForDivisionCount;
     }
 
 
@@ -949,8 +1003,10 @@ public class ReplicatorManager : MonoBehaviour
         if (jobSpeedFactors.IsCreated) jobSpeedFactors.Dispose();
     }
 
-    bool SpawnAgentFromPopulation(Replicator parent)
+    bool SpawnAgentFromPopulation(Replicator parent, out Replicator childAgent)
     {
+        childAgent = null;
+
         if (agents.Count >= maxPopulation) return false;
 
         if (parent.traits.replicateOnlyInSea && !IsSeaLocation(parent.currentDirection))
@@ -986,7 +1042,7 @@ public class ReplicatorManager : MonoBehaviour
             childMetabolism = MetabolismType.Saprotrophy;
         }
 
-        return SpawnAgentAtDirection(randomDir, parent.traits, parent, childMetabolism);
+        return SpawnAgentAtDirection(randomDir, parent.traits, parent, childMetabolism, out childAgent);
     }
 
     bool IsSaprotrophyUnlocked()
@@ -1047,11 +1103,13 @@ public class ReplicatorManager : MonoBehaviour
     {
         if (agents.Count >= maxPopulation) return false;
         Vector3 dir = GetSpawnDirectionCandidate();
-        return SpawnAgentAtDirection(dir, CreateDefaultTraits(), null, MetabolismType.SulfurChemosynthesis);
+        return SpawnAgentAtDirection(dir, CreateDefaultTraits(), null, MetabolismType.SulfurChemosynthesis, out _);
     }
 
-    bool SpawnAgentAtDirection(Vector3 direction, Replicator.Traits traits, Replicator parent, MetabolismType metabolism)
+    bool SpawnAgentAtDirection(Vector3 direction, Replicator.Traits traits, Replicator parent, MetabolismType metabolism, out Replicator spawnedAgent)
     {
+        spawnedAgent = null;
+
         if (agents.Count >= maxPopulation) return false;
 
         Vector3 randomDir = direction.normalized;
@@ -1079,7 +1137,31 @@ public class ReplicatorManager : MonoBehaviour
         newAgent.energy = parent == null ? Random.Range(0.1f, 0.5f) : Mathf.Max(0.1f, parent.energy * 0.5f);
         newAgent.size = 1f;
 
+        float baselineTarget = Mathf.Max(0.0001f, defaultBiomassTarget);
+        if (parent == null)
+        {
+            newAgent.biomassTarget = baselineTarget;
+        }
+        else
+        {
+            float inheritedTarget = Mathf.Max(0.0001f, parent.biomassTarget);
+            if (inheritedTarget <= 0f)
+            {
+                inheritedTarget = baselineTarget;
+            }
+
+            if (Random.value < Mathf.Clamp01(biomassMutationChance))
+            {
+                float mutationScale = Mathf.Max(0f, biomassMutationScale);
+                float mutationFactor = 1f + Random.Range(-mutationScale, mutationScale);
+                inheritedTarget *= Mathf.Max(0.1f, mutationFactor);
+            }
+
+            newAgent.biomassTarget = Mathf.Max(0.0001f, inheritedTarget);
+        }
+
         agents.Add(newAgent);
+        spawnedAgent = newAgent;
         return true;
     }
 
