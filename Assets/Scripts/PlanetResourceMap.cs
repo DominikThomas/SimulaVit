@@ -79,6 +79,13 @@ public class PlanetResourceMap : MonoBehaviour
     public float ventTempGain = 0.6f;
     [Range(0f, 1f)] public float oceanTempDamping = 0.5f;
 
+    [Header("Temperature - Vent Heat Gradient")]
+    public bool enableVentHeatGradient = true;
+    [Range(0, 8)] public int ventHeatBlurPasses = 3;
+    [Range(0f, 1f)] public float ventHeatSpread = 0.4f;
+    public float ventHeatMaxOcean = 1.2f;
+    public float ventHeatMaxLand = 1.6f;
+
     [Header("Debug Preview")]
     public ResourceType debugViewType = ResourceType.CO2;
     public Gradient debugGradient;
@@ -109,6 +116,9 @@ public class PlanetResourceMap : MonoBehaviour
 
     private bool isInitialized;
     public float[] ventStrength;
+    private float[] ventHeat;
+    private float[] ventHeatTmp;
+    private int[] ventHeatNeighbors;
     private byte[] ventMask;
     private int[] ventCells;
     private byte[] oceanMask;
@@ -249,13 +259,14 @@ public class PlanetResourceMap : MonoBehaviour
         float insolationTerm = Mathf.Max(0f, insolationTempGain) * insolation * insolationDamping;
 
         float ventTerm = 0f;
-        if (ventStrength != null && cellIndex >= 0 && cellIndex < ventStrength.Length)
+        if (ventHeat != null && cellIndex >= 0 && cellIndex < ventHeat.Length)
         {
-            ventTerm = Mathf.Max(0f, ventTempGain) * Mathf.Max(0f, ventStrength[cellIndex]);
+            ventTerm = Mathf.Max(0f, ventHeat[cellIndex]);
         }
 
         float temp = baseTemp + insolationTerm + ventTerm;
-        return Mathf.Clamp(temp, 0f, 1.5f);
+        float tempMax = underwater ? Mathf.Max(0.01f, ventHeatMaxOcean) : Mathf.Max(0.01f, ventHeatMaxLand);
+        return Mathf.Clamp(temp, 0f, tempMax);
     }
 
     private void InitializeIfNeeded()
@@ -287,6 +298,9 @@ public class PlanetResourceMap : MonoBehaviour
         cellDirections = new Vector3[cellCount];
         ventMask = new byte[cellCount];
         ventStrength = new float[cellCount];
+        ventHeat = new float[cellCount];
+        ventHeatTmp = new float[cellCount];
+        ventHeatNeighbors = new int[cellCount * 6];
         oceanMask = new byte[cellCount];
 
         int ventCount = 0;
@@ -335,6 +349,9 @@ public class PlanetResourceMap : MonoBehaviour
                 ventCount++;
             }
         }
+
+        BuildVentHeatNeighbors();
+        RebuildVentHeatField();
 
         int total = cellCount;
         Debug.Log($"Vents: {ventCount}/{total} = {(100f * ventCount / total):F1}%");
@@ -525,6 +542,135 @@ public class PlanetResourceMap : MonoBehaviour
     {
         Vector3 samplePoint = dir * (ventFrequency * Mathf.Max(0.0001f, ventNoiseScale)) + new Vector3(17.3f, -9.1f, 5.7f);
         return (SimpleNoise.Evaluate(samplePoint) + 1f) * 0.5f;
+    }
+
+
+    private void BuildVentHeatNeighbors()
+    {
+        if (cellDirections == null || ventHeatNeighbors == null || resolution <= 0)
+        {
+            return;
+        }
+
+        int cellCount = cellDirections.Length;
+        float angularStep = Mathf.PI / Mathf.Max(8f, resolution * 4f);
+        float tangentOffset = Mathf.Sin(angularStep);
+
+        for (int cell = 0; cell < cellCount; cell++)
+        {
+            Vector3 dir = cellDirections[cell];
+            Vector3 tangentA = Vector3.Cross(dir, Vector3.up);
+            if (tangentA.sqrMagnitude < 1e-6f)
+            {
+                tangentA = Vector3.Cross(dir, Vector3.right);
+            }
+
+            tangentA.Normalize();
+            Vector3 tangentB = Vector3.Cross(dir, tangentA).normalized;
+
+            Vector3[] neighborDirs =
+            {
+                (dir + tangentA * tangentOffset).normalized,
+                (dir - tangentA * tangentOffset).normalized,
+                (dir + tangentB * tangentOffset).normalized,
+                (dir - tangentB * tangentOffset).normalized,
+                (dir + (tangentA + tangentB).normalized * tangentOffset).normalized,
+                (dir + (tangentA - tangentB).normalized * tangentOffset).normalized
+            };
+
+            for (int n = 0; n < 6; n++)
+            {
+                int neighborIndex = PlanetGridIndexing.DirectionToCellIndex(neighborDirs[n], resolution);
+                ventHeatNeighbors[(cell * 6) + n] = neighborIndex;
+            }
+        }
+    }
+
+    private void RebuildVentHeatField()
+    {
+        if (ventStrength == null || ventHeat == null || ventHeatTmp == null)
+        {
+            return;
+        }
+
+        int cellCount = ventStrength.Length;
+        float safeVentTempGain = Mathf.Max(0f, ventTempGain);
+
+        for (int cell = 0; cell < cellCount; cell++)
+        {
+            float strength = Mathf.Max(0f, ventStrength[cell]);
+            ventHeat[cell] = strength * safeVentTempGain;
+            ventHeatTmp[cell] = ventHeat[cell];
+        }
+
+        if (enableVentHeatGradient && ventHeatNeighbors != null)
+        {
+            int passes = Mathf.Max(0, ventHeatBlurPasses);
+            float spread = Mathf.Clamp01(ventHeatSpread);
+
+            for (int pass = 0; pass < passes; pass++)
+            {
+                for (int cell = 0; cell < cellCount; cell++)
+                {
+                    if (!IsOceanCell(cell))
+                    {
+                        ventHeatTmp[cell] = ventHeat[cell];
+                        continue;
+                    }
+
+                    float neighborSum = 0f;
+                    int neighborCount = 0;
+                    int baseIndex = cell * 6;
+                    for (int n = 0; n < 6; n++)
+                    {
+                        int neighborCell = ventHeatNeighbors[baseIndex + n];
+                        if (neighborCell < 0 || neighborCell >= cellCount || !IsOceanCell(neighborCell))
+                        {
+                            continue;
+                        }
+
+                        neighborSum += ventHeat[neighborCell];
+                        neighborCount++;
+                    }
+
+                    float neighborAverage = neighborCount > 0 ? neighborSum / neighborCount : ventHeat[cell];
+                    ventHeatTmp[cell] = Mathf.Lerp(ventHeat[cell], neighborAverage, spread);
+                }
+
+                float[] swap = ventHeat;
+                ventHeat = ventHeatTmp;
+                ventHeatTmp = swap;
+            }
+        }
+
+        float oceanTempSum = 0f;
+        float landTempSum = 0f;
+        float oceanTempMax = 0f;
+        float landTempMax = 0f;
+        int oceanCount = 0;
+        int landCount = 0;
+
+        for (int cell = 0; cell < cellCount; cell++)
+        {
+            float baseValue = Mathf.Max(0f, baseTemp);
+            float temp = baseValue + ventHeat[cell];
+            if (IsOceanCell(cell))
+            {
+                oceanTempSum += temp;
+                oceanTempMax = Mathf.Max(oceanTempMax, temp);
+                oceanCount++;
+            }
+            else
+            {
+                landTempSum += temp;
+                landTempMax = Mathf.Max(landTempMax, temp);
+                landCount++;
+            }
+        }
+
+        float oceanAvg = oceanCount > 0 ? oceanTempSum / oceanCount : 0f;
+        float landAvg = landCount > 0 ? landTempSum / landCount : 0f;
+        Debug.Log($"Vent heat field: oceanAvg={oceanAvg:0.00} oceanMax={oceanTempMax:0.00} landAvg={landAvg:0.00} landMax={landTempMax:0.00}", this);
     }
 
     private Vector3 GetSunDirection()

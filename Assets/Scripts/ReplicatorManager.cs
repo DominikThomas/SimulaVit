@@ -95,6 +95,8 @@ public class ReplicatorManager : MonoBehaviour
     public float h2sSpawnBiasWeight = 2.5f;
     [Tooltip("How strongly spontaneous/initial spawn chance scales with local CO2.")]
     public float co2SpawnBiasWeight = 0.5f;
+    public float chemoSpawnOptimalTemp = 1.0f;
+    public float chemoSpawnTempTolerance = 0.25f;
 
 
     [Header("Spontaneous Spawning")]
@@ -151,6 +153,7 @@ public class ReplicatorManager : MonoBehaviour
     private int debugChemoStressedCount;
     private int debugPhotoStressedCount;
     private int debugSaproStressedCount;
+    private float nextChemoSpawnDebugLogTime;
 
     // Arrays for Batching
     private Matrix4x4[] matrixBatch = new Matrix4x4[1023];
@@ -586,7 +589,8 @@ public class ReplicatorManager : MonoBehaviour
     float GetChemosynthesisSpawnScore(Vector3 direction)
     {
         int resolution = Mathf.Max(1, planetGenerator.resolution);
-        int cellIndex = PlanetGridIndexing.DirectionToCellIndex(direction.normalized, resolution);
+        Vector3 normalizedDir = direction.normalized;
+        int cellIndex = PlanetGridIndexing.DirectionToCellIndex(normalizedDir, resolution);
 
         float co2Need = Mathf.Max(0.0001f, chemosynthesisCo2NeedPerTick);
         float h2sNeed = Mathf.Max(0.0001f, chemosynthesisH2sNeedPerTick);
@@ -594,10 +598,24 @@ public class ReplicatorManager : MonoBehaviour
         float co2Availability = planetResourceMap.Get(ResourceType.CO2, cellIndex) / co2Need;
         float h2sAvailability = planetResourceMap.Get(ResourceType.H2S, cellIndex) / h2sNeed;
 
-        float weighted = (Mathf.Max(0f, co2SpawnBiasWeight) * co2Availability)
-                       + (Mathf.Max(0f, h2sSpawnBiasWeight) * h2sAvailability);
+        float chemistryScore = (Mathf.Max(0f, co2SpawnBiasWeight) * co2Availability)
+                             + (Mathf.Max(0f, h2sSpawnBiasWeight) * h2sAvailability);
 
-        return weighted;
+        float temp = planetResourceMap.GetTemperature(normalizedDir, cellIndex);
+        float tolerance = Mathf.Max(0.0001f, chemoSpawnTempTolerance);
+        float d = Mathf.Abs(temp - chemoSpawnOptimalTemp);
+        float tempFactor = Mathf.Clamp01(1f - (d / tolerance));
+        float temperedFactor = Mathf.Lerp(0.1f, 1f, tempFactor);
+
+        float score = chemistryScore * temperedFactor;
+
+        if (Time.timeSinceLevelLoad >= nextChemoSpawnDebugLogTime)
+        {
+            nextChemoSpawnDebugLogTime = Time.timeSinceLevelLoad + 8f;
+            Debug.Log($"Chemo spawn score: chemistry={chemistryScore:0.00} temp={temp:0.00} tempFactor={tempFactor:0.00} final={score:0.00}");
+        }
+
+        return score;
     }
 
     float GetLocationSpawnMultiplier(bool isSeaLocation)
