@@ -1237,7 +1237,22 @@ public class ReplicatorManager : MonoBehaviour
 
             float stressedBasal = basalCost * (1f + stress);
             agent.speedFactor = Mathf.Clamp((agent.energy / safeEnergyForFullSpeed) * performance, minSpeedFactor, 1f);
-            float movementCost = Mathf.Max(0f, moveEnergyCostPerSecond) * dtTick * agent.speedFactor;
+            float movementCost = 0f;
+            switch (agent.locomotion)
+            {
+                case LocomotionType.PassiveDrift:
+                case LocomotionType.Anchored:
+                    movementCost = 0f;
+                    break;
+                case LocomotionType.Amoeboid:
+                case LocomotionType.Flagellum:
+                    // TODO: Re-enable active locomotion energy costs when movement tuning is finalized.
+                    movementCost = 0f;
+                    break;
+                default:
+                    movementCost = 0f;
+                    break;
+            }
             agent.energy -= (stressedBasal + movementCost);
 
             if (agent.energy <= 0f)
