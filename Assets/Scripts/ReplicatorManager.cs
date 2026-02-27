@@ -57,6 +57,15 @@ public class ReplicatorManager : MonoBehaviour
     public float chemosynthesisEnergyPerTick = 0.3f;
     [Tooltip("Fractional mutation chance on reproduction that flips metabolism type.")]
     [Range(0f, 1f)] public float metabolismMutationChance = 0.01f;
+
+    [Header("Locomotion Mutation")]
+    [Range(0f, 1f)] public float locomotionMutationChance = 0.01f;
+    [Range(0f, 1f)] public float locomotionUpgradeChance = 0.5f;
+    [Range(0f, 1f)] public float locomotionAnchoredMutationChance = 0.05f;
+    [Tooltip("If enabled, Anchored can mutate back into Amoeboid.")]
+    public bool allowAnchoredToAmoeboidMutation = false;
+    [Range(0f, 1f)] public float anchoredToAmoeboidMutationChance = 0.001f;
+
     [Header("Metabolism Unlock")]
     [Tooltip("If true, Photosynthesis can mutate back to chemosynthesis. Default false.")]
     public bool allowReverseMetabolismMutation = false;
@@ -718,7 +727,7 @@ public class ReplicatorManager : MonoBehaviour
             return false;
         }
 
-        return SpawnAgentAtDirection(randomDir, CreateDefaultTraits(), null, MetabolismType.SulfurChemosynthesis, out _);
+        return SpawnAgentAtDirection(randomDir, CreateDefaultTraits(), null, MetabolismType.SulfurChemosynthesis, LocomotionType.PassiveDrift, 0f, out _);
     }
 
 
@@ -1371,12 +1380,67 @@ public class ReplicatorManager : MonoBehaviour
             childMetabolism = MetabolismType.Saprotrophy;
         }
 
-        return SpawnAgentAtDirection(randomDir, parent.traits, parent, childMetabolism, out childAgent);
+        LocomotionType childLocomotion = ResolveInheritedLocomotion(parent);
+        float childLocomotionSkill = ResolveInheritedLocomotionSkill(parent);
+
+        return SpawnAgentAtDirection(randomDir, parent.traits, parent, childMetabolism, childLocomotion, childLocomotionSkill, out childAgent);
     }
 
     bool IsSaprotrophyUnlocked()
     {
         return planetGenerator != null && planetGenerator.SaprotrophyUnlocked;
+    }
+
+    LocomotionType ResolveInheritedLocomotion(Replicator parent)
+    {
+        LocomotionType locomotion = parent != null ? parent.locomotion : LocomotionType.PassiveDrift;
+
+        if (parent == null || Random.value >= Mathf.Clamp01(locomotionMutationChance))
+        {
+            return locomotion;
+        }
+
+        bool mutateToAnchored = Random.value < Mathf.Clamp01(locomotionAnchoredMutationChance);
+
+        if (mutateToAnchored)
+        {
+            if (locomotion == LocomotionType.PassiveDrift || locomotion == LocomotionType.Amoeboid)
+            {
+                return LocomotionType.Anchored;
+            }
+
+            if (locomotion == LocomotionType.Anchored
+                && allowAnchoredToAmoeboidMutation
+                && Random.value < Mathf.Clamp01(anchoredToAmoeboidMutationChance))
+            {
+                return LocomotionType.Amoeboid;
+            }
+        }
+
+        if (Random.value < Mathf.Clamp01(locomotionUpgradeChance))
+        {
+            if (locomotion == LocomotionType.PassiveDrift)
+            {
+                return LocomotionType.Amoeboid;
+            }
+
+            if (locomotion == LocomotionType.Amoeboid)
+            {
+                return LocomotionType.Flagellum;
+            }
+        }
+
+        return locomotion;
+    }
+
+    float ResolveInheritedLocomotionSkill(Replicator parent)
+    {
+        if (parent == null)
+        {
+            return 0f;
+        }
+
+        return Mathf.Clamp01(parent.locomotionSkill);
     }
 
     bool IsInsolatedLocation(Vector3 direction)
@@ -1432,10 +1496,10 @@ public class ReplicatorManager : MonoBehaviour
     {
         if (agents.Count >= maxPopulation) return false;
         Vector3 dir = GetSpawnDirectionCandidate();
-        return SpawnAgentAtDirection(dir, CreateDefaultTraits(), null, MetabolismType.SulfurChemosynthesis, out _);
+        return SpawnAgentAtDirection(dir, CreateDefaultTraits(), null, MetabolismType.SulfurChemosynthesis, LocomotionType.PassiveDrift, 0f, out _);
     }
 
-    bool SpawnAgentAtDirection(Vector3 direction, Replicator.Traits traits, Replicator parent, MetabolismType metabolism, out Replicator spawnedAgent)
+    bool SpawnAgentAtDirection(Vector3 direction, Replicator.Traits traits, Replicator parent, MetabolismType metabolism, LocomotionType locomotion, float locomotionSkill, out Replicator spawnedAgent)
     {
         spawnedAgent = null;
 
@@ -1461,7 +1525,7 @@ public class ReplicatorManager : MonoBehaviour
 
         float newLifespan = Random.Range(minLifespan, maxLifespan);
         float movementSeed = Random.Range(-1000f, 1000f);
-        Replicator newAgent = new Replicator(spawnPosition, spawnRotation, newLifespan, baseAgentColor, traits, movementSeed, metabolism);
+        Replicator newAgent = new Replicator(spawnPosition, spawnRotation, newLifespan, baseAgentColor, traits, movementSeed, metabolism, locomotion, locomotionSkill);
         newAgent.age = parent == null ? Random.Range(0f, newLifespan * 0.5f) : 0f;
         newAgent.energy = parent == null ? Random.Range(0.1f, 0.5f) : Mathf.Max(0.1f, parent.energy * 0.5f);
         newAgent.size = 1f;

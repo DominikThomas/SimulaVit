@@ -22,6 +22,14 @@ public enum DeathCause
     TemperatureTooLow
 }
 
+public enum LocomotionType
+{
+    PassiveDrift,
+    Amoeboid,
+    Flagellum,
+    Anchored
+}
+
 [System.Serializable]
 public class Replicator
 {
@@ -53,6 +61,8 @@ public class Replicator
     public float organicCStore;
     public float biomassTarget;
     public float speedFactor;
+    public LocomotionType locomotion;
+    public float locomotionSkill;
     public MetabolismType metabolism;
     public float optimalTemp;
     public float tempTolerance;
@@ -71,7 +81,7 @@ public class Replicator
     public float movementSeed;
 
     // Constructor
-    public Replicator(Vector3 pos, Quaternion rot, float lifespan, Color col, Traits traits, float movementSeed, MetabolismType metabolism)
+    public Replicator(Vector3 pos, Quaternion rot, float lifespan, Color col, Traits traits, float movementSeed, MetabolismType metabolism, LocomotionType locomotion = LocomotionType.PassiveDrift, float locomotionSkill = 0f)
     {
         position = pos;
         rotation = rot;
@@ -84,6 +94,8 @@ public class Replicator
         organicCStore = 0f;
         biomassTarget = 0f;
         speedFactor = 1f;
+        this.locomotion = locomotion;
+        this.locomotionSkill = Mathf.Clamp01(locomotionSkill);
         age = 0;
         this.metabolism = metabolism;
         currentDirection = pos.normalized;
