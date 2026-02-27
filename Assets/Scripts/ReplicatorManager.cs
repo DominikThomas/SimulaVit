@@ -605,7 +605,8 @@ public class ReplicatorManager : MonoBehaviour
         {
             case DeathCause.OldAge: return "OldAge";
             case DeathCause.EnergyDepletion: return "Energy";
-            case DeathCause.TemperatureLethal: return "Temp";
+            case DeathCause.TemperatureTooHigh: return "TempHigh";
+            case DeathCause.TemperatureTooLow: return "TempLow";
             case DeathCause.Lack_CO2: return "CO2";
             case DeathCause.Lack_H2S: return "H2S";
             case DeathCause.Lack_Light: return "Light";
@@ -986,7 +987,11 @@ public class ReplicatorManager : MonoBehaviour
 
             if (d > tempTolerance + lethalMargin)
             {
-                RegisterDeathCause(agent.metabolism, DeathCause.TemperatureLethal);
+                DeathCause temperatureDeathCause = temp > agent.optimalTemp
+                    ? DeathCause.TemperatureTooHigh
+                    : DeathCause.TemperatureTooLow;
+
+                RegisterDeathCause(agent.metabolism, temperatureDeathCause);
                 DepositDeathOrganicC(agent);
                 agents.RemoveAt(i);
                 continue;
