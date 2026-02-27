@@ -12,7 +12,6 @@ public enum DeathCause
     Unknown,
     OldAge,
     EnergyDepletion,
-    TemperatureLethal,
     Lack_CO2,
     Lack_H2S,
     Lack_Light,

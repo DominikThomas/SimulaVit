@@ -605,7 +605,6 @@ public class ReplicatorManager : MonoBehaviour
         {
             case DeathCause.OldAge: return "OldAge";
             case DeathCause.EnergyDepletion: return "Energy";
-            case DeathCause.TemperatureLethal: return "Temp";
             case DeathCause.TemperatureTooHigh: return "TempHigh";
             case DeathCause.TemperatureTooLow: return "TempLow";
             case DeathCause.Lack_CO2: return "CO2";
