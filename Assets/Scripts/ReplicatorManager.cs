@@ -91,7 +91,7 @@ public class ReplicatorManager : MonoBehaviour
 
     [Header("Spawn Resource Bias")]
     public bool biasSpawnsToChemosynthesisResources = true;
-    [Range(1, 64)] public int spawnResourceProbeAttempts = 12;
+    [Range(1, 256)] public int spawnResourceProbeAttempts = 128;
     [Tooltip("How strongly spontaneous/initial spawn chance scales with local H2S.")]
     public float h2sSpawnBiasWeight = 2.5f;
     [Tooltip("How strongly spontaneous/initial spawn chance scales with local CO2.")]
