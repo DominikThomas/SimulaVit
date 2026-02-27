@@ -7,6 +7,20 @@ public enum MetabolismType
     Saprotrophy
 }
 
+public enum DeathCause
+{
+    Unknown,
+    OldAge,
+    EnergyDepletion,
+    TemperatureLethal,
+    Lack_CO2,
+    Lack_H2S,
+    Lack_Light,
+    Lack_OrganicC_Food,
+    Lack_O2,
+    Lack_StoredC
+}
+
 [System.Serializable]
 public class Replicator
 {
@@ -39,6 +53,16 @@ public class Replicator
     public float biomassTarget;
     public float speedFactor;
     public MetabolismType metabolism;
+    public float optimalTemp;
+    public float tempTolerance;
+    public float lethalTempMargin;
+    public float starveCo2Seconds;
+    public float starveH2sSeconds;
+    public float starveLightSeconds;
+    public float starveOrganicCFoodSeconds;
+    public float starveO2Seconds;
+    public float starveStoredCSeconds;
+    public DeathCause lastDeathCauseCandidate;
 
     // Movement data
     public Vector3 velocity;
@@ -62,5 +86,6 @@ public class Replicator
         age = 0;
         this.metabolism = metabolism;
         currentDirection = pos.normalized;
+        lastDeathCauseCandidate = DeathCause.Unknown;
     }
 }
