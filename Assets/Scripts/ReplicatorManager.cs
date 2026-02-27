@@ -400,9 +400,29 @@ public class ReplicatorManager : MonoBehaviour
         EnsureHudStyles();
 
         int totalAgents = agents.Count;
-        float photosynthPct = totalAgents > 0 ? (photosynthAgentCount * 100f) / totalAgents : 0f;
-        float chemosynthPct = totalAgents > 0 ? (chemosynthAgentCount * 100f) / totalAgents : 0f;
-        float saprotrophPct = totalAgents > 0 ? (saprotrophAgentCount * 100f) / totalAgents : 0f;
+        int[] totalByLocomotion = new int[4];
+        int[] chemosynthByLocomotion = new int[4];
+        int[] photosynthByLocomotion = new int[4];
+        int[] saprotrophByLocomotion = new int[4];
+
+        for (int i = 0; i < agents.Count; i++)
+        {
+            int locomotionIndex = Mathf.Clamp((int)agents[i].locomotion, 0, totalByLocomotion.Length - 1);
+            totalByLocomotion[locomotionIndex]++;
+
+            if (agents[i].metabolism == MetabolismType.Photosynthesis)
+            {
+                photosynthByLocomotion[locomotionIndex]++;
+            }
+            else if (agents[i].metabolism == MetabolismType.Saprotrophy)
+            {
+                saprotrophByLocomotion[locomotionIndex]++;
+            }
+            else
+            {
+                chemosynthByLocomotion[locomotionIndex]++;
+            }
+        }
 
         float globalCo2 = planetResourceMap != null ? planetResourceMap.debugGlobalCO2 : 0f;
         float globalO2 = planetResourceMap != null ? planetResourceMap.debugGlobalO2 : 0f;
@@ -415,19 +435,24 @@ public class ReplicatorManager : MonoBehaviour
             $"CO2: {globalCo2:0.000} ({co2Pct:0.0}%)\n" +
             $"O2: {globalO2:0.000} ({o2Pct:0.0}%)";
 
+        string FormatLocomotionCounts(int[] counts)
+        {
+            return $"{counts[0]}/{counts[1]}/{counts[2]}/{counts[3]}";
+        }
+
         string replicatorsText =
-            "Replicators\n" +
-            $"Total: {totalAgents}\n" +
-            $"<color=#FFD54A>Chemosynthesis:</color> {chemosynthAgentCount} ({chemosynthPct:0.0}%)";
+            "Replicators (Passive/Amoeboid/Flagellum/Anchored)\n" +
+            $"Total: {FormatLocomotionCounts(totalByLocomotion)}\n" +
+            $"<color=#FFD54A>Chemosynthesis:</color> {FormatLocomotionCounts(chemosynthByLocomotion)}";
 
         if (photosynthAgentCount > 0)
         {
-            replicatorsText += $"\n<color=#79E07E>Photosynthesis:</color> {photosynthAgentCount} ({photosynthPct:0.0}%)";
+            replicatorsText += $"\n<color=#79E07E>Photosynthesis:</color> {FormatLocomotionCounts(photosynthByLocomotion)}";
         }
 
         if (saprotrophAgentCount > 0)
         {
-            replicatorsText += $"\n<color=#62B0FF>Saprotroph:</color> {saprotrophAgentCount} ({saprotrophPct:0.0}%)";
+            replicatorsText += $"\n<color=#62B0FF>Saprotroph:</color> {FormatLocomotionCounts(saprotrophByLocomotion)}";
         }
 
         const float panelWidth = 189f;
