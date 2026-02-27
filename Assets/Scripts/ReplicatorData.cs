@@ -64,8 +64,8 @@ public class Replicator
     public LocomotionType locomotion;
     public float locomotionSkill;
     public MetabolismType metabolism;
-    public float optimalTemp;
-    public float tempTolerance;
+    public float optimalTempMin;
+    public float optimalTempMax;
     public float lethalTempMargin;
     public float starveCo2Seconds;
     public float starveH2sSeconds;

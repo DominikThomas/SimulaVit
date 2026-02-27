@@ -102,7 +102,6 @@ public class ReplicatorManager : MonoBehaviour
     public Vector2 chemoTempRange = new Vector2(0.8f, 1.2f);
     public Vector2 photoTempRange = new Vector2(0.3f, 0.8f);
     public Vector2 saproTempRange = new Vector2(0.2f, 0.7f);
-    public float defaultTempTolerance = 0.15f;
     public float defaultLethalMargin = 0.35f;
     [Range(0f, 1f)] public float tempMutationChance = 0.02f;
     public float tempMutationScale = 0.05f;
@@ -886,10 +885,13 @@ public class ReplicatorManager : MonoBehaviour
                 Vector3 dir = agent.position.normalized;
                 int cellIndex = PlanetGridIndexing.DirectionToCellIndex(dir, resolution);
                 float temp = planetResourceMap.GetTemperature(dir, cellIndex);
-                float d = Mathf.Abs(temp - agent.optimalTemp);
-                bool insideTolerance = d <= Mathf.Max(0f, agent.tempTolerance);
 
-                if (insideTolerance && SpawnAgentFromPopulation(agent, out Replicator childAgent))
+                float min = agent.optimalTempMin;
+                float max = agent.optimalTempMax;
+
+                bool insideOptimalBand = (temp >= min && temp <= max);
+
+                if (insideOptimalBand && SpawnAgentFromPopulation(agent, out Replicator childAgent))
                 {
                     if (enableCarbonLimitedDivision)
                     {
@@ -993,35 +995,45 @@ public class ReplicatorManager : MonoBehaviour
             int cellIndex = PlanetGridIndexing.DirectionToCellIndex(dir, resolution);
 
             float temp = planetResourceMap.GetTemperature(dir, cellIndex);
-            float tempTolerance = Mathf.Max(0f, agent.tempTolerance);
+
+            float min = agent.optimalTempMin;
+            float max = agent.optimalTempMax;
             float lethalMargin = Mathf.Max(0.0001f, agent.lethalTempMargin);
-            float d = Mathf.Abs(temp - agent.optimalTemp);
-            bool insideTolerance = d <= tempTolerance;
-            float stress = insideTolerance ? 0f : Mathf.InverseLerp(tempTolerance, tempTolerance + lethalMargin, d);
-            float performance = insideTolerance ? 1f : Mathf.Lerp(0.7f, 0.1f, stress);
+
+            float d = 0f;
+
+            if (temp < min)
+                d = min - temp;
+            else if (temp > max)
+                d = temp - max;
+
+            bool insideOptimalBand = d <= 0f;
+
+            float stress = insideOptimalBand ? 0f : Mathf.Clamp01(d / lethalMargin);
+            float performance = insideOptimalBand ? 1f : Mathf.Lerp(0.7f, 0.1f, stress);
 
             if (agent.metabolism == MetabolismType.Photosynthesis)
             {
                 debugPhotoTempSum += temp;
                 debugPhotoTempCount++;
-                if (!insideTolerance) debugPhotoStressedCount++;
+                if (!insideOptimalBand) debugPhotoStressedCount++;
             }
             else if (agent.metabolism == MetabolismType.Saprotrophy)
             {
                 debugSaproTempSum += temp;
                 debugSaproTempCount++;
-                if (!insideTolerance) debugSaproStressedCount++;
+                if (!insideOptimalBand) debugSaproStressedCount++;
             }
             else
             {
                 debugChemoTempSum += temp;
                 debugChemoTempCount++;
-                if (!insideTolerance) debugChemoStressedCount++;
+                if (!insideOptimalBand) debugChemoStressedCount++;
             }
 
-            if (d > tempTolerance + lethalMargin)
+            if (d > 0f)
             {
-                DeathCause temperatureDeathCause = temp > agent.optimalTemp
+                DeathCause temperatureDeathCause = temp > max
                     ? DeathCause.TemperatureTooHigh
                     : DeathCause.TemperatureTooLow;
 
@@ -1237,7 +1249,22 @@ public class ReplicatorManager : MonoBehaviour
 
             float stressedBasal = basalCost * (1f + stress);
             agent.speedFactor = Mathf.Clamp((agent.energy / safeEnergyForFullSpeed) * performance, minSpeedFactor, 1f);
-            float movementCost = Mathf.Max(0f, moveEnergyCostPerSecond) * dtTick * agent.speedFactor;
+            float movementCost = 0f;
+            switch (agent.locomotion)
+            {
+                case LocomotionType.PassiveDrift:
+                case LocomotionType.Anchored:
+                    movementCost = 0f;
+                    break;
+                case LocomotionType.Amoeboid:
+                case LocomotionType.Flagellum:
+                    // TODO: Re-enable active locomotion energy costs when movement tuning is finalized.
+                    movementCost = 0f;
+                    break;
+                default:
+                    movementCost = 0f;
+                    break;
+            }
             agent.energy -= (stressedBasal + movementCost);
 
             if (agent.energy <= 0f)
@@ -1586,36 +1613,57 @@ public class ReplicatorManager : MonoBehaviour
 
     void AssignTemperatureTraits(Replicator agent, Replicator parent, MetabolismType metabolism)
     {
+        Vector2 baseRange = GetTempRangeForMetabolism(metabolism);
+        float baseMin = Mathf.Min(baseRange.x, baseRange.y);
+        float baseMax = Mathf.Max(baseRange.x, baseRange.y);
+
+        float mutationChance = Mathf.Clamp01(tempMutationChance);
+        float scale = Mathf.Abs(tempMutationScale);
+
         if (parent == null)
         {
-            Vector2 tempRange = GetTempRangeForMetabolism(metabolism);
-            float min = Mathf.Min(tempRange.x, tempRange.y);
-            float max = Mathf.Max(tempRange.x, tempRange.y);
-            agent.optimalTemp = Random.Range(min, max);
-            agent.tempTolerance = Mathf.Max(0.01f, defaultTempTolerance);
+            // Entire metabolism range is the optimal band
+            agent.optimalTempMin = baseMin;
+            agent.optimalTempMax = baseMax;
+
             agent.lethalTempMargin = Mathf.Max(0.05f, defaultLethalMargin);
             return;
         }
 
-        agent.optimalTemp = parent.optimalTemp;
-        agent.tempTolerance = Mathf.Max(0.01f, parent.tempTolerance);
+        // Inherit
+        agent.optimalTempMin = parent.optimalTempMin;
+        agent.optimalTempMax = parent.optimalTempMax;
         agent.lethalTempMargin = Mathf.Max(0.05f, parent.lethalTempMargin);
 
-        float mutationChance = Mathf.Clamp01(tempMutationChance);
+        // Mutate the band edges slightly
         if (Random.value < mutationChance)
-        {
-            agent.optimalTemp += Random.Range(-tempMutationScale, tempMutationScale);
-        }
+            agent.optimalTempMin += Random.Range(-scale, scale);
 
         if (Random.value < mutationChance)
+            agent.optimalTempMax += Random.Range(-scale, scale);
+
+        // Ensure ordering and minimum band width
+        if (agent.optimalTempMin > agent.optimalTempMax)
         {
-            agent.tempTolerance = Mathf.Max(0.01f, agent.tempTolerance + Random.Range(-tempMutationScale, tempMutationScale));
+            float t = agent.optimalTempMin;
+            agent.optimalTempMin = agent.optimalTempMax;
+            agent.optimalTempMax = t;
         }
 
-        if (Random.value < mutationChance)
+        float minWidth = 0.02f; // tunable
+        if (agent.optimalTempMax - agent.optimalTempMin < minWidth)
         {
-            agent.lethalTempMargin = Mathf.Max(0.05f, agent.lethalTempMargin + Random.Range(-tempMutationScale, tempMutationScale));
+            float center = 0.5f * (agent.optimalTempMin + agent.optimalTempMax);
+            agent.optimalTempMin = center - 0.5f * minWidth;
+            agent.optimalTempMax = center + 0.5f * minWidth;
         }
+
+        // Optionally clamp to global reasonable range
+        agent.optimalTempMin = Mathf.Clamp(agent.optimalTempMin, 0f, 2f);
+        agent.optimalTempMax = Mathf.Clamp(agent.optimalTempMax, 0f, 2f);
+
+        if (Random.value < mutationChance)
+            agent.lethalTempMargin = Mathf.Max(0.05f, agent.lethalTempMargin + Random.Range(-scale, scale));
     }
 
     Vector2 GetTempRangeForMetabolism(MetabolismType metabolism)
