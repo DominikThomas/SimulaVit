@@ -50,6 +50,7 @@ public class Replicator
     public float energy;
     public float size;
     public float organicCStore;
+    public float biomassTarget;
     public float speedFactor;
     public MetabolismType metabolism;
     public float optimalTemp;
@@ -80,6 +81,7 @@ public class Replicator
         energy = 0f;
         size = 1f;
         organicCStore = 0f;
+        biomassTarget = 0f;
         speedFactor = 1f;
         age = 0;
         this.metabolism = metabolism;

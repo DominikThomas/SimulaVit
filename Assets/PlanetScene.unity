@@ -607,6 +607,13 @@ MonoBehaviour:
   replicationEnergyCost: 0.5
   basalEnergyCostPerSecond: 0.01
   starvationAttributionSeconds: 5
+  enableCarbonLimitedDivision: 1
+  defaultBiomassTarget: 0.15
+  divisionBiomassMultiple: 2
+  divisionEnergyCost: 0.2
+  divisionCarbonSplitToChild: 0.5
+  biomassMutationChance: 0.02
+  biomassMutationScale: 0.1
   energyForFullSpeed: 0.5
   minSpeedFactor: 0.15
   chemosynthesisCo2NeedPerTick: 0.02
@@ -659,6 +666,8 @@ MonoBehaviour:
   chemosynthAgentCount: 0
   photosynthAgentCount: 0
   saprotrophAgentCount: 0
+  averageOrganicCStore: 0
+  divisionEligibleAgentCount: 0
 --- !u!4 &1064713444
 Transform:
   m_ObjectHideFlags: 0
