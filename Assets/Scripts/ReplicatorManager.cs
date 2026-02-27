@@ -34,6 +34,7 @@ public class ReplicatorManager : MonoBehaviour
     public float moveEnergyCostPerSecond = 0.05f;
     public float replicationEnergyCost = 0.5f;
     public float basalEnergyCostPerSecond = 0.01f;
+    public float starvationAttributionSeconds = 5f;
 
     [Header("Energy -> Speed")]
     public float energyForFullSpeed = 0.5f;
@@ -154,6 +155,9 @@ public class ReplicatorManager : MonoBehaviour
     private int debugPhotoStressedCount;
     private int debugSaproStressedCount;
     private float nextChemoSpawnDebugLogTime;
+    private int[] chemoDeathCauseCounts;
+    private int[] photoDeathCauseCounts;
+    private int[] saproDeathCauseCounts;
 
     // Arrays for Batching
     private Matrix4x4[] matrixBatch = new Matrix4x4[1023];
@@ -348,6 +352,7 @@ public class ReplicatorManager : MonoBehaviour
 
         propertyBlock = new MaterialPropertyBlock();
         isInitialized = true;
+        EnsureDeathCauseCounters();
 
         for (int i = 0; i < initialSpawnCount; i++) SpawnAgentAtRandomLocation();
     }
@@ -502,8 +507,151 @@ public class ReplicatorManager : MonoBehaviour
             $"Metabolism: chemo={chemosynthAgentCount} photo={photosynthAgentCount} sapro={saprotrophAgentCount} " +
             $"photoUnlocked={unlocked} saproUnlocked={IsSaprotrophyUnlocked()} " +
             $"temp[chemo:{chemoTempText} photo:{photoTempText} sapro:{saproTempText}]");
+        Debug.Log($"DeathCauses: chemo[{FormatDeathCauseDistribution(chemoDeathCauseCounts)}] photo[{FormatDeathCauseDistribution(photoDeathCauseCounts)}] sapro[{FormatDeathCauseDistribution(saproDeathCauseCounts)}]");
+        ResetDeathCauseCounters();
     }
 
+
+    void EnsureDeathCauseCounters()
+    {
+        int len = System.Enum.GetValues(typeof(DeathCause)).Length;
+        if (chemoDeathCauseCounts == null || chemoDeathCauseCounts.Length != len) chemoDeathCauseCounts = new int[len];
+        if (photoDeathCauseCounts == null || photoDeathCauseCounts.Length != len) photoDeathCauseCounts = new int[len];
+        if (saproDeathCauseCounts == null || saproDeathCauseCounts.Length != len) saproDeathCauseCounts = new int[len];
+    }
+
+    void ResetDeathCauseCounters()
+    {
+        if (chemoDeathCauseCounts == null || photoDeathCauseCounts == null || saproDeathCauseCounts == null)
+        {
+            return;
+        }
+
+        System.Array.Clear(chemoDeathCauseCounts, 0, chemoDeathCauseCounts.Length);
+        System.Array.Clear(photoDeathCauseCounts, 0, photoDeathCauseCounts.Length);
+        System.Array.Clear(saproDeathCauseCounts, 0, saproDeathCauseCounts.Length);
+    }
+
+    void RegisterDeathCause(MetabolismType metabolism, DeathCause cause)
+    {
+        EnsureDeathCauseCounters();
+        int causeIndex = Mathf.Clamp((int)cause, 0, chemoDeathCauseCounts.Length - 1);
+
+        int[] counts = metabolism == MetabolismType.Photosynthesis
+            ? photoDeathCauseCounts
+            : (metabolism == MetabolismType.Saprotrophy ? saproDeathCauseCounts : chemoDeathCauseCounts);
+
+        counts[causeIndex]++;
+    }
+
+    string FormatDeathCauseDistribution(int[] counts)
+    {
+        if (counts == null)
+        {
+            return "n/a";
+        }
+
+        int total = 0;
+        for (int i = 0; i < counts.Length; i++)
+        {
+            total += counts[i];
+        }
+
+        if (total <= 0)
+        {
+            return "n/a";
+        }
+
+        System.Text.StringBuilder sb = new System.Text.StringBuilder();
+        for (int i = 0; i < counts.Length; i++)
+        {
+            int count = counts[i];
+            if (count <= 0)
+            {
+                continue;
+            }
+
+            if (sb.Length > 0)
+            {
+                sb.Append(' ');
+            }
+
+            DeathCause cause = (DeathCause)i;
+            float pct = (100f * count) / total;
+            sb.Append(DeathCauseShortLabel(cause));
+            sb.Append('=');
+            sb.Append(pct.ToString("0"));
+            sb.Append('%');
+        }
+
+        return sb.ToString();
+    }
+
+    string DeathCauseShortLabel(DeathCause cause)
+    {
+        switch (cause)
+        {
+            case DeathCause.OldAge: return "OldAge";
+            case DeathCause.EnergyDepletion: return "Energy";
+            case DeathCause.TemperatureLethal: return "Temp";
+            case DeathCause.Lack_CO2: return "CO2";
+            case DeathCause.Lack_H2S: return "H2S";
+            case DeathCause.Lack_Light: return "Light";
+            case DeathCause.Lack_OrganicC_Food: return "OrgC";
+            case DeathCause.Lack_O2: return "O2";
+            case DeathCause.Lack_StoredC: return "StoredC";
+            default: return "Unknown";
+        }
+    }
+
+    DeathCause ResolveEnergyDeathCause(Replicator agent)
+    {
+        float threshold = Mathf.Max(0f, starvationAttributionSeconds);
+        float best = -1f;
+        DeathCause cause = DeathCause.EnergyDepletion;
+
+        if (agent.starveH2sSeconds >= threshold && agent.starveH2sSeconds > best)
+        {
+            best = agent.starveH2sSeconds;
+            cause = DeathCause.Lack_H2S;
+        }
+
+        if (agent.starveCo2Seconds >= threshold && agent.starveCo2Seconds > best)
+        {
+            best = agent.starveCo2Seconds;
+            cause = DeathCause.Lack_CO2;
+        }
+
+        if (agent.starveLightSeconds >= threshold && agent.starveLightSeconds > best)
+        {
+            best = agent.starveLightSeconds;
+            cause = DeathCause.Lack_Light;
+        }
+
+        if (agent.starveOrganicCFoodSeconds >= threshold && agent.starveOrganicCFoodSeconds > best)
+        {
+            best = agent.starveOrganicCFoodSeconds;
+            cause = DeathCause.Lack_OrganicC_Food;
+        }
+
+        if (agent.starveO2Seconds >= threshold && agent.starveO2Seconds > best)
+        {
+            best = agent.starveO2Seconds;
+            cause = DeathCause.Lack_O2;
+        }
+
+        if (agent.starveStoredCSeconds >= threshold && agent.starveStoredCSeconds > best)
+        {
+            cause = DeathCause.Lack_StoredC;
+        }
+
+        return cause;
+    }
+
+    float UpdateStarveTimer(float current, bool deprived, float dt)
+    {
+        return deprived ? (current + dt) : 0f;
+    }
 
     string FormatTemperatureDebug(float tempSum, int count, int stressedCount)
     {
@@ -656,6 +804,7 @@ public class ReplicatorManager : MonoBehaviour
 
             if (agent.age > agent.maxLifespan)
             {
+                RegisterDeathCause(agent.metabolism, DeathCause.OldAge);
                 DepositDeathOrganicC(agent);
                 agents.RemoveAt(i);
                 continue;
@@ -782,6 +931,7 @@ public class ReplicatorManager : MonoBehaviour
 
             if (d > tempTolerance + lethalMargin)
             {
+                RegisterDeathCause(agent.metabolism, DeathCause.TemperatureLethal);
                 DepositDeathOrganicC(agent);
                 agents.RemoveAt(i);
                 continue;
@@ -790,12 +940,18 @@ public class ReplicatorManager : MonoBehaviour
             if (agent.metabolism == MetabolismType.Photosynthesis)
             {
                 float insolation = Mathf.Clamp01(planetResourceMap.GetInsolation(dir));
+                bool lackCo2 = false;
+                bool lackLight = false;
+                bool lackO2 = false;
+                bool lackStoredC = false;
 
                 if (insolation > 0f)
                 {
                     float co2Need = Mathf.Max(0f, photosynthesisCo2PerTickAtFullInsolation) * insolation;
                     float co2Available = planetResourceMap.Get(ResourceType.CO2, cellIndex);
                     float co2Consumed = Mathf.Min(co2Need, co2Available);
+
+                    lackCo2 = co2Need > 0f && co2Consumed <= Mathf.Epsilon;
 
                     if (co2Consumed > 0f)
                     {
@@ -812,18 +968,35 @@ public class ReplicatorManager : MonoBehaviour
                 }
                 else
                 {
+                    float desiredResp = Mathf.Max(0f, nightRespirationCPerTick);
+                    float o2Available = planetResourceMap.Get(ResourceType.O2, cellIndex);
+                    bool hasStore = agent.organicCStore > 0f;
+                    lackLight = !hasStore;
+                    lackStoredC = !hasStore && desiredResp > 0f;
+                    lackO2 = hasStore && desiredResp > 0f && o2Available <= Mathf.Epsilon;
+
                     // Night / no light: respire stored organic carbon using the shared aerobic pathway
                     float gained = AerobicRespireFromStore(
                         agent,
                         cellIndex,
-                        Mathf.Max(0f, nightRespirationCPerTick),
+                        desiredResp,
                         o2PerC,
                         energyPerC);
                     if (gained > 0f)
                     {
                         agent.energy -= gained * (1f - performance);
+                        lackLight = false;
+                        lackStoredC = false;
+                        lackO2 = false;
                     }
                 }
+
+                agent.starveCo2Seconds = UpdateStarveTimer(agent.starveCo2Seconds, lackCo2, dtTick);
+                agent.starveLightSeconds = UpdateStarveTimer(agent.starveLightSeconds, lackLight, dtTick);
+                agent.starveO2Seconds = UpdateStarveTimer(agent.starveO2Seconds, lackO2, dtTick);
+                agent.starveStoredCSeconds = UpdateStarveTimer(agent.starveStoredCSeconds, lackStoredC, dtTick);
+                agent.starveH2sSeconds = 0f;
+                agent.starveOrganicCFoodSeconds = 0f;
             }
             else if (agent.metabolism == MetabolismType.Saprotrophy)
             {
@@ -836,6 +1009,9 @@ public class ReplicatorManager : MonoBehaviour
                 float desiredIntake = Mathf.Min(envC, intakeCap);
 
                 float assimilation = Mathf.Clamp01(saproAssimilationFraction);
+                bool lackFood = desiredIntake <= Mathf.Epsilon;
+                bool lackO2 = false;
+                bool lackStoredC = false;
 
                 if (desiredIntake > 0f)
                 {
@@ -854,6 +1030,7 @@ public class ReplicatorManager : MonoBehaviour
                         float o2Available = planetResourceMap.Get(ResourceType.O2, cellIndex);
                         float maxRespireByO2 = o2Available / o2PerC;          // how much C can be respired with available O2
                         actualRespire = Mathf.Clamp(desiredRespire, 0f, maxRespireByO2);
+                        lackO2 = desiredRespire > 0f && actualRespire <= Mathf.Epsilon;
                     }
 
                     float totalActuallyUsed = actualStore + actualRespire;
@@ -874,6 +1051,7 @@ public class ReplicatorManager : MonoBehaviour
                             planetResourceMap.Add(ResourceType.O2, cellIndex, -o2Consumed);
                             planetResourceMap.Add(ResourceType.CO2, cellIndex, actualRespire);
                             agent.energy += actualRespire * energyPerC * performance;
+                            lackO2 = false;
                         }
                     }
                     // else: O2=0 and store is full -> cannot use any detritus; leave it in the environment.
@@ -881,17 +1059,32 @@ public class ReplicatorManager : MonoBehaviour
                 else
                 {
                     // No food in tile: allow saprotroph to survive briefly by respiring its own store
+                    float desiredResp = Mathf.Max(0f, saproRespireStoreCPerTick);
+                    float o2Available = planetResourceMap.Get(ResourceType.O2, cellIndex);
+                    bool hasStore = agent.organicCStore > 0f;
+                    lackStoredC = !hasStore && desiredResp > 0f;
+                    lackO2 = hasStore && desiredResp > 0f && o2Available <= Mathf.Epsilon;
+
                     float gained = AerobicRespireFromStore(
                         agent,
                         cellIndex,
-                        Mathf.Max(0f, saproRespireStoreCPerTick),
+                        desiredResp,
                         o2PerC,
                         energyPerC);
                     if (gained > 0f)
                     {
                         agent.energy -= gained * (1f - performance);
+                        lackStoredC = false;
+                        lackO2 = false;
                     }
                 }
+
+                agent.starveOrganicCFoodSeconds = UpdateStarveTimer(agent.starveOrganicCFoodSeconds, lackFood, dtTick);
+                agent.starveO2Seconds = UpdateStarveTimer(agent.starveO2Seconds, lackO2, dtTick);
+                agent.starveStoredCSeconds = UpdateStarveTimer(agent.starveStoredCSeconds, lackStoredC, dtTick);
+                agent.starveCo2Seconds = 0f;
+                agent.starveH2sSeconds = 0f;
+                agent.starveLightSeconds = 0f;
             }
             else
             {
@@ -904,6 +1097,11 @@ public class ReplicatorManager : MonoBehaviour
                 float co2Ratio = co2Need <= Mathf.Epsilon ? 1f : co2Available / co2Need;
                 float h2sRatio = h2sNeed <= Mathf.Epsilon ? 1f : h2sAvailable / h2sNeed;
                 float pulledRatio = Mathf.Clamp01(Mathf.Min(co2Ratio, h2sRatio));
+
+                bool lackCo2 = false;
+                bool lackH2s = false;
+                bool lackO2 = false;
+                bool lackStoredC = false;
 
                 if (pulledRatio > 0f)
                 {
@@ -923,16 +1121,24 @@ public class ReplicatorManager : MonoBehaviour
                     if (fixedC > 0f)
                         agent.organicCStore = Mathf.Clamp(agent.organicCStore + fixedC, 0f, maxStore);
                 }
-/*                else
+                else
                 {
-                    // No H2S/CO2 to run chemosynthesis: fall back to aerobic respiration of stored carbon (if O2 exists)
-                    AerobicRespireFromStore(
-                        agent,
-                        cellIndex,
-                        Mathf.Max(0f, chemoRespirationCPerTick),
-                        o2PerC,
-                        energyPerC);
-                }*/
+                    lackCo2 = co2Need > 0f && co2Available <= Mathf.Epsilon;
+                    lackH2s = h2sNeed > 0f && h2sAvailable <= Mathf.Epsilon;
+
+                    float desiredResp = Mathf.Max(0f, chemoRespirationCPerTick);
+                    bool hasStore = agent.organicCStore > 0f;
+                    float o2Available = planetResourceMap.Get(ResourceType.O2, cellIndex);
+                    lackStoredC = !hasStore && desiredResp > 0f;
+                    lackO2 = hasStore && desiredResp > 0f && o2Available <= Mathf.Epsilon;
+                }
+
+                agent.starveCo2Seconds = UpdateStarveTimer(agent.starveCo2Seconds, lackCo2, dtTick);
+                agent.starveH2sSeconds = UpdateStarveTimer(agent.starveH2sSeconds, lackH2s, dtTick);
+                agent.starveO2Seconds = UpdateStarveTimer(agent.starveO2Seconds, lackO2, dtTick);
+                agent.starveStoredCSeconds = UpdateStarveTimer(agent.starveStoredCSeconds, lackStoredC, dtTick);
+                agent.starveLightSeconds = 0f;
+                agent.starveOrganicCFoodSeconds = 0f;
             }
 
             float stressedBasal = basalCost * (1f + stress);
@@ -942,6 +1148,7 @@ public class ReplicatorManager : MonoBehaviour
 
             if (agent.energy <= 0f)
             {
+                RegisterDeathCause(agent.metabolism, ResolveEnergyDeathCause(agent));
                 DepositDeathOrganicC(agent); // make sure this deposits agent.organicCStore into environment OrganicC
                 agents.RemoveAt(i);
             }
