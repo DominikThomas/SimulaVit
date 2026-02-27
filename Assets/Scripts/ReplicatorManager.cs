@@ -455,9 +455,9 @@ public class ReplicatorManager : MonoBehaviour
             replicatorsText += $"\n<color=#62B0FF>Saprotroph:</color> {FormatLocomotionCounts(saprotrophByLocomotion)}";
         }
 
-        const float panelWidth = 189f;
+        const float panelWidth = 250f;
         const float padding = 8f;
-        const float lineHeight = 16f;
+        const float lineHeight = 20f;
         float rightX = Screen.width - panelWidth - padding;
 
         float atmosphereHeight = (atmosphereText.Split('\n').Length * lineHeight) + (padding * 2f);
