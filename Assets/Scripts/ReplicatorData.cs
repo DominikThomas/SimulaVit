@@ -18,7 +18,9 @@ public enum DeathCause
     Lack_Light,
     Lack_OrganicC_Food,
     Lack_O2,
-    Lack_StoredC
+    Lack_StoredC,
+    TemperatureTooHigh,
+    TemperatureTooLow
 }
 
 [System.Serializable]
