@@ -57,6 +57,15 @@ public class ReplicatorManager : MonoBehaviour
     public float chemosynthesisEnergyPerTick = 0.3f;
     [Tooltip("Fractional mutation chance on reproduction that flips metabolism type.")]
     [Range(0f, 1f)] public float metabolismMutationChance = 0.01f;
+
+    [Header("Locomotion Mutation")]
+    [Range(0f, 1f)] public float locomotionMutationChance = 0.01f;
+    [Range(0f, 1f)] public float locomotionUpgradeChance = 0.5f;
+    [Range(0f, 1f)] public float locomotionAnchoredMutationChance = 0.05f;
+    [Tooltip("If enabled, Anchored can mutate back into Amoeboid.")]
+    public bool allowAnchoredToAmoeboidMutation = false;
+    [Range(0f, 1f)] public float anchoredToAmoeboidMutationChance = 0.001f;
+
     [Header("Metabolism Unlock")]
     [Tooltip("If true, Photosynthesis can mutate back to chemosynthesis. Default false.")]
     public bool allowReverseMetabolismMutation = false;
@@ -391,9 +400,29 @@ public class ReplicatorManager : MonoBehaviour
         EnsureHudStyles();
 
         int totalAgents = agents.Count;
-        float photosynthPct = totalAgents > 0 ? (photosynthAgentCount * 100f) / totalAgents : 0f;
-        float chemosynthPct = totalAgents > 0 ? (chemosynthAgentCount * 100f) / totalAgents : 0f;
-        float saprotrophPct = totalAgents > 0 ? (saprotrophAgentCount * 100f) / totalAgents : 0f;
+        int[] totalByLocomotion = new int[4];
+        int[] chemosynthByLocomotion = new int[4];
+        int[] photosynthByLocomotion = new int[4];
+        int[] saprotrophByLocomotion = new int[4];
+
+        for (int i = 0; i < agents.Count; i++)
+        {
+            int locomotionIndex = Mathf.Clamp((int)agents[i].locomotion, 0, totalByLocomotion.Length - 1);
+            totalByLocomotion[locomotionIndex]++;
+
+            if (agents[i].metabolism == MetabolismType.Photosynthesis)
+            {
+                photosynthByLocomotion[locomotionIndex]++;
+            }
+            else if (agents[i].metabolism == MetabolismType.Saprotrophy)
+            {
+                saprotrophByLocomotion[locomotionIndex]++;
+            }
+            else
+            {
+                chemosynthByLocomotion[locomotionIndex]++;
+            }
+        }
 
         float globalCo2 = planetResourceMap != null ? planetResourceMap.debugGlobalCO2 : 0f;
         float globalO2 = planetResourceMap != null ? planetResourceMap.debugGlobalO2 : 0f;
@@ -406,24 +435,29 @@ public class ReplicatorManager : MonoBehaviour
             $"CO2: {globalCo2:0.000} ({co2Pct:0.0}%)\n" +
             $"O2: {globalO2:0.000} ({o2Pct:0.0}%)";
 
+        string FormatLocomotionCounts(int[] counts)
+        {
+            return $"{counts[0]}/{counts[1]}/{counts[2]}/{counts[3]}";
+        }
+
         string replicatorsText =
-            "Replicators\n" +
-            $"Total: {totalAgents}\n" +
-            $"<color=#FFD54A>Chemosynthesis:</color> {chemosynthAgentCount} ({chemosynthPct:0.0}%)";
+            "Replicators (Passive/Amoeboid/Flagellum/Anchored)\n" +
+            $"Total: {FormatLocomotionCounts(totalByLocomotion)}\n" +
+            $"<color=#FFD54A>Chemosynthesis:</color> {FormatLocomotionCounts(chemosynthByLocomotion)}";
 
         if (photosynthAgentCount > 0)
         {
-            replicatorsText += $"\n<color=#79E07E>Photosynthesis:</color> {photosynthAgentCount} ({photosynthPct:0.0}%)";
+            replicatorsText += $"\n<color=#79E07E>Photosynthesis:</color> {FormatLocomotionCounts(photosynthByLocomotion)}";
         }
 
         if (saprotrophAgentCount > 0)
         {
-            replicatorsText += $"\n<color=#62B0FF>Saprotroph:</color> {saprotrophAgentCount} ({saprotrophPct:0.0}%)";
+            replicatorsText += $"\n<color=#62B0FF>Saprotroph:</color> {FormatLocomotionCounts(saprotrophByLocomotion)}";
         }
 
-        const float panelWidth = 189f;
+        const float panelWidth = 250f;
         const float padding = 8f;
-        const float lineHeight = 16f;
+        const float lineHeight = 20f;
         float rightX = Screen.width - panelWidth - padding;
 
         float atmosphereHeight = (atmosphereText.Split('\n').Length * lineHeight) + (padding * 2f);
@@ -718,7 +752,7 @@ public class ReplicatorManager : MonoBehaviour
             return false;
         }
 
-        return SpawnAgentAtDirection(randomDir, CreateDefaultTraits(), null, MetabolismType.SulfurChemosynthesis, out _);
+        return SpawnAgentAtDirection(randomDir, CreateDefaultTraits(), null, MetabolismType.SulfurChemosynthesis, LocomotionType.PassiveDrift, 0f, out _);
     }
 
 
@@ -1371,12 +1405,67 @@ public class ReplicatorManager : MonoBehaviour
             childMetabolism = MetabolismType.Saprotrophy;
         }
 
-        return SpawnAgentAtDirection(randomDir, parent.traits, parent, childMetabolism, out childAgent);
+        LocomotionType childLocomotion = ResolveInheritedLocomotion(parent);
+        float childLocomotionSkill = ResolveInheritedLocomotionSkill(parent);
+
+        return SpawnAgentAtDirection(randomDir, parent.traits, parent, childMetabolism, childLocomotion, childLocomotionSkill, out childAgent);
     }
 
     bool IsSaprotrophyUnlocked()
     {
         return planetGenerator != null && planetGenerator.SaprotrophyUnlocked;
+    }
+
+    LocomotionType ResolveInheritedLocomotion(Replicator parent)
+    {
+        LocomotionType locomotion = parent != null ? parent.locomotion : LocomotionType.PassiveDrift;
+
+        if (parent == null || Random.value >= Mathf.Clamp01(locomotionMutationChance))
+        {
+            return locomotion;
+        }
+
+        bool mutateToAnchored = Random.value < Mathf.Clamp01(locomotionAnchoredMutationChance);
+
+        if (mutateToAnchored)
+        {
+            if (locomotion == LocomotionType.PassiveDrift || locomotion == LocomotionType.Amoeboid)
+            {
+                return LocomotionType.Anchored;
+            }
+
+            if (locomotion == LocomotionType.Anchored
+                && allowAnchoredToAmoeboidMutation
+                && Random.value < Mathf.Clamp01(anchoredToAmoeboidMutationChance))
+            {
+                return LocomotionType.Amoeboid;
+            }
+        }
+
+        if (Random.value < Mathf.Clamp01(locomotionUpgradeChance))
+        {
+            if (locomotion == LocomotionType.PassiveDrift)
+            {
+                return LocomotionType.Amoeboid;
+            }
+
+            if (locomotion == LocomotionType.Amoeboid)
+            {
+                return LocomotionType.Flagellum;
+            }
+        }
+
+        return locomotion;
+    }
+
+    float ResolveInheritedLocomotionSkill(Replicator parent)
+    {
+        if (parent == null)
+        {
+            return 0f;
+        }
+
+        return Mathf.Clamp01(parent.locomotionSkill);
     }
 
     bool IsInsolatedLocation(Vector3 direction)
@@ -1432,10 +1521,10 @@ public class ReplicatorManager : MonoBehaviour
     {
         if (agents.Count >= maxPopulation) return false;
         Vector3 dir = GetSpawnDirectionCandidate();
-        return SpawnAgentAtDirection(dir, CreateDefaultTraits(), null, MetabolismType.SulfurChemosynthesis, out _);
+        return SpawnAgentAtDirection(dir, CreateDefaultTraits(), null, MetabolismType.SulfurChemosynthesis, LocomotionType.PassiveDrift, 0f, out _);
     }
 
-    bool SpawnAgentAtDirection(Vector3 direction, Replicator.Traits traits, Replicator parent, MetabolismType metabolism, out Replicator spawnedAgent)
+    bool SpawnAgentAtDirection(Vector3 direction, Replicator.Traits traits, Replicator parent, MetabolismType metabolism, LocomotionType locomotion, float locomotionSkill, out Replicator spawnedAgent)
     {
         spawnedAgent = null;
 
@@ -1461,7 +1550,7 @@ public class ReplicatorManager : MonoBehaviour
 
         float newLifespan = Random.Range(minLifespan, maxLifespan);
         float movementSeed = Random.Range(-1000f, 1000f);
-        Replicator newAgent = new Replicator(spawnPosition, spawnRotation, newLifespan, baseAgentColor, traits, movementSeed, metabolism);
+        Replicator newAgent = new Replicator(spawnPosition, spawnRotation, newLifespan, baseAgentColor, traits, movementSeed, metabolism, locomotion, locomotionSkill);
         newAgent.age = parent == null ? Random.Range(0f, newLifespan * 0.5f) : 0f;
         newAgent.energy = parent == null ? Random.Range(0.1f, 0.5f) : Mathf.Max(0.1f, parent.energy * 0.5f);
         newAgent.size = 1f;
