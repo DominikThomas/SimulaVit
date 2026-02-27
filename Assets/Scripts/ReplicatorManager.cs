@@ -1008,6 +1008,7 @@ public class ReplicatorManager : MonoBehaviour
                 d = temp - max;
 
             bool insideOptimalBand = d <= 0f;
+            bool lethalTemperature = d > lethalMargin;
 
             float stress = insideOptimalBand ? 0f : Mathf.Clamp01(d / lethalMargin);
             float performance = insideOptimalBand ? 1f : Mathf.Lerp(0.7f, 0.1f, stress);
@@ -1031,7 +1032,7 @@ public class ReplicatorManager : MonoBehaviour
                 if (!insideOptimalBand) debugChemoStressedCount++;
             }
 
-            if (d > 0f)
+            if (lethalTemperature)
             {
                 DeathCause temperatureDeathCause = temp > max
                     ? DeathCause.TemperatureTooHigh
@@ -1630,10 +1631,23 @@ public class ReplicatorManager : MonoBehaviour
             return;
         }
 
-        // Inherit
-        agent.optimalTempMin = parent.optimalTempMin;
-        agent.optimalTempMax = parent.optimalTempMax;
-        agent.lethalTempMargin = Mathf.Max(0.05f, parent.lethalTempMargin);
+        bool metabolismChanged = parent.metabolism != metabolism;
+
+        if (metabolismChanged)
+        {
+            // Rebase onto the new metabolism's range so newly-mutated children don't
+            // inherit a temperature niche that belongs to another metabolism.
+            agent.optimalTempMin = baseMin;
+            agent.optimalTempMax = baseMax;
+            agent.lethalTempMargin = Mathf.Max(0.05f, defaultLethalMargin);
+        }
+        else
+        {
+            // Inherit within the same metabolism.
+            agent.optimalTempMin = parent.optimalTempMin;
+            agent.optimalTempMax = parent.optimalTempMax;
+            agent.lethalTempMargin = Mathf.Max(0.05f, parent.lethalTempMargin);
+        }
 
         // Mutate the band edges slightly
         if (Random.value < mutationChance)
