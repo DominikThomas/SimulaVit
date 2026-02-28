@@ -98,10 +98,33 @@ public class ReplicatorManager : MonoBehaviour
     [Range(0f, 1f)] public float saproAssimilationFraction = 0.2f; // fraction of env OrganicC intake stored as organicCStore (rest respired)
     public float saproRespireStoreCPerTick = 0.01f;                // if no env food, respire own store
 
+    [Header("Predation")]
+    public bool enablePredators = true;
+    [Range(0f, 1f)] public float predatorMutationChance = 0.002f;
+    public bool predatorRequiresMotility = true;
+    public float predatorAttackRange = 0.25f;
+    public float predatorAttackCooldownSeconds = 1.0f;
+    public float predatorBiteOrganicC = 0.05f;
+    public float predatorBiteEnergy = 0.05f;
+    public float predatorKillEnergyThreshold = 0.01f;
+    [Range(0f, 1f)] public float predatorAssimilationFraction = 0.6f;
+    public float predatorEnergyPerC = 1.0f;
+    public float predatorBasalCostMultiplier = 1.5f;
+    public float predatorMoveSpeedMultiplier = 1.1f;
+    public float predatorSpawnColorStrength = 1f;
+
+    [Header("Fear / Avoid Predators")]
+    public bool enableFear = true;
+    public float fearRadius = 0.6f;
+    public float fearStrength = 1.0f;
+    public float fearMinDot = 0.0f;
+    public bool fearRequiresMotility = true;
+
     [Header("Temperature Preferences")]
     public Vector2 chemoTempRange = new Vector2(0.8f, 1.2f);
     public Vector2 photoTempRange = new Vector2(0.3f, 0.8f);
     public Vector2 saproTempRange = new Vector2(0.2f, 0.7f);
+    public Vector2 predatorTempRange = new Vector2(0.25f, 0.8f);
     public float defaultLethalMargin = 0.35f;
     [Range(0f, 1f)] public float tempMutationChance = 0.02f;
     public float tempMutationScale = 0.05f;
@@ -177,6 +200,7 @@ public class ReplicatorManager : MonoBehaviour
     [SerializeField] private int chemosynthAgentCount;
     [SerializeField] private int photosynthAgentCount;
     [SerializeField] private int saprotrophAgentCount;
+    [SerializeField] private int predatorAgentCount;
     [SerializeField] private float averageOrganicCStore;
     [SerializeField] private int divisionEligibleAgentCount;
     private GUIStyle hudStyle;
@@ -199,6 +223,8 @@ public class ReplicatorManager : MonoBehaviour
     private int[] chemoDeathCauseCounts;
     private int[] photoDeathCauseCounts;
     private int[] saproDeathCauseCounts;
+    private int[] predatorDeathCauseCounts;
+    private int predationKillsWindow;
 
     // Arrays for Batching
     private Matrix4x4[] matrixBatch = new Matrix4x4[1023];
@@ -446,6 +472,7 @@ public class ReplicatorManager : MonoBehaviour
 
         UpdateLifecycle();
         TickMetabolism();
+        RunPredationPass();
         HandleSpontaneousSpawning();
         UpdateAmoeboidSteering();
         RunMovementJob();
@@ -468,6 +495,7 @@ public class ReplicatorManager : MonoBehaviour
         int[] chemosynthByLocomotion = new int[4];
         int[] photosynthByLocomotion = new int[4];
         int[] saprotrophByLocomotion = new int[4];
+        int[] predatorByLocomotion = new int[4];
 
         for (int i = 0; i < agents.Count; i++)
         {
@@ -481,6 +509,10 @@ public class ReplicatorManager : MonoBehaviour
             else if (agents[i].metabolism == MetabolismType.Saprotrophy)
             {
                 saprotrophByLocomotion[locomotionIndex]++;
+            }
+            else if (agents[i].metabolism == MetabolismType.Predation)
+            {
+                predatorByLocomotion[locomotionIndex]++;
             }
             else
             {
@@ -517,6 +549,11 @@ public class ReplicatorManager : MonoBehaviour
         if (saprotrophAgentCount > 0)
         {
             replicatorsText += $"\n<color=#62B0FF>Saprotroph:</color> {FormatLocomotionCounts(saprotrophByLocomotion)}";
+        }
+
+        if (predatorAgentCount > 0)
+        {
+            replicatorsText += $"\n<color=#FF5A5A>Predator:</color> {FormatLocomotionCounts(predatorByLocomotion)}";
         }
 
         const float panelWidth = 250f;
@@ -573,6 +610,7 @@ public class ReplicatorManager : MonoBehaviour
         int chemo = 0;
         int photo = 0;
         int sapro = 0;
+        int predator = 0;
 
         for (int i = 0; i < agents.Count; i++)
         {
@@ -584,6 +622,10 @@ public class ReplicatorManager : MonoBehaviour
             {
                 chemo++;
             }
+            else if (agents[i].metabolism == MetabolismType.Predation)
+            {
+                predator++;
+            }
             else
             {
                 sapro++;
@@ -593,6 +635,7 @@ public class ReplicatorManager : MonoBehaviour
         chemosynthAgentCount = chemo;
         photosynthAgentCount = photo;
         saprotrophAgentCount = sapro;
+        predatorAgentCount = predator;
     }
 
 
@@ -614,10 +657,11 @@ public class ReplicatorManager : MonoBehaviour
 
 
         Debug.Log(
-            $"Metabolism: chemo={chemosynthAgentCount} photo={photosynthAgentCount} sapro={saprotrophAgentCount} " +
+            $"Metabolism: chemo={chemosynthAgentCount} photo={photosynthAgentCount} sapro={saprotrophAgentCount} predator={predatorAgentCount} " +
             $"photoUnlocked={unlocked} saproUnlocked={IsSaprotrophyUnlocked()} " +
-            $"temp[chemo:{chemoTempText} photo:{photoTempText} sapro:{saproTempText}] avgOrganicC={averageOrganicCStore:F3} divisionEligible={divisionEligibleAgentCount}");
-        Debug.Log($"DeathCauses: chemo[{FormatDeathCauseDistribution(chemoDeathCauseCounts)}] photo[{FormatDeathCauseDistribution(photoDeathCauseCounts)}] sapro[{FormatDeathCauseDistribution(saproDeathCauseCounts)}]");
+            $"temp[chemo:{chemoTempText} photo:{photoTempText} sapro:{saproTempText}] avgOrganicC={averageOrganicCStore:F3} divisionEligible={divisionEligibleAgentCount} predKillsWindow={predationKillsWindow}");
+        Debug.Log($"DeathCauses: chemo[{FormatDeathCauseDistribution(chemoDeathCauseCounts)}] photo[{FormatDeathCauseDistribution(photoDeathCauseCounts)}] sapro[{FormatDeathCauseDistribution(saproDeathCauseCounts)}] predator[{FormatDeathCauseDistribution(predatorDeathCauseCounts)}]");
+        predationKillsWindow = 0;
         ResetDeathCauseCounters();
     }
 
@@ -628,11 +672,12 @@ public class ReplicatorManager : MonoBehaviour
         if (chemoDeathCauseCounts == null || chemoDeathCauseCounts.Length != len) chemoDeathCauseCounts = new int[len];
         if (photoDeathCauseCounts == null || photoDeathCauseCounts.Length != len) photoDeathCauseCounts = new int[len];
         if (saproDeathCauseCounts == null || saproDeathCauseCounts.Length != len) saproDeathCauseCounts = new int[len];
+        if (predatorDeathCauseCounts == null || predatorDeathCauseCounts.Length != len) predatorDeathCauseCounts = new int[len];
     }
 
     void ResetDeathCauseCounters()
     {
-        if (chemoDeathCauseCounts == null || photoDeathCauseCounts == null || saproDeathCauseCounts == null)
+        if (chemoDeathCauseCounts == null || photoDeathCauseCounts == null || saproDeathCauseCounts == null || predatorDeathCauseCounts == null)
         {
             return;
         }
@@ -640,6 +685,7 @@ public class ReplicatorManager : MonoBehaviour
         System.Array.Clear(chemoDeathCauseCounts, 0, chemoDeathCauseCounts.Length);
         System.Array.Clear(photoDeathCauseCounts, 0, photoDeathCauseCounts.Length);
         System.Array.Clear(saproDeathCauseCounts, 0, saproDeathCauseCounts.Length);
+        System.Array.Clear(predatorDeathCauseCounts, 0, predatorDeathCauseCounts.Length);
     }
 
     void RegisterDeathCause(MetabolismType metabolism, DeathCause cause)
@@ -649,7 +695,7 @@ public class ReplicatorManager : MonoBehaviour
 
         int[] counts = metabolism == MetabolismType.Photosynthesis
             ? photoDeathCauseCounts
-            : (metabolism == MetabolismType.Saprotrophy ? saproDeathCauseCounts : chemoDeathCauseCounts);
+            : (metabolism == MetabolismType.Saprotrophy ? saproDeathCauseCounts : (metabolism == MetabolismType.Predation ? predatorDeathCauseCounts : chemoDeathCauseCounts));
 
         counts[causeIndex]++;
     }
@@ -711,6 +757,7 @@ public class ReplicatorManager : MonoBehaviour
             case DeathCause.Lack_OrganicC_Food: return "OrgC";
             case DeathCause.Lack_O2: return "O2";
             case DeathCause.Lack_StoredC: return "StoredC";
+            case DeathCause.Predation: return "Predation";
             default: return "Unknown";
         }
     }
@@ -967,6 +1014,30 @@ public class ReplicatorManager : MonoBehaviour
                 float o2 = NormalizeResource(ResourceType.O2, cellIndex, steerGoodO2);
                 return Mathf.Min(organicC, o2);
             }
+            case MetabolismType.Predation:
+            {
+                float o2 = NormalizeResource(ResourceType.O2, cellIndex, steerGoodO2);
+                float preyDensity = 0f;
+                float senseRange = Mathf.Max(0.01f, fearRadius) * Mathf.Max(0.0001f, planetGenerator.radius);
+                float senseRangeSq = senseRange * senseRange;
+                Vector3 pos = normalizedDir * planetGenerator.radius;
+                for (int i = 0; i < agents.Count; i++)
+                {
+                    Replicator other = agents[i];
+                    if (other.metabolism == MetabolismType.Predation)
+                    {
+                        continue;
+                    }
+
+                    if ((other.position - pos).sqrMagnitude <= senseRangeSq)
+                    {
+                        preyDensity += 1f;
+                    }
+                }
+
+                float normalizedPrey = Mathf.Clamp01(preyDensity / 6f);
+                return Mathf.Min(o2, normalizedPrey);
+            }
             default:
                 return 0f;
         }
@@ -978,6 +1049,172 @@ public class ReplicatorManager : MonoBehaviour
         float value = planetResourceMap.Get(resourceType, cellIndex);
         float normalized = Mathf.Clamp01(value / scale);
         return float.IsNaN(normalized) || float.IsInfinity(normalized) ? 0f : normalized;
+    }
+
+
+
+    bool IsPredator(Replicator agent)
+    {
+        return agent != null && agent.metabolism == MetabolismType.Predation;
+    }
+
+    bool IsMotile(Replicator agent)
+    {
+        if (agent == null)
+        {
+            return false;
+        }
+
+        return agent.locomotion == LocomotionType.Amoeboid || agent.locomotion == LocomotionType.Flagellum;
+    }
+
+    Vector3 ComputeFleeBias(Replicator agent, Vector3 currentDir)
+    {
+        if (!enableFear || IsPredator(agent))
+        {
+            return Vector3.zero;
+        }
+
+        if (fearRequiresMotility && !IsMotile(agent))
+        {
+            return Vector3.zero;
+        }
+
+        float radius = Mathf.Max(0f, fearRadius) * Mathf.Max(0.0001f, planetGenerator.radius);
+        if (radius <= Mathf.Epsilon)
+        {
+            return Vector3.zero;
+        }
+
+        float radiusSq = radius * radius;
+        Vector3 origin = agent.position;
+        Vector3 flee = Vector3.zero;
+
+        for (int i = 0; i < agents.Count; i++)
+        {
+            Replicator other = agents[i];
+            if (!IsPredator(other))
+            {
+                continue;
+            }
+
+            Vector3 away = origin - other.position;
+            float distSq = away.sqrMagnitude;
+            if (distSq <= Mathf.Epsilon || distSq > radiusSq)
+            {
+                continue;
+            }
+
+            Vector3 awayDir = away.normalized;
+            if (fearMinDot > -1f)
+            {
+                float dot = Vector3.Dot(currentDir, -awayDir);
+                if (dot < fearMinDot)
+                {
+                    continue;
+                }
+            }
+
+            float dist = Mathf.Sqrt(distSq);
+            float weight = 1f - Mathf.Clamp01(dist / radius);
+            flee += awayDir * weight;
+        }
+
+        Vector3 tangentFlee = Vector3.ProjectOnPlane(flee, currentDir);
+        return tangentFlee.sqrMagnitude > 0.0001f ? tangentFlee.normalized : Vector3.zero;
+    }
+
+    int FindNearestPreyIndex(int predatorIndex, float attackRangeWorld)
+    {
+        Replicator predator = agents[predatorIndex];
+        float bestDistSq = attackRangeWorld * attackRangeWorld;
+        int bestIndex = -1;
+
+        for (int i = 0; i < agents.Count; i++)
+        {
+            if (i == predatorIndex)
+            {
+                continue;
+            }
+
+            Replicator prey = agents[i];
+            if (prey.metabolism == MetabolismType.Predation)
+            {
+                continue;
+            }
+
+            float distSq = (prey.position - predator.position).sqrMagnitude;
+            if (distSq < bestDistSq)
+            {
+                bestDistSq = distSq;
+                bestIndex = i;
+            }
+        }
+
+        return bestIndex;
+    }
+
+    void RunPredationPass()
+    {
+        if (!enablePredators || agents.Count <= 1 || planetGenerator == null)
+        {
+            return;
+        }
+
+        float dt = Time.deltaTime;
+        float attackRangeWorld = Mathf.Max(0f, predatorAttackRange) * Mathf.Max(0.0001f, planetGenerator.radius);
+        float biteOrganicC = Mathf.Max(0f, predatorBiteOrganicC);
+        float biteEnergy = Mathf.Max(0f, predatorBiteEnergy);
+        float assimilation = Mathf.Clamp01(predatorAssimilationFraction);
+        float cooldownSeconds = Mathf.Max(0f, predatorAttackCooldownSeconds);
+        float energyPerC = Mathf.Max(0f, predatorEnergyPerC);
+        float maxStore = Mathf.Max(0f, maxOrganicCStore);
+
+        for (int i = agents.Count - 1; i >= 0; i--)
+        {
+            Replicator predator = agents[i];
+            if (!IsPredator(predator))
+            {
+                continue;
+            }
+
+            predator.attackCooldown = Mathf.Max(0f, predator.attackCooldown - dt);
+            if (predator.attackCooldown > 0f || attackRangeWorld <= 0f)
+            {
+                continue;
+            }
+
+            int preyIndex = FindNearestPreyIndex(i, attackRangeWorld);
+            if (preyIndex < 0 || preyIndex >= agents.Count)
+            {
+                continue;
+            }
+
+            Replicator prey = agents[preyIndex];
+            float takeC = Mathf.Min(Mathf.Max(0f, prey.organicCStore), biteOrganicC);
+            prey.organicCStore = Mathf.Max(0f, prey.organicCStore - takeC);
+
+            float takeE = 0f;
+            if (takeC < biteOrganicC && biteEnergy > 0f)
+            {
+                takeE = Mathf.Min(Mathf.Max(0f, prey.energy), biteEnergy);
+                prey.energy = Mathf.Max(0f, prey.energy - takeE);
+            }
+
+            float storedGain = takeC * assimilation;
+            predator.organicCStore = Mathf.Clamp(predator.organicCStore + storedGain, 0f, maxStore);
+            float respiredC = takeC - storedGain;
+            predator.energy += (respiredC * energyPerC) + (takeE * 0.5f);
+            predator.attackCooldown = cooldownSeconds;
+
+            if (prey.energy <= Mathf.Max(0f, predatorKillEnergyThreshold) || prey.energy <= 0f)
+            {
+                RegisterDeathCause(prey.metabolism, DeathCause.Predation);
+                DepositDeathOrganicC(prey);
+                agents.RemoveAt(preyIndex);
+                predationKillsWindow++;
+            }
+        }
     }
 
     void UpdateAmoeboidSteering()
@@ -1033,7 +1270,14 @@ public class ReplicatorManager : MonoBehaviour
                     }
                 }
 
-                agent.desiredMoveDir = bestDir;
+                Vector3 desired = bestDir;
+                Vector3 fleeBias = ComputeFleeBias(agent, currentDir);
+                if (fleeBias.sqrMagnitude > 0.0001f)
+                {
+                    desired = (desired + fleeBias * Mathf.Max(0f, fearStrength)).normalized;
+                }
+
+                agent.desiredMoveDir = desired;
                 agent.nextSteerTime = now + interval;
             }
 
@@ -1225,7 +1469,7 @@ public class ReplicatorManager : MonoBehaviour
                 debugPhotoTempCount++;
                 if (!insideOptimalBand) debugPhotoStressedCount++;
             }
-            else if (agent.metabolism == MetabolismType.Saprotrophy)
+            else if (agent.metabolism == MetabolismType.Saprotrophy || agent.metabolism == MetabolismType.Predation)
             {
                 debugSaproTempSum += temp;
                 debugSaproTempCount++;
@@ -1314,9 +1558,6 @@ public class ReplicatorManager : MonoBehaviour
             else if (agent.metabolism == MetabolismType.Saprotrophy)
             {
                 // Saprotrophy = aerobic heterotrophy (detritus respiration).
-                // IMPORTANT: Do NOT remove full intake if O2 is limiting.
-                // Only remove what is actually stored + respired.
-
                 float envC = planetResourceMap.Get(ResourceType.OrganicC, cellIndex);
                 float intakeCap = Mathf.Max(0f, saproCPerTick);
                 float desiredIntake = Mathf.Min(envC, intakeCap);
@@ -1328,20 +1569,17 @@ public class ReplicatorManager : MonoBehaviour
 
                 if (desiredIntake > 0f)
                 {
-                    // Split desired intake into "store" and "respire" fractions
                     float desiredStore = desiredIntake * assimilation;
                     float desiredRespire = desiredIntake - desiredStore;
 
-                    // Cap how much can be stored by remaining storage capacity
                     float storeCapacity = Mathf.Max(0f, maxStore - agent.organicCStore);
                     float actualStore = Mathf.Min(desiredStore, storeCapacity);
 
-                    // Respiration is limited by available O2
                     float actualRespire = 0f;
                     if (desiredRespire > 0f && o2PerC > 0f && energyPerC > 0f)
                     {
                         float o2Available = planetResourceMap.Get(ResourceType.O2, cellIndex);
-                        float maxRespireByO2 = o2Available / o2PerC;          // how much C can be respired with available O2
+                        float maxRespireByO2 = o2Available / o2PerC;
                         actualRespire = Mathf.Clamp(desiredRespire, 0f, maxRespireByO2);
                         lackO2 = desiredRespire > 0f && actualRespire <= Mathf.Epsilon;
                     }
@@ -1350,14 +1588,11 @@ public class ReplicatorManager : MonoBehaviour
 
                     if (totalActuallyUsed > 0f)
                     {
-                        // Now subtract exactly what we used from environment OrganicC
                         planetResourceMap.Add(ResourceType.OrganicC, cellIndex, -totalActuallyUsed);
 
-                        // Apply storage
                         if (actualStore > 0f)
                             agent.organicCStore = Mathf.Clamp(agent.organicCStore + actualStore, 0f, maxStore);
 
-                        // Apply respiration
                         if (actualRespire > 0f)
                         {
                             float o2Consumed = actualRespire * o2PerC;
@@ -1367,29 +1602,47 @@ public class ReplicatorManager : MonoBehaviour
                             lackO2 = false;
                         }
                     }
-                    // else: O2=0 and store is full -> cannot use any detritus; leave it in the environment.
                 }
                 else
                 {
-                    // No food in tile: allow saprotroph to survive briefly by respiring its own store
                     float desiredResp = Mathf.Max(0f, saproRespireStoreCPerTick);
                     float o2Available = planetResourceMap.Get(ResourceType.O2, cellIndex);
                     bool hasStore = agent.organicCStore > 0f;
                     lackStoredC = !hasStore && desiredResp > 0f;
                     lackO2 = hasStore && desiredResp > 0f && o2Available <= Mathf.Epsilon;
 
-                    float gained = AerobicRespireFromStore(
-                        agent,
-                        cellIndex,
-                        desiredResp,
-                        o2PerC,
-                        energyPerC);
+                    float gained = AerobicRespireFromStore(agent, cellIndex, desiredResp, o2PerC, energyPerC);
                     if (gained > 0f)
                     {
                         agent.energy -= gained * (1f - performance);
                         lackStoredC = false;
                         lackO2 = false;
                     }
+                }
+
+                agent.starveOrganicCFoodSeconds = UpdateStarveTimer(agent.starveOrganicCFoodSeconds, lackFood, dtTick);
+                agent.starveO2Seconds = UpdateStarveTimer(agent.starveO2Seconds, lackO2, dtTick);
+                agent.starveStoredCSeconds = UpdateStarveTimer(agent.starveStoredCSeconds, lackStoredC, dtTick);
+                agent.starveCo2Seconds = 0f;
+                agent.starveH2sSeconds = 0f;
+                agent.starveLightSeconds = 0f;
+            }
+            else if (agent.metabolism == MetabolismType.Predation)
+            {
+                bool lackFood = true;
+                float desiredResp = Mathf.Max(0f, saproRespireStoreCPerTick);
+                bool hasStore = agent.organicCStore > 0f;
+                float o2Available = planetResourceMap.Get(ResourceType.O2, cellIndex);
+                bool lackStoredC = !hasStore && desiredResp > 0f;
+                bool lackO2 = hasStore && desiredResp > 0f && o2Available <= Mathf.Epsilon;
+
+                float gained = AerobicRespireFromStore(agent, cellIndex, desiredResp, o2PerC, energyPerC);
+                if (gained > 0f)
+                {
+                    agent.energy -= gained * (1f - performance);
+                    lackStoredC = false;
+                    lackO2 = false;
+                    lackFood = false;
                 }
 
                 agent.starveOrganicCFoodSeconds = UpdateStarveTimer(agent.starveOrganicCFoodSeconds, lackFood, dtTick);
@@ -1454,8 +1707,10 @@ public class ReplicatorManager : MonoBehaviour
                 agent.starveOrganicCFoodSeconds = 0f;
             }
 
-            float stressedBasal = basalCost * (1f + stress);
-            agent.speedFactor = Mathf.Clamp((agent.energy / safeEnergyForFullSpeed) * performance, minSpeedFactor, 1f);
+            float metabolismBasalCostMultiplier = agent.metabolism == MetabolismType.Predation ? Mathf.Max(0f, predatorBasalCostMultiplier) : 1f;
+            float stressedBasal = basalCost * metabolismBasalCostMultiplier * (1f + stress);
+            float speedMultiplier = agent.metabolism == MetabolismType.Predation ? Mathf.Max(0f, predatorMoveSpeedMultiplier) : 1f;
+            agent.speedFactor = Mathf.Clamp((agent.energy / safeEnergyForFullSpeed) * performance * speedMultiplier, minSpeedFactor, 1f);
             float movementCost = 0f;
             switch (agent.locomotion)
             {
@@ -1649,10 +1904,20 @@ public class ReplicatorManager : MonoBehaviour
         }
 
         if (childMetabolism != MetabolismType.Saprotrophy
+            && childMetabolism != MetabolismType.Predation
             && Random.value < Mathf.Clamp01(saprotrophyMutationChance)
             && CanMutateToSaprotrophy())
         {
             childMetabolism = MetabolismType.Saprotrophy;
+        }
+
+        if (enablePredators
+            && childMetabolism == MetabolismType.Saprotrophy
+            && parent.metabolism == MetabolismType.Saprotrophy
+            && Random.value < Mathf.Clamp01(predatorMutationChance)
+            && CanMutateToPredation(parent))
+        {
+            childMetabolism = MetabolismType.Predation;
         }
 
         LocomotionType childLocomotion = ResolveInheritedLocomotion(parent);
@@ -1664,6 +1929,21 @@ public class ReplicatorManager : MonoBehaviour
     bool IsSaprotrophyUnlocked()
     {
         return planetGenerator != null && planetGenerator.SaprotrophyUnlocked;
+    }
+
+    bool CanMutateToPredation(Replicator parent)
+    {
+        if (!enablePredators || !IsSaprotrophyUnlocked() || parent == null)
+        {
+            return false;
+        }
+
+        if (!predatorRequiresMotility)
+        {
+            return true;
+        }
+
+        return IsMotile(parent);
     }
 
     LocomotionType ResolveInheritedLocomotion(Replicator parent)
@@ -1914,6 +2194,11 @@ public class ReplicatorManager : MonoBehaviour
             return saproTempRange;
         }
 
+        if (metabolism == MetabolismType.Predation)
+        {
+            return predatorTempRange;
+        }
+
         return chemoTempRange;
     }
 
@@ -1981,9 +2266,12 @@ public class ReplicatorManager : MonoBehaviour
             intensity *= Mathf.Lerp(0.2f, 1.5f, energyScale);
         }
 
+        Color predatorBaseColor = Color.Lerp(Color.red, Color.white, 1f - Mathf.Clamp01(predatorSpawnColorStrength));
         Color metabolismBaseColor = metabolism == MetabolismType.Photosynthesis
             ? Color.green
-            : metabolism == MetabolismType.Saprotrophy ? Color.blue : Color.yellow;
+            : metabolism == MetabolismType.Saprotrophy
+                ? Color.blue
+                : metabolism == MetabolismType.Predation ? predatorBaseColor : Color.yellow;
         Color finalColor = metabolismBaseColor * intensity;
         finalColor.a = alpha;
         return finalColor;
