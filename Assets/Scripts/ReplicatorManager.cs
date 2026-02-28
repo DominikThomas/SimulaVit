@@ -122,6 +122,10 @@ public class ReplicatorManager : MonoBehaviour
     [Range(1, 64)] public int amoebaSteerSamples = 8;
     public float amoebaTurnRate = 0.5f;
     public float amoebaMoveSpeedMultiplier = 0.7f;
+    [Range(1, 64)] public int flagellumSteerSamples = 20;
+    public float flagellumTurnRate = 1.5f;
+    public float flagellumMoveSpeedMultiplier = 1.2f;
+    public float flagellumDriftSuppression = 0.5f;
     public float steerUpdateInterval = 0.5f;
 
     [Header("Spawn Resource Bias")]
@@ -237,6 +241,9 @@ public class ReplicatorManager : MonoBehaviour
         public float TimeVal;
         public float AmoebaTurnRate;
         public float AmoebaMoveSpeedMultiplier;
+        public float FlagellumTurnRate;
+        public float FlagellumMoveSpeedMultiplier;
+        public float FlagellumDriftSuppression;
         public float AnchoredDriftMultiplier;
 
         // --- NEW: Noise Parameters for Surface Snap ---
@@ -272,14 +279,24 @@ public class ReplicatorManager : MonoBehaviour
             float wobble = SimpleNoise.Evaluate(surfaceNormal * 6.2f + new Vector3(MovementSeeds[index] * 0.73f, 0f, TimeVal * 0.43f));
             forward = (forward + lateralAxis * wobble * 0.35f * driftMultiplier).normalized;
 
-            if (locomotion == (int)LocomotionType.Amoeboid)
+            bool isAmoeboid = locomotion == (int)LocomotionType.Amoeboid;
+            bool isFlagellum = locomotion == (int)LocomotionType.Flagellum;
+
+            if (isAmoeboid || isFlagellum)
             {
                 Vector3 desiredDir = DesiredMoveDirs[index];
                 Vector3 desiredTangent = Vector3.ProjectOnPlane(desiredDir, surfaceNormal);
                 if (desiredTangent.sqrMagnitude > 0.0001f)
                 {
                     Vector3 desiredForward = desiredTangent.normalized;
-                    forward = Vector3.Slerp(forward, desiredForward, Mathf.Clamp01(AmoebaTurnRate * DeltaTime));
+                    float activeTurnRate = isFlagellum ? FlagellumTurnRate : AmoebaTurnRate;
+                    forward = Vector3.Slerp(forward, desiredForward, Mathf.Clamp01(activeTurnRate * DeltaTime));
+
+                    if (isFlagellum)
+                    {
+                        float suppression = Mathf.Clamp01(FlagellumDriftSuppression);
+                        forward = Vector3.Slerp(forward, desiredForward, suppression);
+                    }
                 }
             }
 
@@ -287,9 +304,13 @@ public class ReplicatorManager : MonoBehaviour
             float currentNoise = CalculateNoise(surfaceNormal);
             bool currentlyInSea = !OceanEnabled || currentNoise < OceanThreshold;
             float speedMultiplier = currentlyInSea ? 1f : SurfaceMoveSpeedMultipliers[index];
-            if (locomotion == (int)LocomotionType.Amoeboid)
+            if (isAmoeboid)
             {
                 speedMultiplier *= AmoebaMoveSpeedMultiplier;
+            }
+            else if (isFlagellum)
+            {
+                speedMultiplier *= FlagellumMoveSpeedMultiplier;
             }
 
             float speedFactor = SpeedFactors[index];
@@ -974,7 +995,7 @@ public class ReplicatorManager : MonoBehaviour
         for (int i = 0; i < agents.Count; i++)
         {
             Replicator agent = agents[i];
-            if (agent.locomotion != LocomotionType.Amoeboid)
+            if (agent.locomotion != LocomotionType.Amoeboid && agent.locomotion != LocomotionType.Flagellum)
             {
                 continue;
             }
@@ -986,11 +1007,13 @@ public class ReplicatorManager : MonoBehaviour
                 Vector3 bestDir = currentDir;
                 int baseCellIndex = PlanetGridIndexing.DirectionToCellIndex(currentDir, resolution);
                 float bestScore = ComputeHabitatScore(agent, currentDir, baseCellIndex);
+                bool isFlagellum = agent.locomotion == LocomotionType.Flagellum;
+                int samplesForLocomotion = Mathf.Max(1, isFlagellum ? flagellumSteerSamples : samples);
                 float sampleAngle = Mathf.Lerp(10f, 45f, 1f - Mathf.Clamp01(agent.locomotionSkill));
 
-                for (int sampleIndex = 0; sampleIndex < samples; sampleIndex++)
+                for (int sampleIndex = 0; sampleIndex < samplesForLocomotion; sampleIndex++)
                 {
-                    float angleOffset = (sampleIndex + 1f) * (360f / samples) + now * 17f + agent.movementSeed * 37f;
+                    float angleOffset = (sampleIndex + 1f) * (360f / samplesForLocomotion) + now * 17f + agent.movementSeed * 37f;
                     Vector3 axis = Vector3.Cross(currentDir, Vector3.up);
                     if (axis.sqrMagnitude < 0.0001f)
                     {
@@ -1519,6 +1542,9 @@ public class ReplicatorManager : MonoBehaviour
             TimeVal = Time.time,
             AmoebaTurnRate = Mathf.Max(0f, amoebaTurnRate),
             AmoebaMoveSpeedMultiplier = Mathf.Max(0f, amoebaMoveSpeedMultiplier),
+            FlagellumTurnRate = Mathf.Max(0f, flagellumTurnRate),
+            FlagellumMoveSpeedMultiplier = Mathf.Max(0f, flagellumMoveSpeedMultiplier),
+            FlagellumDriftSuppression = Mathf.Clamp01(flagellumDriftSuppression),
             AnchoredDriftMultiplier = 0.1f,
 
             // Pass Planet Settings to Job
