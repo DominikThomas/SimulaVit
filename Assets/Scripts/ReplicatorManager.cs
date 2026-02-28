@@ -106,6 +106,20 @@ public class ReplicatorManager : MonoBehaviour
     [Range(0f, 1f)] public float tempMutationChance = 0.02f;
     public float tempMutationScale = 0.05f;
 
+    [Header("Steering Habitat Score")]
+    [Tooltip("Dominant weight for temperature fitness when computing per-cell habitat score.")]
+    public float steerTempWeight = 5f;
+    [Tooltip("Secondary weight for food fitness when computing per-cell habitat score.")]
+    public float steerFoodWeight = 1f;
+    [Tooltip("Food normalization scale for CO2. Values >= this count as fully available.")]
+    public float steerGoodCO2 = 0.02f;
+    [Tooltip("Food normalization scale for H2S. Values >= this count as fully available.")]
+    public float steerGoodH2S = 0.001f;
+    [Tooltip("Food normalization scale for O2. Values >= this count as fully available.")]
+    public float steerGoodO2 = 0.02f;
+    [Tooltip("Food normalization scale for OrganicC. Values >= this count as fully available.")]
+    public float steerGoodOrganicC = 0.02f;
+
     [Header("Spawn Resource Bias")]
     public bool biasSpawnsToChemosynthesisResources = true;
     [Range(1, 256)] public int spawnResourceProbeAttempts = 128;
@@ -836,6 +850,83 @@ public class ReplicatorManager : MonoBehaviour
 
         float noise = planetGenerator.CalculateNoise(direction.normalized);
         return noise < planetGenerator.OceanThresholdNoise;
+    }
+
+    public float ComputeHabitatScore(Replicator agent, Vector3 dir, int cellIndex)
+    {
+        if (agent == null || planetResourceMap == null)
+        {
+            return 0f;
+        }
+
+        Vector3 normalizedDir = dir.sqrMagnitude > 0f ? dir.normalized : Vector3.up;
+        float temperature = planetResourceMap.GetTemperature(normalizedDir, cellIndex);
+        float tempFitness = ComputeTemperatureFitness(agent, temperature);
+        float foodFitness = ComputeFoodFitness(agent, normalizedDir, cellIndex);
+
+        float score = Mathf.Max(0f, steerTempWeight) * tempFitness
+                    + Mathf.Max(0f, steerFoodWeight) * foodFitness;
+
+        if (float.IsNaN(score) || float.IsInfinity(score))
+        {
+            return 0f;
+        }
+
+        return Mathf.Clamp(score, 0f, 100f);
+    }
+
+    float ComputeTemperatureFitness(Replicator agent, float temperature)
+    {
+        float optimalTemp = 0.5f * (agent.optimalTempMin + agent.optimalTempMax);
+        float tempTolerance = Mathf.Max(0.0001f, 0.5f * (agent.optimalTempMax - agent.optimalTempMin));
+        float lethalMargin = Mathf.Max(0.0001f, agent.lethalTempMargin);
+
+        float distFromOptimal = Mathf.Abs(temperature - optimalTemp);
+        float safeBand = tempTolerance + lethalMargin;
+
+        if (distFromOptimal <= tempTolerance)
+        {
+            return 1f;
+        }
+
+        float outsideTolerance = distFromOptimal - tempTolerance;
+        float fitness = 1f - (outsideTolerance / safeBand);
+        return Mathf.Clamp01(fitness);
+    }
+
+    float ComputeFoodFitness(Replicator agent, Vector3 normalizedDir, int cellIndex)
+    {
+        float co2 = NormalizeResource(ResourceType.CO2, cellIndex, steerGoodCO2);
+
+        switch (agent.metabolism)
+        {
+            case MetabolismType.SulfurChemosynthesis:
+            {
+                float h2s = NormalizeResource(ResourceType.H2S, cellIndex, steerGoodH2S);
+                return Mathf.Min(h2s, co2);
+            }
+            case MetabolismType.Photosynthesis:
+            {
+                float light = Mathf.Clamp01(planetResourceMap.GetInsolation(normalizedDir));
+                return Mathf.Min(light, co2);
+            }
+            case MetabolismType.Saprotrophy:
+            {
+                float organicC = NormalizeResource(ResourceType.OrganicC, cellIndex, steerGoodOrganicC);
+                float o2 = NormalizeResource(ResourceType.O2, cellIndex, steerGoodO2);
+                return Mathf.Min(organicC, o2);
+            }
+            default:
+                return 0f;
+        }
+    }
+
+    float NormalizeResource(ResourceType resourceType, int cellIndex, float goodEnoughScale)
+    {
+        float scale = Mathf.Max(0.0001f, goodEnoughScale);
+        float value = planetResourceMap.Get(resourceType, cellIndex);
+        float normalized = Mathf.Clamp01(value / scale);
+        return float.IsNaN(normalized) || float.IsInfinity(normalized) ? 0f : normalized;
     }
 
     void UpdateLifecycle()
