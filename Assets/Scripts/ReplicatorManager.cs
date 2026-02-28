@@ -2056,7 +2056,10 @@ public class ReplicatorManager : MonoBehaviour
         LocomotionType childLocomotion = ResolveInheritedLocomotion(parent);
         float childLocomotionSkill = ResolveInheritedLocomotionSkill(parent);
 
-        return SpawnAgentAtDirection(randomDir, parent.traits, parent, childMetabolism, childLocomotion, childLocomotionSkill, out childAgent);
+        // Reproduction should happen at/near the parent's current habitat.
+        // `spawnOnlyInSea` is intended for initial/spontaneous seeding, while
+        // `replicateOnlyInSea` controls whether a parent is allowed to divide on land.
+        return SpawnAgentAtDirection(randomDir, parent.traits, parent, childMetabolism, childLocomotion, childLocomotionSkill, out childAgent, enforceSpawnOnlyInSeaTrait: false);
     }
 
     bool IsSaprotrophyUnlocked()
@@ -2184,10 +2187,10 @@ public class ReplicatorManager : MonoBehaviour
     {
         if (agents.Count >= maxPopulation) return false;
         Vector3 dir = GetSpawnDirectionCandidate();
-        return SpawnAgentAtDirection(dir, CreateDefaultTraits(), null, MetabolismType.SulfurChemosynthesis, LocomotionType.PassiveDrift, 0f, out _);
+        return SpawnAgentAtDirection(dir, CreateDefaultTraits(), null, MetabolismType.SulfurChemosynthesis, LocomotionType.PassiveDrift, 0f, out _, enforceSpawnOnlyInSeaTrait: true);
     }
 
-    bool SpawnAgentAtDirection(Vector3 direction, Replicator.Traits traits, Replicator parent, MetabolismType metabolism, LocomotionType locomotion, float locomotionSkill, out Replicator spawnedAgent)
+    bool SpawnAgentAtDirection(Vector3 direction, Replicator.Traits traits, Replicator parent, MetabolismType metabolism, LocomotionType locomotion, float locomotionSkill, out Replicator spawnedAgent, bool enforceSpawnOnlyInSeaTrait = true)
     {
         spawnedAgent = null;
 
@@ -2195,7 +2198,7 @@ public class ReplicatorManager : MonoBehaviour
 
         Vector3 randomDir = direction.normalized;
 
-        if (traits.spawnOnlyInSea)
+        if (enforceSpawnOnlyInSeaTrait && traits.spawnOnlyInSea)
         {
             if (!TryFindSeaDirection(randomDir, out randomDir))
             {
