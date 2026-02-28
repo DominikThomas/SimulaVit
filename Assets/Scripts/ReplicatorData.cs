@@ -4,7 +4,8 @@ public enum MetabolismType
 {
     SulfurChemosynthesis,
     Photosynthesis,
-    Saprotrophy
+    Saprotrophy,
+    Predation
 }
 
 public enum DeathCause
@@ -18,6 +19,7 @@ public enum DeathCause
     Lack_OrganicC_Food,
     Lack_O2,
     Lack_StoredC,
+    Predation,
     TemperatureTooHigh,
     TemperatureTooLow
 }
@@ -64,6 +66,8 @@ public class Replicator
     public LocomotionType locomotion;
     public float locomotionSkill;
     public MetabolismType metabolism;
+    public float attackCooldown;
+    public float fearCooldown;
     public float optimalTempMin;
     public float optimalTempMax;
     public float lethalTempMargin;
@@ -100,6 +104,8 @@ public class Replicator
         this.locomotionSkill = Mathf.Clamp01(locomotionSkill);
         age = 0;
         this.metabolism = metabolism;
+        attackCooldown = 0f;
+        fearCooldown = 0f;
         currentDirection = pos.normalized;
         desiredMoveDir = Vector3.zero;
         nextSteerTime = 0f;
