@@ -2,6 +2,7 @@ using UnityEngine;
 using System.Collections.Generic;
 using Unity.Jobs;
 using Unity.Collections;
+using System;
 
 public class ReplicatorManager : MonoBehaviour
 {
@@ -230,6 +231,19 @@ public class ReplicatorManager : MonoBehaviour
     private Matrix4x4[] matrixBatch = new Matrix4x4[1023];
     private Vector4[] colorBatch = new Vector4[1023];
     private MaterialPropertyBlock propertyBlock;
+
+    // Spatial indexing for neighborhood queries (predation/fear/habitat sensing).
+    private readonly Dictionary<int, List<int>> spatialBuckets = new Dictionary<int, List<int>>(2048);
+    private readonly HashSet<int> pendingPredationRemovals = new HashSet<int>();
+    private readonly List<int> predationRemovalBuffer = new List<int>(256);
+    private float spatialCellSize = 1f;
+
+    // Reused HUD counters to avoid per-frame allocations in OnGUI.
+    private readonly int[] totalByLocomotion = new int[4];
+    private readonly int[] chemosynthByLocomotion = new int[4];
+    private readonly int[] photosynthByLocomotion = new int[4];
+    private readonly int[] saprotrophByLocomotion = new int[4];
+    private readonly int[] predatorByLocomotion = new int[4];
 
     // Reused job buffers to avoid per-frame NativeArray allocations.
     private NativeArray<Vector3> jobPositions;
@@ -491,11 +505,11 @@ public class ReplicatorManager : MonoBehaviour
         EnsureHudStyles();
 
         int totalAgents = agents.Count;
-        int[] totalByLocomotion = new int[4];
-        int[] chemosynthByLocomotion = new int[4];
-        int[] photosynthByLocomotion = new int[4];
-        int[] saprotrophByLocomotion = new int[4];
-        int[] predatorByLocomotion = new int[4];
+        Array.Clear(totalByLocomotion, 0, totalByLocomotion.Length);
+        Array.Clear(chemosynthByLocomotion, 0, chemosynthByLocomotion.Length);
+        Array.Clear(photosynthByLocomotion, 0, photosynthByLocomotion.Length);
+        Array.Clear(saprotrophByLocomotion, 0, saprotrophByLocomotion.Length);
+        Array.Clear(predatorByLocomotion, 0, predatorByLocomotion.Length);
 
         for (int i = 0; i < agents.Count; i++)
         {
@@ -1021,17 +1035,34 @@ public class ReplicatorManager : MonoBehaviour
                 float senseRange = Mathf.Max(0.01f, fearRadius) * Mathf.Max(0.0001f, planetGenerator.radius);
                 float senseRangeSq = senseRange * senseRange;
                 Vector3 pos = normalizedDir * planetGenerator.radius;
-                for (int i = 0; i < agents.Count; i++)
-                {
-                    Replicator other = agents[i];
-                    if (other.metabolism == MetabolismType.Predation)
-                    {
-                        continue;
-                    }
+                int bucketRange = GetBucketSearchRadius(senseRange);
+                GetBucketCoordinates(pos, out int bx, out int by, out int bz);
 
-                    if ((other.position - pos).sqrMagnitude <= senseRangeSq)
+                for (int x = bx - bucketRange; x <= bx + bucketRange; x++)
+                {
+                    for (int y = by - bucketRange; y <= by + bucketRange; y++)
                     {
-                        preyDensity += 1f;
+                        for (int z = bz - bucketRange; z <= bz + bucketRange; z++)
+                        {
+                            if (!spatialBuckets.TryGetValue(HashBucket(x, y, z), out List<int> bucket))
+                            {
+                                continue;
+                            }
+
+                            for (int i = 0; i < bucket.Count; i++)
+                            {
+                                Replicator other = agents[bucket[i]];
+                                if (other.metabolism == MetabolismType.Predation)
+                                {
+                                    continue;
+                                }
+
+                                if ((other.position - pos).sqrMagnitude <= senseRangeSq)
+                                {
+                                    preyDensity += 1f;
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -1090,64 +1121,99 @@ public class ReplicatorManager : MonoBehaviour
         Vector3 origin = agent.position;
         Vector3 flee = Vector3.zero;
 
-        for (int i = 0; i < agents.Count; i++)
+        int bucketRange = GetBucketSearchRadius(radius);
+        GetBucketCoordinates(origin, out int bx, out int by, out int bz);
+
+        for (int x = bx - bucketRange; x <= bx + bucketRange; x++)
         {
-            Replicator other = agents[i];
-            if (!IsPredator(other))
+            for (int y = by - bucketRange; y <= by + bucketRange; y++)
             {
-                continue;
-            }
-
-            Vector3 away = origin - other.position;
-            float distSq = away.sqrMagnitude;
-            if (distSq <= Mathf.Epsilon || distSq > radiusSq)
-            {
-                continue;
-            }
-
-            Vector3 awayDir = away.normalized;
-            if (fearMinDot > -1f)
-            {
-                float dot = Vector3.Dot(currentDir, -awayDir);
-                if (dot < fearMinDot)
+                for (int z = bz - bucketRange; z <= bz + bucketRange; z++)
                 {
-                    continue;
+                    if (!spatialBuckets.TryGetValue(HashBucket(x, y, z), out List<int> bucket))
+                    {
+                        continue;
+                    }
+
+                    for (int i = 0; i < bucket.Count; i++)
+                    {
+                        Replicator other = agents[bucket[i]];
+                        if (!IsPredator(other))
+                        {
+                            continue;
+                        }
+
+                        Vector3 away = origin - other.position;
+                        float distSq = away.sqrMagnitude;
+                        if (distSq <= Mathf.Epsilon || distSq > radiusSq)
+                        {
+                            continue;
+                        }
+
+                        Vector3 awayDir = away.normalized;
+                        if (fearMinDot > -1f)
+                        {
+                            float dot = Vector3.Dot(currentDir, -awayDir);
+                            if (dot < fearMinDot)
+                            {
+                                continue;
+                            }
+                        }
+
+                        float dist = Mathf.Sqrt(distSq);
+                        float weight = 1f - Mathf.Clamp01(dist / radius);
+                        flee += awayDir * weight;
+                    }
                 }
             }
-
-            float dist = Mathf.Sqrt(distSq);
-            float weight = 1f - Mathf.Clamp01(dist / radius);
-            flee += awayDir * weight;
         }
 
         Vector3 tangentFlee = Vector3.ProjectOnPlane(flee, currentDir);
         return tangentFlee.sqrMagnitude > 0.0001f ? tangentFlee.normalized : Vector3.zero;
     }
 
-    int FindNearestPreyIndex(int predatorIndex, float attackRangeWorld)
+    int FindNearestPreyIndex(int predatorIndex, float attackRangeWorld, HashSet<int> blockedPrey)
     {
         Replicator predator = agents[predatorIndex];
         float bestDistSq = attackRangeWorld * attackRangeWorld;
         int bestIndex = -1;
 
-        for (int i = 0; i < agents.Count; i++)
+        int bucketRange = GetBucketSearchRadius(attackRangeWorld);
+        GetBucketCoordinates(predator.position, out int bx, out int by, out int bz);
+
+        for (int x = bx - bucketRange; x <= bx + bucketRange; x++)
         {
-            if (i == predatorIndex)
+            for (int y = by - bucketRange; y <= by + bucketRange; y++)
             {
-                continue;
-            }
+                for (int z = bz - bucketRange; z <= bz + bucketRange; z++)
+                {
+                    if (!spatialBuckets.TryGetValue(HashBucket(x, y, z), out List<int> bucket))
+                    {
+                        continue;
+                    }
 
-            Replicator prey = agents[i];
-            if (prey.metabolism == MetabolismType.Predation)
-            {
-                continue;
-            }
+                    for (int bi = 0; bi < bucket.Count; bi++)
+                    {
+                        int i = bucket[bi];
+                        if (i == predatorIndex || blockedPrey.Contains(i))
+                        {
+                            continue;
+                        }
 
-            float distSq = (prey.position - predator.position).sqrMagnitude;
-            if (distSq < bestDistSq)
-            {
-                bestDistSq = distSq;
-                bestIndex = i;
+                        Replicator prey = agents[i];
+                        if (prey.metabolism == MetabolismType.Predation)
+                        {
+                            continue;
+                        }
+
+                        float distSq = (prey.position - predator.position).sqrMagnitude;
+                        if (distSq < bestDistSq)
+                        {
+                            bestDistSq = distSq;
+                            bestIndex = i;
+                        }
+                    }
+                }
             }
         }
 
@@ -1169,6 +1235,8 @@ public class ReplicatorManager : MonoBehaviour
         float cooldownSeconds = Mathf.Max(0f, predatorAttackCooldownSeconds);
         float energyPerC = Mathf.Max(0f, predatorEnergyPerC);
         float maxStore = Mathf.Max(0f, maxOrganicCStore);
+        RebuildSpatialIndex(Mathf.Max(attackRangeWorld, 0.01f));
+        pendingPredationRemovals.Clear();
 
         for (int i = agents.Count - 1; i >= 0; i--)
         {
@@ -1184,7 +1252,7 @@ public class ReplicatorManager : MonoBehaviour
                 continue;
             }
 
-            int preyIndex = FindNearestPreyIndex(i, attackRangeWorld);
+            int preyIndex = FindNearestPreyIndex(i, attackRangeWorld, pendingPredationRemovals);
             if (preyIndex < 0 || preyIndex >= agents.Count)
             {
                 continue;
@@ -1211,8 +1279,27 @@ public class ReplicatorManager : MonoBehaviour
             {
                 RegisterDeathCause(prey.metabolism, DeathCause.Predation);
                 DepositDeathOrganicC(prey);
-                agents.RemoveAt(preyIndex);
+                pendingPredationRemovals.Add(preyIndex);
                 predationKillsWindow++;
+            }
+        }
+
+        if (pendingPredationRemovals.Count > 0)
+        {
+            predationRemovalBuffer.Clear();
+            foreach (int index in pendingPredationRemovals)
+            {
+                predationRemovalBuffer.Add(index);
+            }
+
+            predationRemovalBuffer.Sort();
+            for (int i = predationRemovalBuffer.Count - 1; i >= 0; i--)
+            {
+                int index = predationRemovalBuffer[i];
+                if (index >= 0 && index < agents.Count)
+                {
+                    agents.RemoveAt(index);
+                }
             }
         }
     }
@@ -1228,6 +1315,8 @@ public class ReplicatorManager : MonoBehaviour
         float now = Time.time;
         float interval = Mathf.Max(0.01f, steerUpdateInterval);
         int samples = Mathf.Max(1, amoebaSteerSamples);
+        float sensingRange = Mathf.Max(0.01f, fearRadius) * Mathf.Max(0.0001f, planetGenerator.radius);
+        RebuildSpatialIndex(Mathf.Max(sensingRange, 0.01f));
 
         for (int i = 0; i < agents.Count; i++)
         {
@@ -1285,6 +1374,50 @@ public class ReplicatorManager : MonoBehaviour
             {
                 agent.desiredMoveDir = currentDir;
             }
+        }
+    }
+
+    void RebuildSpatialIndex(float cellSize)
+    {
+        spatialCellSize = Mathf.Max(0.01f, cellSize);
+
+        foreach (var entry in spatialBuckets)
+        {
+            entry.Value.Clear();
+        }
+
+        for (int i = 0; i < agents.Count; i++)
+        {
+            GetBucketCoordinates(agents[i].position, out int x, out int y, out int z);
+            int hash = HashBucket(x, y, z);
+            if (!spatialBuckets.TryGetValue(hash, out List<int> bucket))
+            {
+                bucket = new List<int>(8);
+                spatialBuckets.Add(hash, bucket);
+            }
+
+            bucket.Add(i);
+        }
+    }
+
+    void GetBucketCoordinates(Vector3 worldPos, out int x, out int y, out int z)
+    {
+        float inv = 1f / spatialCellSize;
+        x = Mathf.FloorToInt(worldPos.x * inv);
+        y = Mathf.FloorToInt(worldPos.y * inv);
+        z = Mathf.FloorToInt(worldPos.z * inv);
+    }
+
+    int GetBucketSearchRadius(float worldRadius)
+    {
+        return Mathf.Max(1, Mathf.CeilToInt(worldRadius / Mathf.Max(0.01f, spatialCellSize)));
+    }
+
+    static int HashBucket(int x, int y, int z)
+    {
+        unchecked
+        {
+            return (x * 73856093) ^ (y * 19349663) ^ (z * 83492791);
         }
     }
 
