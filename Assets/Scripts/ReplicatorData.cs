@@ -78,6 +78,8 @@ public class Replicator
     // Movement data
     public Vector3 velocity;
     public Vector3 currentDirection; // Normalized position (direction from center)
+    public Vector3 desiredMoveDir;
+    public float nextSteerTime;
     public float movementSeed;
 
     // Constructor
@@ -99,6 +101,8 @@ public class Replicator
         age = 0;
         this.metabolism = metabolism;
         currentDirection = pos.normalized;
+        desiredMoveDir = Vector3.zero;
+        nextSteerTime = 0f;
         lastDeathCauseCandidate = DeathCause.Unknown;
     }
 }

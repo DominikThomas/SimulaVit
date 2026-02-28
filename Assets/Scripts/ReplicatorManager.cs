@@ -119,6 +119,10 @@ public class ReplicatorManager : MonoBehaviour
     public float steerGoodO2 = 0.02f;
     [Tooltip("Food normalization scale for OrganicC. Values >= this count as fully available.")]
     public float steerGoodOrganicC = 0.02f;
+    [Range(1, 64)] public int amoebaSteerSamples = 8;
+    public float amoebaTurnRate = 0.5f;
+    public float amoebaMoveSpeedMultiplier = 0.7f;
+    public float steerUpdateInterval = 0.5f;
 
     [Header("Spawn Resource Bias")]
     public bool biasSpawnsToChemosynthesisResources = true;
@@ -204,6 +208,8 @@ public class ReplicatorManager : MonoBehaviour
     private NativeArray<float> jobSurfaceMoveSpeedMultipliers;
     private NativeArray<float> jobMovementSeeds;
     private NativeArray<float> jobSpeedFactors;
+    private NativeArray<int> jobLocomotionTypes;
+    private NativeArray<Vector3> jobDesiredMoveDirs;
     private int jobCapacity;
 
     // Cache shader property IDs once.
@@ -220,6 +226,8 @@ public class ReplicatorManager : MonoBehaviour
         public NativeArray<float> SurfaceMoveSpeedMultipliers;
         public NativeArray<float> MovementSeeds;
         public NativeArray<float> SpeedFactors;
+        public NativeArray<int> LocomotionTypes;
+        public NativeArray<Vector3> DesiredMoveDirs;
 
         // Simulation parameters
         public float DeltaTime;
@@ -227,6 +235,9 @@ public class ReplicatorManager : MonoBehaviour
         public float TurnSpeed;
         public float Radius;
         public float TimeVal;
+        public float AmoebaTurnRate;
+        public float AmoebaMoveSpeedMultiplier;
+        public float AnchoredDriftMultiplier;
 
         // --- NEW: Noise Parameters for Surface Snap ---
         public float NoiseMagnitude;
@@ -244,26 +255,44 @@ public class ReplicatorManager : MonoBehaviour
             Quaternion rot = Rotations[index];
             Vector3 surfaceNormal = pos.normalized;
 
+            int locomotion = LocomotionTypes[index];
+            float driftMultiplier = locomotion == (int)LocomotionType.Anchored ? AnchoredDriftMultiplier : 1f;
+
             // 1. Turning (per-agent noise with independent phase offsets)
             float seed = MovementSeeds[index];
             float turnNoiseA = SimpleNoise.Evaluate(surfaceNormal * 3.1f + new Vector3(seed, TimeVal * 0.31f, 0f));
             float turnNoiseB = SimpleNoise.Evaluate(surfaceNormal * 4.7f + new Vector3(TimeVal * 0.19f, seed * 1.37f, 0f));
             float turnNoise = Mathf.Clamp(turnNoiseA + turnNoiseB, -1f, 1f);
-            float turnAmount = turnNoise * TurnSpeed * DeltaTime * 35f;
+            float turnAmount = turnNoise * TurnSpeed * DeltaTime * 35f * driftMultiplier;
             rot = Quaternion.AngleAxis(turnAmount, surfaceNormal) * rot;
 
             // 2. Movement (Arc across sphere)
             Vector3 forward = rot * Vector3.forward;
             Vector3 lateralAxis = Vector3.Cross(surfaceNormal, forward);
             float wobble = SimpleNoise.Evaluate(surfaceNormal * 6.2f + new Vector3(MovementSeeds[index] * 0.73f, 0f, TimeVal * 0.43f));
-            forward = (forward + lateralAxis * wobble * 0.35f).normalized;
+            forward = (forward + lateralAxis * wobble * 0.35f * driftMultiplier).normalized;
+
+            if (locomotion == (int)LocomotionType.Amoeboid)
+            {
+                Vector3 desiredDir = DesiredMoveDirs[index];
+                Vector3 desiredTangent = Vector3.ProjectOnPlane(desiredDir, surfaceNormal);
+                if (desiredTangent.sqrMagnitude > 0.0001f)
+                {
+                    Vector3 desiredForward = desiredTangent.normalized;
+                    forward = Vector3.Slerp(forward, desiredForward, Mathf.Clamp01(AmoebaTurnRate * DeltaTime));
+                }
+            }
 
             bool moveOnlyInSea = MoveOnlyInSea[index];
             float currentNoise = CalculateNoise(surfaceNormal);
             bool currentlyInSea = !OceanEnabled || currentNoise < OceanThreshold;
             float speedMultiplier = currentlyInSea ? 1f : SurfaceMoveSpeedMultipliers[index];
-            float speedFactor = SpeedFactors[index];
+            if (locomotion == (int)LocomotionType.Amoeboid)
+            {
+                speedMultiplier *= AmoebaMoveSpeedMultiplier;
+            }
 
+            float speedFactor = SpeedFactors[index];
             Quaternion travelRot = Quaternion.AngleAxis((MoveSpeed * speedMultiplier * speedFactor) * DeltaTime / Radius, Vector3.Cross(surfaceNormal, forward));
 
             // Get the new direction vector (normalized)
@@ -397,6 +426,7 @@ public class ReplicatorManager : MonoBehaviour
         UpdateLifecycle();
         TickMetabolism();
         HandleSpontaneousSpawning();
+        UpdateAmoeboidSteering();
         RunMovementJob();
         RenderAgents();
         UpdateMetabolismCounts();
@@ -929,6 +959,68 @@ public class ReplicatorManager : MonoBehaviour
         return float.IsNaN(normalized) || float.IsInfinity(normalized) ? 0f : normalized;
     }
 
+    void UpdateAmoeboidSteering()
+    {
+        if (agents.Count == 0 || planetGenerator == null || planetResourceMap == null)
+        {
+            return;
+        }
+
+        int resolution = Mathf.Max(1, planetGenerator.resolution);
+        float now = Time.time;
+        float interval = Mathf.Max(0.01f, steerUpdateInterval);
+        int samples = Mathf.Max(1, amoebaSteerSamples);
+
+        for (int i = 0; i < agents.Count; i++)
+        {
+            Replicator agent = agents[i];
+            if (agent.locomotion != LocomotionType.Amoeboid)
+            {
+                continue;
+            }
+
+            Vector3 currentDir = agent.currentDirection.sqrMagnitude > 0f ? agent.currentDirection.normalized : agent.position.normalized;
+
+            if (agent.nextSteerTime <= now)
+            {
+                Vector3 bestDir = currentDir;
+                int baseCellIndex = PlanetGridIndexing.DirectionToCellIndex(currentDir, resolution);
+                float bestScore = ComputeHabitatScore(agent, currentDir, baseCellIndex);
+                float sampleAngle = Mathf.Lerp(10f, 45f, 1f - Mathf.Clamp01(agent.locomotionSkill));
+
+                for (int sampleIndex = 0; sampleIndex < samples; sampleIndex++)
+                {
+                    float angleOffset = (sampleIndex + 1f) * (360f / samples) + now * 17f + agent.movementSeed * 37f;
+                    Vector3 axis = Vector3.Cross(currentDir, Vector3.up);
+                    if (axis.sqrMagnitude < 0.0001f)
+                    {
+                        axis = Vector3.Cross(currentDir, Vector3.right);
+                    }
+
+                    Quaternion spread = Quaternion.AngleAxis(sampleAngle, axis.normalized);
+                    Quaternion around = Quaternion.AngleAxis(angleOffset, currentDir);
+                    Vector3 candidateDir = (around * (spread * currentDir)).normalized;
+
+                    int candidateCellIndex = PlanetGridIndexing.DirectionToCellIndex(candidateDir, resolution);
+                    float candidateScore = ComputeHabitatScore(agent, candidateDir, candidateCellIndex);
+                    if (candidateScore > bestScore)
+                    {
+                        bestScore = candidateScore;
+                        bestDir = candidateDir;
+                    }
+                }
+
+                agent.desiredMoveDir = bestDir;
+                agent.nextSteerTime = now + interval;
+            }
+
+            if (agent.desiredMoveDir.sqrMagnitude <= 0.0001f)
+            {
+                agent.desiredMoveDir = currentDir;
+            }
+        }
+    }
+
     void UpdateLifecycle()
     {
         float dt = Time.deltaTime;
@@ -1406,6 +1498,8 @@ public class ReplicatorManager : MonoBehaviour
             this.jobSurfaceMoveSpeedMultipliers[i] = Mathf.Max(0.01f, agents[i].traits.surfaceMoveSpeedMultiplier);
             this.jobMovementSeeds[i] = agents[i].movementSeed;
             this.jobSpeedFactors[i] = Mathf.Clamp(agents[i].speedFactor, minSpeedFactor, 1f);
+            this.jobLocomotionTypes[i] = (int)agents[i].locomotion;
+            this.jobDesiredMoveDirs[i] = agents[i].desiredMoveDir;
         }
 
         ReplicatorUpdateJob job = new ReplicatorUpdateJob
@@ -1416,11 +1510,16 @@ public class ReplicatorManager : MonoBehaviour
             SurfaceMoveSpeedMultipliers = jobSurfaceMoveSpeedMultipliers,
             MovementSeeds = jobMovementSeeds,
             SpeedFactors = jobSpeedFactors,
+            LocomotionTypes = jobLocomotionTypes,
+            DesiredMoveDirs = jobDesiredMoveDirs,
             DeltaTime = Time.deltaTime,
             MoveSpeed = moveSpeed,
             TurnSpeed = turnSpeed,
             Radius = planetGenerator.radius,
             TimeVal = Time.time,
+            AmoebaTurnRate = Mathf.Max(0f, amoebaTurnRate),
+            AmoebaMoveSpeedMultiplier = Mathf.Max(0f, amoebaMoveSpeedMultiplier),
+            AnchoredDriftMultiplier = 0.1f,
 
             // Pass Planet Settings to Job
             NoiseMagnitude = planetGenerator.noiseMagnitude,
@@ -1455,6 +1554,8 @@ public class ReplicatorManager : MonoBehaviour
         if (jobSurfaceMoveSpeedMultipliers.IsCreated) jobSurfaceMoveSpeedMultipliers.Dispose();
         if (jobMovementSeeds.IsCreated) jobMovementSeeds.Dispose();
         if (jobSpeedFactors.IsCreated) jobSpeedFactors.Dispose();
+        if (jobLocomotionTypes.IsCreated) jobLocomotionTypes.Dispose();
+        if (jobDesiredMoveDirs.IsCreated) jobDesiredMoveDirs.Dispose();
 
         jobCapacity = Mathf.NextPowerOfTwo(requiredCount);
         jobPositions = new NativeArray<Vector3>(jobCapacity, Allocator.Persistent);
@@ -1463,6 +1564,8 @@ public class ReplicatorManager : MonoBehaviour
         jobSurfaceMoveSpeedMultipliers = new NativeArray<float>(jobCapacity, Allocator.Persistent);
         jobMovementSeeds = new NativeArray<float>(jobCapacity, Allocator.Persistent);
         jobSpeedFactors = new NativeArray<float>(jobCapacity, Allocator.Persistent);
+        jobLocomotionTypes = new NativeArray<int>(jobCapacity, Allocator.Persistent);
+        jobDesiredMoveDirs = new NativeArray<Vector3>(jobCapacity, Allocator.Persistent);
     }
 
     void Reset()
@@ -1483,6 +1586,8 @@ public class ReplicatorManager : MonoBehaviour
         if (jobSurfaceMoveSpeedMultipliers.IsCreated) jobSurfaceMoveSpeedMultipliers.Dispose();
         if (jobMovementSeeds.IsCreated) jobMovementSeeds.Dispose();
         if (jobSpeedFactors.IsCreated) jobSpeedFactors.Dispose();
+        if (jobLocomotionTypes.IsCreated) jobLocomotionTypes.Dispose();
+        if (jobDesiredMoveDirs.IsCreated) jobDesiredMoveDirs.Dispose();
     }
 
     bool SpawnAgentFromPopulation(Replicator parent, out Replicator childAgent)
