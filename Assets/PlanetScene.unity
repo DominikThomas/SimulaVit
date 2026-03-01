@@ -594,12 +594,12 @@ MonoBehaviour:
   planetGenerator: {fileID: 382753102}
   planetResourceMap: {fileID: 1222684993}
   initialSpawnCount: 0
-  maxPopulation: 50000
+  maxPopulation: 20000
   baseAgentColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
-  moveSpeed: 1
-  turnSpeed: 3
+  moveSpeed: 3
+  turnSpeed: 5
   spawnSpread: 0
-  reproductionRate: 0.1
+  reproductionRate: 1
   minLifespan: 120
   maxLifespan: 360
   metabolismTickSeconds: 0.5
@@ -620,9 +620,14 @@ MonoBehaviour:
   chemosynthesisH2sNeedPerTick: 0.01
   chemosynthesisEnergyPerTick: 0.7
   metabolismMutationChance: 0.01
+  locomotionMutationChance: 0.333
+  locomotionUpgradeChance: 0.5
+  locomotionAnchoredMutationChance: 0.05
+  allowAnchoredToAmoeboidMutation: 0
+  anchoredToAmoeboidMutationChance: 0.001
   allowReverseMetabolismMutation: 0
   photosynthesisCo2PerTickAtFullInsolation: 0.02
-  photosynthesisEnergyPerCo2: 8
+  photosynthesisEnergyPerCo2: 2
   aerobicO2PerC: 0.02
   aerobicEnergyPerC: 0.05
   photosynthStoreFraction: 1
@@ -632,19 +637,51 @@ MonoBehaviour:
   nightRespirationO2PerC: 0.02
   chemosynthStoreFraction: 1
   chemoRespirationCPerTick: 0.01
-  saprotrophyMutationChance: 0.005
+  saprotrophyMutationChance: 0.191
   saproCPerTick: 0.02
   saproO2PerC: 0.02
   saproEnergyPerC: 0.06
   saproAssimilationFraction: 0.2
   saproRespireStoreCPerTick: 0.01
+  enablePredators: 1
+  predatorMutationChance: 0.637
+  predatorRequiresMotility: 1
+  predatorAttackRange: 0.25
+  predatorAttackCooldownSeconds: 1
+  predatorBiteOrganicC: 0.05
+  predatorBiteEnergy: 0.05
+  predatorKillEnergyThreshold: 0.01
+  predatorAssimilationFraction: 0.6
+  predatorEnergyPerC: 1
+  predatorBasalCostMultiplier: 1.5
+  predatorMoveSpeedMultiplier: 10
+  predatorSpawnColorStrength: 1
+  enableFear: 1
+  fearRadius: 0.6
+  fearStrength: 1
+  fearMinDot: 0
+  fearRequiresMotility: 1
   chemoTempRange: {x: 0.8, y: 1.2}
   photoTempRange: {x: 0.3, y: 0.8}
   saproTempRange: {x: 0.2, y: 0.7}
-  defaultTempTolerance: 0.15
-  defaultLethalMargin: 0.35
+  predatorTempRange: {x: 0.25, y: 0.8}
+  defaultLethalMargin: 0.15
   tempMutationChance: 0.02
   tempMutationScale: 0.05
+  steerTempWeight: 5
+  steerFoodWeight: 1
+  steerGoodCO2: 0.02
+  steerGoodH2S: 0.001
+  steerGoodO2: 0.02
+  steerGoodOrganicC: 0.02
+  amoebaSteerSamples: 8
+  amoebaTurnRate: 0.5
+  amoebaMoveSpeedMultiplier: 0.7
+  flagellumSteerSamples: 20
+  flagellumTurnRate: 1.5
+  flagellumMoveSpeedMultiplier: 1.2
+  flagellumDriftSuppression: 0.5
+  steerUpdateInterval: 0.5
   biasSpawnsToChemosynthesisResources: 1
   spawnResourceProbeAttempts: 128
   h2sSpawnBiasWeight: 10
@@ -666,6 +703,7 @@ MonoBehaviour:
   chemosynthAgentCount: 0
   photosynthAgentCount: 0
   saprotrophAgentCount: 0
+  predatorAgentCount: 0
   averageOrganicCStore: 0
   divisionEligibleAgentCount: 0
 --- !u!4 &1064713444

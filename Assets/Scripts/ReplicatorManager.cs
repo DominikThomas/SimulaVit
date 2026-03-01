@@ -879,7 +879,7 @@ public class ReplicatorManager : MonoBehaviour
         float locationMultiplier = GetLocationSpawnMultiplier(isSeaLocation);
         float spawnChance = Mathf.Clamp01(spontaneousSpawnChance * locationMultiplier);
 
-        if (Random.value >= spawnChance)
+        if (UnityEngine.Random.value >= spawnChance)
         {
             return false;
         }
@@ -892,16 +892,16 @@ public class ReplicatorManager : MonoBehaviour
     {
         if (!biasSpawnsToChemosynthesisResources || planetResourceMap == null || planetGenerator == null)
         {
-            return Random.onUnitSphere;
+            return UnityEngine.Random.onUnitSphere;
         }
 
         int attempts = Mathf.Max(1, spawnResourceProbeAttempts);
-        Vector3 bestDirection = Random.onUnitSphere;
+        Vector3 bestDirection = UnityEngine.Random.onUnitSphere;
         float bestScore = -1f;
 
         for (int i = 0; i < attempts; i++)
         {
-            Vector3 candidate = Random.onUnitSphere;
+            Vector3 candidate = UnityEngine.Random.onUnitSphere;
             float score = GetChemosynthesisSpawnScore(candidate);
             if (score > bestScore)
             {
@@ -1472,7 +1472,7 @@ public class ReplicatorManager : MonoBehaviour
                 }
             }
 
-            if (Random.value < reproductionChance && hasEnergyForDivision && hasCarbonForDivision)
+            if (UnityEngine.Random.value < reproductionChance && hasEnergyForDivision && hasCarbonForDivision)
             {
                 int resolution = Mathf.Max(1, planetGenerator.resolution);
                 Vector3 dir = agent.position.normalized;
@@ -2029,7 +2029,7 @@ public class ReplicatorManager : MonoBehaviour
         randomDir = randomDir.normalized;
 
         MetabolismType childMetabolism = parent.metabolism;
-        if (Random.value < Mathf.Clamp01(metabolismMutationChance))
+        if (UnityEngine.Random.value < Mathf.Clamp01(metabolismMutationChance))
         {
             if (parent.metabolism == MetabolismType.SulfurChemosynthesis)
             {
@@ -2048,7 +2048,7 @@ public class ReplicatorManager : MonoBehaviour
 
         if (childMetabolism != MetabolismType.Saprotrophy
             && childMetabolism != MetabolismType.Predation
-            && Random.value < Mathf.Clamp01(saprotrophyMutationChance)
+            && UnityEngine.Random.value < Mathf.Clamp01(saprotrophyMutationChance)
             && CanMutateToSaprotrophy())
         {
             childMetabolism = MetabolismType.Saprotrophy;
@@ -2057,7 +2057,7 @@ public class ReplicatorManager : MonoBehaviour
         if (enablePredators
             && childMetabolism == MetabolismType.Saprotrophy
             && parent.metabolism == MetabolismType.Saprotrophy
-            && Random.value < Mathf.Clamp01(predatorMutationChance)
+            && UnityEngine.Random.value < Mathf.Clamp01(predatorMutationChance)
             && CanMutateToPredation(parent))
         {
             childMetabolism = MetabolismType.Predation;
@@ -2096,12 +2096,12 @@ public class ReplicatorManager : MonoBehaviour
     {
         LocomotionType locomotion = parent != null ? parent.locomotion : LocomotionType.PassiveDrift;
 
-        if (parent == null || Random.value >= Mathf.Clamp01(locomotionMutationChance))
+        if (parent == null || UnityEngine.Random.value >= Mathf.Clamp01(locomotionMutationChance))
         {
             return locomotion;
         }
 
-        bool mutateToAnchored = Random.value < Mathf.Clamp01(locomotionAnchoredMutationChance);
+        bool mutateToAnchored = UnityEngine.Random.value < Mathf.Clamp01(locomotionAnchoredMutationChance);
 
         if (mutateToAnchored)
         {
@@ -2112,13 +2112,13 @@ public class ReplicatorManager : MonoBehaviour
 
             if (locomotion == LocomotionType.Anchored
                 && allowAnchoredToAmoeboidMutation
-                && Random.value < Mathf.Clamp01(anchoredToAmoeboidMutationChance))
+                && UnityEngine.Random.value < Mathf.Clamp01(anchoredToAmoeboidMutationChance))
             {
                 return LocomotionType.Amoeboid;
             }
         }
 
-        if (Random.value < Mathf.Clamp01(locomotionUpgradeChance))
+        if (UnityEngine.Random.value < Mathf.Clamp01(locomotionUpgradeChance))
         {
             if (locomotion == LocomotionType.PassiveDrift)
             {
@@ -2222,13 +2222,13 @@ public class ReplicatorManager : MonoBehaviour
         float height = GetSurfaceHeight(randomDir);
         spawnPosition = randomDir * height;
         spawnRotation = Quaternion.FromToRotation(Vector3.up, randomDir);
-        spawnRotation *= Quaternion.Euler(0, Random.Range(0f, 360f), 0);
+        spawnRotation *= Quaternion.Euler(0, UnityEngine.Random.Range(0f, 360f), 0);
 
-        float newLifespan = Random.Range(minLifespan, maxLifespan);
-        float movementSeed = Random.Range(-1000f, 1000f);
+        float newLifespan = UnityEngine.Random.Range(minLifespan, maxLifespan);
+        float movementSeed = UnityEngine.Random.Range(-1000f, 1000f);
         Replicator newAgent = new Replicator(spawnPosition, spawnRotation, newLifespan, baseAgentColor, traits, movementSeed, metabolism, locomotion, locomotionSkill);
-        newAgent.age = parent == null ? Random.Range(0f, newLifespan * 0.5f) : 0f;
-        newAgent.energy = parent == null ? Random.Range(0.1f, 0.5f) : Mathf.Max(0.1f, parent.energy * 0.5f);
+        newAgent.age = parent == null ? UnityEngine.Random.Range(0f, newLifespan * 0.5f) : 0f;
+        newAgent.energy = parent == null ? UnityEngine.Random.Range(0.1f, 0.5f) : Mathf.Max(0.1f, parent.energy * 0.5f);
         newAgent.size = 1f;
 
         AssignTemperatureTraits(newAgent, parent, metabolism);
@@ -2245,10 +2245,10 @@ public class ReplicatorManager : MonoBehaviour
                 inheritedTarget = baselineTarget;
             }
 
-            if (Random.value < Mathf.Clamp01(biomassMutationChance))
+            if (UnityEngine.Random.value < Mathf.Clamp01(biomassMutationChance))
             {
                 float mutationScale = Mathf.Max(0f, biomassMutationScale);
-                float mutationFactor = 1f + Random.Range(-mutationScale, mutationScale);
+                float mutationFactor = 1f + UnityEngine.Random.Range(-mutationScale, mutationScale);
                 inheritedTarget *= Mathf.Max(0.1f, mutationFactor);
             }
 
@@ -2298,11 +2298,11 @@ public class ReplicatorManager : MonoBehaviour
         }
 
         // Mutate the band edges slightly
-        if (Random.value < mutationChance)
-            agent.optimalTempMin += Random.Range(-scale, scale);
+        if (UnityEngine.Random.value < mutationChance)
+            agent.optimalTempMin += UnityEngine.Random.Range(-scale, scale);
 
-        if (Random.value < mutationChance)
-            agent.optimalTempMax += Random.Range(-scale, scale);
+        if (UnityEngine.Random.value < mutationChance)
+            agent.optimalTempMax += UnityEngine.Random.Range(-scale, scale);
 
         // Ensure ordering and minimum band width
         if (agent.optimalTempMin > agent.optimalTempMax)
@@ -2324,8 +2324,8 @@ public class ReplicatorManager : MonoBehaviour
         agent.optimalTempMin = Mathf.Clamp(agent.optimalTempMin, 0f, 2f);
         agent.optimalTempMax = Mathf.Clamp(agent.optimalTempMax, 0f, 2f);
 
-        if (Random.value < mutationChance)
-            agent.lethalTempMargin = Mathf.Max(0.05f, agent.lethalTempMargin + Random.Range(-scale, scale));
+        if (UnityEngine.Random.value < mutationChance)
+            agent.lethalTempMargin = Mathf.Max(0.05f, agent.lethalTempMargin + UnityEngine.Random.Range(-scale, scale));
     }
 
     Vector2 GetTempRangeForMetabolism(MetabolismType metabolism)
@@ -2371,7 +2371,7 @@ public class ReplicatorManager : MonoBehaviour
 
         for (int i = 0; i < maxAttempts; i++)
         {
-            candidate = Random.onUnitSphere;
+            candidate = UnityEngine.Random.onUnitSphere;
             if (IsSeaLocation(candidate))
             {
                 seaDirection = candidate;
