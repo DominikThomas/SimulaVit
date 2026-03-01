@@ -484,6 +484,13 @@ public class ReplicatorManager : MonoBehaviour
     {
         if (!isInitialized) return;
 
+        float worldRadius = Mathf.Max(0.0001f, planetGenerator != null ? planetGenerator.radius : 0f);
+        float maxSearchRadius = Mathf.Max(
+            Mathf.Max(0f, predatorAttackRange) * worldRadius,
+            Mathf.Max(0f, fearRadius) * worldRadius
+        );
+        RebuildSpatialIndex(Mathf.Max(maxSearchRadius, 0.01f));
+
         UpdateLifecycle();
         TickMetabolism();
         RunPredationPass();
@@ -1160,8 +1167,7 @@ public class ReplicatorManager : MonoBehaviour
                             }
                         }
 
-                        float dist = Mathf.Sqrt(distSq);
-                        float weight = 1f - Mathf.Clamp01(dist / radius);
+                        float weight = 1f - Mathf.Clamp01(distSq / radiusSq);
                         flee += awayDir * weight;
                     }
                 }
@@ -1209,6 +1215,11 @@ public class ReplicatorManager : MonoBehaviour
                         float distSq = (prey.position - predator.position).sqrMagnitude;
                         if (distSq < bestDistSq)
                         {
+                            if (distSq < 0.0001f)
+                            {
+                                return i;
+                            }
+
                             bestDistSq = distSq;
                             bestIndex = i;
                         }
@@ -1235,7 +1246,6 @@ public class ReplicatorManager : MonoBehaviour
         float cooldownSeconds = Mathf.Max(0f, predatorAttackCooldownSeconds);
         float energyPerC = Mathf.Max(0f, predatorEnergyPerC);
         float maxStore = Mathf.Max(0f, maxOrganicCStore);
-        RebuildSpatialIndex(Mathf.Max(attackRangeWorld, 0.01f));
         pendingPredationRemovals.Clear();
 
         for (int i = agents.Count - 1; i >= 0; i--)
@@ -1315,8 +1325,6 @@ public class ReplicatorManager : MonoBehaviour
         float now = Time.time;
         float interval = Mathf.Max(0.01f, steerUpdateInterval);
         int samples = Mathf.Max(1, amoebaSteerSamples);
-        float sensingRange = Mathf.Max(0.01f, fearRadius) * Mathf.Max(0.0001f, planetGenerator.radius);
-        RebuildSpatialIndex(Mathf.Max(sensingRange, 0.01f));
 
         for (int i = 0; i < agents.Count; i++)
         {
@@ -1327,9 +1335,11 @@ public class ReplicatorManager : MonoBehaviour
             }
 
             Vector3 currentDir = agent.currentDirection.sqrMagnitude > 0f ? agent.currentDirection.normalized : agent.position.normalized;
+            Vector3 fleeBias = Vector3.zero;
 
             if (agent.nextSteerTime <= now)
             {
+                fleeBias = ComputeFleeBias(agent, currentDir);
                 Vector3 bestDir = currentDir;
                 int baseCellIndex = PlanetGridIndexing.DirectionToCellIndex(currentDir, resolution);
                 float bestScore = ComputeHabitatScore(agent, currentDir, baseCellIndex);
@@ -1360,7 +1370,6 @@ public class ReplicatorManager : MonoBehaviour
                 }
 
                 Vector3 desired = bestDir;
-                Vector3 fleeBias = ComputeFleeBias(agent, currentDir);
                 if (fleeBias.sqrMagnitude > 0.0001f)
                 {
                     desired = (desired + fleeBias * Mathf.Max(0f, fearStrength)).normalized;
@@ -1410,7 +1419,8 @@ public class ReplicatorManager : MonoBehaviour
 
     int GetBucketSearchRadius(float worldRadius)
     {
-        return Mathf.Max(1, Mathf.CeilToInt(worldRadius / Mathf.Max(0.01f, spatialCellSize)));
+        int calculated = Mathf.Max(1, Mathf.CeilToInt(worldRadius / Mathf.Max(0.01f, spatialCellSize)));
+        return Mathf.Min(calculated, 2);
     }
 
     static int HashBucket(int x, int y, int z)
