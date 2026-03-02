@@ -86,6 +86,12 @@ public class PlanetResourceMap : MonoBehaviour
     public float ventHeatMaxOcean = 1.2f;
     public float ventHeatMaxLand = 1.6f;
 
+    [Header("Ecology Cues")]
+    public bool enableEcologyCues = true;
+    public float cueDecayPerSecond = 1.0f;
+    [Range(0, 3)] public int cueDiffusePasses = 1;
+    [Range(0f, 1f)] public float cueDiffuseStrength = 0.35f;
+
     [Header("Debug Preview")]
     public ResourceType debugViewType = ResourceType.CO2;
     public Gradient debugGradient;
@@ -116,8 +122,12 @@ public class PlanetResourceMap : MonoBehaviour
 
     private bool isInitialized;
     public float[] ventStrength;
+    public float[] predatorCue;
+    public float[] preyCue;
     private float[] ventHeat;
     private float[] ventHeatTmp;
+    private float[] cuePredatorTmp;
+    private float[] cuePreyTmp;
     private int[] ventHeatNeighbors;
     private byte[] ventMask;
     private int[] ventCells;
@@ -302,6 +312,7 @@ public class PlanetResourceMap : MonoBehaviour
         ventHeatTmp = new float[cellCount];
         ventHeatNeighbors = new int[cellCount * 6];
         oceanMask = new byte[cellCount];
+        EnsureCueArrays(cellCount);
 
         int ventCount = 0;
         float oceanRadius = planetGenerator.GetOceanRadius();
@@ -371,6 +382,126 @@ public class PlanetResourceMap : MonoBehaviour
         UpdateAtmosphereDebugMeans();
         isInitialized = true;
         Debug.Log($"Initialized {VentCount} vents", this);
+    }
+
+    /// <summary>
+    /// Ecological cues approximate local chemical traces (kairomones): predator scent and prey scent per tile.
+    /// They are rebuilt externally each simulation step, then decayed and diffused to create smooth gradients.
+    /// </summary>
+    public void EnsureCueArrays(int cellCount)
+    {
+        if (cellCount <= 0)
+        {
+            predatorCue = null;
+            preyCue = null;
+            cuePredatorTmp = null;
+            cuePreyTmp = null;
+            return;
+        }
+
+        if (predatorCue == null || predatorCue.Length != cellCount)
+        {
+            predatorCue = new float[cellCount];
+        }
+
+        if (preyCue == null || preyCue.Length != cellCount)
+        {
+            preyCue = new float[cellCount];
+        }
+
+        if (cuePredatorTmp == null || cuePredatorTmp.Length != cellCount)
+        {
+            cuePredatorTmp = new float[cellCount];
+        }
+
+        if (cuePreyTmp == null || cuePreyTmp.Length != cellCount)
+        {
+            cuePreyTmp = new float[cellCount];
+        }
+    }
+
+    public void ClearCues()
+    {
+        if (predatorCue == null || preyCue == null)
+        {
+            return;
+        }
+
+        System.Array.Clear(predatorCue, 0, predatorCue.Length);
+        System.Array.Clear(preyCue, 0, preyCue.Length);
+    }
+
+    public void ApplyCueDecayAndDiffuse(float dt)
+    {
+        if (!enableEcologyCues || predatorCue == null || preyCue == null)
+        {
+            return;
+        }
+
+        int cellCount = predatorCue.Length;
+        if (cellCount == 0)
+        {
+            return;
+        }
+
+        EnsureCueArrays(cellCount);
+
+        float decay = Mathf.Exp(-Mathf.Max(0f, cueDecayPerSecond) * Mathf.Max(0f, dt));
+        for (int cell = 0; cell < cellCount; cell++)
+        {
+            predatorCue[cell] = Mathf.Max(0f, predatorCue[cell] * decay);
+            preyCue[cell] = Mathf.Max(0f, preyCue[cell] * decay);
+        }
+
+        if (ventHeatNeighbors == null)
+        {
+            BuildVentHeatNeighbors();
+        }
+
+        if (ventHeatNeighbors == null)
+        {
+            return;
+        }
+
+        int passes = Mathf.Clamp(cueDiffusePasses, 0, 3);
+        float strength = Mathf.Clamp01(cueDiffuseStrength);
+
+        for (int pass = 0; pass < passes; pass++)
+        {
+            for (int cell = 0; cell < cellCount; cell++)
+            {
+                int baseIndex = cell * 6;
+                float predatorNeighborSum = 0f;
+                float preyNeighborSum = 0f;
+                int neighborCount = 0;
+
+                for (int n = 0; n < 6; n++)
+                {
+                    int neighborCell = ventHeatNeighbors[baseIndex + n];
+                    if (neighborCell < 0 || neighborCell >= cellCount)
+                    {
+                        continue;
+                    }
+
+                    predatorNeighborSum += predatorCue[neighborCell];
+                    preyNeighborSum += preyCue[neighborCell];
+                    neighborCount++;
+                }
+
+                float predatorNeighborAvg = neighborCount > 0 ? predatorNeighborSum / neighborCount : predatorCue[cell];
+                float preyNeighborAvg = neighborCount > 0 ? preyNeighborSum / neighborCount : preyCue[cell];
+                cuePredatorTmp[cell] = Mathf.Lerp(predatorCue[cell], predatorNeighborAvg, strength);
+                cuePreyTmp[cell] = Mathf.Lerp(preyCue[cell], preyNeighborAvg, strength);
+            }
+
+            float[] predatorSwap = predatorCue;
+            predatorCue = cuePredatorTmp;
+            cuePredatorTmp = predatorSwap;
+
+            float[] preySwap = preyCue;
+            preyCue = cuePreyTmp;
+            cuePreyTmp = preySwap;
+        }
     }
 
     private void ApplyAtmosphereMixing()
@@ -797,6 +928,9 @@ public class PlanetResourceMap : MonoBehaviour
         landExchangeRate = Mathf.Max(0f, landExchangeRate);
         oceanExchangeRate = Mathf.Max(0f, oceanExchangeRate);
         naturalOxidationFractionPerTick = Mathf.Clamp01(naturalOxidationFractionPerTick);
+        cueDecayPerSecond = Mathf.Max(0f, cueDecayPerSecond);
+        cueDiffusePasses = Mathf.Clamp(cueDiffusePasses, 0, 3);
+        cueDiffuseStrength = Mathf.Clamp01(cueDiffuseStrength);
     }
 
 
