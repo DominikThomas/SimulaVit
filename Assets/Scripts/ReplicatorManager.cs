@@ -121,6 +121,10 @@ public class ReplicatorManager : MonoBehaviour
     public float fearMinDot = 0.0f;
     public bool fearRequiresMotility = true;
 
+    [Header("Spatial Index")]
+    [Tooltip("Fixed world-space size for each spatial bucket. Search range is derived per query from radius / bucket size.")]
+    public float spatialBucketSize = 0.25f;
+
     [Header("Temperature Preferences")]
     public Vector2 chemoTempRange = new Vector2(0.8f, 1.2f);
     public Vector2 photoTempRange = new Vector2(0.3f, 0.8f);
@@ -484,12 +488,7 @@ public class ReplicatorManager : MonoBehaviour
     {
         if (!isInitialized) return;
 
-        float worldRadius = Mathf.Max(0.0001f, planetGenerator != null ? planetGenerator.radius : 0f);
-        float maxSearchRadius = Mathf.Max(
-            Mathf.Max(0f, predatorAttackRange) * worldRadius,
-            Mathf.Max(0f, fearRadius) * worldRadius
-        );
-        RebuildSpatialIndex(Mathf.Max(maxSearchRadius, 0.01f));
+        RebuildSpatialIndex();
 
         UpdateLifecycle();
         TickMetabolism();
@@ -1386,9 +1385,9 @@ public class ReplicatorManager : MonoBehaviour
         }
     }
 
-    void RebuildSpatialIndex(float cellSize)
+    void RebuildSpatialIndex()
     {
-        spatialCellSize = Mathf.Max(0.01f, cellSize);
+        spatialCellSize = Mathf.Max(0.01f, spatialBucketSize);
 
         foreach (var entry in spatialBuckets)
         {
@@ -1419,8 +1418,8 @@ public class ReplicatorManager : MonoBehaviour
 
     int GetBucketSearchRadius(float worldRadius)
     {
-        int calculated = Mathf.Max(1, Mathf.CeilToInt(worldRadius / Mathf.Max(0.01f, spatialCellSize)));
-        return Mathf.Min(calculated, 2);
+        float clampedRadius = Mathf.Max(0f, worldRadius);
+        return Mathf.CeilToInt(clampedRadius / Mathf.Max(0.01f, spatialCellSize));
     }
 
     static int HashBucket(int x, int y, int z)
