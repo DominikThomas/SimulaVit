@@ -493,6 +493,7 @@ public class ReplicatorManager : MonoBehaviour
         UpdateLifecycle();
         TickMetabolism();
         RunPredationPass();
+        RebuildSpatialIndex();
         HandleSpontaneousSpawning();
         UpdateAmoeboidSteering();
         RunMovementJob();
@@ -1057,7 +1058,13 @@ public class ReplicatorManager : MonoBehaviour
 
                             for (int i = 0; i < bucket.Count; i++)
                             {
-                                Replicator other = agents[bucket[i]];
+                                int otherIndex = bucket[i];
+                                if (otherIndex < 0 || otherIndex >= agents.Count)
+                                {
+                                    continue;
+                                }
+
+                                Replicator other = agents[otherIndex];
                                 if (other.metabolism == MetabolismType.Predation)
                                 {
                                     continue;
@@ -1143,7 +1150,13 @@ public class ReplicatorManager : MonoBehaviour
 
                     for (int i = 0; i < bucket.Count; i++)
                     {
-                        Replicator other = agents[bucket[i]];
+                        int otherIndex = bucket[i];
+                        if (otherIndex < 0 || otherIndex >= agents.Count)
+                        {
+                            continue;
+                        }
+
+                        Replicator other = agents[otherIndex];
                         if (!IsPredator(other))
                         {
                             continue;
@@ -1200,7 +1213,7 @@ public class ReplicatorManager : MonoBehaviour
                     for (int bi = 0; bi < bucket.Count; bi++)
                     {
                         int i = bucket[bi];
-                        if (i == predatorIndex || blockedPrey.Contains(i))
+                        if (i == predatorIndex || i < 0 || i >= agents.Count || blockedPrey.Contains(i))
                         {
                             continue;
                         }
