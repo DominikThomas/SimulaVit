@@ -154,6 +154,10 @@ public class ReplicatorManager : MonoBehaviour
 
     [Header("Steering - Ecology Cues")]
     public bool useEcologyCuesForPredation = true;
+    [Tooltip("Master switch for predator/prey cue influence in movement habitat scoring.")]
+    public bool enablePredatorPreyCueSteering = true;
+    [Tooltip("If disabled, skip rebuilding predator/prey cue fields in PlanetResourceMap.")]
+    public bool enablePredatorPreyCueMapUpdate = true;
     public float predatorCueWeight = 1.5f;
     public float preyCueWeight = 1.0f;
     public float cueSampleWeight = 1.0f;
@@ -505,7 +509,20 @@ public class ReplicatorManager : MonoBehaviour
             RebuildSpatialIndex(Mathf.Max(maxSearchRadius, 0.01f));
         }
 
-        RebuildEcologyCues(Time.deltaTime);
+        if (enablePredatorPreyCueMapUpdate)
+        {
+            RebuildEcologyCues(Time.deltaTime);
+        }
+        else
+        {
+            if (planetResourceMap != null && planetResourceMap.enableEcologyCues)
+            {
+                planetResourceMap.ClearCues();
+            }
+
+            avgPredatorCueDebug = 0f;
+            avgPreyCueDebug = 0f;
+        }
         UpdateLifecycle();
         TickMetabolism();
         RunPredationPass();
@@ -1001,7 +1018,7 @@ public class ReplicatorManager : MonoBehaviour
         float score = Mathf.Max(0f, steerTempWeight) * tempFitness
                     + Mathf.Max(0f, steerFoodWeight) * foodFitness;
 
-        if (useEcologyCuesForPredation && planetResourceMap.enableEcologyCues && planetResourceMap.predatorCue != null && planetResourceMap.preyCue != null)
+        if (useEcologyCuesForPredation && enablePredatorPreyCueSteering && planetResourceMap.enableEcologyCues && planetResourceMap.predatorCue != null && planetResourceMap.preyCue != null)
         {
             float predCue = NormalizeCue(planetResourceMap.predatorCue[cellIndex]);
             float preyCue = NormalizeCue(planetResourceMap.preyCue[cellIndex]);
@@ -1101,8 +1118,13 @@ public class ReplicatorManager : MonoBehaviour
 
     void RebuildEcologyCues(float dt)
     {
-        if (planetResourceMap == null || !planetResourceMap.enableEcologyCues)
+        if (planetResourceMap == null || !planetResourceMap.enableEcologyCues || !enablePredatorPreyCueMapUpdate)
         {
+            if (planetResourceMap != null && planetResourceMap.enableEcologyCues)
+            {
+                planetResourceMap.ClearCues();
+            }
+
             avgPredatorCueDebug = 0f;
             avgPreyCueDebug = 0f;
             return;
@@ -1309,7 +1331,7 @@ public class ReplicatorManager : MonoBehaviour
                 float bestScore = ComputeHabitatScore(agent, currentDir, baseCellIndex);
                 bool isFlagellum = agent.locomotion == LocomotionType.Flagellum;
                 int samplesForLocomotion = Mathf.Max(1, isFlagellum ? flagellumSteerSamples : samples);
-                if (useEcologyCuesForPredation && planetResourceMap != null && planetResourceMap.enableEcologyCues)
+                if (useEcologyCuesForPredation && enablePredatorPreyCueSteering && planetResourceMap != null && planetResourceMap.enableEcologyCues)
                 {
                     samplesForLocomotion = Mathf.Max(samplesForLocomotion, Mathf.Max(1, cueSteerSamples));
                 }
