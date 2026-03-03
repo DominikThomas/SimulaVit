@@ -1,0 +1,9 @@
+{
+  "name": "SimulaVit.PlayModeTests",
+  "references": [
+    "UnityEngine.TestRunner"
+  ],
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ]
+}

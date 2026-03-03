@@ -1,0 +1,13 @@
+{
+  "name": "SimulaVit.EditModeTests",
+  "references": [
+    "UnityEngine.TestRunner",
+    "UnityEditor.TestRunner"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ]
+}
