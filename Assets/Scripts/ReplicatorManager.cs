@@ -152,6 +152,18 @@ public class ReplicatorManager : MonoBehaviour
     public float flagellumDriftSuppression = 0.5f;
     public float steerUpdateInterval = 0.5f;
 
+    [Header("Steering - Ecology Cues")]
+    public bool useEcologyCuesForPredation = true;
+    [Tooltip("Master switch for predator/prey cue influence in movement habitat scoring.")]
+    public bool enablePredatorPreyCueSteering = true;
+    [Tooltip("If disabled, skip rebuilding predator/prey cue fields in PlanetResourceMap.")]
+    public bool enablePredatorPreyCueMapUpdate = true;
+    public float predatorCueWeight = 1.5f;
+    public float preyCueWeight = 1.0f;
+    public float cueSampleWeight = 1.0f;
+    [Range(1, 64)] public int cueSteerSamples = 8;
+    public float cueGoodValue = 2.0f;
+
     [Header("Spawn Resource Bias")]
     public bool biasSpawnsToChemosynthesisResources = true;
     [Range(1, 256)] public int spawnResourceProbeAttempts = 128;
@@ -226,6 +238,9 @@ public class ReplicatorManager : MonoBehaviour
     private int[] saproDeathCauseCounts;
     private int[] predatorDeathCauseCounts;
     private int predationKillsWindow;
+    private float avgPredatorCueDebug;
+    private float avgPreyCueDebug;
+    private readonly List<int> localPredationCandidates = new List<int>(64);
 
     // Arrays for Batching
     private Matrix4x4[] matrixBatch = new Matrix4x4[1023];
@@ -485,12 +500,29 @@ public class ReplicatorManager : MonoBehaviour
         if (!isInitialized) return;
 
         float worldRadius = Mathf.Max(0.0001f, planetGenerator != null ? planetGenerator.radius : 0f);
-        float maxSearchRadius = Mathf.Max(
-            Mathf.Max(0f, predatorAttackRange) * worldRadius,
-            Mathf.Max(0f, fearRadius) * worldRadius
-        );
-        RebuildSpatialIndex(Mathf.Max(maxSearchRadius, 0.01f));
+        if (!useEcologyCuesForPredation)
+        {
+            float maxSearchRadius = Mathf.Max(
+                Mathf.Max(0f, predatorAttackRange) * worldRadius,
+                Mathf.Max(0f, fearRadius) * worldRadius
+            );
+            RebuildSpatialIndex(Mathf.Max(maxSearchRadius, 0.01f));
+        }
 
+        if (enablePredatorPreyCueMapUpdate)
+        {
+            RebuildEcologyCues(Time.deltaTime);
+        }
+        else
+        {
+            if (planetResourceMap != null && planetResourceMap.enableEcologyCues)
+            {
+                planetResourceMap.ClearCues();
+            }
+
+            avgPredatorCueDebug = 0f;
+            avgPreyCueDebug = 0f;
+        }
         UpdateLifecycle();
         TickMetabolism();
         RunPredationPass();
@@ -680,7 +712,7 @@ public class ReplicatorManager : MonoBehaviour
         Debug.Log(
             $"Metabolism: chemo={chemosynthAgentCount} photo={photosynthAgentCount} sapro={saprotrophAgentCount} predator={predatorAgentCount} " +
             $"photoUnlocked={unlocked} saproUnlocked={IsSaprotrophyUnlocked()} " +
-            $"temp[chemo:{chemoTempText} photo:{photoTempText} sapro:{saproTempText}] avgOrganicC={averageOrganicCStore:F3} divisionEligible={divisionEligibleAgentCount} predKillsWindow={predationKillsWindow}");
+            $"temp[chemo:{chemoTempText} photo:{photoTempText} sapro:{saproTempText}] avgOrganicC={averageOrganicCStore:F3} divisionEligible={divisionEligibleAgentCount} predKillsWindow={predationKillsWindow} avgPredCue={avgPredatorCueDebug:F3} avgPreyCue={avgPreyCueDebug:F3}");
         Debug.Log($"DeathCauses: chemo[{FormatDeathCauseDistribution(chemoDeathCauseCounts)}] photo[{FormatDeathCauseDistribution(photoDeathCauseCounts)}] sapro[{FormatDeathCauseDistribution(saproDeathCauseCounts)}] predator[{FormatDeathCauseDistribution(predatorDeathCauseCounts)}]");
         predationKillsWindow = 0;
         ResetDeathCauseCounters();
@@ -986,6 +1018,23 @@ public class ReplicatorManager : MonoBehaviour
         float score = Mathf.Max(0f, steerTempWeight) * tempFitness
                     + Mathf.Max(0f, steerFoodWeight) * foodFitness;
 
+        if (useEcologyCuesForPredation && enablePredatorPreyCueSteering && planetResourceMap.enableEcologyCues && planetResourceMap.predatorCue != null && planetResourceMap.preyCue != null)
+        {
+            float predCue = NormalizeCue(planetResourceMap.predatorCue[cellIndex]);
+            float preyCue = NormalizeCue(planetResourceMap.preyCue[cellIndex]);
+            float cueTerm;
+            if (agent.metabolism == MetabolismType.Predation)
+            {
+                cueTerm = Mathf.Max(0f, preyCueWeight) * preyCue - 0.2f * predCue;
+            }
+            else
+            {
+                cueTerm = -Mathf.Max(0f, predatorCueWeight) * predCue + 0.1f * preyCue;
+            }
+
+            score += Mathf.Max(0f, cueSampleWeight) * cueTerm;
+        }
+
         if (float.IsNaN(score) || float.IsInfinity(score))
         {
             return 0f;
@@ -1038,43 +1087,13 @@ public class ReplicatorManager : MonoBehaviour
             case MetabolismType.Predation:
             {
                 float o2 = NormalizeResource(ResourceType.O2, cellIndex, steerGoodO2);
-                float preyDensity = 0f;
-                float senseRange = Mathf.Max(0.01f, fearRadius) * Mathf.Max(0.0001f, planetGenerator.radius);
-                float senseRangeSq = senseRange * senseRange;
-                Vector3 pos = normalizedDir * planetGenerator.radius;
-                int bucketRange = GetBucketSearchRadius(senseRange);
-                GetBucketCoordinates(pos, out int bx, out int by, out int bz);
-
-                for (int x = bx - bucketRange; x <= bx + bucketRange; x++)
+                float preyCue = 0f;
+                if (planetResourceMap != null && planetResourceMap.preyCue != null && cellIndex >= 0 && cellIndex < planetResourceMap.preyCue.Length)
                 {
-                    for (int y = by - bucketRange; y <= by + bucketRange; y++)
-                    {
-                        for (int z = bz - bucketRange; z <= bz + bucketRange; z++)
-                        {
-                            if (!spatialBuckets.TryGetValue(HashBucket(x, y, z), out List<int> bucket))
-                            {
-                                continue;
-                            }
-
-                            for (int i = 0; i < bucket.Count; i++)
-                            {
-                                Replicator other = agents[bucket[i]];
-                                if (other.metabolism == MetabolismType.Predation)
-                                {
-                                    continue;
-                                }
-
-                                if ((other.position - pos).sqrMagnitude <= senseRangeSq)
-                                {
-                                    preyDensity += 1f;
-                                }
-                            }
-                        }
-                    }
+                    preyCue = NormalizeCue(planetResourceMap.preyCue[cellIndex]);
                 }
 
-                float normalizedPrey = Mathf.Clamp01(preyDensity / 6f);
-                return Mathf.Min(o2, normalizedPrey);
+                return Mathf.Min(o2, preyCue);
             }
             default:
                 return 0f;
@@ -1089,6 +1108,63 @@ public class ReplicatorManager : MonoBehaviour
         return float.IsNaN(normalized) || float.IsInfinity(normalized) ? 0f : normalized;
     }
 
+
+    float NormalizeCue(float cueValue)
+    {
+        float half = Mathf.Max(0.0001f, cueGoodValue);
+        float normalized = cueValue / (cueValue + half);
+        return float.IsNaN(normalized) || float.IsInfinity(normalized) ? 0f : Mathf.Clamp01(normalized);
+    }
+
+    void RebuildEcologyCues(float dt)
+    {
+        if (planetResourceMap == null || !planetResourceMap.enableEcologyCues || !enablePredatorPreyCueMapUpdate)
+        {
+            if (planetResourceMap != null && planetResourceMap.enableEcologyCues)
+            {
+                planetResourceMap.ClearCues();
+            }
+
+            avgPredatorCueDebug = 0f;
+            avgPreyCueDebug = 0f;
+            return;
+        }
+
+        int resolution = Mathf.Max(1, planetGenerator.resolution);
+        int cellCount = PlanetGridIndexing.GetCellCount(resolution);
+        planetResourceMap.EnsureCueArrays(cellCount);
+        planetResourceMap.ClearCues();
+
+        float[] predatorCue = planetResourceMap.predatorCue;
+        float[] preyCue = planetResourceMap.preyCue;
+        for (int i = 0; i < agents.Count; i++)
+        {
+            Replicator agent = agents[i];
+            int cellIndex = PlanetGridIndexing.DirectionToCellIndex(agent.position.normalized, resolution);
+            if (IsPredator(agent))
+            {
+                predatorCue[cellIndex] += 1f;
+            }
+            else
+            {
+                preyCue[cellIndex] += 1f;
+            }
+        }
+
+        planetResourceMap.ApplyCueDecayAndDiffuse(dt);
+
+        float predatorSum = 0f;
+        float preySum = 0f;
+        for (int i = 0; i < cellCount; i++)
+        {
+            predatorSum += predatorCue[i];
+            preySum += preyCue[i];
+        }
+
+        float inv = cellCount > 0 ? 1f / cellCount : 0f;
+        avgPredatorCueDebug = predatorSum * inv;
+        avgPreyCueDebug = preySum * inv;
+    }
 
 
     bool IsPredator(Replicator agent)
@@ -1106,131 +1182,6 @@ public class ReplicatorManager : MonoBehaviour
         return agent.locomotion == LocomotionType.Amoeboid || agent.locomotion == LocomotionType.Flagellum;
     }
 
-    Vector3 ComputeFleeBias(Replicator agent, Vector3 currentDir)
-    {
-        if (!enableFear || IsPredator(agent))
-        {
-            return Vector3.zero;
-        }
-
-        if (fearRequiresMotility && !IsMotile(agent))
-        {
-            return Vector3.zero;
-        }
-
-        float radius = Mathf.Max(0f, fearRadius) * Mathf.Max(0.0001f, planetGenerator.radius);
-        if (radius <= Mathf.Epsilon)
-        {
-            return Vector3.zero;
-        }
-
-        float radiusSq = radius * radius;
-        Vector3 origin = agent.position;
-        Vector3 flee = Vector3.zero;
-
-        int bucketRange = GetBucketSearchRadius(radius);
-        GetBucketCoordinates(origin, out int bx, out int by, out int bz);
-
-        for (int x = bx - bucketRange; x <= bx + bucketRange; x++)
-        {
-            for (int y = by - bucketRange; y <= by + bucketRange; y++)
-            {
-                for (int z = bz - bucketRange; z <= bz + bucketRange; z++)
-                {
-                    if (!spatialBuckets.TryGetValue(HashBucket(x, y, z), out List<int> bucket))
-                    {
-                        continue;
-                    }
-
-                    for (int i = 0; i < bucket.Count; i++)
-                    {
-                        Replicator other = agents[bucket[i]];
-                        if (!IsPredator(other))
-                        {
-                            continue;
-                        }
-
-                        Vector3 away = origin - other.position;
-                        float distSq = away.sqrMagnitude;
-                        if (distSq <= Mathf.Epsilon || distSq > radiusSq)
-                        {
-                            continue;
-                        }
-
-                        Vector3 awayDir = away.normalized;
-                        if (fearMinDot > -1f)
-                        {
-                            float dot = Vector3.Dot(currentDir, -awayDir);
-                            if (dot < fearMinDot)
-                            {
-                                continue;
-                            }
-                        }
-
-                        float weight = 1f - Mathf.Clamp01(distSq / radiusSq);
-                        flee += awayDir * weight;
-                    }
-                }
-            }
-        }
-
-        Vector3 tangentFlee = Vector3.ProjectOnPlane(flee, currentDir);
-        return tangentFlee.sqrMagnitude > 0.0001f ? tangentFlee.normalized : Vector3.zero;
-    }
-
-    int FindNearestPreyIndex(int predatorIndex, float attackRangeWorld, HashSet<int> blockedPrey)
-    {
-        Replicator predator = agents[predatorIndex];
-        float bestDistSq = attackRangeWorld * attackRangeWorld;
-        int bestIndex = -1;
-
-        int bucketRange = GetBucketSearchRadius(attackRangeWorld);
-        GetBucketCoordinates(predator.position, out int bx, out int by, out int bz);
-
-        for (int x = bx - bucketRange; x <= bx + bucketRange; x++)
-        {
-            for (int y = by - bucketRange; y <= by + bucketRange; y++)
-            {
-                for (int z = bz - bucketRange; z <= bz + bucketRange; z++)
-                {
-                    if (!spatialBuckets.TryGetValue(HashBucket(x, y, z), out List<int> bucket))
-                    {
-                        continue;
-                    }
-
-                    for (int bi = 0; bi < bucket.Count; bi++)
-                    {
-                        int i = bucket[bi];
-                        if (i == predatorIndex || blockedPrey.Contains(i))
-                        {
-                            continue;
-                        }
-
-                        Replicator prey = agents[i];
-                        if (prey.metabolism == MetabolismType.Predation)
-                        {
-                            continue;
-                        }
-
-                        float distSq = (prey.position - predator.position).sqrMagnitude;
-                        if (distSq < bestDistSq)
-                        {
-                            if (distSq < 0.0001f)
-                            {
-                                return i;
-                            }
-
-                            bestDistSq = distSq;
-                            bestIndex = i;
-                        }
-                    }
-                }
-            }
-        }
-
-        return bestIndex;
-    }
-
     void RunPredationPass()
     {
         if (!enablePredators || agents.Count <= 1 || planetGenerator == null)
@@ -1239,7 +1190,6 @@ public class ReplicatorManager : MonoBehaviour
         }
 
         float dt = Time.deltaTime;
-        float attackRangeWorld = Mathf.Max(0f, predatorAttackRange) * Mathf.Max(0.0001f, planetGenerator.radius);
         float biteOrganicC = Mathf.Max(0f, predatorBiteOrganicC);
         float biteEnergy = Mathf.Max(0f, predatorBiteEnergy);
         float assimilation = Mathf.Clamp01(predatorAssimilationFraction);
@@ -1247,6 +1197,9 @@ public class ReplicatorManager : MonoBehaviour
         float energyPerC = Mathf.Max(0f, predatorEnergyPerC);
         float maxStore = Mathf.Max(0f, maxOrganicCStore);
         pendingPredationRemovals.Clear();
+
+        int resolution = Mathf.Max(1, planetGenerator.resolution);
+        float[] preyCue = planetResourceMap != null ? planetResourceMap.preyCue : null;
 
         for (int i = agents.Count - 1; i >= 0; i--)
         {
@@ -1257,26 +1210,61 @@ public class ReplicatorManager : MonoBehaviour
             }
 
             predator.attackCooldown = Mathf.Max(0f, predator.attackCooldown - dt);
-            if (predator.attackCooldown > 0f || attackRangeWorld <= 0f)
+            if (predator.attackCooldown > 0f)
             {
                 continue;
             }
 
-            int preyIndex = FindNearestPreyIndex(i, attackRangeWorld, pendingPredationRemovals);
+            int predatorCell = PlanetGridIndexing.DirectionToCellIndex(predator.position.normalized, resolution);
+            if (useEcologyCuesForPredation && preyCue != null)
+            {
+                if (predatorCell < 0 || predatorCell >= preyCue.Length || preyCue[predatorCell] <= 0.001f)
+                {
+                    continue;
+                }
+            }
+
+            localPredationCandidates.Clear();
+            for (int j = 0; j < agents.Count; j++)
+            {
+                if (j == i || pendingPredationRemovals.Contains(j))
+                {
+                    continue;
+                }
+
+                Replicator prey = agents[j];
+                if (IsPredator(prey))
+                {
+                    continue;
+                }
+
+                int preyCell = PlanetGridIndexing.DirectionToCellIndex(prey.position.normalized, resolution);
+                if (preyCell == predatorCell)
+                {
+                    localPredationCandidates.Add(j);
+                }
+            }
+
+            if (localPredationCandidates.Count == 0)
+            {
+                continue;
+            }
+
+            int preyIndex = localPredationCandidates[UnityEngine.Random.Range(0, localPredationCandidates.Count)];
             if (preyIndex < 0 || preyIndex >= agents.Count)
             {
                 continue;
             }
 
-            Replicator prey = agents[preyIndex];
-            float takeC = Mathf.Min(Mathf.Max(0f, prey.organicCStore), biteOrganicC);
-            prey.organicCStore = Mathf.Max(0f, prey.organicCStore - takeC);
+            Replicator preyVictim = agents[preyIndex];
+            float takeC = Mathf.Min(Mathf.Max(0f, preyVictim.organicCStore), biteOrganicC);
+            preyVictim.organicCStore = Mathf.Max(0f, preyVictim.organicCStore - takeC);
 
             float takeE = 0f;
             if (takeC < biteOrganicC && biteEnergy > 0f)
             {
-                takeE = Mathf.Min(Mathf.Max(0f, prey.energy), biteEnergy);
-                prey.energy = Mathf.Max(0f, prey.energy - takeE);
+                takeE = Mathf.Min(Mathf.Max(0f, preyVictim.energy), biteEnergy);
+                preyVictim.energy = Mathf.Max(0f, preyVictim.energy - takeE);
             }
 
             float storedGain = takeC * assimilation;
@@ -1285,10 +1273,10 @@ public class ReplicatorManager : MonoBehaviour
             predator.energy += (respiredC * energyPerC) + (takeE * 0.5f);
             predator.attackCooldown = cooldownSeconds;
 
-            if (prey.energy <= Mathf.Max(0f, predatorKillEnergyThreshold) || prey.energy <= 0f)
+            if (preyVictim.energy <= Mathf.Max(0f, predatorKillEnergyThreshold) || preyVictim.energy <= 0f)
             {
-                RegisterDeathCause(prey.metabolism, DeathCause.Predation);
-                DepositDeathOrganicC(prey);
+                RegisterDeathCause(preyVictim.metabolism, DeathCause.Predation);
+                DepositDeathOrganicC(preyVictim);
                 pendingPredationRemovals.Add(preyIndex);
                 predationKillsWindow++;
             }
@@ -1335,16 +1323,18 @@ public class ReplicatorManager : MonoBehaviour
             }
 
             Vector3 currentDir = agent.currentDirection.sqrMagnitude > 0f ? agent.currentDirection.normalized : agent.position.normalized;
-            Vector3 fleeBias = Vector3.zero;
 
             if (agent.nextSteerTime <= now)
             {
-                fleeBias = ComputeFleeBias(agent, currentDir);
                 Vector3 bestDir = currentDir;
                 int baseCellIndex = PlanetGridIndexing.DirectionToCellIndex(currentDir, resolution);
                 float bestScore = ComputeHabitatScore(agent, currentDir, baseCellIndex);
                 bool isFlagellum = agent.locomotion == LocomotionType.Flagellum;
                 int samplesForLocomotion = Mathf.Max(1, isFlagellum ? flagellumSteerSamples : samples);
+                if (useEcologyCuesForPredation && enablePredatorPreyCueSteering && planetResourceMap != null && planetResourceMap.enableEcologyCues)
+                {
+                    samplesForLocomotion = Mathf.Max(samplesForLocomotion, Mathf.Max(1, cueSteerSamples));
+                }
                 float sampleAngle = Mathf.Lerp(10f, 45f, 1f - Mathf.Clamp01(agent.locomotionSkill));
 
                 for (int sampleIndex = 0; sampleIndex < samplesForLocomotion; sampleIndex++)
@@ -1369,13 +1359,7 @@ public class ReplicatorManager : MonoBehaviour
                     }
                 }
 
-                Vector3 desired = bestDir;
-                if (fleeBias.sqrMagnitude > 0.0001f)
-                {
-                    desired = (desired + fleeBias * Mathf.Max(0f, fearStrength)).normalized;
-                }
-
-                agent.desiredMoveDir = desired;
+                agent.desiredMoveDir = bestDir;
                 agent.nextSteerTime = now + interval;
             }
 
