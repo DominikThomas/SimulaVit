@@ -152,17 +152,14 @@ public class ReplicatorManager : MonoBehaviour
     public float flagellumDriftSuppression = 0.5f;
     public float steerUpdateInterval = 0.5f;
 
-    [Header("Steering - Ecology Cues")]
-    public bool useEcologyCuesForPredation = true;
-    [Tooltip("Master switch for predator/prey cue influence in movement habitat scoring.")]
-    public bool enablePredatorPreyCueSteering = true;
-    [Tooltip("If disabled, skip rebuilding predator/prey cue fields in PlanetResourceMap.")]
-    public bool enablePredatorPreyCueMapUpdate = true;
-    public float predatorCueWeight = 1.5f;
-    public float preyCueWeight = 1.0f;
-    public float cueSampleWeight = 1.0f;
-    [Range(1, 64)] public int cueSteerSamples = 8;
-    public float cueGoodValue = 2.0f;
+    [Header("Scent-Based Predation")]
+    public bool useScentPredation = true;
+    public float dissolvedOrganicLeakEmitPerSecond = 1.0f;
+    public float toxicProteolyticWasteEmitPerSecond = 1.5f;
+    public float scentEmitInterval = 0.2f;
+    public float toxicProteolyticWasteSteerWeight = 2.0f;
+    public float dissolvedOrganicLeakSteerWeight = 2.0f;
+    public float scentScoreSaturation = 2.0f;
 
     [Header("Spawn Resource Bias")]
     public bool biasSpawnsToChemosynthesisResources = true;
@@ -238,20 +235,20 @@ public class ReplicatorManager : MonoBehaviour
     private int[] saproDeathCauseCounts;
     private int[] predatorDeathCauseCounts;
     private int predationKillsWindow;
-    private float avgPredatorCueDebug;
-    private float avgPreyCueDebug;
+    private float avgToxicProteolyticWasteDebug;
+    private float avgDissolvedOrganicLeakDebug;
+    private float nextScentUpdateTime;
+    private bool preyBinsReady;
     private readonly List<int> localPredationCandidates = new List<int>(64);
+    private readonly Dictionary<int, List<int>> preyAgentsByCell = new Dictionary<int, List<int>>(2048);
 
     // Arrays for Batching
     private Matrix4x4[] matrixBatch = new Matrix4x4[1023];
     private Vector4[] colorBatch = new Vector4[1023];
     private MaterialPropertyBlock propertyBlock;
 
-    // Spatial indexing for neighborhood queries (predation/fear/habitat sensing).
-    private readonly Dictionary<int, List<int>> spatialBuckets = new Dictionary<int, List<int>>(2048);
     private readonly HashSet<int> pendingPredationRemovals = new HashSet<int>();
     private readonly List<int> predationRemovalBuffer = new List<int>(256);
-    private float spatialCellSize = 1f;
 
     // Reused HUD counters to avoid per-frame allocations in OnGUI.
     private readonly int[] totalByLocomotion = new int[4];
@@ -502,29 +499,15 @@ public class ReplicatorManager : MonoBehaviour
     {
         if (!isInitialized) return;
 
-        float worldRadius = Mathf.Max(0.0001f, planetGenerator != null ? planetGenerator.radius : 0f);
-        if (!useEcologyCuesForPredation)
+        if (useScentPredation && planetResourceMap != null && planetResourceMap.enableScentFields)
         {
-            float maxSearchRadius = Mathf.Max(
-                Mathf.Max(0f, predatorAttackRange) * worldRadius,
-                Mathf.Max(0f, fearRadius) * worldRadius
-            );
-            RebuildSpatialIndex(Mathf.Max(maxSearchRadius, 0.01f));
-        }
-
-        if (enablePredatorPreyCueMapUpdate)
-        {
-            RebuildEcologyCues(Time.deltaTime);
+            UpdateScentFields();
         }
         else
         {
-            if (planetResourceMap != null && planetResourceMap.enableEcologyCues)
-            {
-                planetResourceMap.ClearCues();
-            }
-
-            avgPredatorCueDebug = 0f;
-            avgPreyCueDebug = 0f;
+            avgToxicProteolyticWasteDebug = 0f;
+            avgDissolvedOrganicLeakDebug = 0f;
+            preyBinsReady = false;
         }
         UpdateLifecycle();
         TickMetabolism();
@@ -718,7 +701,7 @@ public class ReplicatorManager : MonoBehaviour
         Debug.Log(
             $"Metabolism: chemo={chemosynthAgentCount} photo={photosynthAgentCount} sapro={saprotrophAgentCount} predator={predatorAgentCount} " +
             $"photoUnlocked={unlocked} saproUnlocked={IsSaprotrophyUnlocked()} " +
-            $"temp[chemo:{chemoTempText} photo:{photoTempText} sapro:{saproTempText}] avgOrganicC={averageOrganicCStore:F3} divisionEligible={divisionEligibleAgentCount} predKillsWindow={predationKillsWindow} avgPredCue={avgPredatorCueDebug:F3} avgPreyCue={avgPreyCueDebug:F3}");
+            $"temp[chemo:{chemoTempText} photo:{photoTempText} sapro:{saproTempText}] avgOrganicC={averageOrganicCStore:F3} divisionEligible={divisionEligibleAgentCount} predKillsWindow={predationKillsWindow} avgToxicProteolyticWaste={avgToxicProteolyticWasteDebug:F3} avgDissolvedOrganicLeak={avgDissolvedOrganicLeakDebug:F3}");
         Debug.Log($"DeathCauses: chemo[{FormatDeathCauseDistribution(chemoDeathCauseCounts)}] photo[{FormatDeathCauseDistribution(photoDeathCauseCounts)}] sapro[{FormatDeathCauseDistribution(saproDeathCauseCounts)}] predator[{FormatDeathCauseDistribution(predatorDeathCauseCounts)}]");
         predationKillsWindow = 0;
         ResetDeathCauseCounters();
@@ -1024,21 +1007,21 @@ public class ReplicatorManager : MonoBehaviour
         float score = Mathf.Max(0f, steerTempWeight) * tempFitness
                     + Mathf.Max(0f, steerFoodWeight) * foodFitness;
 
-        if (useEcologyCuesForPredation && enablePredatorPreyCueSteering && planetResourceMap.enableEcologyCues && planetResourceMap.predatorCue != null && planetResourceMap.preyCue != null)
+        if (useScentPredation && planetResourceMap.enableScentFields)
         {
-            float predCue = NormalizeCue(planetResourceMap.predatorCue[cellIndex]);
-            float preyCue = NormalizeCue(planetResourceMap.preyCue[cellIndex]);
-            float cueTerm;
+            float dissolvedOrganicLeak = NormalizeScent(planetResourceMap.Get(ResourceType.DissolvedOrganicLeak, cellIndex));
+            float toxicProteolyticWaste = NormalizeScent(planetResourceMap.Get(ResourceType.ToxicProteolyticWaste, cellIndex));
+            float scentTerm;
             if (agent.metabolism == MetabolismType.Predation)
             {
-                cueTerm = Mathf.Max(0f, preyCueWeight) * preyCue - 0.2f * predCue;
+                scentTerm = Mathf.Max(0f, dissolvedOrganicLeakSteerWeight) * dissolvedOrganicLeak - 0.25f * toxicProteolyticWaste;
             }
             else
             {
-                cueTerm = -Mathf.Max(0f, predatorCueWeight) * predCue + 0.1f * preyCue;
+                scentTerm = -Mathf.Max(0f, toxicProteolyticWasteSteerWeight) * toxicProteolyticWaste + 0.1f * dissolvedOrganicLeak;
             }
 
-            score += Mathf.Max(0f, cueSampleWeight) * cueTerm;
+            score += scentTerm;
         }
 
         if (float.IsNaN(score) || float.IsInfinity(score))
@@ -1093,13 +1076,8 @@ public class ReplicatorManager : MonoBehaviour
             case MetabolismType.Predation:
             {
                 float o2 = NormalizeResource(ResourceType.O2, cellIndex, steerGoodO2);
-                float preyCue = 0f;
-                if (planetResourceMap != null && planetResourceMap.preyCue != null && cellIndex >= 0 && cellIndex < planetResourceMap.preyCue.Length)
-                {
-                    preyCue = NormalizeCue(planetResourceMap.preyCue[cellIndex]);
-                }
-
-                return Mathf.Min(o2, preyCue);
+                float dissolvedOrganicLeak = NormalizeScent(planetResourceMap.Get(ResourceType.DissolvedOrganicLeak, cellIndex));
+                return Mathf.Min(o2, dissolvedOrganicLeak);
             }
             default:
                 return 0f;
@@ -1115,63 +1093,111 @@ public class ReplicatorManager : MonoBehaviour
     }
 
 
-    float NormalizeCue(float cueValue)
+    float NormalizeScent(float scentValue)
     {
-        float half = Mathf.Max(0.0001f, cueGoodValue);
-        float normalized = cueValue / (cueValue + half);
+        float half = Mathf.Max(0.0001f, scentScoreSaturation);
+        float normalized = scentValue / (scentValue + half);
         return float.IsNaN(normalized) || float.IsInfinity(normalized) ? 0f : Mathf.Clamp01(normalized);
     }
 
-    void RebuildEcologyCues(float dt)
+    void UpdateScentFields()
     {
-        if (planetResourceMap == null || !planetResourceMap.enableEcologyCues || !enablePredatorPreyCueMapUpdate)
+        float interval = Mathf.Max(0.01f, scentEmitInterval);
+        if (Time.time < nextScentUpdateTime)
         {
-            if (planetResourceMap != null && planetResourceMap.enableEcologyCues)
-            {
-                planetResourceMap.ClearCues();
-            }
+            return;
+        }
 
-            avgPredatorCueDebug = 0f;
-            avgPreyCueDebug = 0f;
+        nextScentUpdateTime = Time.time + interval;
+
+        if (planetResourceMap == null)
+        {
             return;
         }
 
         int resolution = Mathf.Max(1, planetGenerator.resolution);
         int cellCount = PlanetGridIndexing.GetCellCount(resolution);
-        planetResourceMap.EnsureCueArrays(cellCount);
-        planetResourceMap.ClearCues();
+        planetResourceMap.EnsureScentArrays(cellCount);
+        RebuildPreyCellBins(resolution);
+        preyBinsReady = true;
 
-        float[] predatorCue = planetResourceMap.predatorCue;
-        float[] preyCue = planetResourceMap.preyCue;
+        float leakEmit = Mathf.Max(0f, dissolvedOrganicLeakEmitPerSecond) * interval;
+        float wasteEmit = Mathf.Max(0f, toxicProteolyticWasteEmitPerSecond) * interval;
+
         for (int i = 0; i < agents.Count; i++)
         {
             Replicator agent = agents[i];
             int cellIndex = PlanetGridIndexing.DirectionToCellIndex(agent.position.normalized, resolution);
             if (IsPredator(agent))
             {
-                predatorCue[cellIndex] += 1f;
+                planetResourceMap.AddScent(ResourceType.ToxicProteolyticWaste, cellIndex, wasteEmit);
             }
             else
             {
-                preyCue[cellIndex] += 1f;
+                planetResourceMap.AddScent(ResourceType.DissolvedOrganicLeak, cellIndex, leakEmit);
             }
         }
 
-        planetResourceMap.ApplyCueDecayAndDiffuse(dt);
-
-        float predatorSum = 0f;
-        float preySum = 0f;
-        for (int i = 0; i < cellCount; i++)
-        {
-            predatorSum += predatorCue[i];
-            preySum += preyCue[i];
-        }
-
-        float inv = cellCount > 0 ? 1f / cellCount : 0f;
-        avgPredatorCueDebug = predatorSum * inv;
-        avgPreyCueDebug = preySum * inv;
+        planetResourceMap.ApplyScentDecayAndDiffuse(interval);
+        SampleScentDiagnostics();
     }
 
+    void RebuildPreyCellBins(int resolution)
+    {
+        preyAgentsByCell.Clear();
+        for (int i = 0; i < agents.Count; i++)
+        {
+            if (IsPredator(agents[i]))
+            {
+                continue;
+            }
+
+            int cellIndex = PlanetGridIndexing.DirectionToCellIndex(agents[i].position.normalized, resolution);
+            if (!preyAgentsByCell.TryGetValue(cellIndex, out List<int> preyIndices))
+            {
+                preyIndices = new List<int>(4);
+                preyAgentsByCell[cellIndex] = preyIndices;
+            }
+
+            preyIndices.Add(i);
+        }
+    }
+
+    void SampleScentDiagnostics()
+    {
+        if (planetResourceMap == null || planetResourceMap.dissolvedOrganicLeak == null || planetResourceMap.toxicProteolyticWaste == null)
+        {
+            avgToxicProteolyticWasteDebug = 0f;
+            avgDissolvedOrganicLeakDebug = 0f;
+            return;
+        }
+
+        float[] dissolvedOrganicLeak = planetResourceMap.dissolvedOrganicLeak;
+        float[] toxicProteolyticWaste = planetResourceMap.toxicProteolyticWaste;
+        int cellCount = dissolvedOrganicLeak.Length;
+        if (cellCount == 0)
+        {
+            avgToxicProteolyticWasteDebug = 0f;
+            avgDissolvedOrganicLeakDebug = 0f;
+            return;
+        }
+
+        int samples = Mathf.Min(32, cellCount);
+        int stride = Mathf.Max(1, cellCount / samples);
+        float leakSum = 0f;
+        float wasteSum = 0f;
+        int sampled = 0;
+        for (int cell = 0; cell < cellCount && sampled < samples; cell += stride)
+        {
+            leakSum += dissolvedOrganicLeak[cell];
+            wasteSum += toxicProteolyticWaste[cell];
+            sampled++;
+        }
+
+        float invSampleCount = sampled > 0 ? 1f / sampled : 0f;
+        avgDissolvedOrganicLeakDebug = leakSum * invSampleCount;
+        avgToxicProteolyticWasteDebug = wasteSum * invSampleCount;
+    }
 
     bool IsPredator(Replicator agent)
     {
@@ -1205,7 +1231,10 @@ public class ReplicatorManager : MonoBehaviour
         pendingPredationRemovals.Clear();
 
         int resolution = Mathf.Max(1, planetGenerator.resolution);
-        float[] preyCue = planetResourceMap != null ? planetResourceMap.preyCue : null;
+        if (!useScentPredation || !preyBinsReady)
+        {
+            return;
+        }
 
         for (int i = agents.Count - 1; i >= 0; i--)
         {
@@ -1222,33 +1251,21 @@ public class ReplicatorManager : MonoBehaviour
             }
 
             int predatorCell = PlanetGridIndexing.DirectionToCellIndex(predator.position.normalized, resolution);
-            if (useEcologyCuesForPredation && preyCue != null)
+            if (!preyAgentsByCell.TryGetValue(predatorCell, out List<int> preyInCell) || preyInCell.Count == 0)
             {
-                if (predatorCell < 0 || predatorCell >= preyCue.Length || preyCue[predatorCell] <= 0.001f)
-                {
-                    continue;
-                }
+                continue;
             }
 
             localPredationCandidates.Clear();
-            for (int j = 0; j < agents.Count; j++)
+            for (int preyListIndex = 0; preyListIndex < preyInCell.Count; preyListIndex++)
             {
-                if (j == i || pendingPredationRemovals.Contains(j))
+                int preyIndexCandidate = preyInCell[preyListIndex];
+                if (preyIndexCandidate == i || pendingPredationRemovals.Contains(preyIndexCandidate))
                 {
                     continue;
                 }
 
-                Replicator prey = agents[j];
-                if (IsPredator(prey))
-                {
-                    continue;
-                }
-
-                int preyCell = PlanetGridIndexing.DirectionToCellIndex(prey.position.normalized, resolution);
-                if (preyCell == predatorCell)
-                {
-                    localPredationCandidates.Add(j);
-                }
+                localPredationCandidates.Add(preyIndexCandidate);
             }
 
             if (localPredationCandidates.Count == 0)
@@ -1337,10 +1354,6 @@ public class ReplicatorManager : MonoBehaviour
                 float bestScore = ComputeHabitatScore(agent, currentDir, baseCellIndex);
                 bool isFlagellum = agent.locomotion == LocomotionType.Flagellum;
                 int samplesForLocomotion = Mathf.Max(1, isFlagellum ? flagellumSteerSamples : samples);
-                if (useEcologyCuesForPredation && enablePredatorPreyCueSteering && planetResourceMap != null && planetResourceMap.enableEcologyCues)
-                {
-                    samplesForLocomotion = Mathf.Max(samplesForLocomotion, Mathf.Max(1, cueSteerSamples));
-                }
                 float sampleAngle = Mathf.Lerp(10f, 45f, 1f - Mathf.Clamp01(agent.locomotionSkill));
 
                 for (int sampleIndex = 0; sampleIndex < samplesForLocomotion; sampleIndex++)
@@ -1376,50 +1389,6 @@ public class ReplicatorManager : MonoBehaviour
         }
     }
 
-    void RebuildSpatialIndex(float cellSize)
-    {
-        spatialCellSize = Mathf.Max(0.01f, cellSize);
-
-        foreach (var entry in spatialBuckets)
-        {
-            entry.Value.Clear();
-        }
-
-        for (int i = 0; i < agents.Count; i++)
-        {
-            GetBucketCoordinates(agents[i].position, out int x, out int y, out int z);
-            int hash = HashBucket(x, y, z);
-            if (!spatialBuckets.TryGetValue(hash, out List<int> bucket))
-            {
-                bucket = new List<int>(8);
-                spatialBuckets.Add(hash, bucket);
-            }
-
-            bucket.Add(i);
-        }
-    }
-
-    void GetBucketCoordinates(Vector3 worldPos, out int x, out int y, out int z)
-    {
-        float inv = 1f / spatialCellSize;
-        x = Mathf.FloorToInt(worldPos.x * inv);
-        y = Mathf.FloorToInt(worldPos.y * inv);
-        z = Mathf.FloorToInt(worldPos.z * inv);
-    }
-
-    int GetBucketSearchRadius(float worldRadius)
-    {
-        int calculated = Mathf.Max(1, Mathf.CeilToInt(worldRadius / Mathf.Max(0.01f, spatialCellSize)));
-        return Mathf.Min(calculated, 2);
-    }
-
-    static int HashBucket(int x, int y, int z)
-    {
-        unchecked
-        {
-            return (x * 73856093) ^ (y * 19349663) ^ (z * 83492791);
-        }
-    }
 
     void UpdateLifecycle()
     {
