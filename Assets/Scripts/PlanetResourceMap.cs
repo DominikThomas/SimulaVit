@@ -13,7 +13,9 @@ public enum ResourceType
     P,
     Fe,
     Si,
-    Ca
+    Ca,
+    DissolvedOrganicLeak,
+    ToxicProteolyticWaste
 }
 
 [DisallowMultipleComponent]
@@ -86,11 +88,17 @@ public class PlanetResourceMap : MonoBehaviour
     public float ventHeatMaxOcean = 1.2f;
     public float ventHeatMaxLand = 1.6f;
 
-    [Header("Ecology Cues")]
-    public bool enableEcologyCues = true;
-    public float cueDecayPerSecond = 1.0f;
-    [Range(0, 3)] public int cueDiffusePasses = 1;
-    [Range(0f, 1f)] public float cueDiffuseStrength = 0.35f;
+    [Header("Scent Fields")]
+    [Tooltip("Enable diffuse chemical cue fields used for scent-based predation/fear steering.")]
+    public bool enableScentFields = true;
+    [Tooltip("Decay rate for prey-emitted dissolved organic leak field.")]
+    public float dissolvedOrganicLeakDecayPerSecond = 0.6f;
+    [Tooltip("Decay rate for predator-emitted toxic proteolytic waste field.")]
+    public float toxicProteolyticWasteDecayPerSecond = 0.8f;
+    [Range(0f, 1f)] public float scentDiffuseStrength = 0.25f;
+    [Range(0, 4)] public int scentDiffusePasses = 1;
+    public float scentMaxPerCell = 10f;
+    public float scentUpdateInterval = 0.2f;
 
     [Header("Debug Preview")]
     public ResourceType debugViewType = ResourceType.CO2;
@@ -122,12 +130,12 @@ public class PlanetResourceMap : MonoBehaviour
 
     private bool isInitialized;
     public float[] ventStrength;
-    public float[] predatorCue;
-    public float[] preyCue;
+    public float[] toxicProteolyticWaste;
+    public float[] dissolvedOrganicLeak;
     private float[] ventHeat;
     private float[] ventHeatTmp;
-    private float[] cuePredatorTmp;
-    private float[] cuePreyTmp;
+    private float[] scentWasteTmp;
+    private float[] scentLeakTmp;
     private int[] ventHeatNeighbors;
     private byte[] ventMask;
     private int[] ventCells;
@@ -312,7 +320,7 @@ public class PlanetResourceMap : MonoBehaviour
         ventHeatTmp = new float[cellCount];
         ventHeatNeighbors = new int[cellCount * 6];
         oceanMask = new byte[cellCount];
-        EnsureCueArrays(cellCount);
+        EnsureScentArrays(cellCount);
 
         int ventCount = 0;
         float oceanRadius = planetGenerator.GetOceanRadius();
@@ -384,73 +392,99 @@ public class PlanetResourceMap : MonoBehaviour
         Debug.Log($"Initialized {VentCount} vents", this);
     }
 
-    /// <summary>
-    /// Ecological cues approximate local chemical traces (kairomones): predator scent and prey scent per tile.
-    /// They are rebuilt externally each simulation step, then decayed and diffused to create smooth gradients.
-    /// </summary>
-    public void EnsureCueArrays(int cellCount)
+    public void EnsureScentArrays()
+    {
+        int cellCount = co2 != null ? co2.Length : 0;
+        EnsureScentArrays(cellCount);
+    }
+
+    public void EnsureScentArrays(int cellCount)
     {
         if (cellCount <= 0)
         {
-            predatorCue = null;
-            preyCue = null;
-            cuePredatorTmp = null;
-            cuePreyTmp = null;
+            toxicProteolyticWaste = null;
+            dissolvedOrganicLeak = null;
+            scentWasteTmp = null;
+            scentLeakTmp = null;
             return;
         }
 
-        if (predatorCue == null || predatorCue.Length != cellCount)
+        if (toxicProteolyticWaste == null || toxicProteolyticWaste.Length != cellCount)
         {
-            predatorCue = new float[cellCount];
+            toxicProteolyticWaste = new float[cellCount];
         }
 
-        if (preyCue == null || preyCue.Length != cellCount)
+        if (dissolvedOrganicLeak == null || dissolvedOrganicLeak.Length != cellCount)
         {
-            preyCue = new float[cellCount];
+            dissolvedOrganicLeak = new float[cellCount];
         }
 
-        if (cuePredatorTmp == null || cuePredatorTmp.Length != cellCount)
+        if (scentWasteTmp == null || scentWasteTmp.Length != cellCount)
         {
-            cuePredatorTmp = new float[cellCount];
+            scentWasteTmp = new float[cellCount];
         }
 
-        if (cuePreyTmp == null || cuePreyTmp.Length != cellCount)
+        if (scentLeakTmp == null || scentLeakTmp.Length != cellCount)
         {
-            cuePreyTmp = new float[cellCount];
+            scentLeakTmp = new float[cellCount];
         }
     }
 
-    public void ClearCues()
+    public void ClearScents()
     {
-        if (predatorCue == null || preyCue == null)
+        if (toxicProteolyticWaste == null || dissolvedOrganicLeak == null)
         {
             return;
         }
 
-        System.Array.Clear(predatorCue, 0, predatorCue.Length);
-        System.Array.Clear(preyCue, 0, preyCue.Length);
+        System.Array.Clear(toxicProteolyticWaste, 0, toxicProteolyticWaste.Length);
+        System.Array.Clear(dissolvedOrganicLeak, 0, dissolvedOrganicLeak.Length);
     }
 
-    public void ApplyCueDecayAndDiffuse(float dt)
+    public void AddScent(ResourceType scentType, int cell, float amount)
     {
-        if (!enableEcologyCues || predatorCue == null || preyCue == null)
+        if (!enableScentFields || !isInitialized || !IsCellValid(cell) || amount <= 0f)
         {
             return;
         }
 
-        int cellCount = predatorCue.Length;
+        EnsureScentArrays();
+        float cap = Mathf.Max(0f, scentMaxPerCell);
+        if (scentType == ResourceType.DissolvedOrganicLeak)
+        {
+            dissolvedOrganicLeak[cell] = cap > 0f
+                ? Mathf.Min(cap, dissolvedOrganicLeak[cell] + amount)
+                : dissolvedOrganicLeak[cell] + amount;
+        }
+        else if (scentType == ResourceType.ToxicProteolyticWaste)
+        {
+            toxicProteolyticWaste[cell] = cap > 0f
+                ? Mathf.Min(cap, toxicProteolyticWaste[cell] + amount)
+                : toxicProteolyticWaste[cell] + amount;
+        }
+    }
+
+    public void ApplyScentDecayAndDiffuse(float dt)
+    {
+        if (!enableScentFields || toxicProteolyticWaste == null || dissolvedOrganicLeak == null)
+        {
+            return;
+        }
+
+        int cellCount = toxicProteolyticWaste.Length;
         if (cellCount == 0)
         {
             return;
         }
 
-        EnsureCueArrays(cellCount);
+        EnsureScentArrays(cellCount);
 
-        float decay = Mathf.Exp(-Mathf.Max(0f, cueDecayPerSecond) * Mathf.Max(0f, dt));
+        float wasteDecay = Mathf.Exp(-Mathf.Max(0f, toxicProteolyticWasteDecayPerSecond) * Mathf.Max(0f, dt));
+        float leakDecay = Mathf.Exp(-Mathf.Max(0f, dissolvedOrganicLeakDecayPerSecond) * Mathf.Max(0f, dt));
         for (int cell = 0; cell < cellCount; cell++)
         {
-            predatorCue[cell] = Mathf.Max(0f, predatorCue[cell] * decay);
-            preyCue[cell] = Mathf.Max(0f, preyCue[cell] * decay);
+            toxicProteolyticWaste[cell] = Mathf.Max(0f, toxicProteolyticWaste[cell] * wasteDecay);
+            dissolvedOrganicLeak[cell] = Mathf.Max(0f, dissolvedOrganicLeak[cell] * leakDecay);
         }
 
         if (ventHeatNeighbors == null)
@@ -463,16 +497,17 @@ public class PlanetResourceMap : MonoBehaviour
             return;
         }
 
-        int passes = Mathf.Clamp(cueDiffusePasses, 0, 3);
-        float strength = Mathf.Clamp01(cueDiffuseStrength);
+        int passes = Mathf.Clamp(scentDiffusePasses, 0, 4);
+        float strength = Mathf.Clamp01(scentDiffuseStrength);
+        float capPerCell = Mathf.Max(0f, scentMaxPerCell);
 
         for (int pass = 0; pass < passes; pass++)
         {
             for (int cell = 0; cell < cellCount; cell++)
             {
                 int baseIndex = cell * 6;
-                float predatorNeighborSum = 0f;
-                float preyNeighborSum = 0f;
+                float wasteNeighborSum = 0f;
+                float leakNeighborSum = 0f;
                 int neighborCount = 0;
 
                 for (int n = 0; n < 6; n++)
@@ -483,24 +518,26 @@ public class PlanetResourceMap : MonoBehaviour
                         continue;
                     }
 
-                    predatorNeighborSum += predatorCue[neighborCell];
-                    preyNeighborSum += preyCue[neighborCell];
+                    wasteNeighborSum += toxicProteolyticWaste[neighborCell];
+                    leakNeighborSum += dissolvedOrganicLeak[neighborCell];
                     neighborCount++;
                 }
 
-                float predatorNeighborAvg = neighborCount > 0 ? predatorNeighborSum / neighborCount : predatorCue[cell];
-                float preyNeighborAvg = neighborCount > 0 ? preyNeighborSum / neighborCount : preyCue[cell];
-                cuePredatorTmp[cell] = Mathf.Lerp(predatorCue[cell], predatorNeighborAvg, strength);
-                cuePreyTmp[cell] = Mathf.Lerp(preyCue[cell], preyNeighborAvg, strength);
+                float wasteNeighborAvg = neighborCount > 0 ? wasteNeighborSum / neighborCount : toxicProteolyticWaste[cell];
+                float leakNeighborAvg = neighborCount > 0 ? leakNeighborSum / neighborCount : dissolvedOrganicLeak[cell];
+                float blendedWaste = Mathf.Lerp(toxicProteolyticWaste[cell], wasteNeighborAvg, strength);
+                float blendedLeak = Mathf.Lerp(dissolvedOrganicLeak[cell], leakNeighborAvg, strength);
+                scentWasteTmp[cell] = capPerCell > 0f ? Mathf.Min(capPerCell, Mathf.Max(0f, blendedWaste)) : Mathf.Max(0f, blendedWaste);
+                scentLeakTmp[cell] = capPerCell > 0f ? Mathf.Min(capPerCell, Mathf.Max(0f, blendedLeak)) : Mathf.Max(0f, blendedLeak);
             }
 
-            float[] predatorSwap = predatorCue;
-            predatorCue = cuePredatorTmp;
-            cuePredatorTmp = predatorSwap;
+            float[] predatorSwap = toxicProteolyticWaste;
+            toxicProteolyticWaste = scentWasteTmp;
+            scentWasteTmp = predatorSwap;
 
-            float[] preySwap = preyCue;
-            preyCue = cuePreyTmp;
-            cuePreyTmp = preySwap;
+            float[] preySwap = dissolvedOrganicLeak;
+            dissolvedOrganicLeak = scentLeakTmp;
+            scentLeakTmp = preySwap;
         }
     }
 
@@ -855,6 +892,8 @@ public class PlanetResourceMap : MonoBehaviour
             case ResourceType.Fe: return fe;
             case ResourceType.Si: return si;
             case ResourceType.Ca: return ca;
+            case ResourceType.DissolvedOrganicLeak: return dissolvedOrganicLeak;
+            case ResourceType.ToxicProteolyticWaste: return toxicProteolyticWaste;
             default: return co2;
         }
     }
@@ -928,9 +967,12 @@ public class PlanetResourceMap : MonoBehaviour
         landExchangeRate = Mathf.Max(0f, landExchangeRate);
         oceanExchangeRate = Mathf.Max(0f, oceanExchangeRate);
         naturalOxidationFractionPerTick = Mathf.Clamp01(naturalOxidationFractionPerTick);
-        cueDecayPerSecond = Mathf.Max(0f, cueDecayPerSecond);
-        cueDiffusePasses = Mathf.Clamp(cueDiffusePasses, 0, 3);
-        cueDiffuseStrength = Mathf.Clamp01(cueDiffuseStrength);
+        dissolvedOrganicLeakDecayPerSecond = Mathf.Max(0f, dissolvedOrganicLeakDecayPerSecond);
+        toxicProteolyticWasteDecayPerSecond = Mathf.Max(0f, toxicProteolyticWasteDecayPerSecond);
+        scentDiffusePasses = Mathf.Clamp(scentDiffusePasses, 0, 4);
+        scentDiffuseStrength = Mathf.Clamp01(scentDiffuseStrength);
+        scentMaxPerCell = Mathf.Max(0f, scentMaxPerCell);
+        scentUpdateInterval = Mathf.Max(0.01f, scentUpdateInterval);
     }
 
 
@@ -953,6 +995,8 @@ public class PlanetResourceMap : MonoBehaviour
             case ResourceType.Fe: return Mathf.Max(0.0001f, ironScale);
             case ResourceType.Si: return Mathf.Max(0.0001f, baselineSi + siliconPatchScale);
             case ResourceType.Ca: return Mathf.Max(0.0001f, baselineCa + calciumPatchScale);
+            case ResourceType.DissolvedOrganicLeak: return Mathf.Max(0.0001f, scentMaxPerCell);
+            case ResourceType.ToxicProteolyticWaste: return Mathf.Max(0.0001f, scentMaxPerCell);
             default: return 1f;
         }
     }
