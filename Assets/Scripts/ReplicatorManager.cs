@@ -276,6 +276,9 @@ public class ReplicatorManager : MonoBehaviour
     private static readonly int ColorID = Shader.PropertyToID("_Color");
     private static readonly int EmissionID = Shader.PropertyToID("_EmissionColor");
 
+    [Header("Debug/Testing")]
+    public bool enableRendering = true;
+
     // --- JOB STRUCT DEFINITION ---
     public struct ReplicatorUpdateJob : IJobParallelFor
     {
@@ -529,7 +532,10 @@ public class ReplicatorManager : MonoBehaviour
         HandleSpontaneousSpawning();
         UpdateAmoeboidSteering();
         RunMovementJob();
-        RenderAgents();
+        if (enableRendering)
+        {
+            RenderAgents();
+        }
         UpdateMetabolismCounts();
         LogMetabolismDebugThrottled();
     }
