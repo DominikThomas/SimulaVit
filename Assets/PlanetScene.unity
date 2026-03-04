@@ -682,6 +682,14 @@ MonoBehaviour:
   flagellumMoveSpeedMultiplier: 1.2
   flagellumDriftSuppression: 0.5
   steerUpdateInterval: 0.5
+  useEcologyCuesForPredation: 1
+  enablePredatorPreyCueSteering: 1
+  enablePredatorPreyCueMapUpdate: 0
+  predatorCueWeight: 1.5
+  preyCueWeight: 1
+  cueSampleWeight: 1
+  cueSteerSamples: 8
+  cueGoodValue: 2
   biasSpawnsToChemosynthesisResources: 1
   spawnResourceProbeAttempts: 128
   h2sSpawnBiasWeight: 10
@@ -792,6 +800,10 @@ MonoBehaviour:
   ventHeatSpread: 0.4
   ventHeatMaxOcean: 1.2
   ventHeatMaxLand: 1.6
+  enableEcologyCues: 1
+  cueDecayPerSecond: 1
+  cueDiffusePasses: 1
+  cueDiffuseStrength: 0.35
   debugViewType: 0
   debugGradient:
     serializedVersion: 2
@@ -49432,6 +49444,8 @@ MonoBehaviour:
   - 0
   - 0
   - 0
+  predatorCue: []
+  preyCue: []
 --- !u!114 &1222684994
 MonoBehaviour:
   m_ObjectHideFlags: 0
