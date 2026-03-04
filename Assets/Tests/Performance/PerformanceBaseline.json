@@ -1,0 +1,21 @@
+{
+  "gcAllocMarginBytes": 128.0,
+  "scenarios": [
+    {
+      "scenario": "PredatorsOff",
+      "avgFrameMs": 40.0,
+      "p95FrameMs": 60.0,
+      "gcAllocPerFrame": 512.0,
+      "expectedAgents": 5000,
+      "expectedPredators": 0
+    },
+    {
+      "scenario": "PredatorsOn",
+      "avgFrameMs": 45.0,
+      "p95FrameMs": 70.0,
+      "gcAllocPerFrame": 640.0,
+      "expectedAgents": 5000,
+      "expectedPredators": 0
+    }
+  ]
+}
