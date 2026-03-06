@@ -83,7 +83,10 @@ public class Replicator
     public Vector3 velocity;
     public Vector3 currentDirection; // Normalized position (direction from center)
     public Vector3 desiredMoveDir;
-    public float nextSteerTime;
+    public Vector3 moveDirection;
+    public float lastHabitatValue;
+    public float tumbleProbability;
+    public float nextSenseTime;
     public float movementSeed;
 
     // Constructor
@@ -108,7 +111,10 @@ public class Replicator
         fearCooldown = 0f;
         currentDirection = pos.normalized;
         desiredMoveDir = Vector3.zero;
-        nextSteerTime = 0f;
+        moveDirection = currentDirection;
+        lastHabitatValue = 0f;
+        tumbleProbability = 0f;
+        nextSenseTime = 0f;
         lastDeathCauseCandidate = DeathCause.Unknown;
     }
 }

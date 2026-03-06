@@ -143,14 +143,25 @@ public class ReplicatorManager : MonoBehaviour
     public float steerGoodO2 = 0.02f;
     [Tooltip("Food normalization scale for OrganicC. Values >= this count as fully available.")]
     public float steerGoodOrganicC = 0.02f;
-    [Range(1, 64)] public int amoebaSteerSamples = 8;
-    public float amoebaTurnRate = 0.5f;
-    public float amoebaMoveSpeedMultiplier = 0.7f;
-    [Range(1, 64)] public int flagellumSteerSamples = 20;
+
+    [Header("Run and Tumble")]
+    public float amoeboidSenseInterval = 0.5f;
+    public float flagellumSenseInterval = 0.2f;
+    public float amoeboidSenseIntervalJitter = 0.15f;
+    public float flagellumSenseIntervalJitter = 0.05f;
+    public float baseTumbleProbability = 0.2f;
+    public float tumbleIncreaseOnWorsening = 0.25f;
+    public float tumbleDecreaseOnImproving = 0.1f;
+    public float minTumbleProbability = 0.02f;
+    public float maxTumbleProbability = 0.9f;
+    public float amoeboidTurnAngleMax = 60f;
+    public float flagellumTurnAngleMax = 180f;
+    public float amoeboidTurnRate = 0.5f;
+    public float amoeboidMoveSpeedMultiplier = 0.7f;
     public float flagellumTurnRate = 1.5f;
     public float flagellumMoveSpeedMultiplier = 1.2f;
     public float flagellumDriftSuppression = 0.5f;
-    public float steerUpdateInterval = 0.5f;
+    public float amoeboidRunNoiseStrength = 0.08f;
 
     [Header("Scent-Based Predation")]
     public bool useScentPredation = true;
@@ -205,6 +216,9 @@ public class ReplicatorManager : MonoBehaviour
     [Header("HUD")]
     [Tooltip("Draw a small runtime overlay with population and atmosphere stats.")]
     public bool showSimulationHud = true;
+    [Header("Locomotion Debug")]
+    public bool enableRunAndTumbleDebug = false;
+    public float runAndTumbleDebugWindowSeconds = 2f;
     private List<Replicator> agents = new List<Replicator>();
 
     [SerializeField] private int chemosynthAgentCount;
@@ -239,6 +253,12 @@ public class ReplicatorManager : MonoBehaviour
     private float avgDissolvedOrganicLeakDebug;
     private float nextScentUpdateTime;
     private bool preyBinsReady;
+    private float runDurationAccumulator;
+    private float runDurationSampleCount;
+    private float tumbleProbabilityAccumulator;
+    private int tumbleProbabilitySampleCount;
+    private int tumblesThisWindow;
+    private float runAndTumbleDebugTimer;
     private readonly List<int> localPredationCandidates = new List<int>(64);
     private readonly Dictionary<int, List<int>> preyAgentsByCell = new Dictionary<int, List<int>>(2048);
 
@@ -513,7 +533,7 @@ public class ReplicatorManager : MonoBehaviour
         TickMetabolism();
         RunPredationPass();
         HandleSpontaneousSpawning();
-        UpdateAmoeboidSteering();
+        UpdateRunAndTumbleLocomotion();
         RunMovementJob();
         if (enableRendering)
         {
@@ -992,7 +1012,7 @@ public class ReplicatorManager : MonoBehaviour
         return noise < planetGenerator.OceanThresholdNoise;
     }
 
-    public float ComputeHabitatScore(Replicator agent, Vector3 dir, int cellIndex)
+    public float ComputeLocalHabitatValue(Replicator agent, Vector3 dir, int cellIndex)
     {
         if (agent == null || planetResourceMap == null)
         {
@@ -1325,7 +1345,7 @@ public class ReplicatorManager : MonoBehaviour
         }
     }
 
-    void UpdateAmoeboidSteering()
+    void UpdateRunAndTumbleLocomotion()
     {
         if (agents.Count == 0 || planetGenerator == null || planetResourceMap == null)
         {
@@ -1334,59 +1354,134 @@ public class ReplicatorManager : MonoBehaviour
 
         int resolution = Mathf.Max(1, planetGenerator.resolution);
         float now = Time.time;
-        float interval = Mathf.Max(0.01f, steerUpdateInterval);
-        int samples = Mathf.Max(1, amoebaSteerSamples);
+
+        if (enableRunAndTumbleDebug)
+        {
+            runAndTumbleDebugTimer += Time.deltaTime;
+        }
 
         for (int i = 0; i < agents.Count; i++)
         {
             Replicator agent = agents[i];
-            if (agent.locomotion != LocomotionType.Amoeboid && agent.locomotion != LocomotionType.Flagellum)
+            bool isAmoeboid = agent.locomotion == LocomotionType.Amoeboid;
+            bool isFlagellum = agent.locomotion == LocomotionType.Flagellum;
+            if (!isAmoeboid && !isFlagellum)
             {
                 continue;
             }
 
             Vector3 currentDir = agent.currentDirection.sqrMagnitude > 0f ? agent.currentDirection.normalized : agent.position.normalized;
-
-            if (agent.nextSteerTime <= now)
+            if (agent.moveDirection.sqrMagnitude <= 0.0001f)
             {
-                Vector3 bestDir = currentDir;
-                int baseCellIndex = PlanetGridIndexing.DirectionToCellIndex(currentDir, resolution);
-                float bestScore = ComputeHabitatScore(agent, currentDir, baseCellIndex);
-                bool isFlagellum = agent.locomotion == LocomotionType.Flagellum;
-                int samplesForLocomotion = Mathf.Max(1, isFlagellum ? flagellumSteerSamples : samples);
-                float sampleAngle = Mathf.Lerp(10f, 45f, 1f - Mathf.Clamp01(agent.locomotionSkill));
-
-                for (int sampleIndex = 0; sampleIndex < samplesForLocomotion; sampleIndex++)
-                {
-                    float angleOffset = (sampleIndex + 1f) * (360f / samplesForLocomotion) + now * 17f + agent.movementSeed * 37f;
-                    Vector3 axis = Vector3.Cross(currentDir, Vector3.up);
-                    if (axis.sqrMagnitude < 0.0001f)
-                    {
-                        axis = Vector3.Cross(currentDir, Vector3.right);
-                    }
-
-                    Quaternion spread = Quaternion.AngleAxis(sampleAngle, axis.normalized);
-                    Quaternion around = Quaternion.AngleAxis(angleOffset, currentDir);
-                    Vector3 candidateDir = (around * (spread * currentDir)).normalized;
-
-                    int candidateCellIndex = PlanetGridIndexing.DirectionToCellIndex(candidateDir, resolution);
-                    float candidateScore = ComputeHabitatScore(agent, candidateDir, candidateCellIndex);
-                    if (candidateScore > bestScore)
-                    {
-                        bestScore = candidateScore;
-                        bestDir = candidateDir;
-                    }
-                }
-
-                agent.desiredMoveDir = bestDir;
-                agent.nextSteerTime = now + interval;
-            }
-
-            if (agent.desiredMoveDir.sqrMagnitude <= 0.0001f)
-            {
+                agent.moveDirection = currentDir;
                 agent.desiredMoveDir = currentDir;
             }
+
+            if (now < agent.nextSenseTime)
+            {
+                if (isAmoeboid && amoeboidRunNoiseStrength > 0f)
+                {
+                    ApplyAmoeboidRunNoise(agent, now);
+                }
+                continue;
+            }
+
+            int cellIndex = PlanetGridIndexing.DirectionToCellIndex(currentDir, resolution);
+            float habitatValue = ComputeLocalHabitatValue(agent, currentDir, cellIndex);
+            bool initialized = agent.nextSenseTime > 0f;
+
+            if (!initialized)
+            {
+                agent.tumbleProbability = Mathf.Clamp(baseTumbleProbability, minTumbleProbability, maxTumbleProbability);
+            }
+            else if (habitatValue > agent.lastHabitatValue)
+            {
+                agent.tumbleProbability = Mathf.Clamp(agent.tumbleProbability - Mathf.Max(0f, tumbleDecreaseOnImproving), minTumbleProbability, maxTumbleProbability);
+            }
+            else if (habitatValue < agent.lastHabitatValue)
+            {
+                agent.tumbleProbability = Mathf.Clamp(agent.tumbleProbability + Mathf.Max(0f, tumbleIncreaseOnWorsening), minTumbleProbability, maxTumbleProbability);
+            }
+
+            if (UnityEngine.Random.value < agent.tumbleProbability)
+            {
+                float maxTurnAngle = isFlagellum ? Mathf.Max(0f, flagellumTurnAngleMax) : Mathf.Max(0f, amoeboidTurnAngleMax);
+                agent.moveDirection = GenerateTumbledDirection(agent.moveDirection, currentDir, maxTurnAngle);
+                tumblesThisWindow++;
+            }
+            else if (isAmoeboid && amoeboidRunNoiseStrength > 0f)
+            {
+                ApplyAmoeboidRunNoise(agent, now);
+            }
+
+            agent.desiredMoveDir = agent.moveDirection;
+            agent.lastHabitatValue = habitatValue;
+
+            float baseInterval = isFlagellum ? Mathf.Max(0.01f, flagellumSenseInterval) : Mathf.Max(0.01f, amoeboidSenseInterval);
+            float jitter = isFlagellum ? Mathf.Max(0f, flagellumSenseIntervalJitter) : Mathf.Max(0f, amoeboidSenseIntervalJitter);
+            float runDuration = Mathf.Max(0.01f, baseInterval + UnityEngine.Random.Range(-jitter, jitter));
+            agent.nextSenseTime = now + runDuration;
+
+            runDurationAccumulator += runDuration;
+            runDurationSampleCount += 1f;
+            tumbleProbabilityAccumulator += agent.tumbleProbability;
+            tumbleProbabilitySampleCount++;
         }
+
+        if (enableRunAndTumbleDebug && runAndTumbleDebugTimer >= Mathf.Max(0.2f, runAndTumbleDebugWindowSeconds))
+        {
+            float avgTumbleProbability = tumbleProbabilitySampleCount > 0 ? tumbleProbabilityAccumulator / tumbleProbabilitySampleCount : 0f;
+            float avgRunDuration = runDurationSampleCount > 0f ? runDurationAccumulator / runDurationSampleCount : 0f;
+            Debug.Log($"Run&Tumble debug: avgTumbleProbability={avgTumbleProbability:0.000}, avgRunDuration={avgRunDuration:0.000}s, tumblesInWindow={tumblesThisWindow}");
+
+            runAndTumbleDebugTimer = 0f;
+            runDurationAccumulator = 0f;
+            runDurationSampleCount = 0f;
+            tumbleProbabilityAccumulator = 0f;
+            tumbleProbabilitySampleCount = 0;
+            tumblesThisWindow = 0;
+        }
+    }
+
+    void ApplyAmoeboidRunNoise(Replicator agent, float now)
+    {
+        float noise = Mathf.Sin((now + agent.movementSeed) * 2.7f) * Mathf.Max(0f, amoeboidRunNoiseStrength) * Mathf.Max(0f, amoeboidTurnAngleMax);
+        agent.moveDirection = RotateDirectionAroundSurfaceNormal(agent.moveDirection, agent.currentDirection, noise);
+        agent.desiredMoveDir = agent.moveDirection;
+    }
+
+    Vector3 GenerateTumbledDirection(Vector3 currentMoveDirection, Vector3 surfaceNormal, float maxTurnAngle)
+    {
+        Vector3 baseDirection = currentMoveDirection.sqrMagnitude > 0.0001f ? currentMoveDirection.normalized : surfaceNormal;
+        Vector3 tangent = Vector3.ProjectOnPlane(baseDirection, surfaceNormal);
+        if (tangent.sqrMagnitude <= 0.0001f)
+        {
+            tangent = Vector3.Cross(surfaceNormal, Vector3.up);
+            if (tangent.sqrMagnitude <= 0.0001f)
+            {
+                tangent = Vector3.Cross(surfaceNormal, Vector3.right);
+            }
+        }
+
+        float turnAngle = UnityEngine.Random.Range(-Mathf.Abs(maxTurnAngle), Mathf.Abs(maxTurnAngle));
+        return RotateDirectionAroundSurfaceNormal(tangent.normalized, surfaceNormal, turnAngle);
+    }
+
+    Vector3 RotateDirectionAroundSurfaceNormal(Vector3 direction, Vector3 surfaceNormal, float angleDegrees)
+    {
+        Vector3 normal = surfaceNormal.sqrMagnitude > 0.0001f ? surfaceNormal.normalized : Vector3.up;
+        Vector3 tangent = Vector3.ProjectOnPlane(direction, normal);
+        if (tangent.sqrMagnitude <= 0.0001f)
+        {
+            tangent = Vector3.Cross(normal, Vector3.up);
+            if (tangent.sqrMagnitude <= 0.0001f)
+            {
+                tangent = Vector3.Cross(normal, Vector3.right);
+            }
+        }
+
+        Vector3 rotated = Quaternion.AngleAxis(angleDegrees, normal) * tangent.normalized;
+        return rotated.sqrMagnitude > 0.0001f ? rotated.normalized : tangent.normalized;
     }
 
 
@@ -1897,8 +1992,8 @@ public class ReplicatorManager : MonoBehaviour
             TurnSpeed = turnSpeed,
             Radius = planetGenerator.radius,
             TimeVal = Time.time,
-            AmoebaTurnRate = Mathf.Max(0f, amoebaTurnRate),
-            AmoebaMoveSpeedMultiplier = Mathf.Max(0f, amoebaMoveSpeedMultiplier),
+            AmoebaTurnRate = Mathf.Max(0f, amoeboidTurnRate),
+            AmoebaMoveSpeedMultiplier = Mathf.Max(0f, amoeboidMoveSpeedMultiplier),
             FlagellumTurnRate = Mathf.Max(0f, flagellumTurnRate),
             FlagellumMoveSpeedMultiplier = Mathf.Max(0f, flagellumMoveSpeedMultiplier),
             FlagellumDriftSuppression = Mathf.Clamp01(flagellumDriftSuppression),
@@ -2191,6 +2286,12 @@ public class ReplicatorManager : MonoBehaviour
         newAgent.size = 1f;
 
         AssignTemperatureTraits(newAgent, parent, metabolism);
+        newAgent.moveDirection = randomDir;
+        newAgent.desiredMoveDir = randomDir;
+        newAgent.tumbleProbability = Mathf.Clamp(baseTumbleProbability, minTumbleProbability, maxTumbleProbability);
+        newAgent.lastHabitatValue = 0f;
+        newAgent.nextSenseTime = 0f;
+
         float baselineTarget = Mathf.Max(0.0001f, defaultBiomassTarget);
         if (parent == null)
         {
