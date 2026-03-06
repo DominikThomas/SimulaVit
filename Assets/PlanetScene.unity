@@ -32,11 +32,11 @@ RenderSettings:
   m_FlareFadeSpeed: 3
   m_HaloTexture: {fileID: 0}
   m_SpotCookie: {fileID: 10001, guid: 0000000000000000e000000000000000, type: 0}
-  m_DefaultReflectionMode: 0
+  m_DefaultReflectionMode: 1
   m_DefaultReflectionResolution: 128
   m_ReflectionBounces: 1
   m_ReflectionIntensity: 1
-  m_CustomReflection: {fileID: 0}
+  m_CustomReflection: {fileID: 8900000, guid: 09999639e73bcd64abda22253af612d8, type: 3}
   m_Sun: {fileID: 0}
   m_UseRadianceAmbientProbe: 0
 --- !u!157 &3
@@ -674,14 +674,23 @@ MonoBehaviour:
   steerGoodH2S: 0.001
   steerGoodO2: 0.02
   steerGoodOrganicC: 0.02
-  amoebaSteerSamples: 8
-  amoebaTurnRate: 0.5
-  amoebaMoveSpeedMultiplier: 0.7
-  flagellumSteerSamples: 20
+  amoeboidSenseInterval: 0.5
+  flagellumSenseInterval: 0.2
+  amoeboidSenseIntervalJitter: 0.15
+  flagellumSenseIntervalJitter: 0.05
+  baseTumbleProbability: 0.2
+  tumbleIncreaseOnWorsening: 0.25
+  tumbleDecreaseOnImproving: 0.1
+  minTumbleProbability: 0.02
+  maxTumbleProbability: 0.9
+  amoeboidTurnAngleMax: 60
+  flagellumTurnAngleMax: 180
+  amoeboidTurnRate: 0.5
+  amoeboidMoveSpeedMultiplier: 0.7
   flagellumTurnRate: 1.5
   flagellumMoveSpeedMultiplier: 1.2
   flagellumDriftSuppression: 0.5
-  steerUpdateInterval: 0.5
+  amoeboidRunNoiseStrength: 0.08
   useScentPredation: 1
   dissolvedOrganicLeakEmitPerSecond: 1
   toxicProteolyticWasteEmitPerSecond: 1.5
@@ -707,6 +716,8 @@ MonoBehaviour:
   colorByEnergy: 1
   energyVisualMultiplier: 1
   showSimulationHud: 1
+  enableRunAndTumbleDebug: 0
+  runAndTumbleDebugWindowSeconds: 2
   chemosynthAgentCount: 0
   photosynthAgentCount: 0
   saprotrophAgentCount: 0
