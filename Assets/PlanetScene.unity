@@ -630,8 +630,8 @@ MonoBehaviour:
   photosynthesisEnergyPerCo2: 2
   aerobicO2PerC: 0.02
   aerobicEnergyPerC: 0.05
-  photosynthStoreFraction: 1
-  maxOrganicCStore: 10
+  photosynthStoreFraction: 0.8
+  maxOrganicCStore: 3
   nightRespirationCPerTick: 0.01
   nightRespirationEnergyPerC: 0.05
   nightRespirationO2PerC: 0.02
@@ -682,14 +682,13 @@ MonoBehaviour:
   flagellumMoveSpeedMultiplier: 1.2
   flagellumDriftSuppression: 0.5
   steerUpdateInterval: 0.5
-  useEcologyCuesForPredation: 1
-  enablePredatorPreyCueSteering: 1
-  enablePredatorPreyCueMapUpdate: 0
-  predatorCueWeight: 1.5
-  preyCueWeight: 1
-  cueSampleWeight: 1
-  cueSteerSamples: 8
-  cueGoodValue: 2
+  useScentPredation: 1
+  dissolvedOrganicLeakEmitPerSecond: 1
+  toxicProteolyticWasteEmitPerSecond: 1.5
+  scentEmitInterval: 0.2
+  toxicProteolyticWasteSteerWeight: 2
+  dissolvedOrganicLeakSteerWeight: 2
+  scentScoreSaturation: 2
   biasSpawnsToChemosynthesisResources: 1
   spawnResourceProbeAttempts: 128
   h2sSpawnBiasWeight: 10
@@ -714,6 +713,7 @@ MonoBehaviour:
   predatorAgentCount: 0
   averageOrganicCStore: 0
   divisionEligibleAgentCount: 0
+  enableRendering: 1
 --- !u!4 &1064713444
 Transform:
   m_ObjectHideFlags: 0
@@ -779,7 +779,7 @@ MonoBehaviour:
   enableVentReplenishment: 1
   ventTickSeconds: 0.5
   ventH2SPerTick: 0.002
-  ventCO2PerTick: 0.0025
+  ventCO2PerTick: 0
   ventH2SMax: 5
   ventsOnlyBelowSeaLevel: 0
   enableNaturalOxidation: 1
@@ -800,10 +800,13 @@ MonoBehaviour:
   ventHeatSpread: 0.4
   ventHeatMaxOcean: 1.2
   ventHeatMaxLand: 1.6
-  enableEcologyCues: 1
-  cueDecayPerSecond: 1
-  cueDiffusePasses: 1
-  cueDiffuseStrength: 0.35
+  enableScentFields: 1
+  dissolvedOrganicLeakDecayPerSecond: 0.6
+  toxicProteolyticWasteDecayPerSecond: 0.8
+  scentDiffuseStrength: 0.25
+  scentDiffusePasses: 1
+  scentMaxPerCell: 10
+  scentUpdateInterval: 0.2
   debugViewType: 0
   debugGradient:
     serializedVersion: 2
@@ -49444,8 +49447,8 @@ MonoBehaviour:
   - 0
   - 0
   - 0
-  predatorCue: []
-  preyCue: []
+  toxicProteolyticWaste: []
+  dissolvedOrganicLeak: []
 --- !u!114 &1222684994
 MonoBehaviour:
   m_ObjectHideFlags: 0
