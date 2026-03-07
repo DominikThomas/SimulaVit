@@ -143,6 +143,9 @@ public class PlanetResourceMap : MonoBehaviour
     private float ventTimer;
     private float atmosphereTimer;
 
+    private const int NeighborCount = 6;
+
+
     public int VentCount => ventCells != null ? ventCells.Length : 0;
     public int[] VentCells => ventCells;
     public Vector3[] CellDirs => cellDirections;
@@ -154,20 +157,7 @@ public class PlanetResourceMap : MonoBehaviour
             planetGenerator = GetComponent<PlanetGenerator>();
         }
 
-        if (sunSkyRotator == null)
-        {
-            sunSkyRotator = FindFirstObjectByType<SunSkyRotator>();
-        }
-
-        if (sunLight == null && sunSkyRotator != null)
-        {
-            sunLight = sunSkyRotator.GetComponent<Light>();
-        }
-
-        if (sunLight == null)
-        {
-            sunLight = RenderSettings.sun;
-        }
+        ResolveSunReferences();
 
         EnsureDebugGradient();
     }
@@ -318,7 +308,7 @@ public class PlanetResourceMap : MonoBehaviour
         ventStrength = new float[cellCount];
         ventHeat = new float[cellCount];
         ventHeatTmp = new float[cellCount];
-        ventHeatNeighbors = new int[cellCount * 6];
+        ventHeatNeighbors = new int[cellCount * NeighborCount];
         oceanMask = new byte[cellCount];
         EnsureScentArrays(cellCount);
 
@@ -409,25 +399,10 @@ public class PlanetResourceMap : MonoBehaviour
             return;
         }
 
-        if (toxicProteolyticWaste == null || toxicProteolyticWaste.Length != cellCount)
-        {
-            toxicProteolyticWaste = new float[cellCount];
-        }
-
-        if (dissolvedOrganicLeak == null || dissolvedOrganicLeak.Length != cellCount)
-        {
-            dissolvedOrganicLeak = new float[cellCount];
-        }
-
-        if (scentWasteTmp == null || scentWasteTmp.Length != cellCount)
-        {
-            scentWasteTmp = new float[cellCount];
-        }
-
-        if (scentLeakTmp == null || scentLeakTmp.Length != cellCount)
-        {
-            scentLeakTmp = new float[cellCount];
-        }
+        EnsureArrayCapacity(ref toxicProteolyticWaste, cellCount);
+        EnsureArrayCapacity(ref dissolvedOrganicLeak, cellCount);
+        EnsureArrayCapacity(ref scentWasteTmp, cellCount);
+        EnsureArrayCapacity(ref scentLeakTmp, cellCount);
     }
 
     public void ClearScents()
@@ -505,12 +480,12 @@ public class PlanetResourceMap : MonoBehaviour
         {
             for (int cell = 0; cell < cellCount; cell++)
             {
-                int baseIndex = cell * 6;
+                int baseIndex = cell * NeighborCount;
                 float wasteNeighborSum = 0f;
                 float leakNeighborSum = 0f;
                 int neighborCount = 0;
 
-                for (int n = 0; n < 6; n++)
+                for (int n = 0; n < NeighborCount; n++)
                 {
                     int neighborCell = ventHeatNeighbors[baseIndex + n];
                     if (neighborCell < 0 || neighborCell >= cellCount)
@@ -746,10 +721,10 @@ public class PlanetResourceMap : MonoBehaviour
                 (dir + (tangentA - tangentB).normalized * tangentOffset).normalized
             };
 
-            for (int n = 0; n < 6; n++)
+            for (int n = 0; n < NeighborCount; n++)
             {
                 int neighborIndex = PlanetGridIndexing.DirectionToCellIndex(neighborDirs[n], resolution);
-                ventHeatNeighbors[(cell * 6) + n] = neighborIndex;
+                ventHeatNeighbors[(cell * NeighborCount) + n] = neighborIndex;
             }
         }
     }
@@ -788,8 +763,8 @@ public class PlanetResourceMap : MonoBehaviour
 
                     float neighborSum = 0f;
                     int neighborCount = 0;
-                    int baseIndex = cell * 6;
-                    for (int n = 0; n < 6; n++)
+                    int baseIndex = cell * NeighborCount;
+                    for (int n = 0; n < NeighborCount; n++)
                     {
                         int neighborCell = ventHeatNeighbors[baseIndex + n];
                         if (neighborCell < 0 || neighborCell >= cellCount || !IsOceanCell(neighborCell))
@@ -841,8 +816,13 @@ public class PlanetResourceMap : MonoBehaviour
         Debug.Log($"Vent heat field: oceanAvg={oceanAvg:0.00} oceanMax={oceanTempMax:0.00} landAvg={landAvg:0.00} landMax={landTempMax:0.00}", this);
     }
 
-    private Vector3 GetSunDirection()
+    private void ResolveSunReferences()
     {
+        if (sunSkyRotator == null)
+        {
+            sunSkyRotator = FindFirstObjectByType<SunSkyRotator>();
+        }
+
         if (sunLight == null && sunSkyRotator != null)
         {
             sunLight = sunSkyRotator.GetComponent<Light>();
@@ -852,6 +832,19 @@ public class PlanetResourceMap : MonoBehaviour
         {
             sunLight = RenderSettings.sun;
         }
+    }
+
+    private static void EnsureArrayCapacity(ref float[] array, int cellCount)
+    {
+        if (array == null || array.Length != cellCount)
+        {
+            array = new float[cellCount];
+        }
+    }
+
+    private Vector3 GetSunDirection()
+    {
+        ResolveSunReferences();
 
         if (sunLight != null && sunLight.type == LightType.Directional)
         {
