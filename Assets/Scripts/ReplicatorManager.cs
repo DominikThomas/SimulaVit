@@ -219,6 +219,10 @@ public class ReplicatorManager : MonoBehaviour
     [Header("Locomotion Debug")]
     public bool enableRunAndTumbleDebug = false;
     public float runAndTumbleDebugWindowSeconds = 2f;
+    [Tooltip("Logs a warning when anchored replicators drift beyond the configured epsilon within the sample window.")]
+    public bool debugSessileMovement = false;
+    [Range(0.5f, 30f)] public float debugSessileMovementWindowSeconds = 3f;
+    [Range(0.00001f, 0.1f)] public float debugSessileMovementEpsilon = 0.001f;
     private List<Replicator> agents = new List<Replicator>();
 
     [SerializeField] private int chemosynthAgentCount;
@@ -269,6 +273,9 @@ public class ReplicatorManager : MonoBehaviour
 
     private readonly HashSet<int> pendingPredationRemovals = new HashSet<int>();
     private readonly List<int> predationRemovalBuffer = new List<int>(256);
+    private readonly Dictionary<Replicator, Vector3> sessileDebugPositions = new Dictionary<Replicator, Vector3>(512);
+    private readonly Dictionary<Replicator, float> sessileDebugTimers = new Dictionary<Replicator, float>(512);
+    private readonly HashSet<Replicator> sessileDebugSeen = new HashSet<Replicator>();
 
     // Reused HUD counters to avoid per-frame allocations in OnGUI.
     private readonly int[] totalByLocomotion = new int[4];
@@ -338,6 +345,13 @@ public class ReplicatorManager : MonoBehaviour
             Vector3 surfaceNormal = pos.normalized;
 
             int locomotion = LocomotionTypes[index];
+            if (locomotion == (int)LocomotionType.Anchored)
+            {
+                Positions[index] = pos;
+                Rotations[index] = rot;
+                return;
+            }
+
             float driftMultiplier = locomotion == (int)LocomotionType.Anchored ? AnchoredDriftMultiplier : 1f;
 
             // 1. Turning (per-agent noise with independent phase offsets)
@@ -535,6 +549,7 @@ public class ReplicatorManager : MonoBehaviour
         HandleSpontaneousSpawning();
         UpdateRunAndTumbleLocomotion();
         RunMovementJob();
+        ValidateSessileMovement();
         if (enableRendering)
         {
             RenderAgents();
@@ -1440,6 +1455,86 @@ public class ReplicatorManager : MonoBehaviour
             tumbleProbabilityAccumulator = 0f;
             tumbleProbabilitySampleCount = 0;
             tumblesThisWindow = 0;
+        }
+    }
+
+    void ValidateSessileMovement()
+    {
+        if (!debugSessileMovement)
+        {
+            return;
+        }
+
+        float window = Mathf.Max(0.5f, debugSessileMovementWindowSeconds);
+        float epsilon = Mathf.Max(0.00001f, debugSessileMovementEpsilon);
+        float epsilonSqr = epsilon * epsilon;
+        sessileDebugSeen.Clear();
+
+        for (int i = 0; i < agents.Count; i++)
+        {
+            Replicator agent = agents[i];
+            if (agent.locomotion != LocomotionType.Anchored)
+            {
+                sessileDebugPositions.Remove(agent);
+                sessileDebugTimers.Remove(agent);
+                continue;
+            }
+
+            sessileDebugSeen.Add(agent);
+
+            if (!sessileDebugPositions.TryGetValue(agent, out Vector3 baseline))
+            {
+                sessileDebugPositions[agent] = agent.position;
+                sessileDebugTimers[agent] = 0f;
+                continue;
+            }
+
+            float timer = sessileDebugTimers.TryGetValue(agent, out float existingTimer) ? existingTimer : 0f;
+            timer += Time.deltaTime;
+
+            if (timer < window)
+            {
+                sessileDebugTimers[agent] = timer;
+                continue;
+            }
+
+            float distanceSqr = (agent.position - baseline).sqrMagnitude;
+            if (distanceSqr > epsilonSqr)
+            {
+                Debug.LogWarning($"Anchored replicator drift detected. moved={Mathf.Sqrt(distanceSqr):F6} (> {epsilon:F6}) over {timer:F2}s", this);
+            }
+
+            sessileDebugPositions[agent] = agent.position;
+            sessileDebugTimers[agent] = 0f;
+        }
+
+        if (sessileDebugPositions.Count > sessileDebugSeen.Count)
+        {
+            List<Replicator> stale = null;
+            foreach (Replicator tracked in sessileDebugPositions.Keys)
+            {
+                if (sessileDebugSeen.Contains(tracked))
+                {
+                    continue;
+                }
+
+                if (stale == null)
+                {
+                    stale = new List<Replicator>();
+                }
+
+                stale.Add(tracked);
+            }
+
+            if (stale != null)
+            {
+                for (int i = 0; i < stale.Count; i++)
+                {
+                    Replicator tracked = stale[i];
+                    sessileDebugPositions.Remove(tracked);
+                    sessileDebugTimers.Remove(tracked);
+                }
+            }
         }
     }
 
