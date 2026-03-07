@@ -652,15 +652,15 @@ public class ReplicatorManager : MonoBehaviour
         {
             replicatorsText += $"\n<color=#FFD54A>Sulfur:</color> {FormatLocomotionCounts(chemosynthByLocomotion)} ({(100f * chemosynthAgentCount / safeTotal):0.0}%)";
         }
-        if (chemosynthAgentCount > 0)
+        if (photosynthAgentCount > 0)
         {
             replicatorsText += $"\n<color=#79E07E>Photo:</color> {FormatLocomotionCounts(photosynthByLocomotion)} ({(100f * photosynthAgentCount / safeTotal):0.0}%)";
         }
-        if (chemosynthAgentCount > 0)
+        if (saprotrophAgentCount > 0)
         {
             replicatorsText += $"\n<color=#62B0FF>Sapro:</color> {FormatLocomotionCounts(saprotrophByLocomotion)} ({(100f * saprotrophAgentCount / safeTotal):0.0}%)";
         }
-        if (chemosynthAgentCount > 0)
+        if (predatorAgentCount > 0)
         {
             replicatorsText += $"\n<color=#FF5A5A>Predator:</color> {FormatLocomotionCounts(predatorByLocomotion)} ({(100f * predatorAgentCount / safeTotal):0.0}%)";
         }
