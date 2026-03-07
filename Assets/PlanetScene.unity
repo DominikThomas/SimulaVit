@@ -330,8 +330,8 @@ MonoBehaviour:
   viewer: {fileID: 370080327}
   planetRadius: 8
   horizonTriggerOffsetDegrees: 0
-  horizonTransitionDegrees: 6
-  horizonColor: {r: 1, g: 0.45, b: 0.2, a: 1}
+  horizonTransitionDegrees: 18
+  horizonColor: {r: 0.6431373, g: 0, b: 0, a: 1}
   dayColor: {r: 1, g: 0.95, b: 0.75, a: 1}
   colorShiftStrength: 1
   dayEmissionMultiplier: 1
@@ -598,7 +598,7 @@ MonoBehaviour:
   baseAgentColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
   moveSpeed: 3
   turnSpeed: 5
-  spawnSpread: 0
+  spawnSpread: 0.01
   reproductionRate: 1
   minLifespan: 120
   maxLifespan: 360
@@ -614,7 +614,7 @@ MonoBehaviour:
   divisionCarbonSplitToChild: 0.5
   biomassMutationChance: 0.02
   biomassMutationScale: 0.1
-  energyForFullSpeed: 0.5
+  energyForFullSpeed: 1.5
   minSpeedFactor: 0.15
   chemosynthesisCo2NeedPerTick: 0.02
   chemosynthesisH2sNeedPerTick: 0.01
@@ -631,7 +631,7 @@ MonoBehaviour:
   aerobicO2PerC: 0.02
   aerobicEnergyPerC: 0.05
   photosynthStoreFraction: 0.8
-  maxOrganicCStore: 3
+  maxOrganicCStore: 6
   nightRespirationCPerTick: 0.01
   nightRespirationEnergyPerC: 0.05
   nightRespirationO2PerC: 0.02
@@ -718,6 +718,9 @@ MonoBehaviour:
   showSimulationHud: 1
   enableRunAndTumbleDebug: 0
   runAndTumbleDebugWindowSeconds: 2
+  debugSessileMovement: 0
+  debugSessileMovementWindowSeconds: 3
+  debugSessileMovementEpsilon: 0.001
   chemosynthAgentCount: 0
   photosynthAgentCount: 0
   saprotrophAgentCount: 0

@@ -2174,7 +2174,7 @@ public class ReplicatorManager : MonoBehaviour
             return false;
         }
 
-        Vector3 randomDir = parent.currentDirection; // + Random.insideUnitSphere * spawnSpread;
+        Vector3 randomDir = parent.currentDirection + UnityEngine.Random.insideUnitSphere * spawnSpread;
         randomDir = randomDir.normalized;
 
         MetabolismType childMetabolism = parent.metabolism;
