@@ -276,6 +276,7 @@ public class ReplicatorManager : MonoBehaviour
     private readonly Dictionary<Replicator, Vector3> sessileDebugPositions = new Dictionary<Replicator, Vector3>(512);
     private readonly Dictionary<Replicator, float> sessileDebugTimers = new Dictionary<Replicator, float>(512);
     private readonly HashSet<Replicator> sessileDebugSeen = new HashSet<Replicator>();
+    private readonly List<Replicator> staleSessileAgents = new List<Replicator>(128);
 
     // Reused HUD counters to avoid per-frame allocations in OnGUI.
     private readonly int[] totalByLocomotion = new int[4];
@@ -539,9 +540,7 @@ public class ReplicatorManager : MonoBehaviour
         }
         else
         {
-            avgToxicProteolyticWasteDebug = 0f;
-            avgDissolvedOrganicLeakDebug = 0f;
-            preyBinsReady = false;
+            ResetScentDebugState();
         }
         UpdateLifecycle();
         TickMetabolism();
@@ -556,6 +555,13 @@ public class ReplicatorManager : MonoBehaviour
         }
         UpdateMetabolismCounts();
         LogMetabolismDebugThrottled();
+    }
+
+    void ResetScentDebugState()
+    {
+        avgToxicProteolyticWasteDebug = 0f;
+        avgDissolvedOrganicLeakDebug = 0f;
+        preyBinsReady = false;
     }
 
     void OnGUI()
@@ -1291,19 +1297,7 @@ public class ReplicatorManager : MonoBehaviour
                 continue;
             }
 
-            localPredationCandidates.Clear();
-            for (int preyListIndex = 0; preyListIndex < preyInCell.Count; preyListIndex++)
-            {
-                int preyIndexCandidate = preyInCell[preyListIndex];
-                if (preyIndexCandidate == i || pendingPredationRemovals.Contains(preyIndexCandidate))
-                {
-                    continue;
-                }
-
-                localPredationCandidates.Add(preyIndexCandidate);
-            }
-
-            if (localPredationCandidates.Count == 0)
+            if (!TryBuildPredationCandidates(i, preyInCell))
             {
                 continue;
             }
@@ -1315,23 +1309,10 @@ public class ReplicatorManager : MonoBehaviour
             }
 
             Replicator preyVictim = agents[preyIndex];
-            float takeC = Mathf.Min(Mathf.Max(0f, preyVictim.organicCStore), biteOrganicC);
-            preyVictim.organicCStore = Mathf.Max(0f, preyVictim.organicCStore - takeC);
-
-            float takeE = 0f;
-            if (takeC < biteOrganicC && biteEnergy > 0f)
-            {
-                takeE = Mathf.Min(Mathf.Max(0f, preyVictim.energy), biteEnergy);
-                preyVictim.energy = Mathf.Max(0f, preyVictim.energy - takeE);
-            }
-
-            float storedGain = takeC * assimilation;
-            predator.organicCStore = Mathf.Clamp(predator.organicCStore + storedGain, 0f, maxStore);
-            float respiredC = takeC - storedGain;
-            predator.energy += (respiredC * energyPerC) + (takeE * 0.5f);
+            ApplyPredationBite(predator, preyVictim, biteOrganicC, biteEnergy, assimilation, energyPerC, maxStore);
             predator.attackCooldown = cooldownSeconds;
 
-            if (preyVictim.energy <= Mathf.Max(0f, predatorKillEnergyThreshold) || preyVictim.energy <= 0f)
+            if (preyVictim.energy <= Mathf.Max(0f, predatorKillEnergyThreshold))
             {
                 RegisterDeathCause(preyVictim.metabolism, DeathCause.Predation);
                 DepositDeathOrganicC(preyVictim);
@@ -1340,22 +1321,72 @@ public class ReplicatorManager : MonoBehaviour
             }
         }
 
-        if (pendingPredationRemovals.Count > 0)
+        RemovePredationVictims();
+    }
+
+    bool TryBuildPredationCandidates(int predatorIndex, List<int> preyInCell)
+    {
+        localPredationCandidates.Clear();
+
+        for (int preyListIndex = 0; preyListIndex < preyInCell.Count; preyListIndex++)
         {
-            predationRemovalBuffer.Clear();
-            foreach (int index in pendingPredationRemovals)
+            int preyIndexCandidate = preyInCell[preyListIndex];
+            if (preyIndexCandidate == predatorIndex || pendingPredationRemovals.Contains(preyIndexCandidate))
             {
-                predationRemovalBuffer.Add(index);
+                continue;
             }
 
-            predationRemovalBuffer.Sort();
-            for (int i = predationRemovalBuffer.Count - 1; i >= 0; i--)
+            localPredationCandidates.Add(preyIndexCandidate);
+        }
+
+        return localPredationCandidates.Count > 0;
+    }
+
+    void ApplyPredationBite(
+        Replicator predator,
+        Replicator preyVictim,
+        float biteOrganicC,
+        float biteEnergy,
+        float assimilation,
+        float energyPerC,
+        float maxStore)
+    {
+        float takeC = Mathf.Min(Mathf.Max(0f, preyVictim.organicCStore), biteOrganicC);
+        preyVictim.organicCStore = Mathf.Max(0f, preyVictim.organicCStore - takeC);
+
+        float takeE = 0f;
+        if (takeC < biteOrganicC && biteEnergy > 0f)
+        {
+            takeE = Mathf.Min(Mathf.Max(0f, preyVictim.energy), biteEnergy);
+            preyVictim.energy = Mathf.Max(0f, preyVictim.energy - takeE);
+        }
+
+        float storedGain = takeC * assimilation;
+        predator.organicCStore = Mathf.Clamp(predator.organicCStore + storedGain, 0f, maxStore);
+        float respiredC = takeC - storedGain;
+        predator.energy += (respiredC * energyPerC) + (takeE * 0.5f);
+    }
+
+    void RemovePredationVictims()
+    {
+        if (pendingPredationRemovals.Count <= 0)
+        {
+            return;
+        }
+
+        predationRemovalBuffer.Clear();
+        foreach (int index in pendingPredationRemovals)
+        {
+            predationRemovalBuffer.Add(index);
+        }
+
+        predationRemovalBuffer.Sort();
+        for (int i = predationRemovalBuffer.Count - 1; i >= 0; i--)
+        {
+            int index = predationRemovalBuffer[i];
+            if (index >= 0 && index < agents.Count)
             {
-                int index = predationRemovalBuffer[i];
-                if (index >= 0 && index < agents.Count)
-                {
-                    agents.RemoveAt(index);
-                }
+                agents.RemoveAt(index);
             }
         }
     }
@@ -1510,7 +1541,7 @@ public class ReplicatorManager : MonoBehaviour
 
         if (sessileDebugPositions.Count > sessileDebugSeen.Count)
         {
-            List<Replicator> stale = null;
+            staleSessileAgents.Clear();
             foreach (Replicator tracked in sessileDebugPositions.Keys)
             {
                 if (sessileDebugSeen.Contains(tracked))
@@ -1518,22 +1549,14 @@ public class ReplicatorManager : MonoBehaviour
                     continue;
                 }
 
-                if (stale == null)
-                {
-                    stale = new List<Replicator>();
-                }
-
-                stale.Add(tracked);
+                staleSessileAgents.Add(tracked);
             }
 
-            if (stale != null)
+            for (int i = 0; i < staleSessileAgents.Count; i++)
             {
-                for (int i = 0; i < stale.Count; i++)
-                {
-                    Replicator tracked = stale[i];
-                    sessileDebugPositions.Remove(tracked);
-                    sessileDebugTimers.Remove(tracked);
-                }
+                Replicator tracked = staleSessileAgents[i];
+                sessileDebugPositions.Remove(tracked);
+                sessileDebugTimers.Remove(tracked);
             }
         }
     }
@@ -2012,7 +2035,7 @@ public class ReplicatorManager : MonoBehaviour
                     break;
                 case LocomotionType.Amoeboid:
                 case LocomotionType.Flagellum:
-                    // TODO: Re-enable active locomotion energy costs when movement tuning is finalized.
+                    // Active locomotion energy cost is intentionally disabled while movement tuning is in flux.
                     movementCost = 0f;
                     break;
                 default:
