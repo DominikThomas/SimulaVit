@@ -619,7 +619,14 @@ MonoBehaviour:
   chemosynthesisCo2NeedPerTick: 0.02
   chemosynthesisH2sNeedPerTick: 0.01
   chemosynthesisEnergyPerTick: 0.7
-  metabolismMutationChance: 0.01
+  metabolismMutationChance: 0.2
+  hydrogenotrophyH2PerTick: 0.02
+  hydrogenotrophyCO2PerTick: 0.01
+  hydrogenotrophyEnergyPerTick: 0.5
+  hydrogenotrophyStoreFraction: 0.8
+  hydrogenToPhotosynthesisMutationChance: 0.1
+  hydrogenToSaprotrophyMutationChance: 0.2
+  hydrogenToSulfurMutationChance: 0.4
   locomotionMutationChance: 0.333
   locomotionUpgradeChance: 0.5
   locomotionAnchoredMutationChance: 0.05
@@ -662,6 +669,7 @@ MonoBehaviour:
   fearMinDot: 0
   fearRequiresMotility: 1
   chemoTempRange: {x: 0.8, y: 1.2}
+  hydrogenTempRange: {x: 0.45, y: 0.9}
   photoTempRange: {x: 0.3, y: 0.8}
   saproTempRange: {x: 0.2, y: 0.7}
   predatorTempRange: {x: 0.25, y: 0.8}
@@ -672,6 +680,7 @@ MonoBehaviour:
   steerFoodWeight: 1
   steerGoodCO2: 0.02
   steerGoodH2S: 0.001
+  steerGoodH2: 0.4
   steerGoodO2: 0.02
   steerGoodOrganicC: 0.02
   amoeboidSenseInterval: 0.5
@@ -700,7 +709,7 @@ MonoBehaviour:
   scentScoreSaturation: 2
   biasSpawnsToChemosynthesisResources: 1
   spawnResourceProbeAttempts: 128
-  h2sSpawnBiasWeight: 10
+  h2SpawnBiasWeight: 2.5
   co2SpawnBiasWeight: 0
   chemoSpawnOptimalTemp: 1
   chemoSpawnTempTolerance: 0.25
@@ -722,6 +731,7 @@ MonoBehaviour:
   debugSessileMovementWindowSeconds: 3
   debugSessileMovementEpsilon: 0.001
   chemosynthAgentCount: 0
+  hydrogenotrophAgentCount: 0
   photosynthAgentCount: 0
   saprotrophAgentCount: 0
   predatorAgentCount: 0
@@ -796,6 +806,10 @@ MonoBehaviour:
   ventCO2PerTick: 0
   ventH2SMax: 5
   ventsOnlyBelowSeaLevel: 0
+  ventH2PerTick: 0.003
+  ventH2Max: 1.5
+  h2sMixRate: 0.12
+  h2MixRate: 0.35
   enableNaturalOxidation: 1
   naturalOxidationFractionPerTick: 0.0005
   naturalOxidationO2HalfSaturation: 0.02

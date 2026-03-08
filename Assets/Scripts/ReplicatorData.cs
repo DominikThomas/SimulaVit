@@ -3,6 +3,7 @@ using UnityEngine;
 public enum MetabolismType
 {
     SulfurChemosynthesis,
+    Hydrogenotrophy,
     Photosynthesis,
     Saprotrophy,
     Predation
@@ -15,6 +16,7 @@ public enum DeathCause
     EnergyDepletion,
     Lack_CO2,
     Lack_H2S,
+    Lack_H2,
     Lack_Light,
     Lack_OrganicC_Food,
     Lack_O2,
@@ -73,6 +75,7 @@ public class Replicator
     public float lethalTempMargin;
     public float starveCo2Seconds;
     public float starveH2sSeconds;
+    public float starveH2Seconds;
     public float starveLightSeconds;
     public float starveOrganicCFoodSeconds;
     public float starveO2Seconds;

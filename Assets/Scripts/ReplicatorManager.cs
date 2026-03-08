@@ -58,6 +58,15 @@ public class ReplicatorManager : MonoBehaviour
     public float chemosynthesisEnergyPerTick = 0.3f;
     [Tooltip("Fractional mutation chance on reproduction that flips metabolism type.")]
     [Range(0f, 1f)] public float metabolismMutationChance = 0.01f;
+    public float hydrogenotrophyH2PerTick = 0.02f;
+    public float hydrogenotrophyCO2PerTick = 0.01f;
+    public float hydrogenotrophyEnergyPerTick = 8f;
+    [Range(0f, 1f)] public float hydrogenotrophyStoreFraction = 0.8f;
+
+    [Header("Hydrogen Metabolism Mutation")]
+    [Range(0f, 1f)] public float hydrogenToPhotosynthesisMutationChance = 0.003f;
+    [Range(0f, 1f)] public float hydrogenToSaprotrophyMutationChance = 0.003f;
+    [Range(0f, 1f)] public float hydrogenToSulfurMutationChance = 0.003f;
 
     [Header("Locomotion Mutation")]
     [Range(0f, 1f)] public float locomotionMutationChance = 0.01f;
@@ -123,6 +132,7 @@ public class ReplicatorManager : MonoBehaviour
 
     [Header("Temperature Preferences")]
     public Vector2 chemoTempRange = new Vector2(0.8f, 1.2f);
+    public Vector2 hydrogenTempRange = new Vector2(0.45f, 0.9f);
     public Vector2 photoTempRange = new Vector2(0.3f, 0.8f);
     public Vector2 saproTempRange = new Vector2(0.2f, 0.7f);
     public Vector2 predatorTempRange = new Vector2(0.25f, 0.8f);
@@ -139,6 +149,8 @@ public class ReplicatorManager : MonoBehaviour
     public float steerGoodCO2 = 0.02f;
     [Tooltip("Food normalization scale for H2S. Values >= this count as fully available.")]
     public float steerGoodH2S = 0.001f;
+    [Tooltip("Food normalization scale for H2. Values >= this count as fully available.")]
+    public float steerGoodH2 = 0.4f;
     [Tooltip("Food normalization scale for O2. Values >= this count as fully available.")]
     public float steerGoodO2 = 0.02f;
     [Tooltip("Food normalization scale for OrganicC. Values >= this count as fully available.")]
@@ -175,8 +187,8 @@ public class ReplicatorManager : MonoBehaviour
     [Header("Spawn Resource Bias")]
     public bool biasSpawnsToChemosynthesisResources = true;
     [Range(1, 256)] public int spawnResourceProbeAttempts = 128;
-    [Tooltip("How strongly spontaneous/initial spawn chance scales with local H2S.")]
-    public float h2sSpawnBiasWeight = 2.5f;
+    [Tooltip("How strongly spontaneous/initial spawn chance scales with local H2.")]
+    public float h2SpawnBiasWeight = 2.5f;
     [Tooltip("How strongly spontaneous/initial spawn chance scales with local CO2.")]
     public float co2SpawnBiasWeight = 0.5f;
     public float chemoSpawnOptimalTemp = 1.0f;
@@ -226,6 +238,7 @@ public class ReplicatorManager : MonoBehaviour
     private List<Replicator> agents = new List<Replicator>();
 
     [SerializeField] private int chemosynthAgentCount;
+    [SerializeField] private int hydrogenotrophAgentCount;
     [SerializeField] private int photosynthAgentCount;
     [SerializeField] private int saprotrophAgentCount;
     [SerializeField] private int predatorAgentCount;
@@ -239,16 +252,20 @@ public class ReplicatorManager : MonoBehaviour
     private float metabolismTickTimer;
     private float metabolismDebugLogTimer;
     private float debugChemoTempSum;
+    private float debugHydrogenTempSum;
     private float debugPhotoTempSum;
     private float debugSaproTempSum;
     private int debugChemoTempCount;
+    private int debugHydrogenTempCount;
     private int debugPhotoTempCount;
     private int debugSaproTempCount;
     private int debugChemoStressedCount;
+    private int debugHydrogenStressedCount;
     private int debugPhotoStressedCount;
     private int debugSaproStressedCount;
     private float nextChemoSpawnDebugLogTime;
     private int[] chemoDeathCauseCounts;
+    private int[] hydrogenDeathCauseCounts;
     private int[] photoDeathCauseCounts;
     private int[] saproDeathCauseCounts;
     private int[] predatorDeathCauseCounts;
@@ -281,6 +298,7 @@ public class ReplicatorManager : MonoBehaviour
     // Reused HUD counters to avoid per-frame allocations in OnGUI.
     private readonly int[] totalByLocomotion = new int[4];
     private readonly int[] chemosynthByLocomotion = new int[4];
+    private readonly int[] hydrogenByLocomotion = new int[4];
     private readonly int[] photosynthByLocomotion = new int[4];
     private readonly int[] saprotrophByLocomotion = new int[4];
     private readonly int[] predatorByLocomotion = new int[4];
@@ -576,6 +594,7 @@ public class ReplicatorManager : MonoBehaviour
         int totalAgents = agents.Count;
         Array.Clear(totalByLocomotion, 0, totalByLocomotion.Length);
         Array.Clear(chemosynthByLocomotion, 0, chemosynthByLocomotion.Length);
+        Array.Clear(hydrogenByLocomotion, 0, hydrogenByLocomotion.Length);
         Array.Clear(photosynthByLocomotion, 0, photosynthByLocomotion.Length);
         Array.Clear(saprotrophByLocomotion, 0, saprotrophByLocomotion.Length);
         Array.Clear(predatorByLocomotion, 0, predatorByLocomotion.Length);
@@ -585,7 +604,11 @@ public class ReplicatorManager : MonoBehaviour
             int locomotionIndex = Mathf.Clamp((int)agents[i].locomotion, 0, totalByLocomotion.Length - 1);
             totalByLocomotion[locomotionIndex]++;
 
-            if (agents[i].metabolism == MetabolismType.Photosynthesis)
+            if (agents[i].metabolism == MetabolismType.Hydrogenotrophy)
+            {
+                hydrogenByLocomotion[locomotionIndex]++;
+            }
+            else if (agents[i].metabolism == MetabolismType.Photosynthesis)
             {
                 photosynthByLocomotion[locomotionIndex]++;
             }
@@ -619,26 +642,28 @@ public class ReplicatorManager : MonoBehaviour
             return $"{counts[0]}/{counts[1]}/{counts[2]}/{counts[3]}";
         }
 
+        float safeTotal = Mathf.Max(1f, totalAgents);
         string replicatorsText =
             "Replicators (Passive/Amoeboid/Flagellum/Anchored)\n" +
             $"Total: {FormatLocomotionCounts(totalByLocomotion)}\n" +
-            $"<color=#FFD54A>Chemosynthesis:</color> {FormatLocomotionCounts(chemosynthByLocomotion)}";
+            $"<color=#D9FFFF>Hydrogen:</color> {FormatLocomotionCounts(hydrogenByLocomotion)} ({(100f * hydrogenotrophAgentCount / safeTotal):0.0}%)";
 
+        if (chemosynthAgentCount > 0)
+        {
+            replicatorsText += $"\n<color=#FFD54A>Sulfur:</color> {FormatLocomotionCounts(chemosynthByLocomotion)} ({(100f * chemosynthAgentCount / safeTotal):0.0}%)";
+        }
         if (photosynthAgentCount > 0)
         {
-            replicatorsText += $"\n<color=#79E07E>Photosynthesis:</color> {FormatLocomotionCounts(photosynthByLocomotion)}";
+            replicatorsText += $"\n<color=#79E07E>Photo:</color> {FormatLocomotionCounts(photosynthByLocomotion)} ({(100f * photosynthAgentCount / safeTotal):0.0}%)";
         }
-
         if (saprotrophAgentCount > 0)
         {
-            replicatorsText += $"\n<color=#62B0FF>Saprotroph:</color> {FormatLocomotionCounts(saprotrophByLocomotion)}";
+            replicatorsText += $"\n<color=#62B0FF>Sapro:</color> {FormatLocomotionCounts(saprotrophByLocomotion)} ({(100f * saprotrophAgentCount / safeTotal):0.0}%)";
         }
-
         if (predatorAgentCount > 0)
         {
-            replicatorsText += $"\n<color=#FF5A5A>Predator:</color> {FormatLocomotionCounts(predatorByLocomotion)}";
+            replicatorsText += $"\n<color=#FF5A5A>Predator:</color> {FormatLocomotionCounts(predatorByLocomotion)} ({(100f * predatorAgentCount / safeTotal):0.0}%)";
         }
-
         const float panelWidth = 250f;
         const float padding = 8f;
         const float lineHeight = 20f;
@@ -691,13 +716,18 @@ public class ReplicatorManager : MonoBehaviour
     void UpdateMetabolismCounts()
     {
         int chemo = 0;
+        int hydrogen = 0;
         int photo = 0;
         int sapro = 0;
         int predator = 0;
 
         for (int i = 0; i < agents.Count; i++)
         {
-            if (agents[i].metabolism == MetabolismType.Photosynthesis)
+            if (agents[i].metabolism == MetabolismType.Hydrogenotrophy)
+            {
+                hydrogen++;
+            }
+            else if (agents[i].metabolism == MetabolismType.Photosynthesis)
             {
                 photo++;
             }
@@ -716,6 +746,7 @@ public class ReplicatorManager : MonoBehaviour
         }
 
         chemosynthAgentCount = chemo;
+        hydrogenotrophAgentCount = hydrogen;
         photosynthAgentCount = photo;
         saprotrophAgentCount = sapro;
         predatorAgentCount = predator;
@@ -734,16 +765,17 @@ public class ReplicatorManager : MonoBehaviour
         metabolismDebugLogTimer = 0f;
         bool unlocked = planetGenerator != null && planetGenerator.PhotosynthesisUnlocked;
 
-        string chemoTempText = FormatTemperatureDebug(debugChemoTempSum, debugChemoTempCount, debugChemoStressedCount);
+        string sulfurTempText = FormatTemperatureDebug(debugChemoTempSum, debugChemoTempCount, debugChemoStressedCount);
+        string hydrogenTempText = FormatTemperatureDebug(debugHydrogenTempSum, debugHydrogenTempCount, debugHydrogenStressedCount);
         string photoTempText = FormatTemperatureDebug(debugPhotoTempSum, debugPhotoTempCount, debugPhotoStressedCount);
         string saproTempText = FormatTemperatureDebug(debugSaproTempSum, debugSaproTempCount, debugSaproStressedCount);
 
 
         Debug.Log(
-            $"Metabolism: chemo={chemosynthAgentCount} photo={photosynthAgentCount} sapro={saprotrophAgentCount} predator={predatorAgentCount} " +
+            $"Metabolism: sulfur={chemosynthAgentCount} hydrogen={hydrogenotrophAgentCount} photo={photosynthAgentCount} sapro={saprotrophAgentCount} predator={predatorAgentCount} " +
             $"photoUnlocked={unlocked} saproUnlocked={IsSaprotrophyUnlocked()} " +
-            $"temp[chemo:{chemoTempText} photo:{photoTempText} sapro:{saproTempText}] avgOrganicC={averageOrganicCStore:F3} divisionEligible={divisionEligibleAgentCount} predKillsWindow={predationKillsWindow} avgToxicProteolyticWaste={avgToxicProteolyticWasteDebug:F3} avgDissolvedOrganicLeak={avgDissolvedOrganicLeakDebug:F3}");
-        Debug.Log($"DeathCauses: chemo[{FormatDeathCauseDistribution(chemoDeathCauseCounts)}] photo[{FormatDeathCauseDistribution(photoDeathCauseCounts)}] sapro[{FormatDeathCauseDistribution(saproDeathCauseCounts)}] predator[{FormatDeathCauseDistribution(predatorDeathCauseCounts)}]");
+            $"temp[sulfur:{sulfurTempText} hydrogen:{hydrogenTempText} photo:{photoTempText} sapro:{saproTempText}] avgOrganicC={averageOrganicCStore:F3} divisionEligible={divisionEligibleAgentCount} predKillsWindow={predationKillsWindow} avgToxicProteolyticWaste={avgToxicProteolyticWasteDebug:F3} avgDissolvedOrganicLeak={avgDissolvedOrganicLeakDebug:F3}");
+        Debug.Log($"DeathCauses: sulfur[{FormatDeathCauseDistribution(chemoDeathCauseCounts)}] hydrogen[{FormatDeathCauseDistribution(hydrogenDeathCauseCounts)}] photo[{FormatDeathCauseDistribution(photoDeathCauseCounts)}] sapro[{FormatDeathCauseDistribution(saproDeathCauseCounts)}] predator[{FormatDeathCauseDistribution(predatorDeathCauseCounts)}]");
         predationKillsWindow = 0;
         ResetDeathCauseCounters();
     }
@@ -753,6 +785,7 @@ public class ReplicatorManager : MonoBehaviour
     {
         int len = System.Enum.GetValues(typeof(DeathCause)).Length;
         if (chemoDeathCauseCounts == null || chemoDeathCauseCounts.Length != len) chemoDeathCauseCounts = new int[len];
+        if (hydrogenDeathCauseCounts == null || hydrogenDeathCauseCounts.Length != len) hydrogenDeathCauseCounts = new int[len];
         if (photoDeathCauseCounts == null || photoDeathCauseCounts.Length != len) photoDeathCauseCounts = new int[len];
         if (saproDeathCauseCounts == null || saproDeathCauseCounts.Length != len) saproDeathCauseCounts = new int[len];
         if (predatorDeathCauseCounts == null || predatorDeathCauseCounts.Length != len) predatorDeathCauseCounts = new int[len];
@@ -760,12 +793,13 @@ public class ReplicatorManager : MonoBehaviour
 
     void ResetDeathCauseCounters()
     {
-        if (chemoDeathCauseCounts == null || photoDeathCauseCounts == null || saproDeathCauseCounts == null || predatorDeathCauseCounts == null)
+        if (chemoDeathCauseCounts == null || hydrogenDeathCauseCounts == null || photoDeathCauseCounts == null || saproDeathCauseCounts == null || predatorDeathCauseCounts == null)
         {
             return;
         }
 
         System.Array.Clear(chemoDeathCauseCounts, 0, chemoDeathCauseCounts.Length);
+        System.Array.Clear(hydrogenDeathCauseCounts, 0, hydrogenDeathCauseCounts.Length);
         System.Array.Clear(photoDeathCauseCounts, 0, photoDeathCauseCounts.Length);
         System.Array.Clear(saproDeathCauseCounts, 0, saproDeathCauseCounts.Length);
         System.Array.Clear(predatorDeathCauseCounts, 0, predatorDeathCauseCounts.Length);
@@ -776,9 +810,11 @@ public class ReplicatorManager : MonoBehaviour
         EnsureDeathCauseCounters();
         int causeIndex = Mathf.Clamp((int)cause, 0, chemoDeathCauseCounts.Length - 1);
 
-        int[] counts = metabolism == MetabolismType.Photosynthesis
-            ? photoDeathCauseCounts
-            : (metabolism == MetabolismType.Saprotrophy ? saproDeathCauseCounts : (metabolism == MetabolismType.Predation ? predatorDeathCauseCounts : chemoDeathCauseCounts));
+        int[] counts = metabolism == MetabolismType.Hydrogenotrophy
+            ? hydrogenDeathCauseCounts
+            : (metabolism == MetabolismType.Photosynthesis
+                ? photoDeathCauseCounts
+                : (metabolism == MetabolismType.Saprotrophy ? saproDeathCauseCounts : (metabolism == MetabolismType.Predation ? predatorDeathCauseCounts : chemoDeathCauseCounts)));
 
         counts[causeIndex]++;
     }
@@ -836,6 +872,7 @@ public class ReplicatorManager : MonoBehaviour
             case DeathCause.TemperatureTooLow: return "TempLow";
             case DeathCause.Lack_CO2: return "CO2";
             case DeathCause.Lack_H2S: return "H2S";
+            case DeathCause.Lack_H2: return "H2";
             case DeathCause.Lack_Light: return "Light";
             case DeathCause.Lack_OrganicC_Food: return "OrgC";
             case DeathCause.Lack_O2: return "O2";
@@ -855,6 +892,12 @@ public class ReplicatorManager : MonoBehaviour
         {
             best = agent.starveH2sSeconds;
             cause = DeathCause.Lack_H2S;
+        }
+
+        if (agent.starveH2Seconds >= threshold && agent.starveH2Seconds > best)
+        {
+            best = agent.starveH2Seconds;
+            cause = DeathCause.Lack_H2;
         }
 
         if (agent.starveCo2Seconds >= threshold && agent.starveCo2Seconds > best)
@@ -946,7 +989,7 @@ public class ReplicatorManager : MonoBehaviour
             return false;
         }
 
-        return SpawnAgentAtDirection(randomDir, CreateDefaultTraits(), null, MetabolismType.SulfurChemosynthesis, LocomotionType.PassiveDrift, 0f, out _);
+        return SpawnAgentAtDirection(randomDir, CreateDefaultTraits(), null, MetabolismType.Hydrogenotrophy, LocomotionType.PassiveDrift, 0f, out _);
     }
 
 
@@ -964,7 +1007,7 @@ public class ReplicatorManager : MonoBehaviour
         for (int i = 0; i < attempts; i++)
         {
             Vector3 candidate = UnityEngine.Random.onUnitSphere;
-            float score = GetChemosynthesisSpawnScore(candidate);
+            float score = GetHydrogenotrophySpawnScore(candidate);
             if (score > bestScore)
             {
                 bestScore = score;
@@ -975,33 +1018,24 @@ public class ReplicatorManager : MonoBehaviour
         return bestDirection;
     }
 
-    float GetChemosynthesisSpawnScore(Vector3 direction)
+    float GetHydrogenotrophySpawnScore(Vector3 direction)
     {
         int resolution = Mathf.Max(1, planetGenerator.resolution);
         Vector3 normalizedDir = direction.normalized;
         int cellIndex = PlanetGridIndexing.DirectionToCellIndex(normalizedDir, resolution);
 
-        float co2Need = Mathf.Max(0.0001f, chemosynthesisCo2NeedPerTick);
-        float h2sNeed = Mathf.Max(0.0001f, chemosynthesisH2sNeedPerTick);
-
-        float co2Availability = planetResourceMap.Get(ResourceType.CO2, cellIndex) / co2Need;
-        float h2sAvailability = planetResourceMap.Get(ResourceType.H2S, cellIndex) / h2sNeed;
-
-        float chemistryScore = (Mathf.Max(0f, co2SpawnBiasWeight) * co2Availability)
-                             + (Mathf.Max(0f, h2sSpawnBiasWeight) * h2sAvailability);
+        float co2Availability = NormalizeResource(ResourceType.CO2, cellIndex, steerGoodCO2);
+        float h2Availability = NormalizeResource(ResourceType.H2, cellIndex, steerGoodH2);
+        float chemistryScore = Mathf.Min(h2Availability, co2Availability);
 
         float temp = planetResourceMap.GetTemperature(normalizedDir, cellIndex);
-        float tolerance = Mathf.Max(0.0001f, chemoSpawnTempTolerance);
-        float d = Mathf.Abs(temp - chemoSpawnOptimalTemp);
-        float tempFactor = Mathf.Clamp01(1f - (d / tolerance));
-        float temperedFactor = Mathf.Lerp(0.1f, 1f, tempFactor);
-
-        float score = chemistryScore * temperedFactor;
+        float tempFitness = ComputeTemperatureFitnessForRange(temp, hydrogenTempRange);
+        float score = chemistryScore * tempFitness;
 
         if (Time.timeSinceLevelLoad >= nextChemoSpawnDebugLogTime)
         {
             nextChemoSpawnDebugLogTime = Time.timeSinceLevelLoad + 8f;
-            Debug.Log($"Chemo spawn score: chemistry={chemistryScore:0.00} temp={temp:0.00} tempFactor={tempFactor:0.00} final={score:0.00}");
+            Debug.Log($"Hydrogen spawn score: chemistry={chemistryScore:0.00} temp={temp:0.00} tempFitness={tempFitness:0.00} final={score:0.00}");
         }
 
         return score;
@@ -1092,6 +1126,20 @@ public class ReplicatorManager : MonoBehaviour
         return Mathf.Clamp01(fitness);
     }
 
+    float ComputeTemperatureFitnessForRange(float temperature, Vector2 range)
+    {
+        float min = Mathf.Min(range.x, range.y);
+        float max = Mathf.Max(range.x, range.y);
+        if (temperature >= min && temperature <= max)
+        {
+            return 1f;
+        }
+
+        float tolerance = Mathf.Max(0.0001f, 0.5f * (max - min));
+        float d = temperature < min ? (min - temperature) : (temperature - max);
+        return Mathf.Clamp01(1f - (d / tolerance));
+    }
+
     float ComputeFoodFitness(Replicator agent, Vector3 normalizedDir, int cellIndex)
     {
         float co2 = NormalizeResource(ResourceType.CO2, cellIndex, steerGoodCO2);
@@ -1102,6 +1150,11 @@ public class ReplicatorManager : MonoBehaviour
             {
                 float h2s = NormalizeResource(ResourceType.H2S, cellIndex, steerGoodH2S);
                 return Mathf.Min(h2s, co2);
+            }
+            case MetabolismType.Hydrogenotrophy:
+            {
+                float h2 = NormalizeResource(ResourceType.H2, cellIndex, steerGoodH2);
+                return Mathf.Min(h2, co2);
             }
             case MetabolismType.Photosynthesis:
             {
@@ -1744,12 +1797,15 @@ public class ReplicatorManager : MonoBehaviour
         float maxStore = Mathf.Max(0f, maxOrganicCStore);
 
         debugChemoTempSum = 0f;
+        debugHydrogenTempSum = 0f;
         debugPhotoTempSum = 0f;
         debugSaproTempSum = 0f;
         debugChemoTempCount = 0;
+        debugHydrogenTempCount = 0;
         debugPhotoTempCount = 0;
         debugSaproTempCount = 0;
         debugChemoStressedCount = 0;
+        debugHydrogenStressedCount = 0;
         debugPhotoStressedCount = 0;
         debugSaproStressedCount = 0;
 
@@ -1783,6 +1839,12 @@ public class ReplicatorManager : MonoBehaviour
                 debugPhotoTempSum += temp;
                 debugPhotoTempCount++;
                 if (!insideOptimalBand) debugPhotoStressedCount++;
+            }
+            else if (agent.metabolism == MetabolismType.Hydrogenotrophy)
+            {
+                debugHydrogenTempSum += temp;
+                debugHydrogenTempCount++;
+                if (!insideOptimalBand) debugHydrogenStressedCount++;
             }
             else if (agent.metabolism == MetabolismType.Saprotrophy || agent.metabolism == MetabolismType.Predation)
             {
@@ -1868,6 +1930,7 @@ public class ReplicatorManager : MonoBehaviour
                 agent.starveO2Seconds = UpdateStarveTimer(agent.starveO2Seconds, lackO2, dtTick);
                 agent.starveStoredCSeconds = UpdateStarveTimer(agent.starveStoredCSeconds, lackStoredC, dtTick);
                 agent.starveH2sSeconds = 0f;
+                agent.starveH2Seconds = 0f;
                 agent.starveOrganicCFoodSeconds = 0f;
             }
             else if (agent.metabolism == MetabolismType.Saprotrophy)
@@ -1940,6 +2003,7 @@ public class ReplicatorManager : MonoBehaviour
                 agent.starveStoredCSeconds = UpdateStarveTimer(agent.starveStoredCSeconds, lackStoredC, dtTick);
                 agent.starveCo2Seconds = 0f;
                 agent.starveH2sSeconds = 0f;
+                agent.starveH2Seconds = 0f;
                 agent.starveLightSeconds = 0f;
             }
             else if (agent.metabolism == MetabolismType.Predation)
@@ -1966,6 +2030,53 @@ public class ReplicatorManager : MonoBehaviour
                 agent.starveCo2Seconds = 0f;
                 agent.starveH2sSeconds = 0f;
                 agent.starveLightSeconds = 0f;
+                agent.starveH2Seconds = 0f;
+            }
+            else if (agent.metabolism == MetabolismType.Hydrogenotrophy)
+            {
+                float co2Need = Mathf.Max(0f, hydrogenotrophyCO2PerTick);
+                float h2Need = Mathf.Max(0f, hydrogenotrophyH2PerTick);
+
+                float co2Available = planetResourceMap.Get(ResourceType.CO2, cellIndex);
+                float h2Available = planetResourceMap.Get(ResourceType.H2, cellIndex);
+                float co2Ratio = co2Need <= Mathf.Epsilon ? 1f : co2Available / co2Need;
+                float h2Ratio = h2Need <= Mathf.Epsilon ? 1f : h2Available / h2Need;
+                float pulledRatio = Mathf.Clamp01(Mathf.Min(co2Ratio, h2Ratio));
+
+                bool lackCo2 = false;
+                bool lackH2 = false;
+
+                if (pulledRatio > 0f)
+                {
+                    float co2Consumed = co2Need * pulledRatio;
+                    float h2Consumed = h2Need * pulledRatio;
+
+                    planetResourceMap.Add(ResourceType.CO2, cellIndex, -co2Consumed);
+                    planetResourceMap.Add(ResourceType.H2, cellIndex, -h2Consumed);
+
+                    float producedEnergy = Mathf.Max(0f, hydrogenotrophyEnergyPerTick) * pulledRatio * performance;
+                    agent.energy += producedEnergy;
+
+                    float storeFrac = Mathf.Clamp01(hydrogenotrophyStoreFraction);
+                    float fixedC = co2Consumed * storeFrac;
+                    if (fixedC > 0f)
+                    {
+                        agent.organicCStore = Mathf.Clamp(agent.organicCStore + fixedC, 0f, maxStore);
+                    }
+                }
+                else
+                {
+                    lackCo2 = co2Need > 0f && co2Available <= Mathf.Epsilon;
+                    lackH2 = h2Need > 0f && h2Available <= Mathf.Epsilon;
+                }
+
+                agent.starveCo2Seconds = UpdateStarveTimer(agent.starveCo2Seconds, lackCo2, dtTick);
+                agent.starveH2Seconds = UpdateStarveTimer(agent.starveH2Seconds, lackH2, dtTick);
+                agent.starveH2sSeconds = 0f;
+                agent.starveLightSeconds = 0f;
+                agent.starveOrganicCFoodSeconds = 0f;
+                agent.starveO2Seconds = 0f;
+                agent.starveStoredCSeconds = 0f;
             }
             else
             {
@@ -2016,6 +2127,7 @@ public class ReplicatorManager : MonoBehaviour
 
                 agent.starveCo2Seconds = UpdateStarveTimer(agent.starveCo2Seconds, lackCo2, dtTick);
                 agent.starveH2sSeconds = UpdateStarveTimer(agent.starveH2sSeconds, lackH2s, dtTick);
+                agent.starveH2Seconds = 0f;
                 agent.starveO2Seconds = UpdateStarveTimer(agent.starveO2Seconds, lackO2, dtTick);
                 agent.starveStoredCSeconds = UpdateStarveTimer(agent.starveStoredCSeconds, lackStoredC, dtTick);
                 agent.starveLightSeconds = 0f;
@@ -2212,15 +2324,29 @@ public class ReplicatorManager : MonoBehaviour
                     childMetabolism = MetabolismType.Photosynthesis;
                 }
             }
+            else if (parent.metabolism == MetabolismType.Hydrogenotrophy)
+            {
+                if (planetGenerator != null
+                    && planetGenerator.PhotosynthesisUnlocked
+                    && IsInsolatedLocation(parent.currentDirection)
+                    && UnityEngine.Random.value < Mathf.Clamp01(hydrogenToPhotosynthesisMutationChance))
+                {
+                    childMetabolism = MetabolismType.Photosynthesis;
+                }
+                else if (UnityEngine.Random.value < Mathf.Clamp01(hydrogenToSulfurMutationChance))
+                {
+                    childMetabolism = MetabolismType.SulfurChemosynthesis;
+                }
+            }
             else if (allowReverseMetabolismMutation)
             {
-                childMetabolism = MetabolismType.SulfurChemosynthesis;
+                childMetabolism = MetabolismType.Hydrogenotrophy;
             }
         }
 
         if (childMetabolism != MetabolismType.Saprotrophy
             && childMetabolism != MetabolismType.Predation
-            && UnityEngine.Random.value < Mathf.Clamp01(saprotrophyMutationChance)
+            && UnityEngine.Random.value < Mathf.Clamp01(parent.metabolism == MetabolismType.Hydrogenotrophy ? hydrogenToSaprotrophyMutationChance : saprotrophyMutationChance)
             && CanMutateToSaprotrophy())
         {
             childMetabolism = MetabolismType.Saprotrophy;
@@ -2369,7 +2495,7 @@ public class ReplicatorManager : MonoBehaviour
     {
         if (agents.Count >= maxPopulation) return false;
         Vector3 dir = GetSpawnDirectionCandidate();
-        return SpawnAgentAtDirection(dir, CreateDefaultTraits(), null, MetabolismType.SulfurChemosynthesis, LocomotionType.PassiveDrift, 0f, out _, enforceSpawnOnlyInSeaTrait: true);
+        return SpawnAgentAtDirection(dir, CreateDefaultTraits(), null, MetabolismType.Hydrogenotrophy, LocomotionType.PassiveDrift, 0f, out _, enforceSpawnOnlyInSeaTrait: true);
     }
 
     bool SpawnAgentAtDirection(Vector3 direction, Replicator.Traits traits, Replicator parent, MetabolismType metabolism, LocomotionType locomotion, float locomotionSkill, out Replicator spawnedAgent, bool enforceSpawnOnlyInSeaTrait = true)
@@ -2508,6 +2634,11 @@ public class ReplicatorManager : MonoBehaviour
 
     Vector2 GetTempRangeForMetabolism(MetabolismType metabolism)
     {
+        if (metabolism == MetabolismType.Hydrogenotrophy)
+        {
+            return hydrogenTempRange;
+        }
+
         if (metabolism == MetabolismType.Photosynthesis)
         {
             return photoTempRange;
@@ -2595,7 +2726,9 @@ public class ReplicatorManager : MonoBehaviour
             ? Color.green
             : metabolism == MetabolismType.Saprotrophy
                 ? Color.blue
-                : metabolism == MetabolismType.Predation ? predatorBaseColor : Color.yellow;
+                : metabolism == MetabolismType.Predation
+                    ? predatorBaseColor
+                    : metabolism == MetabolismType.Hydrogenotrophy ? new Color(0.86f, 1f, 0.98f) : Color.yellow;
         Color finalColor = metabolismBaseColor * intensity;
         finalColor.a = alpha;
         return finalColor;
