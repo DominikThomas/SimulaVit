@@ -690,7 +690,7 @@ public class ReplicatorManager : MonoBehaviour
         const float lineHeight = 20f;
         float rightX = Screen.width - panelWidth - padding;
 
-        float atmosphereHeight = (atmosphereText.Split('\n').Length * lineHeight) + (padding * 2f);
+        float atmosphereHeight = (atmosphereText.Split('\n').Length * lineHeight) + (padding * 2f) - 35;
         float replicatorHeight = (replicatorsText.Split('\n').Length * lineHeight) + (padding * 2f);
 
         Rect atmosphereRect = new Rect(rightX, padding, panelWidth, atmosphereHeight);
