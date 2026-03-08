@@ -668,14 +668,15 @@ MonoBehaviour:
   fearStrength: 1
   fearMinDot: 0
   fearRequiresMotility: 1
-  chemoTempRange: {x: 0.8, y: 1.2}
-  hydrogenTempRange: {x: 0.45, y: 0.9}
-  photoTempRange: {x: 0.3, y: 0.8}
-  saproTempRange: {x: 0.2, y: 0.7}
-  predatorTempRange: {x: 0.25, y: 0.8}
-  defaultLethalMargin: 0.15
+  sulfurChemoTempRange: {x: 333.15, y: 393.15}
+  hydrogenTempRange: {x: 293.15, y: 343.15}
+  photoTempRange: {x: 283.15, y: 313.15}
+  saproTempRange: {x: 278.15, y: 308.15}
+  predatorTempRange: {x: 283.15, y: 323.15}
+  defaultLethalMargin: 20
   tempMutationChance: 0.02
-  tempMutationScale: 0.05
+  tempMutationScale: 2
+  temperatureDisplayUnit: 1
   steerTempWeight: 5
   steerFoodWeight: 1
   steerGoodCO2: 0.02
@@ -819,15 +820,16 @@ MonoBehaviour:
   oceanExchangeRate: 0.05
   debugGlobalCO2: 5
   debugGlobalO2: 0.010003356
-  baseTemp: 0.4
-  insolationTempGain: 0.3
-  ventTempGain: 1
+  baseTempKelvin: 273.15
+  insolationTempGain: 35
+  ventTempGain: 120
   oceanTempDamping: 0.5
   enableVentHeatGradient: 1
   ventHeatBlurPasses: 3
   ventHeatSpread: 0.4
-  ventHeatMaxOcean: 1.2
-  ventHeatMaxLand: 1.6
+  maxOceanTempKelvin: 500
+  maxLandTempKelvin: 500
+  minTempKelvin: 150
   enableScentFields: 1
   dissolvedOrganicLeakDecayPerSecond: 0.6
   toxicProteolyticWasteDecayPerSecond: 0.8
