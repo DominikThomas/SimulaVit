@@ -3,6 +3,14 @@ using System.Collections.Generic;
 using Unity.Jobs;
 using Unity.Collections;
 using System;
+using UnityEngine.Serialization;
+
+public enum TemperatureDisplayUnit
+{
+    Kelvin,
+    Celsius,
+    Fahrenheit
+}
 
 public class ReplicatorManager : MonoBehaviour
 {
@@ -131,14 +139,18 @@ public class ReplicatorManager : MonoBehaviour
     public bool fearRequiresMotility = true;
 
     [Header("Temperature Preferences")]
-    public Vector2 chemoTempRange = new Vector2(0.8f, 1.2f);
-    public Vector2 hydrogenTempRange = new Vector2(0.45f, 0.9f);
-    public Vector2 photoTempRange = new Vector2(0.3f, 0.8f);
-    public Vector2 saproTempRange = new Vector2(0.2f, 0.7f);
-    public Vector2 predatorTempRange = new Vector2(0.25f, 0.8f);
-    public float defaultLethalMargin = 0.35f;
+    [FormerlySerializedAs("chemoTempRange")]
+    public Vector2 sulfurChemoTempRange = new Vector2(333.15f, 393.15f); // 60-120 °C
+    public Vector2 hydrogenTempRange = new Vector2(293.15f, 343.15f); // 20-70 °C
+    public Vector2 photoTempRange = new Vector2(283.15f, 313.15f); // 10-40 °C
+    public Vector2 saproTempRange = new Vector2(278.15f, 308.15f); // 5-35 °C
+    public Vector2 predatorTempRange = new Vector2(283.15f, 323.15f); // 10-50 °C
+    public float defaultLethalMargin = 20f; // Kelvin (~20 °C beyond optimal range before death)
     [Range(0f, 1f)] public float tempMutationChance = 0.02f;
-    public float tempMutationScale = 0.05f;
+    public float tempMutationScale = 2f; // Kelvin mutation scale
+
+    [Header("Temperature Display")]
+    public TemperatureDisplayUnit temperatureDisplayUnit = TemperatureDisplayUnit.Celsius;
 
     [Header("Steering Habitat Score")]
     [Tooltip("Dominant weight for temperature fitness when computing per-cell habitat score.")]
@@ -191,8 +203,8 @@ public class ReplicatorManager : MonoBehaviour
     public float h2SpawnBiasWeight = 2.5f;
     [Tooltip("How strongly spontaneous/initial spawn chance scales with local CO2.")]
     public float co2SpawnBiasWeight = 0.5f;
-    public float chemoSpawnOptimalTemp = 1.0f;
-    public float chemoSpawnTempTolerance = 0.25f;
+    public float chemoSpawnOptimalTemp = 353.15f; // 80 °C
+    public float chemoSpawnTempTolerance = 20f; // Kelvin
 
 
     [Header("Spontaneous Spawning")]
@@ -246,6 +258,10 @@ public class ReplicatorManager : MonoBehaviour
     [SerializeField] private int divisionEligibleAgentCount;
     private GUIStyle hudStyle;
     private GUIStyle hudBackgroundStyle;
+    private float hudMeanTempKelvin;
+    private float hudMinTempKelvin;
+    private float hudMaxTempKelvin;
+    private float nextHudTempSampleTime;
     private bool isInitialized;
     private float spawnAttemptTimer;
     private bool firstSpontaneousSpawnHappened;
@@ -632,10 +648,15 @@ public class ReplicatorManager : MonoBehaviour
         float co2Pct = (globalCo2 / atmosphereTotal) * 100f;
         float o2Pct = (globalO2 / atmosphereTotal) * 100f;
 
+        SampleHudTemperatureStats();
+
         string atmosphereText =
             "Atmosphere (global average)\n" +
             $"CO2: {globalCo2:0.000} ({co2Pct:0.0}%)\n" +
-            $"O2: {globalO2:0.000} ({o2Pct:0.0}%)";
+            $"O2: {globalO2:0.000} ({o2Pct:0.0}%)\n" +
+            $"Temp Mean: {FormatTemperature(hudMeanTempKelvin, temperatureDisplayUnit)}\n" +
+            $"Temp Min: {FormatTemperature(hudMinTempKelvin, temperatureDisplayUnit)}\n" +
+            $"Temp Max: {FormatTemperature(hudMaxTempKelvin, temperatureDisplayUnit)}";
 
         string FormatLocomotionCounts(int[] counts)
         {
@@ -669,16 +690,51 @@ public class ReplicatorManager : MonoBehaviour
         const float lineHeight = 20f;
         float rightX = Screen.width - panelWidth - padding;
 
-        float atmosphereHeight = (atmosphereText.Split('\n').Length * lineHeight) + (padding * 2f);
+        float atmosphereHeight = (atmosphereText.Split('\n').Length * lineHeight) + (padding * 2f) - 35;
         float replicatorHeight = (replicatorsText.Split('\n').Length * lineHeight) + (padding * 2f);
 
         Rect atmosphereRect = new Rect(rightX, padding, panelWidth, atmosphereHeight);
         GUI.Box(atmosphereRect, GUIContent.none, hudBackgroundStyle);
         GUI.Label(new Rect(atmosphereRect.x + padding, atmosphereRect.y + padding, panelWidth - 2f * padding, atmosphereHeight - 2f * padding), atmosphereText, hudStyle);
 
+        Rect tempUnitButtonRect = new Rect(rightX, atmosphereRect.yMax + 4f, panelWidth, lineHeight);
+        if (GUI.Button(tempUnitButtonRect, $"Temp Unit: {GetTemperatureUnitLabel(temperatureDisplayUnit)}"))
+        {
+            temperatureDisplayUnit = (TemperatureDisplayUnit)(((int)temperatureDisplayUnit + 1) % Enum.GetValues(typeof(TemperatureDisplayUnit)).Length);
+        }
+
         Rect replicatorRect = new Rect(rightX, Screen.height - replicatorHeight - padding, panelWidth, replicatorHeight);
         GUI.Box(replicatorRect, GUIContent.none, hudBackgroundStyle);
         GUI.Label(new Rect(replicatorRect.x + padding, replicatorRect.y + padding, panelWidth - 2f * padding, replicatorHeight - 2f * padding), replicatorsText, hudStyle);
+    }
+
+    void SampleHudTemperatureStats()
+    {
+        if (planetResourceMap == null)
+        {
+            hudMeanTempKelvin = 0f;
+            hudMinTempKelvin = 0f;
+            hudMaxTempKelvin = 0f;
+            return;
+        }
+
+        if (Time.timeSinceLevelLoad < nextHudTempSampleTime)
+        {
+            return;
+        }
+
+        nextHudTempSampleTime = Time.timeSinceLevelLoad + 0.5f;
+        planetResourceMap.GetTemperatureStats(out hudMeanTempKelvin, out hudMinTempKelvin, out hudMaxTempKelvin);
+    }
+
+    static string GetTemperatureUnitLabel(TemperatureDisplayUnit unit)
+    {
+        switch (unit)
+        {
+            case TemperatureDisplayUnit.Kelvin: return "K";
+            case TemperatureDisplayUnit.Fahrenheit: return "°F";
+            default: return "°C";
+        }
     }
 
     void EnsureHudStyles()
@@ -946,8 +1002,25 @@ public class ReplicatorManager : MonoBehaviour
 
         float averageTemp = tempSum / count;
         float stressedFraction = (float)stressedCount / count;
-        return $"avg={averageTemp:0.00},stressed={stressedFraction:P0}";
+        return $"avg={FormatTemperature(averageTemp, temperatureDisplayUnit)},stressed={stressedFraction:P0}";
     }
+    public static float KelvinToCelsius(float k) => k - 273.15f;
+
+    public static float KelvinToFahrenheit(float k) => (k - 273.15f) * 9f / 5f + 32f;
+
+    public static string FormatTemperature(float kelvin, TemperatureDisplayUnit unit)
+    {
+        switch (unit)
+        {
+            case TemperatureDisplayUnit.Kelvin:
+                return $"{kelvin:0.0} K";
+            case TemperatureDisplayUnit.Fahrenheit:
+                return $"{KelvinToFahrenheit(kelvin):0.0} °F";
+            default:
+                return $"{KelvinToCelsius(kelvin):0.0} °C";
+        }
+    }
+
     void HandleSpontaneousSpawning()
     {
         if (!enableSpontaneousSpawning) return;
@@ -1035,7 +1108,7 @@ public class ReplicatorManager : MonoBehaviour
         if (Time.timeSinceLevelLoad >= nextChemoSpawnDebugLogTime)
         {
             nextChemoSpawnDebugLogTime = Time.timeSinceLevelLoad + 8f;
-            Debug.Log($"Hydrogen spawn score: chemistry={chemistryScore:0.00} temp={temp:0.00} tempFitness={tempFitness:0.00} final={score:0.00}");
+            Debug.Log($"Hydrogen spawn score: chemistry={chemistryScore:0.00} temp={FormatTemperature(temp, temperatureDisplayUnit)} tempFitness={tempFitness:0.00} final={score:0.00}");
         }
 
         return score;
@@ -2579,7 +2652,7 @@ public class ReplicatorManager : MonoBehaviour
             agent.optimalTempMin = baseMin;
             agent.optimalTempMax = baseMax;
 
-            agent.lethalTempMargin = Mathf.Max(0.05f, defaultLethalMargin);
+            agent.lethalTempMargin = Mathf.Max(1f, defaultLethalMargin);
             return;
         }
 
@@ -2591,14 +2664,14 @@ public class ReplicatorManager : MonoBehaviour
             // inherit a temperature niche that belongs to another metabolism.
             agent.optimalTempMin = baseMin;
             agent.optimalTempMax = baseMax;
-            agent.lethalTempMargin = Mathf.Max(0.05f, defaultLethalMargin);
+            agent.lethalTempMargin = Mathf.Max(1f, defaultLethalMargin);
         }
         else
         {
             // Inherit within the same metabolism.
             agent.optimalTempMin = parent.optimalTempMin;
             agent.optimalTempMax = parent.optimalTempMax;
-            agent.lethalTempMargin = Mathf.Max(0.05f, parent.lethalTempMargin);
+            agent.lethalTempMargin = Mathf.Max(1f, parent.lethalTempMargin);
         }
 
         // Mutate the band edges slightly
@@ -2616,7 +2689,7 @@ public class ReplicatorManager : MonoBehaviour
             agent.optimalTempMax = t;
         }
 
-        float minWidth = 0.02f; // tunable
+        float minWidth = 2f; // Kelvin
         if (agent.optimalTempMax - agent.optimalTempMin < minWidth)
         {
             float center = 0.5f * (agent.optimalTempMin + agent.optimalTempMax);
@@ -2624,12 +2697,12 @@ public class ReplicatorManager : MonoBehaviour
             agent.optimalTempMax = center + 0.5f * minWidth;
         }
 
-        // Optionally clamp to global reasonable range
-        agent.optimalTempMin = Mathf.Clamp(agent.optimalTempMin, 0f, 2f);
-        agent.optimalTempMax = Mathf.Clamp(agent.optimalTempMax, 0f, 2f);
+        // Keep inherited/mutated temperatures in a physically sensible Kelvin range.
+        agent.optimalTempMin = Mathf.Clamp(agent.optimalTempMin, 150f, 500f);
+        agent.optimalTempMax = Mathf.Clamp(agent.optimalTempMax, 150f, 500f);
 
         if (UnityEngine.Random.value < mutationChance)
-            agent.lethalTempMargin = Mathf.Max(0.05f, agent.lethalTempMargin + UnityEngine.Random.Range(-scale, scale));
+            agent.lethalTempMargin = Mathf.Max(1f, agent.lethalTempMargin + UnityEngine.Random.Range(-scale, scale));
     }
 
     Vector2 GetTempRangeForMetabolism(MetabolismType metabolism)
@@ -2654,7 +2727,7 @@ public class ReplicatorManager : MonoBehaviour
             return predatorTempRange;
         }
 
-        return chemoTempRange;
+        return sulfurChemoTempRange;
     }
 
     Replicator.Traits CreateDefaultTraits()

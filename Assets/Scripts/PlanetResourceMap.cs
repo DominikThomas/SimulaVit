@@ -85,17 +85,21 @@ public class PlanetResourceMap : MonoBehaviour
     public float debugGlobalO2;
 
     [Header("Temperature Model")]
-    public float baseTemp = 0.2f;
-    public float insolationTempGain = 0.3f;
-    public float ventTempGain = 0.6f;
+    public float baseTempKelvin = 273.15f; // 0 °C baseline
+    public float insolationTempGain = 35f; // +35 K at full sun
+    public float ventTempGain = 120f; // +120 K at strong vent core
     [Range(0f, 1f)] public float oceanTempDamping = 0.5f;
 
     [Header("Temperature - Vent Heat Gradient")]
     public bool enableVentHeatGradient = true;
     [Range(0, 8)] public int ventHeatBlurPasses = 3;
     [Range(0f, 1f)] public float ventHeatSpread = 0.4f;
-    public float ventHeatMaxOcean = 1.2f;
-    public float ventHeatMaxLand = 1.6f;
+    [Tooltip("Clamp for ocean temperatures in Kelvin.")]
+    public float maxOceanTempKelvin = 500f;
+    [Tooltip("Clamp for land temperatures in Kelvin.")]
+    public float maxLandTempKelvin = 500f;
+    [Tooltip("Global physical minimum temperature clamp in Kelvin.")]
+    public float minTempKelvin = 150f;
 
     [Header("Scent Fields")]
     [Tooltip("Enable diffuse chemical cue fields used for scent-based predation/fear steering.")]
@@ -261,8 +265,8 @@ public class PlanetResourceMap : MonoBehaviour
     }
 
     /// <summary>
-    /// Simple normalized temperature model:
-    /// temp = base + insolationGain * insolation + ventGain * ventStrength.
+    /// Kelvin-based temperature model:
+    /// temp[K] = base[K] + insolationGain[K] * insolation + ventHeating[K].
     /// If a cell is underwater, insolation swings can be damped by oceanTempDamping.
     /// </summary>
     public float GetTemperature(Vector3 dir, int cellIndex = -1)
@@ -285,9 +289,45 @@ public class PlanetResourceMap : MonoBehaviour
             ventTerm = Mathf.Max(0f, ventHeat[cellIndex]);
         }
 
-        float temp = baseTemp + insolationTerm + ventTerm;
-        float tempMax = underwater ? Mathf.Max(0.01f, ventHeatMaxOcean) : Mathf.Max(0.01f, ventHeatMaxLand);
-        return Mathf.Clamp(temp, 0f, tempMax);
+        float tempKelvin = baseTempKelvin + insolationTerm + ventTerm;
+        float tempMax = underwater ? Mathf.Max(minTempKelvin + 1f, maxOceanTempKelvin) : Mathf.Max(minTempKelvin + 1f, maxLandTempKelvin);
+        return Mathf.Clamp(tempKelvin, minTempKelvin, tempMax);
+    }
+
+    public void GetTemperatureStats(out float meanKelvin, out float minKelvin, out float maxKelvin)
+    {
+        meanKelvin = baseTempKelvin;
+        minKelvin = baseTempKelvin;
+        maxKelvin = baseTempKelvin;
+
+        if (!isInitialized || cellDirections == null || cellDirections.Length == 0)
+        {
+            return;
+        }
+
+        float sum = 0f;
+        minKelvin = float.MaxValue;
+        maxKelvin = float.MinValue;
+
+        for (int cell = 0; cell < cellDirections.Length; cell++)
+        {
+            float temp = GetTemperature(cellDirections[cell], cell);
+            sum += temp;
+            minKelvin = Mathf.Min(minKelvin, temp);
+            maxKelvin = Mathf.Max(maxKelvin, temp);
+        }
+
+        meanKelvin = sum / cellDirections.Length;
+        if (!float.IsFinite(meanKelvin))
+        {
+            meanKelvin = baseTempKelvin;
+        }
+
+        if (!float.IsFinite(minKelvin) || !float.IsFinite(maxKelvin))
+        {
+            minKelvin = baseTempKelvin;
+            maxKelvin = baseTempKelvin;
+        }
     }
 
     private void InitializeIfNeeded()
@@ -872,7 +912,7 @@ public class PlanetResourceMap : MonoBehaviour
 
         for (int cell = 0; cell < cellCount; cell++)
         {
-            float baseValue = Mathf.Max(0f, baseTemp);
+            float baseValue = Mathf.Max(0f, baseTempKelvin);
             float temp = baseValue + ventHeat[cell];
             if (IsOceanCell(cell))
             {
@@ -890,7 +930,11 @@ public class PlanetResourceMap : MonoBehaviour
 
         float oceanAvg = oceanCount > 0 ? oceanTempSum / oceanCount : 0f;
         float landAvg = landCount > 0 ? landTempSum / landCount : 0f;
-        Debug.Log($"Vent heat field: oceanAvg={oceanAvg:0.00} oceanMax={oceanTempMax:0.00} landAvg={landAvg:0.00} landMax={landTempMax:0.00}", this);
+        float oceanAvgC = oceanAvg - 273.15f;
+        float oceanMaxC = oceanTempMax - 273.15f;
+        float landAvgC = landAvg - 273.15f;
+        float landMaxC = landTempMax - 273.15f;
+        Debug.Log($"Vent heat field: oceanAvg={oceanAvgC:0.0} °C ({oceanAvg:0.0} K) oceanMax={oceanMaxC:0.0} °C ({oceanTempMax:0.0} K) landAvg={landAvgC:0.0} °C ({landAvg:0.0} K) landMax={landMaxC:0.0} °C ({landTempMax:0.0} K)", this);
     }
 
     private void ResolveSunReferences()
