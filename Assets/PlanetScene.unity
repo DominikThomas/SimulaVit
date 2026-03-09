@@ -595,7 +595,7 @@ MonoBehaviour:
   planetResourceMap: {fileID: 1222684993}
   initialSpawnCount: 0
   maxPopulation: 30000
-  baseAgentColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
+  baseAgentColor: {r: 0.990566, g: 0.96487665, b: 0.6681648, a: 1}
   moveSpeed: 4
   turnSpeed: 5
   spawnSpread: 0.01
@@ -49513,8 +49513,8 @@ MonoBehaviour:
   noiseMagnitudeRange: {x: 0.05, y: 0.2}
   noiseRoughnessRange: {x: 1.5, y: 6}
   oceanCoverageRange: {x: 25, y: 60}
-  photosynthesisUnlockSeconds: 30
-  saprotrophyUnlockSeconds: 60
+  photosynthesisUnlockSeconds: 0
+  saprotrophyUnlockSeconds: 0
 --- !u!4 &1222684995
 Transform:
   m_ObjectHideFlags: 0
