@@ -1075,8 +1075,7 @@ public class ReplicatorManager : MonoBehaviour
     {
         if (agents.Count >= maxPopulation) return false;
 
-        MetabolismType metabolism;
-        Vector3 randomDir = GetSpawnDirectionCandidate(out metabolism);
+        Vector3 randomDir = GetSpawnDirectionCandidate();
         bool isSeaLocation = IsSeaLocation(randomDir);
 
         float locationMultiplier = GetLocationSpawnMultiplier(isSeaLocation);
@@ -1087,14 +1086,12 @@ public class ReplicatorManager : MonoBehaviour
             return false;
         }
 
-        return SpawnAgentAtDirection(randomDir, CreateDefaultTraits(), null, metabolism, LocomotionType.PassiveDrift, 0f, out _);
+        return SpawnAgentAtDirection(randomDir, CreateDefaultTraits(), null, MetabolismType.Hydrogenotrophy, LocomotionType.PassiveDrift, 0f, out _);
     }
 
 
-    Vector3 GetSpawnDirectionCandidate(out MetabolismType metabolism)
+    Vector3 GetSpawnDirectionCandidate()
     {
-        metabolism = MetabolismType.Hydrogenotrophy;
-
         if (!biasSpawnsToChemosynthesisResources || planetResourceMap == null || planetGenerator == null)
         {
             return UnityEngine.Random.onUnitSphere;
@@ -1107,79 +1104,38 @@ public class ReplicatorManager : MonoBehaviour
         for (int i = 0; i < attempts; i++)
         {
             Vector3 candidate = UnityEngine.Random.onUnitSphere;
-            float sulfurScore, hydrogenScore, photoScore, saproScore;
-            EvaluateSpontaneousSpawnScores(candidate, out sulfurScore, out hydrogenScore, out photoScore, out saproScore);
-            float localBestScore = sulfurScore;
-            MetabolismType localMetabolism = MetabolismType.SulfurChemosynthesis;
-
-            if (hydrogenScore > localBestScore)
+            float score = GetHydrogenotrophySpawnScore(candidate);
+            if (score > bestScore)
             {
-                localBestScore = hydrogenScore;
-                localMetabolism = MetabolismType.Hydrogenotrophy;
-            }
-
-            if (photoScore > localBestScore)
-            {
-                localBestScore = photoScore;
-                localMetabolism = MetabolismType.Photosynthesis;
-            }
-
-            if (saproScore > localBestScore)
-            {
-                localBestScore = saproScore;
-                localMetabolism = MetabolismType.Saprotrophy;
-            }
-
-            if (localBestScore > bestScore)
-            {
-                bestScore = localBestScore;
+                bestScore = score;
                 bestDirection = candidate;
-                metabolism = localMetabolism;
             }
         }
 
         return bestDirection;
     }
 
-    void EvaluateSpontaneousSpawnScores(Vector3 direction, out float sulfurScore, out float hydrogenScore, out float photoScore, out float saproScore)
+    float GetHydrogenotrophySpawnScore(Vector3 direction)
     {
         int resolution = Mathf.Max(1, planetGenerator.resolution);
         Vector3 normalizedDir = direction.normalized;
         int cellIndex = PlanetGridIndexing.DirectionToCellIndex(normalizedDir, resolution);
 
         float co2Availability = NormalizeResource(ResourceType.CO2, cellIndex, steerGoodCO2);
-        float h2sAvailability = NormalizeResource(ResourceType.H2S, cellIndex, steerGoodH2S);
         float h2Availability = NormalizeResource(ResourceType.H2, cellIndex, steerGoodH2);
-        float lightAvailability = Mathf.Clamp01(planetResourceMap.GetInsolation(normalizedDir));
-        float organicAvailability = NormalizeResource(ResourceType.OrganicC, cellIndex, steerGoodOrganicC);
-        float o2Availability = NormalizeResource(ResourceType.O2, cellIndex, steerGoodO2);
-        float dissolvedWakeAvailability = NormalizeScent(planetResourceMap.Get(ResourceType.DissolvedOrganicLeak, cellIndex));
+        float chemistryScore = Mathf.Min(h2Availability, co2Availability);
 
         float temp = planetResourceMap.GetTemperature(normalizedDir, cellIndex);
 
-        float sulfurChemistry = Mathf.Min(h2sAvailability, co2Availability);
-        float sulfurTempFitness = ComputeTemperatureFitnessForRange(temp, chemosynthTempRange);
-        sulfurScore = sulfurChemistry * sulfurTempFitness;
-
-        float hydrogenChemistry = Mathf.Min(h2Availability, co2Availability);
-        float hydrogenTempFitness = ComputeTemperatureFitnessForRange(temp, hydrogenTempRange);
-        hydrogenScore = hydrogenChemistry * hydrogenTempFitness;
-
-        bool photoUnlocked = planetGenerator != null && planetGenerator.PhotosynthesisUnlocked;
-        float photoChemistry = Mathf.Min(lightAvailability, co2Availability);
-        float photoTempFitness = ComputeTemperatureFitnessForRange(temp, photoTempRange);
-        photoScore = photoUnlocked ? (photoChemistry * photoTempFitness) : 0f;
-
-        bool saproUnlocked = IsSaprotrophyUnlocked();
-        float saproChemistry = Mathf.Min(Mathf.Max(organicAvailability, dissolvedWakeAvailability), o2Availability);
-        float saproTempFitness = ComputeTemperatureFitnessForRange(temp, saproTempRange);
-        saproScore = saproUnlocked ? (saproChemistry * saproTempFitness) : 0f;
+        float tempFitness = ComputeTemperatureFitnessForRange(temp, hydrogenTempRange);
+        float score = chemistryScore * tempFitness;
 
         if (Time.timeSinceLevelLoad >= nextChemoSpawnDebugLogTime)
         {
             nextChemoSpawnDebugLogTime = Time.timeSinceLevelLoad + 8f;
-            Debug.Log($"Spawn scores: sulfur={sulfurScore:0.00} hydrogen={hydrogenScore:0.00} photo={photoScore:0.00} sapro={saproScore:0.00} temp={FormatTemperature(temp, temperatureDisplayUnit)}");
+            Debug.Log($"Hydrogen spawn score: chemistry={chemistryScore:0.00} temp={FormatTemperature(temp, temperatureDisplayUnit)} tempFitness={tempFitness:0.00} final={score:0.00}");
         }
+        return score;
     }
 
     float GetLocationSpawnMultiplier(bool isSeaLocation)
@@ -2635,9 +2591,8 @@ public class ReplicatorManager : MonoBehaviour
     bool SpawnAgentAtRandomLocation()
     {
         if (agents.Count >= maxPopulation) return false;
-        MetabolismType metabolism;
-        Vector3 dir = GetSpawnDirectionCandidate(out metabolism);
-        return SpawnAgentAtDirection(dir, CreateDefaultTraits(), null, metabolism, LocomotionType.PassiveDrift, 0f, out _, enforceSpawnOnlyInSeaTrait: true);
+        Vector3 dir = GetSpawnDirectionCandidate();
+        return SpawnAgentAtDirection(dir, CreateDefaultTraits(), null, MetabolismType.Hydrogenotrophy, LocomotionType.PassiveDrift, 0f, out _, enforceSpawnOnlyInSeaTrait: true);
     }
 
     bool SpawnAgentAtDirection(Vector3 direction, Replicator.Traits traits, Replicator parent, MetabolismType metabolism, LocomotionType locomotion, float locomotionSkill, out Replicator spawnedAgent, bool enforceSpawnOnlyInSeaTrait = true)
