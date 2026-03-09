@@ -236,6 +236,8 @@ public class ReplicatorManager : MonoBehaviour
 
     [Header("Debug")]
     public bool colorByEnergy = false;
+    [Tooltip("If enabled, includes vent plume diagnostics in periodic metabolism logs.")]
+    public bool debugVentPlumeDiagnostics = false;
     [Range(0.05f, 4f)] public float energyVisualMultiplier = 1f;
     [Header("HUD")]
     [Tooltip("Draw a small runtime overlay with population and atmosphere stats.")]
@@ -827,10 +829,32 @@ public class ReplicatorManager : MonoBehaviour
         string saproTempText = FormatTemperatureDebug(debugSaproTempSum, debugSaproTempCount, debugSaproStressedCount);
 
 
+        float meanH2 = 0f;
+        float maxH2 = 0f;
+        float meanH2S = 0f;
+        float maxH2S = 0f;
+        float avgVentH2S = 0f;
+        float avgVentH2 = 0f;
+        float avgOceanH2 = 0f;
+        float avgOceanH2S = 0f;
+        if (planetResourceMap != null)
+        {
+            planetResourceMap.GetVentChemistryStats(out meanH2, out maxH2, out meanH2S, out maxH2S);
+            if (debugVentPlumeDiagnostics)
+            {
+                planetResourceMap.GetVentPlumeDiagnostics(out avgVentH2S, out avgVentH2, out avgOceanH2, out avgOceanH2S);
+            }
+        }
+
+        string plumeDiagnostics = debugVentPlumeDiagnostics
+            ? $" plume[ventH2S={avgVentH2S:F3} ventH2={avgVentH2:F3} oceanH2={avgOceanH2:F3} oceanH2S={avgOceanH2S:F3}]"
+            : string.Empty;
+
         Debug.Log(
             $"Metabolism: sulfur={chemosynthAgentCount} hydrogen={hydrogenotrophAgentCount} photo={photosynthAgentCount} sapro={saprotrophAgentCount} predator={predatorAgentCount} " +
             $"photoUnlocked={unlocked} saproUnlocked={IsSaprotrophyUnlocked()} " +
-            $"temp[sulfur:{sulfurTempText} hydrogen:{hydrogenTempText} photo:{photoTempText} sapro:{saproTempText}] avgOrganicC={averageOrganicCStore:F3} divisionEligible={divisionEligibleAgentCount} predKillsWindow={predationKillsWindow} avgToxicProteolyticWaste={avgToxicProteolyticWasteDebug:F3} avgDissolvedOrganicLeak={avgDissolvedOrganicLeakDebug:F3}");
+            $"temp[sulfur:{sulfurTempText} hydrogen:{hydrogenTempText} photo:{photoTempText} sapro:{saproTempText}] avgOrganicC={averageOrganicCStore:F3} divisionEligible={divisionEligibleAgentCount} predKillsWindow={predationKillsWindow} avgToxicProteolyticWaste={avgToxicProteolyticWasteDebug:F3} avgDissolvedOrganicLeak={avgDissolvedOrganicLeakDebug:F3} " +
+            $"chem[h2Mean={meanH2:F3} h2Max={maxH2:F3} h2sMean={meanH2S:F3} h2sMax={maxH2S:F3}]" + plumeDiagnostics);
         Debug.Log($"DeathCauses: sulfur[{FormatDeathCauseDistribution(chemoDeathCauseCounts)}] hydrogen[{FormatDeathCauseDistribution(hydrogenDeathCauseCounts)}] photo[{FormatDeathCauseDistribution(photoDeathCauseCounts)}] sapro[{FormatDeathCauseDistribution(saproDeathCauseCounts)}] predator[{FormatDeathCauseDistribution(predatorDeathCauseCounts)}]");
         predationKillsWindow = 0;
         ResetDeathCauseCounters();
@@ -1102,6 +1126,7 @@ public class ReplicatorManager : MonoBehaviour
         float chemistryScore = Mathf.Min(h2Availability, co2Availability);
 
         float temp = planetResourceMap.GetTemperature(normalizedDir, cellIndex);
+
         float tempFitness = ComputeTemperatureFitnessForRange(temp, hydrogenTempRange);
         float score = chemistryScore * tempFitness;
 
@@ -1110,7 +1135,6 @@ public class ReplicatorManager : MonoBehaviour
             nextChemoSpawnDebugLogTime = Time.timeSinceLevelLoad + 8f;
             Debug.Log($"Hydrogen spawn score: chemistry={chemistryScore:0.00} temp={FormatTemperature(temp, temperatureDisplayUnit)} tempFitness={tempFitness:0.00} final={score:0.00}");
         }
-
         return score;
     }
 

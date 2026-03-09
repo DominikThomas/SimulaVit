@@ -594,14 +594,14 @@ MonoBehaviour:
   planetGenerator: {fileID: 382753102}
   planetResourceMap: {fileID: 1222684993}
   initialSpawnCount: 0
-  maxPopulation: 20000
+  maxPopulation: 30000
   baseAgentColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
-  moveSpeed: 3
+  moveSpeed: 4
   turnSpeed: 5
   spawnSpread: 0.01
   reproductionRate: 1
-  minLifespan: 120
-  maxLifespan: 360
+  minLifespan: 360
+  maxLifespan: 600
   metabolismTickSeconds: 0.5
   moveEnergyCostPerSecond: 0.05
   replicationEnergyCost: 0.5
@@ -696,9 +696,9 @@ MonoBehaviour:
   amoeboidTurnAngleMax: 60
   flagellumTurnAngleMax: 180
   amoeboidTurnRate: 0.5
-  amoeboidMoveSpeedMultiplier: 0.7
+  amoeboidMoveSpeedMultiplier: 1.2
   flagellumTurnRate: 1.5
-  flagellumMoveSpeedMultiplier: 1.2
+  flagellumMoveSpeedMultiplier: 2
   flagellumDriftSuppression: 0.5
   amoeboidRunNoiseStrength: 0.08
   useScentPredation: 1
@@ -724,6 +724,7 @@ MonoBehaviour:
   defaultMoveOnlyInSea: 0
   defaultSurfaceMoveSpeedMultiplier: 0.4
   colorByEnergy: 1
+  debugVentPlumeDiagnostics: 0
   energyVisualMultiplier: 1
   showSimulationHud: 1
   enableRunAndTumbleDebug: 0
@@ -803,14 +804,17 @@ MonoBehaviour:
   ventThreshold: 0.8
   enableVentReplenishment: 1
   ventTickSeconds: 0.5
-  ventH2SPerTick: 0.002
-  ventCO2PerTick: 0
-  ventH2SMax: 5
   ventsOnlyBelowSeaLevel: 0
-  ventH2PerTick: 0.003
+  ventH2SPerTick: 0.01
+  ventH2PerTick: 0.006
+  ventCO2PerTick: 0
+  ventH2SMax: 1
   ventH2Max: 1.5
-  h2sMixRate: 0.12
-  h2MixRate: 0.35
+  h2sDiffuseStrength: 0.08
+  h2sDiffusePasses: 1
+  h2DiffuseStrength: 0.22
+  h2DiffusePasses: 1
+  ventResourceDecayPerSecond: 0.1
   enableNaturalOxidation: 1
   naturalOxidationFractionPerTick: 0.0005
   naturalOxidationO2HalfSaturation: 0.02
