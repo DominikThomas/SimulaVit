@@ -236,6 +236,8 @@ public class ReplicatorManager : MonoBehaviour
 
     [Header("Debug")]
     public bool colorByEnergy = false;
+    [Tooltip("If enabled, includes vent plume diagnostics in periodic metabolism logs.")]
+    public bool debugVentPlumeDiagnostics = false;
     [Range(0.05f, 4f)] public float energyVisualMultiplier = 1f;
     [Header("HUD")]
     [Tooltip("Draw a small runtime overlay with population and atmosphere stats.")]
@@ -827,10 +829,32 @@ public class ReplicatorManager : MonoBehaviour
         string saproTempText = FormatTemperatureDebug(debugSaproTempSum, debugSaproTempCount, debugSaproStressedCount);
 
 
+        float meanH2 = 0f;
+        float maxH2 = 0f;
+        float meanH2S = 0f;
+        float maxH2S = 0f;
+        float avgVentH2S = 0f;
+        float avgVentH2 = 0f;
+        float avgOceanH2 = 0f;
+        float avgOceanH2S = 0f;
+        if (planetResourceMap != null)
+        {
+            planetResourceMap.GetVentChemistryStats(out meanH2, out maxH2, out meanH2S, out maxH2S);
+            if (debugVentPlumeDiagnostics)
+            {
+                planetResourceMap.GetVentPlumeDiagnostics(out avgVentH2S, out avgVentH2, out avgOceanH2, out avgOceanH2S);
+            }
+        }
+
+        string plumeDiagnostics = debugVentPlumeDiagnostics
+            ? $" plume[ventH2S={avgVentH2S:F3} ventH2={avgVentH2:F3} oceanH2={avgOceanH2:F3} oceanH2S={avgOceanH2S:F3}]"
+            : string.Empty;
+
         Debug.Log(
             $"Metabolism: sulfur={chemosynthAgentCount} hydrogen={hydrogenotrophAgentCount} photo={photosynthAgentCount} sapro={saprotrophAgentCount} predator={predatorAgentCount} " +
             $"photoUnlocked={unlocked} saproUnlocked={IsSaprotrophyUnlocked()} " +
-            $"temp[sulfur:{sulfurTempText} hydrogen:{hydrogenTempText} photo:{photoTempText} sapro:{saproTempText}] avgOrganicC={averageOrganicCStore:F3} divisionEligible={divisionEligibleAgentCount} predKillsWindow={predationKillsWindow} avgToxicProteolyticWaste={avgToxicProteolyticWasteDebug:F3} avgDissolvedOrganicLeak={avgDissolvedOrganicLeakDebug:F3}");
+            $"temp[sulfur:{sulfurTempText} hydrogen:{hydrogenTempText} photo:{photoTempText} sapro:{saproTempText}] avgOrganicC={averageOrganicCStore:F3} divisionEligible={divisionEligibleAgentCount} predKillsWindow={predationKillsWindow} avgToxicProteolyticWaste={avgToxicProteolyticWasteDebug:F3} avgDissolvedOrganicLeak={avgDissolvedOrganicLeakDebug:F3} " +
+            $"chem[h2Mean={meanH2:F3} h2Max={maxH2:F3} h2sMean={meanH2S:F3} h2sMax={maxH2S:F3}]" + plumeDiagnostics);
         Debug.Log($"DeathCauses: sulfur[{FormatDeathCauseDistribution(chemoDeathCauseCounts)}] hydrogen[{FormatDeathCauseDistribution(hydrogenDeathCauseCounts)}] photo[{FormatDeathCauseDistribution(photoDeathCauseCounts)}] sapro[{FormatDeathCauseDistribution(saproDeathCauseCounts)}] predator[{FormatDeathCauseDistribution(predatorDeathCauseCounts)}]");
         predationKillsWindow = 0;
         ResetDeathCauseCounters();
@@ -1051,7 +1075,8 @@ public class ReplicatorManager : MonoBehaviour
     {
         if (agents.Count >= maxPopulation) return false;
 
-        Vector3 randomDir = GetSpawnDirectionCandidate();
+        MetabolismType metabolism;
+        Vector3 randomDir = GetSpawnDirectionCandidate(out metabolism);
         bool isSeaLocation = IsSeaLocation(randomDir);
 
         float locationMultiplier = GetLocationSpawnMultiplier(isSeaLocation);
@@ -1062,12 +1087,14 @@ public class ReplicatorManager : MonoBehaviour
             return false;
         }
 
-        return SpawnAgentAtDirection(randomDir, CreateDefaultTraits(), null, MetabolismType.Hydrogenotrophy, LocomotionType.PassiveDrift, 0f, out _);
+        return SpawnAgentAtDirection(randomDir, CreateDefaultTraits(), null, metabolism, LocomotionType.PassiveDrift, 0f, out _);
     }
 
 
-    Vector3 GetSpawnDirectionCandidate()
+    Vector3 GetSpawnDirectionCandidate(out MetabolismType metabolism)
     {
+        metabolism = MetabolismType.Hydrogenotrophy;
+
         if (!biasSpawnsToChemosynthesisResources || planetResourceMap == null || planetGenerator == null)
         {
             return UnityEngine.Random.onUnitSphere;
@@ -1080,38 +1107,79 @@ public class ReplicatorManager : MonoBehaviour
         for (int i = 0; i < attempts; i++)
         {
             Vector3 candidate = UnityEngine.Random.onUnitSphere;
-            float score = GetHydrogenotrophySpawnScore(candidate);
-            if (score > bestScore)
+            float sulfurScore, hydrogenScore, photoScore, saproScore;
+            EvaluateSpontaneousSpawnScores(candidate, out sulfurScore, out hydrogenScore, out photoScore, out saproScore);
+            float localBestScore = sulfurScore;
+            MetabolismType localMetabolism = MetabolismType.SulfurChemosynthesis;
+
+            if (hydrogenScore > localBestScore)
             {
-                bestScore = score;
+                localBestScore = hydrogenScore;
+                localMetabolism = MetabolismType.Hydrogenotrophy;
+            }
+
+            if (photoScore > localBestScore)
+            {
+                localBestScore = photoScore;
+                localMetabolism = MetabolismType.Photosynthesis;
+            }
+
+            if (saproScore > localBestScore)
+            {
+                localBestScore = saproScore;
+                localMetabolism = MetabolismType.Saprotrophy;
+            }
+
+            if (localBestScore > bestScore)
+            {
+                bestScore = localBestScore;
                 bestDirection = candidate;
+                metabolism = localMetabolism;
             }
         }
 
         return bestDirection;
     }
 
-    float GetHydrogenotrophySpawnScore(Vector3 direction)
+    void EvaluateSpontaneousSpawnScores(Vector3 direction, out float sulfurScore, out float hydrogenScore, out float photoScore, out float saproScore)
     {
         int resolution = Mathf.Max(1, planetGenerator.resolution);
         Vector3 normalizedDir = direction.normalized;
         int cellIndex = PlanetGridIndexing.DirectionToCellIndex(normalizedDir, resolution);
 
         float co2Availability = NormalizeResource(ResourceType.CO2, cellIndex, steerGoodCO2);
+        float h2sAvailability = NormalizeResource(ResourceType.H2S, cellIndex, steerGoodH2S);
         float h2Availability = NormalizeResource(ResourceType.H2, cellIndex, steerGoodH2);
-        float chemistryScore = Mathf.Min(h2Availability, co2Availability);
+        float lightAvailability = Mathf.Clamp01(planetResourceMap.GetInsolation(normalizedDir));
+        float organicAvailability = NormalizeResource(ResourceType.OrganicC, cellIndex, steerGoodOrganicC);
+        float o2Availability = NormalizeResource(ResourceType.O2, cellIndex, steerGoodO2);
+        float dissolvedWakeAvailability = NormalizeScent(planetResourceMap.Get(ResourceType.DissolvedOrganicLeak, cellIndex));
 
         float temp = planetResourceMap.GetTemperature(normalizedDir, cellIndex);
-        float tempFitness = ComputeTemperatureFitnessForRange(temp, hydrogenTempRange);
-        float score = chemistryScore * tempFitness;
+
+        float sulfurChemistry = Mathf.Min(h2sAvailability, co2Availability);
+        float sulfurTempFitness = ComputeTemperatureFitnessForRange(temp, chemosynthTempRange);
+        sulfurScore = sulfurChemistry * sulfurTempFitness;
+
+        float hydrogenChemistry = Mathf.Min(h2Availability, co2Availability);
+        float hydrogenTempFitness = ComputeTemperatureFitnessForRange(temp, hydrogenTempRange);
+        hydrogenScore = hydrogenChemistry * hydrogenTempFitness;
+
+        bool photoUnlocked = planetGenerator != null && planetGenerator.PhotosynthesisUnlocked;
+        float photoChemistry = Mathf.Min(lightAvailability, co2Availability);
+        float photoTempFitness = ComputeTemperatureFitnessForRange(temp, photoTempRange);
+        photoScore = photoUnlocked ? (photoChemistry * photoTempFitness) : 0f;
+
+        bool saproUnlocked = IsSaprotrophyUnlocked();
+        float saproChemistry = Mathf.Min(Mathf.Max(organicAvailability, dissolvedWakeAvailability), o2Availability);
+        float saproTempFitness = ComputeTemperatureFitnessForRange(temp, saproTempRange);
+        saproScore = saproUnlocked ? (saproChemistry * saproTempFitness) : 0f;
 
         if (Time.timeSinceLevelLoad >= nextChemoSpawnDebugLogTime)
         {
             nextChemoSpawnDebugLogTime = Time.timeSinceLevelLoad + 8f;
-            Debug.Log($"Hydrogen spawn score: chemistry={chemistryScore:0.00} temp={FormatTemperature(temp, temperatureDisplayUnit)} tempFitness={tempFitness:0.00} final={score:0.00}");
+            Debug.Log($"Spawn scores: sulfur={sulfurScore:0.00} hydrogen={hydrogenScore:0.00} photo={photoScore:0.00} sapro={saproScore:0.00} temp={FormatTemperature(temp, temperatureDisplayUnit)}");
         }
-
-        return score;
     }
 
     float GetLocationSpawnMultiplier(bool isSeaLocation)
@@ -2567,8 +2635,9 @@ public class ReplicatorManager : MonoBehaviour
     bool SpawnAgentAtRandomLocation()
     {
         if (agents.Count >= maxPopulation) return false;
-        Vector3 dir = GetSpawnDirectionCandidate();
-        return SpawnAgentAtDirection(dir, CreateDefaultTraits(), null, MetabolismType.Hydrogenotrophy, LocomotionType.PassiveDrift, 0f, out _, enforceSpawnOnlyInSeaTrait: true);
+        MetabolismType metabolism;
+        Vector3 dir = GetSpawnDirectionCandidate(out metabolism);
+        return SpawnAgentAtDirection(dir, CreateDefaultTraits(), null, metabolism, LocomotionType.PassiveDrift, 0f, out _, enforceSpawnOnlyInSeaTrait: true);
     }
 
     bool SpawnAgentAtDirection(Vector3 direction, Replicator.Traits traits, Replicator parent, MetabolismType metabolism, LocomotionType locomotion, float locomotionSkill, out Replicator spawnedAgent, bool enforceSpawnOnlyInSeaTrait = true)

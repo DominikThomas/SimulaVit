@@ -803,14 +803,17 @@ MonoBehaviour:
   ventThreshold: 0.8
   enableVentReplenishment: 1
   ventTickSeconds: 0.5
-  ventH2SPerTick: 0.002
+  ventH2SPerTick: 0.01
+  ventH2PerTick: 0.006
   ventCO2PerTick: 0
-  ventH2SMax: 5
-  ventsOnlyBelowSeaLevel: 0
-  ventH2PerTick: 0.003
+  ventH2SMax: 1
   ventH2Max: 1.5
-  h2sMixRate: 0.12
-  h2MixRate: 0.35
+  ventsOnlyBelowSeaLevel: 0
+  h2sDiffuseStrength: 0.08
+  h2sDiffusePasses: 1
+  h2DiffuseStrength: 0.22
+  h2DiffusePasses: 1
+  ventResourceDecayPerSecond: 0.1
   enableNaturalOxidation: 1
   naturalOxidationFractionPerTick: 0.0005
   naturalOxidationO2HalfSaturation: 0.02

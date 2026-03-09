@@ -54,18 +54,23 @@ public class PlanetResourceMap : MonoBehaviour
     [Header("Vents")]
     public bool enableVentReplenishment = true;
     public float ventTickSeconds = 0.5f;
-    public float ventH2SPerTick = 0.02f;
-    public float ventCO2PerTick = 0.0025f;
-    public float ventH2SMax = 1.0f;
     public bool ventsOnlyBelowSeaLevel = false;
 
-    [Header("Hydrogen vents")]
-    public float ventH2PerTick = 0.003f;
+    [Header("Vent Chemistry Balancing")]
+    public float ventH2SPerTick = 0.01f;
+    public float ventH2PerTick = 0.006f;
+    public float ventCO2PerTick = 0f;
+
+    [Header("Vent Resource Caps")]
+    public float ventH2SMax = 1.0f;
     public float ventH2Max = 1.5f;
 
-    [Header("Local Resource Mixing")]
-    [Range(0f, 1f)] public float h2sMixRate = 0.12f;
-    [Range(0f, 1f)] public float h2MixRate = 0.35f;
+    [Header("Vent Mixing / Diffusion")]
+    [Range(0f, 1f)] public float h2sDiffuseStrength = 0.08f;
+    [Range(0, 4)] public int h2sDiffusePasses = 1;
+    [Range(0f, 1f)] public float h2DiffuseStrength = 0.22f;
+    [Range(0, 4)] public int h2DiffusePasses = 1;
+    public float ventResourceDecayPerSecond = 0.1f;
 
     [Header("Natural Oxidation")]
     public bool enableNaturalOxidation = true;
@@ -212,7 +217,7 @@ public class PlanetResourceMap : MonoBehaviour
                 atmosphereTimer -= atmosphereTick;
                 ApplyAtmosphereMixing();
                 ApplyNaturalOxidation();
-                ApplyLocalResourceMixing();
+                ApplyLocalResourceMixing(atmosphereTick);
             }
         }
     }
@@ -240,7 +245,7 @@ public class PlanetResourceMap : MonoBehaviour
 
     public bool IsVolatile(ResourceType t)
     {
-        return t == ResourceType.CO2 || t == ResourceType.O2 || t == ResourceType.H2;
+        return t == ResourceType.CO2 || t == ResourceType.O2;
     }
 
     public bool IsOceanCell(int cell)
@@ -619,55 +624,183 @@ public class PlanetResourceMap : MonoBehaviour
         debugGlobalO2 = globalO2;
     }
 
-    private void ApplyLocalResourceMixing()
+    private void ApplyLocalResourceMixing(float dt)
     {
         if (!isInitialized || h2s == null || h2 == null || ventHeatNeighbors == null || h2sMixTmp == null || h2MixTmp == null)
         {
             return;
         }
 
-        float h2sRate = Mathf.Clamp01(h2sMixRate);
-        float h2Rate = Mathf.Clamp01(h2MixRate);
-        if (h2sRate <= 0f && h2Rate <= 0f)
+        float h2sRate = Mathf.Clamp01(h2sDiffuseStrength);
+        float h2Rate = Mathf.Clamp01(h2DiffuseStrength);
+        int h2sPassCount = Mathf.Clamp(h2sDiffusePasses, 0, 4);
+        int h2PassCount = Mathf.Clamp(h2DiffusePasses, 0, 4);
+
+        int cellCount = h2s.Length;
+        int maxPasses = Mathf.Max(h2sPassCount, h2PassCount);
+
+        for (int pass = 0; pass < maxPasses; pass++)
+        {
+            bool doH2S = pass < h2sPassCount && h2sRate > 0f;
+            bool doH2 = pass < h2PassCount && h2Rate > 0f;
+            if (!doH2S && !doH2)
+            {
+                continue;
+            }
+
+            for (int cell = 0; cell < cellCount; cell++)
+            {
+                float h2sNeighborSum = 0f;
+                float h2NeighborSum = 0f;
+                int neighborCount = 0;
+
+                int baseIndex = cell * NeighborCount;
+                for (int n = 0; n < NeighborCount; n++)
+                {
+                    int neighbor = ventHeatNeighbors[baseIndex + n];
+                    if (neighbor < 0 || neighbor >= cellCount)
+                    {
+                        continue;
+                    }
+
+                    if (doH2S)
+                    {
+                        h2sNeighborSum += h2s[neighbor];
+                    }
+
+                    if (doH2)
+                    {
+                        h2NeighborSum += h2[neighbor];
+                    }
+
+                    neighborCount++;
+                }
+
+                if (doH2S)
+                {
+                    float h2sAverage = neighborCount > 0 ? h2sNeighborSum / neighborCount : h2s[cell];
+                    h2sMixTmp[cell] = Mathf.Max(0f, Mathf.Lerp(h2s[cell], h2sAverage, h2sRate));
+                }
+
+                if (doH2)
+                {
+                    float h2Average = neighborCount > 0 ? h2NeighborSum / neighborCount : h2[cell];
+                    h2MixTmp[cell] = Mathf.Max(0f, Mathf.Lerp(h2[cell], h2Average, h2Rate));
+                }
+            }
+
+            if (doH2S)
+            {
+                float[] h2sSwap = h2s;
+                h2s = h2sMixTmp;
+                h2sMixTmp = h2sSwap;
+            }
+
+            if (doH2)
+            {
+                float[] h2Swap = h2;
+                h2 = h2MixTmp;
+                h2MixTmp = h2Swap;
+            }
+        }
+
+        ApplyVentChemicalDecay(dt);
+    }
+
+    private void ApplyVentChemicalDecay(float dt)
+    {
+        float decayRate = Mathf.Max(0f, ventResourceDecayPerSecond);
+        if (decayRate <= 0f || h2s == null || h2 == null)
         {
             return;
         }
 
-        int cellCount = h2s.Length;
-        for (int cell = 0; cell < cellCount; cell++)
+        float decayFactor = Mathf.Exp(-decayRate * Mathf.Max(0f, dt));
+        for (int cell = 0; cell < h2s.Length; cell++)
         {
-            float h2sNeighborSum = 0f;
-            float h2NeighborSum = 0f;
-            int neighborCount = 0;
+            h2s[cell] = Mathf.Max(0f, h2s[cell] * decayFactor);
+            h2[cell] = Mathf.Max(0f, h2[cell] * decayFactor);
+        }
+    }
 
-            int baseIndex = cell * NeighborCount;
-            for (int n = 0; n < NeighborCount; n++)
-            {
-                int neighbor = ventHeatNeighbors[baseIndex + n];
-                if (neighbor < 0 || neighbor >= cellCount)
-                {
-                    continue;
-                }
+    public void GetVentChemistryStats(out float meanH2, out float maxH2, out float meanH2S, out float maxH2S)
+    {
+        meanH2 = 0f;
+        maxH2 = 0f;
+        meanH2S = 0f;
+        maxH2S = 0f;
 
-                h2sNeighborSum += h2s[neighbor];
-                h2NeighborSum += h2[neighbor];
-                neighborCount++;
-            }
-
-            float h2sAverage = neighborCount > 0 ? h2sNeighborSum / neighborCount : h2s[cell];
-            float h2Average = neighborCount > 0 ? h2NeighborSum / neighborCount : h2[cell];
-
-            h2sMixTmp[cell] = Mathf.Max(0f, Mathf.Lerp(h2s[cell], h2sAverage, h2sRate));
-            h2MixTmp[cell] = Mathf.Max(0f, Mathf.Lerp(h2[cell], h2Average, h2Rate));
+        if (!isInitialized || h2 == null || h2s == null || h2.Length == 0)
+        {
+            return;
         }
 
-        float[] h2sSwap = h2s;
-        h2s = h2sMixTmp;
-        h2sMixTmp = h2sSwap;
+        float sumH2 = 0f;
+        float sumH2S = 0f;
+        for (int i = 0; i < h2.Length; i++)
+        {
+            float h2Value = h2[i];
+            float h2sValue = h2s[i];
+            sumH2 += h2Value;
+            sumH2S += h2sValue;
+            maxH2 = Mathf.Max(maxH2, h2Value);
+            maxH2S = Mathf.Max(maxH2S, h2sValue);
+        }
 
-        float[] h2Swap = h2;
-        h2 = h2MixTmp;
-        h2MixTmp = h2Swap;
+        float invCount = 1f / h2.Length;
+        meanH2 = sumH2 * invCount;
+        meanH2S = sumH2S * invCount;
+    }
+
+    public void GetVentPlumeDiagnostics(out float avgVentH2S, out float avgVentH2, out float avgOceanH2, out float avgOceanH2S)
+    {
+        avgVentH2S = 0f;
+        avgVentH2 = 0f;
+        avgOceanH2 = 0f;
+        avgOceanH2S = 0f;
+
+        if (!isInitialized || h2 == null || h2s == null || ventMask == null || oceanMask == null)
+        {
+            return;
+        }
+
+        float ventH2SSum = 0f;
+        float ventH2Sum = 0f;
+        float oceanH2Sum = 0f;
+        float oceanH2SSum = 0f;
+        int ventCount = 0;
+        int oceanCount = 0;
+
+        for (int cell = 0; cell < h2.Length; cell++)
+        {
+            if (ventMask[cell] != 0)
+            {
+                ventH2SSum += h2s[cell];
+                ventH2Sum += h2[cell];
+                ventCount++;
+            }
+
+            if (oceanMask[cell] != 0)
+            {
+                oceanH2Sum += h2[cell];
+                oceanH2SSum += h2s[cell];
+                oceanCount++;
+            }
+        }
+
+        if (ventCount > 0)
+        {
+            float invVent = 1f / ventCount;
+            avgVentH2S = ventH2SSum * invVent;
+            avgVentH2 = ventH2Sum * invVent;
+        }
+
+        if (oceanCount > 0)
+        {
+            float invOcean = 1f / oceanCount;
+            avgOceanH2 = oceanH2Sum * invOcean;
+            avgOceanH2S = oceanH2SSum * invOcean;
+        }
     }
 
     private void UpdateAtmosphereDebugMeans()
@@ -1080,8 +1213,11 @@ public class PlanetResourceMap : MonoBehaviour
         ventCO2PerTick = Mathf.Max(0f, ventCO2PerTick);
         ventH2PerTick = Mathf.Max(0f, ventH2PerTick);
         ventH2Max = Mathf.Max(0f, ventH2Max);
-        h2sMixRate = Mathf.Clamp01(h2sMixRate);
-        h2MixRate = Mathf.Clamp01(h2MixRate);
+        h2sDiffuseStrength = Mathf.Clamp01(h2sDiffuseStrength);
+        h2sDiffusePasses = Mathf.Clamp(h2sDiffusePasses, 0, 4);
+        h2DiffuseStrength = Mathf.Clamp01(h2DiffuseStrength);
+        h2DiffusePasses = Mathf.Clamp(h2DiffusePasses, 0, 4);
+        ventResourceDecayPerSecond = Mathf.Max(0f, ventResourceDecayPerSecond);
         atmosphereTickSeconds = Mathf.Max(0.0001f, atmosphereTickSeconds);
         landExchangeRate = Mathf.Max(0f, landExchangeRate);
         oceanExchangeRate = Mathf.Max(0f, oceanExchangeRate);
