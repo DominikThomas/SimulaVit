@@ -1,5 +1,19 @@
 # Incremental Refactor Plan: `ReplicatorManager` and `PlanetResourceMap`
 
+# Simulation Refactor Plan
+
+Status: Draft / Active architecture plan
+
+Purpose:
+- guide incremental refactoring of ReplicatorManager and PlanetResourceMap
+- preserve simulation behaviour during extraction
+- prepare the project for profiling and later Jobs/Burst/DOTS migration
+
+Non-goals:
+- immediate gameplay rebalance
+- one-shot full rewrite
+- forced ECS migration before profiling
+
 ## Constraints
 - Preserve gameplay/simulation behavior first (no balancing changes during extraction).
 - Refactor in small, low-risk steps with parity checks between steps.
