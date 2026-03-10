@@ -72,6 +72,10 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
     {
         activeSpeedMultiplier = Mathf.Max(0f, profile.speedMultiplier);
         simulationStepsPerFrame = Mathf.Max(0, profile.simulationStepsPerFrame);
+        if (replicatorManager != null)
+        {
+            replicatorManager.SetSimulationTiming(activeSpeedMultiplier, simulationStepsPerFrame);
+        }
     }
 
     private void Update()
