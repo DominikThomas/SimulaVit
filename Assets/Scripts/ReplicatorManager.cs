@@ -262,6 +262,8 @@ public class ReplicatorManager : MonoBehaviour
     private readonly ReplicatorDebugTelemetry debugTelemetry = new ReplicatorDebugTelemetry();
     private bool isInitialized;
     private readonly ReplicatorSpawnSystem spawnSystem = new ReplicatorSpawnSystem();
+    private readonly ReplicatorLifecycleSystem lifecycleSystem = new ReplicatorLifecycleSystem();
+    private readonly ReplicatorMetabolismSystem metabolismSystem = new ReplicatorMetabolismSystem();
     private float metabolismTickTimer;
     private float debugChemoTempSum;
     private float debugHydrogenTempSum;
@@ -1483,86 +1485,25 @@ public class ReplicatorManager : MonoBehaviour
 
     void UpdateLifecycle()
     {
-        float dt = Time.deltaTime;
-        float reproductionChance = reproductionRate * dt;
-        float organicCSum = 0f;
-        int eligibleForDivisionCount = 0;
-
-        for (int i = agents.Count - 1; i >= 0; i--)
-        {
-            Replicator agent = agents[i];
-            agent.age += dt;
-
-            if (agent.age > agent.maxLifespan)
-            {
-                RegisterDeathCause(agent.metabolism, DeathCause.OldAge);
-                DepositDeathOrganicC(agent);
-                agents.RemoveAt(i);
-                continue;
-            }
-
-            float lifeRemaining = agent.maxLifespan - agent.age;
-            agent.color = CalculateAgentColor(agent.age, lifeRemaining, agent.energy, agent.metabolism);
-
-            organicCSum += Mathf.Max(0f, agent.organicCStore);
-
-            bool hasEnergyForDivision = enableCarbonLimitedDivision
-                ? agent.energy >= Mathf.Max(0f, divisionEnergyCost)
-                : agent.energy >= replicationEnergyCost;
-
-            bool hasCarbonForDivision = true;
-            if (enableCarbonLimitedDivision)
-            {
-                float target = Mathf.Max(0.0001f, agent.biomassTarget);
-                float divisionThreshold = Mathf.Max(1f, divisionBiomassMultiple) * target;
-                hasCarbonForDivision = agent.organicCStore >= divisionThreshold;
-                if (hasCarbonForDivision)
-                {
-                    eligibleForDivisionCount++;
-                }
-            }
-
-            if (UnityEngine.Random.value < reproductionChance && hasEnergyForDivision && hasCarbonForDivision)
-            {
-                int resolution = Mathf.Max(1, planetGenerator.resolution);
-                Vector3 dir = agent.position.normalized;
-                int cellIndex = PlanetGridIndexing.DirectionToCellIndex(dir, resolution);
-                float temp = planetResourceMap.GetTemperature(dir, cellIndex);
-
-                float min = agent.optimalTempMin;
-                float max = agent.optimalTempMax;
-
-                bool insideOptimalBand = (temp >= min && temp <= max);
-
-                if (insideOptimalBand && SpawnAgentFromPopulation(agent, out Replicator childAgent))
-                {
-                    if (enableCarbonLimitedDivision)
-                    {
-                        agent.energy = Mathf.Max(0f, agent.energy - Mathf.Max(0f, divisionEnergyCost));
-
-                        float totalC = Mathf.Max(0f, agent.organicCStore);
-                        float toChild = totalC * Mathf.Clamp01(divisionCarbonSplitToChild);
-                        childAgent.organicCStore = Mathf.Clamp(toChild, 0f, maxOrganicCStore);
-                        agent.organicCStore = Mathf.Max(0f, totalC - toChild);
-                    }
-                    else
-                    {
-                        agent.energy = Mathf.Max(0f, agent.energy - replicationEnergyCost);
-                    }
-                }
-            }
-        }
-
-        if (agents.Count > 0)
-        {
-            averageOrganicCStore = organicCSum / agents.Count;
-        }
-        else
-        {
-            averageOrganicCStore = 0f;
-        }
-
-        divisionEligibleAgentCount = eligibleForDivisionCount;
+        int resolution = planetGenerator != null ? planetGenerator.resolution : 1;
+        lifecycleSystem.UpdateLifecycle(
+            agents,
+            Time.deltaTime,
+            reproductionRate,
+            enableCarbonLimitedDivision,
+            divisionEnergyCost,
+            replicationEnergyCost,
+            divisionBiomassMultiple,
+            divisionCarbonSplitToChild,
+            maxOrganicCStore,
+            resolution,
+            (dir, cellIndex) => planetResourceMap.GetTemperature(dir, cellIndex),
+            CalculateAgentColor,
+            SpawnAgentFromPopulation,
+            DepositDeathOrganicC,
+            RegisterDeathCause,
+            out averageOrganicCStore,
+            out divisionEligibleAgentCount);
     }
 
 
@@ -1578,417 +1519,62 @@ public class ReplicatorManager : MonoBehaviour
         }
     }
 
-    private float AerobicRespireFromStore(
-        Replicator agent,
-        int cellIndex,
-        float cMaxThisTick,
-        float o2PerC,
-        float energyPerC)
-    {
-        if (agent.organicCStore <= 0f || cMaxThisTick <= 0f || o2PerC <= 0f || energyPerC <= 0f)
-            return 0f;
-
-        float cUsed = Mathf.Min(cMaxThisTick, agent.organicCStore);
-        if (cUsed <= 0f) return 0f;
-
-        // Scale by available O2
-        float o2Needed = cUsed * o2PerC;
-        float o2Available = planetResourceMap.Get(ResourceType.O2, cellIndex);
-        float ratio = o2Needed <= Mathf.Epsilon ? 1f : Mathf.Clamp01(o2Available / o2Needed);
-        cUsed *= ratio;
-
-        if (cUsed <= 0f) return 0f;
-
-        float o2Consumed = cUsed * o2PerC;
-        planetResourceMap.Add(ResourceType.O2, cellIndex, -o2Consumed);
-        planetResourceMap.Add(ResourceType.CO2, cellIndex, cUsed); // simplified 1:1 C -> CO2
-
-        agent.organicCStore = Mathf.Max(0f, agent.organicCStore - cUsed);
-        float gainedEnergy = cUsed * energyPerC;
-        agent.energy += gainedEnergy;
-
-        return gainedEnergy;
-    }
-
     void MetabolismTick(float dtTick)
     {
-        int resolution = Mathf.Max(1, planetGenerator.resolution);
-        float basalCost = Mathf.Max(0f, basalEnergyCostPerSecond) * dtTick;
-        float safeEnergyForFullSpeed = Mathf.Max(0.0001f, energyForFullSpeed);
-
-        // Shared chemistry: aerobic respiration (OrganicC + O2 -> CO2 + energy)
-        float o2PerC = Mathf.Max(0f, aerobicO2PerC);
-        float energyPerC = Mathf.Max(0f, aerobicEnergyPerC);
-        float maxStore = Mathf.Max(0f, maxOrganicCStore);
-
-        debugChemoTempSum = 0f;
-        debugHydrogenTempSum = 0f;
-        debugPhotoTempSum = 0f;
-        debugSaproTempSum = 0f;
-        debugChemoTempCount = 0;
-        debugHydrogenTempCount = 0;
-        debugPhotoTempCount = 0;
-        debugSaproTempCount = 0;
-        debugChemoStressedCount = 0;
-        debugHydrogenStressedCount = 0;
-        debugPhotoStressedCount = 0;
-        debugSaproStressedCount = 0;
-
-        for (int i = agents.Count - 1; i >= 0; i--)
+        var settings = new ReplicatorMetabolismSystem.Settings
         {
-            Replicator agent = agents[i];
-            Vector3 dir = agent.position.normalized;
-            int cellIndex = PlanetGridIndexing.DirectionToCellIndex(dir, resolution);
+            BasalEnergyCostPerSecond = basalEnergyCostPerSecond,
+            EnergyForFullSpeed = energyForFullSpeed,
+            AerobicO2PerC = aerobicO2PerC,
+            AerobicEnergyPerC = aerobicEnergyPerC,
+            MaxOrganicCStore = maxOrganicCStore,
+            PhotosynthesisCo2PerTickAtFullInsolation = photosynthesisCo2PerTickAtFullInsolation,
+            PhotosynthesisEnergyPerCo2 = photosynthesisEnergyPerCo2,
+            PhotosynthStoreFraction = photosynthStoreFraction,
+            NightRespirationCPerTick = nightRespirationCPerTick,
+            SaproCPerTick = saproCPerTick,
+            SaproAssimilationFraction = saproAssimilationFraction,
+            SaproRespireStoreCPerTick = saproRespireStoreCPerTick,
+            HydrogenotrophyCO2PerTick = hydrogenotrophyCO2PerTick,
+            HydrogenotrophyH2PerTick = hydrogenotrophyH2PerTick,
+            HydrogenotrophyEnergyPerTick = hydrogenotrophyEnergyPerTick,
+            HydrogenotrophyStoreFraction = hydrogenotrophyStoreFraction,
+            ChemosynthesisCo2NeedPerTick = chemosynthesisCo2NeedPerTick,
+            ChemosynthesisH2sNeedPerTick = chemosynthesisH2sNeedPerTick,
+            ChemosynthesisEnergyPerTick = chemosynthesisEnergyPerTick,
+            ChemosynthStoreFraction = chemosynthStoreFraction,
+            ChemoRespirationCPerTick = chemoRespirationCPerTick,
+            PredatorBasalCostMultiplier = predatorBasalCostMultiplier,
+            PredatorMoveSpeedMultiplier = predatorMoveSpeedMultiplier,
+            MinSpeedFactor = minSpeedFactor
+        };
 
-            float temp = planetResourceMap.GetTemperature(dir, cellIndex);
+        metabolismSystem.MetabolismTick(
+            agents,
+            planetGenerator,
+            planetResourceMap,
+            settings,
+            dtTick,
+            ResolveEnergyDeathCause,
+            DepositDeathOrganicC,
+            RegisterDeathCause,
+            out ReplicatorMetabolismSystem.DebugSnapshot debugSnapshot);
 
-            float min = agent.optimalTempMin;
-            float max = agent.optimalTempMax;
-            float lethalMargin = Mathf.Max(0.0001f, agent.lethalTempMargin);
-
-            float d = 0f;
-
-            if (temp < min)
-                d = min - temp;
-            else if (temp > max)
-                d = temp - max;
-
-            bool insideOptimalBand = d <= 0f;
-            bool lethalTemperature = d > lethalMargin;
-
-            float stress = insideOptimalBand ? 0f : Mathf.Clamp01(d / lethalMargin);
-            float performance = insideOptimalBand ? 1f : Mathf.Lerp(0.7f, 0.1f, stress);
-
-            if (agent.metabolism == MetabolismType.Photosynthesis)
-            {
-                debugPhotoTempSum += temp;
-                debugPhotoTempCount++;
-                if (!insideOptimalBand) debugPhotoStressedCount++;
-            }
-            else if (agent.metabolism == MetabolismType.Hydrogenotrophy)
-            {
-                debugHydrogenTempSum += temp;
-                debugHydrogenTempCount++;
-                if (!insideOptimalBand) debugHydrogenStressedCount++;
-            }
-            else if (agent.metabolism == MetabolismType.Saprotrophy || agent.metabolism == MetabolismType.Predation)
-            {
-                debugSaproTempSum += temp;
-                debugSaproTempCount++;
-                if (!insideOptimalBand) debugSaproStressedCount++;
-            }
-            else
-            {
-                debugChemoTempSum += temp;
-                debugChemoTempCount++;
-                if (!insideOptimalBand) debugChemoStressedCount++;
-            }
-
-            if (lethalTemperature)
-            {
-                DeathCause temperatureDeathCause = temp > max
-                    ? DeathCause.TemperatureTooHigh
-                    : DeathCause.TemperatureTooLow;
-
-                RegisterDeathCause(agent.metabolism, temperatureDeathCause);
-                DepositDeathOrganicC(agent);
-                agents.RemoveAt(i);
-                continue;
-            }
-
-            if (agent.metabolism == MetabolismType.Photosynthesis)
-            {
-                float insolation = Mathf.Clamp01(planetResourceMap.GetInsolation(dir));
-                bool lackCo2 = false;
-                bool lackLight = false;
-                bool lackO2 = false;
-                bool lackStoredC = false;
-
-                if (insolation > 0f)
-                {
-                    float co2Need = Mathf.Max(0f, photosynthesisCo2PerTickAtFullInsolation) * insolation;
-                    float co2Available = planetResourceMap.Get(ResourceType.CO2, cellIndex);
-                    float co2Consumed = Mathf.Min(co2Need, co2Available);
-
-                    lackCo2 = co2Need > 0f && co2Consumed <= Mathf.Epsilon;
-
-                    if (co2Consumed > 0f)
-                    {
-                        planetResourceMap.Add(ResourceType.CO2, cellIndex, -co2Consumed);
-                        planetResourceMap.Add(ResourceType.O2, cellIndex, co2Consumed);
-
-                        float producedEnergy = co2Consumed * Mathf.Max(0f, photosynthesisEnergyPerCo2) * performance;
-                        agent.energy += producedEnergy;
-
-                        float storedOrganicC = Mathf.Max(0f, photosynthStoreFraction) * co2Consumed;
-                        if (storedOrganicC > 0f)
-                            agent.organicCStore = Mathf.Clamp(agent.organicCStore + storedOrganicC, 0f, maxStore);
-                    }
-                }
-                else
-                {
-                    float desiredResp = Mathf.Max(0f, nightRespirationCPerTick);
-                    float o2Available = planetResourceMap.Get(ResourceType.O2, cellIndex);
-                    bool hasStore = agent.organicCStore > 0f;
-                    lackLight = !hasStore;
-                    lackStoredC = !hasStore && desiredResp > 0f;
-                    lackO2 = hasStore && desiredResp > 0f && o2Available <= Mathf.Epsilon;
-
-                    // Night / no light: respire stored organic carbon using the shared aerobic pathway
-                    float gained = AerobicRespireFromStore(
-                        agent,
-                        cellIndex,
-                        desiredResp,
-                        o2PerC,
-                        energyPerC);
-                    if (gained > 0f)
-                    {
-                        agent.energy -= gained * (1f - performance);
-                        lackLight = false;
-                        lackStoredC = false;
-                        lackO2 = false;
-                    }
-                }
-
-                agent.starveCo2Seconds = UpdateStarveTimer(agent.starveCo2Seconds, lackCo2, dtTick);
-                agent.starveLightSeconds = UpdateStarveTimer(agent.starveLightSeconds, lackLight, dtTick);
-                agent.starveO2Seconds = UpdateStarveTimer(agent.starveO2Seconds, lackO2, dtTick);
-                agent.starveStoredCSeconds = UpdateStarveTimer(agent.starveStoredCSeconds, lackStoredC, dtTick);
-                agent.starveH2sSeconds = 0f;
-                agent.starveH2Seconds = 0f;
-                agent.starveOrganicCFoodSeconds = 0f;
-            }
-            else if (agent.metabolism == MetabolismType.Saprotrophy)
-            {
-                // Saprotrophy = aerobic heterotrophy (detritus respiration).
-                float envC = planetResourceMap.Get(ResourceType.OrganicC, cellIndex);
-                float intakeCap = Mathf.Max(0f, saproCPerTick);
-                float desiredIntake = Mathf.Min(envC, intakeCap);
-
-                float assimilation = Mathf.Clamp01(saproAssimilationFraction);
-                bool lackFood = desiredIntake <= Mathf.Epsilon;
-                bool lackO2 = false;
-                bool lackStoredC = false;
-
-                if (desiredIntake > 0f)
-                {
-                    float desiredStore = desiredIntake * assimilation;
-                    float desiredRespire = desiredIntake - desiredStore;
-
-                    float storeCapacity = Mathf.Max(0f, maxStore - agent.organicCStore);
-                    float actualStore = Mathf.Min(desiredStore, storeCapacity);
-
-                    float actualRespire = 0f;
-                    if (desiredRespire > 0f && o2PerC > 0f && energyPerC > 0f)
-                    {
-                        float o2Available = planetResourceMap.Get(ResourceType.O2, cellIndex);
-                        float maxRespireByO2 = o2Available / o2PerC;
-                        actualRespire = Mathf.Clamp(desiredRespire, 0f, maxRespireByO2);
-                        lackO2 = desiredRespire > 0f && actualRespire <= Mathf.Epsilon;
-                    }
-
-                    float totalActuallyUsed = actualStore + actualRespire;
-
-                    if (totalActuallyUsed > 0f)
-                    {
-                        planetResourceMap.Add(ResourceType.OrganicC, cellIndex, -totalActuallyUsed);
-
-                        if (actualStore > 0f)
-                            agent.organicCStore = Mathf.Clamp(agent.organicCStore + actualStore, 0f, maxStore);
-
-                        if (actualRespire > 0f)
-                        {
-                            float o2Consumed = actualRespire * o2PerC;
-                            planetResourceMap.Add(ResourceType.O2, cellIndex, -o2Consumed);
-                            planetResourceMap.Add(ResourceType.CO2, cellIndex, actualRespire);
-                            agent.energy += actualRespire * energyPerC * performance;
-                            lackO2 = false;
-                        }
-                    }
-                }
-                else
-                {
-                    float desiredResp = Mathf.Max(0f, saproRespireStoreCPerTick);
-                    float o2Available = planetResourceMap.Get(ResourceType.O2, cellIndex);
-                    bool hasStore = agent.organicCStore > 0f;
-                    lackStoredC = !hasStore && desiredResp > 0f;
-                    lackO2 = hasStore && desiredResp > 0f && o2Available <= Mathf.Epsilon;
-
-                    float gained = AerobicRespireFromStore(agent, cellIndex, desiredResp, o2PerC, energyPerC);
-                    if (gained > 0f)
-                    {
-                        agent.energy -= gained * (1f - performance);
-                        lackStoredC = false;
-                        lackO2 = false;
-                    }
-                }
-
-                agent.starveOrganicCFoodSeconds = UpdateStarveTimer(agent.starveOrganicCFoodSeconds, lackFood, dtTick);
-                agent.starveO2Seconds = UpdateStarveTimer(agent.starveO2Seconds, lackO2, dtTick);
-                agent.starveStoredCSeconds = UpdateStarveTimer(agent.starveStoredCSeconds, lackStoredC, dtTick);
-                agent.starveCo2Seconds = 0f;
-                agent.starveH2sSeconds = 0f;
-                agent.starveH2Seconds = 0f;
-                agent.starveLightSeconds = 0f;
-            }
-            else if (agent.metabolism == MetabolismType.Predation)
-            {
-                bool lackFood = true;
-                float desiredResp = Mathf.Max(0f, saproRespireStoreCPerTick);
-                bool hasStore = agent.organicCStore > 0f;
-                float o2Available = planetResourceMap.Get(ResourceType.O2, cellIndex);
-                bool lackStoredC = !hasStore && desiredResp > 0f;
-                bool lackO2 = hasStore && desiredResp > 0f && o2Available <= Mathf.Epsilon;
-
-                float gained = AerobicRespireFromStore(agent, cellIndex, desiredResp, o2PerC, energyPerC);
-                if (gained > 0f)
-                {
-                    agent.energy -= gained * (1f - performance);
-                    lackStoredC = false;
-                    lackO2 = false;
-                    lackFood = false;
-                }
-
-                agent.starveOrganicCFoodSeconds = UpdateStarveTimer(agent.starveOrganicCFoodSeconds, lackFood, dtTick);
-                agent.starveO2Seconds = UpdateStarveTimer(agent.starveO2Seconds, lackO2, dtTick);
-                agent.starveStoredCSeconds = UpdateStarveTimer(agent.starveStoredCSeconds, lackStoredC, dtTick);
-                agent.starveCo2Seconds = 0f;
-                agent.starveH2sSeconds = 0f;
-                agent.starveLightSeconds = 0f;
-                agent.starveH2Seconds = 0f;
-            }
-            else if (agent.metabolism == MetabolismType.Hydrogenotrophy)
-            {
-                float co2Need = Mathf.Max(0f, hydrogenotrophyCO2PerTick);
-                float h2Need = Mathf.Max(0f, hydrogenotrophyH2PerTick);
-
-                float co2Available = planetResourceMap.Get(ResourceType.CO2, cellIndex);
-                float h2Available = planetResourceMap.Get(ResourceType.H2, cellIndex);
-                float co2Ratio = co2Need <= Mathf.Epsilon ? 1f : co2Available / co2Need;
-                float h2Ratio = h2Need <= Mathf.Epsilon ? 1f : h2Available / h2Need;
-                float pulledRatio = Mathf.Clamp01(Mathf.Min(co2Ratio, h2Ratio));
-
-                bool lackCo2 = false;
-                bool lackH2 = false;
-
-                if (pulledRatio > 0f)
-                {
-                    float co2Consumed = co2Need * pulledRatio;
-                    float h2Consumed = h2Need * pulledRatio;
-
-                    planetResourceMap.Add(ResourceType.CO2, cellIndex, -co2Consumed);
-                    planetResourceMap.Add(ResourceType.H2, cellIndex, -h2Consumed);
-
-                    float producedEnergy = Mathf.Max(0f, hydrogenotrophyEnergyPerTick) * pulledRatio * performance;
-                    agent.energy += producedEnergy;
-
-                    float storeFrac = Mathf.Clamp01(hydrogenotrophyStoreFraction);
-                    float fixedC = co2Consumed * storeFrac;
-                    if (fixedC > 0f)
-                    {
-                        agent.organicCStore = Mathf.Clamp(agent.organicCStore + fixedC, 0f, maxStore);
-                    }
-                }
-                else
-                {
-                    lackCo2 = co2Need > 0f && co2Available <= Mathf.Epsilon;
-                    lackH2 = h2Need > 0f && h2Available <= Mathf.Epsilon;
-                }
-
-                agent.starveCo2Seconds = UpdateStarveTimer(agent.starveCo2Seconds, lackCo2, dtTick);
-                agent.starveH2Seconds = UpdateStarveTimer(agent.starveH2Seconds, lackH2, dtTick);
-                agent.starveH2sSeconds = 0f;
-                agent.starveLightSeconds = 0f;
-                agent.starveOrganicCFoodSeconds = 0f;
-                agent.starveO2Seconds = 0f;
-                agent.starveStoredCSeconds = 0f;
-            }
-            else
-            {
-                // Sulfur chemosynthesis: CO2 + H2S -> energy + S0, and fix some CO2 into organicCStore (chemoautotrophy)
-                float co2Need = Mathf.Max(0f, chemosynthesisCo2NeedPerTick);
-                float h2sNeed = Mathf.Max(0f, chemosynthesisH2sNeedPerTick);
-
-                float co2Available = planetResourceMap.Get(ResourceType.CO2, cellIndex);
-                float h2sAvailable = planetResourceMap.Get(ResourceType.H2S, cellIndex);
-                float co2Ratio = co2Need <= Mathf.Epsilon ? 1f : co2Available / co2Need;
-                float h2sRatio = h2sNeed <= Mathf.Epsilon ? 1f : h2sAvailable / h2sNeed;
-                float pulledRatio = Mathf.Clamp01(Mathf.Min(co2Ratio, h2sRatio));
-
-                bool lackCo2 = false;
-                bool lackH2s = false;
-                bool lackO2 = false;
-                bool lackStoredC = false;
-
-                if (pulledRatio > 0f)
-                {
-                    float co2Consumed = co2Need * pulledRatio;
-                    float h2sConsumed = h2sNeed * pulledRatio;
-
-                    planetResourceMap.Add(ResourceType.CO2, cellIndex, -co2Consumed);
-                    planetResourceMap.Add(ResourceType.H2S, cellIndex, -h2sConsumed);
-                    planetResourceMap.Add(ResourceType.S0, cellIndex, h2sConsumed);
-
-                    float producedEnergy = Mathf.Max(0f, chemosynthesisEnergyPerTick) * pulledRatio * performance;
-                    agent.energy += producedEnergy;
-
-                    // NEW: chemoautotroph carbon fixation into storage (biomass/reserves)
-                    float storeFrac = Mathf.Clamp01(chemosynthStoreFraction);
-                    float fixedC = co2Consumed * storeFrac;
-                    if (fixedC > 0f)
-                        agent.organicCStore = Mathf.Clamp(agent.organicCStore + fixedC, 0f, maxStore);
-                }
-                else
-                {
-                    lackCo2 = co2Need > 0f && co2Available <= Mathf.Epsilon;
-                    lackH2s = h2sNeed > 0f && h2sAvailable <= Mathf.Epsilon;
-
-                    float desiredResp = Mathf.Max(0f, chemoRespirationCPerTick);
-                    bool hasStore = agent.organicCStore > 0f;
-                    float o2Available = planetResourceMap.Get(ResourceType.O2, cellIndex);
-                    lackStoredC = !hasStore && desiredResp > 0f;
-                    lackO2 = hasStore && desiredResp > 0f && o2Available <= Mathf.Epsilon;
-                }
-
-                agent.starveCo2Seconds = UpdateStarveTimer(agent.starveCo2Seconds, lackCo2, dtTick);
-                agent.starveH2sSeconds = UpdateStarveTimer(agent.starveH2sSeconds, lackH2s, dtTick);
-                agent.starveH2Seconds = 0f;
-                agent.starveO2Seconds = UpdateStarveTimer(agent.starveO2Seconds, lackO2, dtTick);
-                agent.starveStoredCSeconds = UpdateStarveTimer(agent.starveStoredCSeconds, lackStoredC, dtTick);
-                agent.starveLightSeconds = 0f;
-                agent.starveOrganicCFoodSeconds = 0f;
-            }
-
-            float metabolismBasalCostMultiplier = agent.metabolism == MetabolismType.Predation ? Mathf.Max(0f, predatorBasalCostMultiplier) : 1f;
-            float stressedBasal = basalCost * metabolismBasalCostMultiplier * (1f + stress);
-            float speedMultiplier = agent.metabolism == MetabolismType.Predation ? Mathf.Max(0f, predatorMoveSpeedMultiplier) : 1f;
-            agent.speedFactor = Mathf.Clamp((agent.energy / safeEnergyForFullSpeed) * performance * speedMultiplier, minSpeedFactor, 1f);
-            float movementCost = 0f;
-            switch (agent.locomotion)
-            {
-                case LocomotionType.PassiveDrift:
-                case LocomotionType.Anchored:
-                    movementCost = 0f;
-                    break;
-                case LocomotionType.Amoeboid:
-                case LocomotionType.Flagellum:
-                    // Active locomotion energy cost is intentionally disabled while movement tuning is in flux.
-                    movementCost = 0f;
-                    break;
-                default:
-                    movementCost = 0f;
-                    break;
-            }
-            agent.energy -= (stressedBasal + movementCost);
-
-            if (agent.energy <= 0f)
-            {
-                RegisterDeathCause(agent.metabolism, ResolveEnergyDeathCause(agent));
-                DepositDeathOrganicC(agent); // make sure this deposits agent.organicCStore into environment OrganicC
-                agents.RemoveAt(i);
-            }
-        }
+        debugChemoTempSum = debugSnapshot.ChemoTempSum;
+        debugHydrogenTempSum = debugSnapshot.HydrogenTempSum;
+        debugPhotoTempSum = debugSnapshot.PhotoTempSum;
+        debugSaproTempSum = debugSnapshot.SaproTempSum;
+        debugChemoTempCount = debugSnapshot.ChemoTempCount;
+        debugHydrogenTempCount = debugSnapshot.HydrogenTempCount;
+        debugPhotoTempCount = debugSnapshot.PhotoTempCount;
+        debugSaproTempCount = debugSnapshot.SaproTempCount;
+        debugChemoStressedCount = debugSnapshot.ChemoStressedCount;
+        debugHydrogenStressedCount = debugSnapshot.HydrogenStressedCount;
+        debugPhotoStressedCount = debugSnapshot.PhotoStressedCount;
+        debugSaproStressedCount = debugSnapshot.SaproStressedCount;
     }
+
+
 
     void DepositDeathOrganicC(Replicator agent)
     {
