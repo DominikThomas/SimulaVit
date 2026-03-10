@@ -259,11 +259,11 @@ public class ReplicatorManager : MonoBehaviour
     [SerializeField] private float averageOrganicCStore;
     [SerializeField] private int divisionEligibleAgentCount;
     private readonly ReplicatorHudPresenter hudPresenter = new ReplicatorHudPresenter();
+    private readonly ReplicatorDebugTelemetry debugTelemetry = new ReplicatorDebugTelemetry();
     private bool isInitialized;
     private float spawnAttemptTimer;
     private bool firstSpontaneousSpawnHappened;
     private float metabolismTickTimer;
-    private float metabolismDebugLogTimer;
     private float debugChemoTempSum;
     private float debugHydrogenTempSum;
     private float debugPhotoTempSum;
@@ -303,10 +303,6 @@ public class ReplicatorManager : MonoBehaviour
 
     private readonly HashSet<int> pendingPredationRemovals = new HashSet<int>();
     private readonly List<int> predationRemovalBuffer = new List<int>(256);
-    private readonly Dictionary<Replicator, Vector3> sessileDebugPositions = new Dictionary<Replicator, Vector3>(512);
-    private readonly Dictionary<Replicator, float> sessileDebugTimers = new Dictionary<Replicator, float>(512);
-    private readonly HashSet<Replicator> sessileDebugSeen = new HashSet<Replicator>();
-    private readonly List<Replicator> staleSessileAgents = new List<Replicator>(128);
 
     // Reused job buffers to avoid per-frame NativeArray allocations.
     private NativeArray<Vector3> jobPositions;
@@ -649,50 +645,42 @@ public class ReplicatorManager : MonoBehaviour
 
     void LogMetabolismDebugThrottled()
     {
-        metabolismDebugLogTimer += Time.deltaTime;
-        if (metabolismDebugLogTimer < 3f)
-        {
-            return;
-        }
-
-        metabolismDebugLogTimer = 0f;
-        bool unlocked = planetGenerator != null && planetGenerator.PhotosynthesisUnlocked;
-
-        string sulfurTempText = FormatTemperatureDebug(debugChemoTempSum, debugChemoTempCount, debugChemoStressedCount);
-        string hydrogenTempText = FormatTemperatureDebug(debugHydrogenTempSum, debugHydrogenTempCount, debugHydrogenStressedCount);
-        string photoTempText = FormatTemperatureDebug(debugPhotoTempSum, debugPhotoTempCount, debugPhotoStressedCount);
-        string saproTempText = FormatTemperatureDebug(debugSaproTempSum, debugSaproTempCount, debugSaproStressedCount);
-
-
-        float meanH2 = 0f;
-        float maxH2 = 0f;
-        float meanH2S = 0f;
-        float maxH2S = 0f;
-        float avgVentH2S = 0f;
-        float avgVentH2 = 0f;
-        float avgOceanH2 = 0f;
-        float avgOceanH2S = 0f;
-        if (planetResourceMap != null)
-        {
-            planetResourceMap.GetVentChemistryStats(out meanH2, out maxH2, out meanH2S, out maxH2S);
-            if (debugVentPlumeDiagnostics)
-            {
-                planetResourceMap.GetVentPlumeDiagnostics(out avgVentH2S, out avgVentH2, out avgOceanH2, out avgOceanH2S);
-            }
-        }
-
-        string plumeDiagnostics = debugVentPlumeDiagnostics
-            ? $" plume[ventH2S={avgVentH2S:F3} ventH2={avgVentH2:F3} oceanH2={avgOceanH2:F3} oceanH2S={avgOceanH2S:F3}]"
-            : string.Empty;
-
-        Debug.Log(
-            $"Metabolism: sulfur={chemosynthAgentCount} hydrogen={hydrogenotrophAgentCount} photo={photosynthAgentCount} sapro={saprotrophAgentCount} predator={predatorAgentCount} " +
-            $"photoUnlocked={unlocked} saproUnlocked={IsSaprotrophyUnlocked()} " +
-            $"temp[sulfur:{sulfurTempText} hydrogen:{hydrogenTempText} photo:{photoTempText} sapro:{saproTempText}] avgOrganicC={averageOrganicCStore:F3} divisionEligible={divisionEligibleAgentCount} predKillsWindow={predationKillsWindow} avgToxicProteolyticWaste={avgToxicProteolyticWasteDebug:F3} avgDissolvedOrganicLeak={avgDissolvedOrganicLeakDebug:F3} " +
-            $"chem[h2Mean={meanH2:F3} h2Max={maxH2:F3} h2sMean={meanH2S:F3} h2sMax={maxH2S:F3}]" + plumeDiagnostics);
-        Debug.Log($"DeathCauses: sulfur[{FormatDeathCauseDistribution(chemoDeathCauseCounts)}] hydrogen[{FormatDeathCauseDistribution(hydrogenDeathCauseCounts)}] photo[{FormatDeathCauseDistribution(photoDeathCauseCounts)}] sapro[{FormatDeathCauseDistribution(saproDeathCauseCounts)}] predator[{FormatDeathCauseDistribution(predatorDeathCauseCounts)}]");
-        predationKillsWindow = 0;
-        ResetDeathCauseCounters();
+        debugTelemetry.LogMetabolismDebugThrottled(
+            planetGenerator,
+            planetResourceMap,
+            debugVentPlumeDiagnostics,
+            chemosynthAgentCount,
+            hydrogenotrophAgentCount,
+            photosynthAgentCount,
+            saprotrophAgentCount,
+            predatorAgentCount,
+            debugChemoTempSum,
+            debugChemoTempCount,
+            debugChemoStressedCount,
+            debugHydrogenTempSum,
+            debugHydrogenTempCount,
+            debugHydrogenStressedCount,
+            debugPhotoTempSum,
+            debugPhotoTempCount,
+            debugPhotoStressedCount,
+            debugSaproTempSum,
+            debugSaproTempCount,
+            debugSaproStressedCount,
+            averageOrganicCStore,
+            divisionEligibleAgentCount,
+            predationKillsWindow,
+            avgToxicProteolyticWasteDebug,
+            avgDissolvedOrganicLeakDebug,
+            chemoDeathCauseCounts,
+            hydrogenDeathCauseCounts,
+            photoDeathCauseCounts,
+            saproDeathCauseCounts,
+            predatorDeathCauseCounts,
+            temperatureDisplayUnit,
+            IsSaprotrophyUnlocked,
+            FormatDeathCauseDistribution,
+            () => predationKillsWindow = 0,
+            ResetDeathCauseCounters);
     }
 
 
@@ -852,17 +840,6 @@ public class ReplicatorManager : MonoBehaviour
         return deprived ? (current + dt) : 0f;
     }
 
-    string FormatTemperatureDebug(float tempSum, int count, int stressedCount)
-    {
-        if (count <= 0)
-        {
-            return "n/a";
-        }
-
-        float averageTemp = tempSum / count;
-        float stressedFraction = (float)stressedCount / count;
-        return $"avg={FormatTemperature(averageTemp, temperatureDisplayUnit)},stressed={stressedFraction:P0}";
-    }
     public static float KelvinToCelsius(float k) => k - 273.15f;
 
     public static float KelvinToFahrenheit(float k) => (k - 273.15f) * 9f / 5f + 32f;
@@ -1476,75 +1453,14 @@ public class ReplicatorManager : MonoBehaviour
 
     void ValidateSessileMovement()
     {
-        if (!debugSessileMovement)
-        {
-            return;
-        }
-
-        float window = Mathf.Max(0.5f, debugSessileMovementWindowSeconds);
-        float epsilon = Mathf.Max(0.00001f, debugSessileMovementEpsilon);
-        float epsilonSqr = epsilon * epsilon;
-        sessileDebugSeen.Clear();
-
-        for (int i = 0; i < agents.Count; i++)
-        {
-            Replicator agent = agents[i];
-            if (agent.locomotion != LocomotionType.Anchored)
-            {
-                sessileDebugPositions.Remove(agent);
-                sessileDebugTimers.Remove(agent);
-                continue;
-            }
-
-            sessileDebugSeen.Add(agent);
-
-            if (!sessileDebugPositions.TryGetValue(agent, out Vector3 baseline))
-            {
-                sessileDebugPositions[agent] = agent.position;
-                sessileDebugTimers[agent] = 0f;
-                continue;
-            }
-
-            float timer = sessileDebugTimers.TryGetValue(agent, out float existingTimer) ? existingTimer : 0f;
-            timer += Time.deltaTime;
-
-            if (timer < window)
-            {
-                sessileDebugTimers[agent] = timer;
-                continue;
-            }
-
-            float distanceSqr = (agent.position - baseline).sqrMagnitude;
-            if (distanceSqr > epsilonSqr)
-            {
-                Debug.LogWarning($"Anchored replicator drift detected. moved={Mathf.Sqrt(distanceSqr):F6} (> {epsilon:F6}) over {timer:F2}s", this);
-            }
-
-            sessileDebugPositions[agent] = agent.position;
-            sessileDebugTimers[agent] = 0f;
-        }
-
-        if (sessileDebugPositions.Count > sessileDebugSeen.Count)
-        {
-            staleSessileAgents.Clear();
-            foreach (Replicator tracked in sessileDebugPositions.Keys)
-            {
-                if (sessileDebugSeen.Contains(tracked))
-                {
-                    continue;
-                }
-
-                staleSessileAgents.Add(tracked);
-            }
-
-            for (int i = 0; i < staleSessileAgents.Count; i++)
-            {
-                Replicator tracked = staleSessileAgents[i];
-                sessileDebugPositions.Remove(tracked);
-                sessileDebugTimers.Remove(tracked);
-            }
-        }
+        debugTelemetry.ValidateSessileMovement(
+            debugSessileMovement,
+            debugSessileMovementWindowSeconds,
+            debugSessileMovementEpsilon,
+            agents,
+            this);
     }
+
 
     void ApplyAmoeboidRunNoise(Replicator agent, float now)
     {
