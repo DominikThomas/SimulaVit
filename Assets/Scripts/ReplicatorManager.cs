@@ -258,17 +258,11 @@ public class ReplicatorManager : MonoBehaviour
     [SerializeField] private int predatorAgentCount;
     [SerializeField] private float averageOrganicCStore;
     [SerializeField] private int divisionEligibleAgentCount;
-    private GUIStyle hudStyle;
-    private GUIStyle hudBackgroundStyle;
-    private float hudMeanTempKelvin;
-    private float hudMinTempKelvin;
-    private float hudMaxTempKelvin;
-    private float nextHudTempSampleTime;
+    private readonly ReplicatorHudPresenter hudPresenter = new ReplicatorHudPresenter();
+    private readonly ReplicatorDebugTelemetry debugTelemetry = new ReplicatorDebugTelemetry();
     private bool isInitialized;
-    private float spawnAttemptTimer;
-    private bool firstSpontaneousSpawnHappened;
+    private readonly ReplicatorSpawnSystem spawnSystem = new ReplicatorSpawnSystem();
     private float metabolismTickTimer;
-    private float metabolismDebugLogTimer;
     private float debugChemoTempSum;
     private float debugHydrogenTempSum;
     private float debugPhotoTempSum;
@@ -308,18 +302,6 @@ public class ReplicatorManager : MonoBehaviour
 
     private readonly HashSet<int> pendingPredationRemovals = new HashSet<int>();
     private readonly List<int> predationRemovalBuffer = new List<int>(256);
-    private readonly Dictionary<Replicator, Vector3> sessileDebugPositions = new Dictionary<Replicator, Vector3>(512);
-    private readonly Dictionary<Replicator, float> sessileDebugTimers = new Dictionary<Replicator, float>(512);
-    private readonly HashSet<Replicator> sessileDebugSeen = new HashSet<Replicator>();
-    private readonly List<Replicator> staleSessileAgents = new List<Replicator>(128);
-
-    // Reused HUD counters to avoid per-frame allocations in OnGUI.
-    private readonly int[] totalByLocomotion = new int[4];
-    private readonly int[] chemosynthByLocomotion = new int[4];
-    private readonly int[] hydrogenByLocomotion = new int[4];
-    private readonly int[] photosynthByLocomotion = new int[4];
-    private readonly int[] saprotrophByLocomotion = new int[4];
-    private readonly int[] predatorByLocomotion = new int[4];
 
     // Reused job buffers to avoid per-frame NativeArray allocations.
     private NativeArray<Vector3> jobPositions;
@@ -607,167 +589,15 @@ public class ReplicatorManager : MonoBehaviour
             return;
         }
 
-        EnsureHudStyles();
-
-        int totalAgents = agents.Count;
-        Array.Clear(totalByLocomotion, 0, totalByLocomotion.Length);
-        Array.Clear(chemosynthByLocomotion, 0, chemosynthByLocomotion.Length);
-        Array.Clear(hydrogenByLocomotion, 0, hydrogenByLocomotion.Length);
-        Array.Clear(photosynthByLocomotion, 0, photosynthByLocomotion.Length);
-        Array.Clear(saprotrophByLocomotion, 0, saprotrophByLocomotion.Length);
-        Array.Clear(predatorByLocomotion, 0, predatorByLocomotion.Length);
-
-        for (int i = 0; i < agents.Count; i++)
-        {
-            int locomotionIndex = Mathf.Clamp((int)agents[i].locomotion, 0, totalByLocomotion.Length - 1);
-            totalByLocomotion[locomotionIndex]++;
-
-            if (agents[i].metabolism == MetabolismType.Hydrogenotrophy)
-            {
-                hydrogenByLocomotion[locomotionIndex]++;
-            }
-            else if (agents[i].metabolism == MetabolismType.Photosynthesis)
-            {
-                photosynthByLocomotion[locomotionIndex]++;
-            }
-            else if (agents[i].metabolism == MetabolismType.Saprotrophy)
-            {
-                saprotrophByLocomotion[locomotionIndex]++;
-            }
-            else if (agents[i].metabolism == MetabolismType.Predation)
-            {
-                predatorByLocomotion[locomotionIndex]++;
-            }
-            else
-            {
-                chemosynthByLocomotion[locomotionIndex]++;
-            }
-        }
-
-        float globalCo2 = planetResourceMap != null ? planetResourceMap.debugGlobalCO2 : 0f;
-        float globalO2 = planetResourceMap != null ? planetResourceMap.debugGlobalO2 : 0f;
-        float atmosphereTotal = Mathf.Max(0.0001f, globalCo2 + globalO2);
-        float co2Pct = (globalCo2 / atmosphereTotal) * 100f;
-        float o2Pct = (globalO2 / atmosphereTotal) * 100f;
-
-        SampleHudTemperatureStats();
-
-        string atmosphereText =
-            "Atmosphere (global average)\n" +
-            $"CO2: {globalCo2:0.000} ({co2Pct:0.0}%)\n" +
-            $"O2: {globalO2:0.000} ({o2Pct:0.0}%)\n" +
-            $"Temp Mean: {FormatTemperature(hudMeanTempKelvin, temperatureDisplayUnit)}\n" +
-            $"Temp Min: {FormatTemperature(hudMinTempKelvin, temperatureDisplayUnit)}\n" +
-            $"Temp Max: {FormatTemperature(hudMaxTempKelvin, temperatureDisplayUnit)}";
-
-        string FormatLocomotionCounts(int[] counts)
-        {
-            return $"{counts[0]}/{counts[1]}/{counts[2]}/{counts[3]}";
-        }
-
-        float safeTotal = Mathf.Max(1f, totalAgents);
-        string replicatorsText =
-            "Replicators (Passive/Amoeboid/Flagellum/Anchored)\n" +
-            $"Total: {FormatLocomotionCounts(totalByLocomotion)}\n" +
-            $"<color=#D9FFFF>Hydrogen:</color> {FormatLocomotionCounts(hydrogenByLocomotion)} ({(100f * hydrogenotrophAgentCount / safeTotal):0.0}%)";
-
-        if (chemosynthAgentCount > 0)
-        {
-            replicatorsText += $"\n<color=#FFD54A>Sulfur:</color> {FormatLocomotionCounts(chemosynthByLocomotion)} ({(100f * chemosynthAgentCount / safeTotal):0.0}%)";
-        }
-        if (photosynthAgentCount > 0)
-        {
-            replicatorsText += $"\n<color=#79E07E>Photo:</color> {FormatLocomotionCounts(photosynthByLocomotion)} ({(100f * photosynthAgentCount / safeTotal):0.0}%)";
-        }
-        if (saprotrophAgentCount > 0)
-        {
-            replicatorsText += $"\n<color=#62B0FF>Sapro:</color> {FormatLocomotionCounts(saprotrophByLocomotion)} ({(100f * saprotrophAgentCount / safeTotal):0.0}%)";
-        }
-        if (predatorAgentCount > 0)
-        {
-            replicatorsText += $"\n<color=#FF5A5A>Predator:</color> {FormatLocomotionCounts(predatorByLocomotion)} ({(100f * predatorAgentCount / safeTotal):0.0}%)";
-        }
-        const float panelWidth = 250f;
-        const float padding = 8f;
-        const float lineHeight = 20f;
-        float rightX = Screen.width - panelWidth - padding;
-
-        float atmosphereHeight = (atmosphereText.Split('\n').Length * lineHeight) + (padding * 2f) - 35;
-        float replicatorHeight = (replicatorsText.Split('\n').Length * lineHeight) + (padding * 2f);
-
-        Rect atmosphereRect = new Rect(rightX, padding, panelWidth, atmosphereHeight);
-        GUI.Box(atmosphereRect, GUIContent.none, hudBackgroundStyle);
-        GUI.Label(new Rect(atmosphereRect.x + padding, atmosphereRect.y + padding, panelWidth - 2f * padding, atmosphereHeight - 2f * padding), atmosphereText, hudStyle);
-
-        Rect tempUnitButtonRect = new Rect(rightX, atmosphereRect.yMax + 4f, panelWidth, lineHeight);
-        if (GUI.Button(tempUnitButtonRect, $"Temp Unit: {GetTemperatureUnitLabel(temperatureDisplayUnit)}"))
-        {
-            temperatureDisplayUnit = (TemperatureDisplayUnit)(((int)temperatureDisplayUnit + 1) % Enum.GetValues(typeof(TemperatureDisplayUnit)).Length);
-        }
-
-        Rect replicatorRect = new Rect(rightX, Screen.height - replicatorHeight - padding, panelWidth, replicatorHeight);
-        GUI.Box(replicatorRect, GUIContent.none, hudBackgroundStyle);
-        GUI.Label(new Rect(replicatorRect.x + padding, replicatorRect.y + padding, panelWidth - 2f * padding, replicatorHeight - 2f * padding), replicatorsText, hudStyle);
-    }
-
-    void SampleHudTemperatureStats()
-    {
-        if (planetResourceMap == null)
-        {
-            hudMeanTempKelvin = 0f;
-            hudMinTempKelvin = 0f;
-            hudMaxTempKelvin = 0f;
-            return;
-        }
-
-        if (Time.timeSinceLevelLoad < nextHudTempSampleTime)
-        {
-            return;
-        }
-
-        nextHudTempSampleTime = Time.timeSinceLevelLoad + 0.5f;
-        planetResourceMap.GetTemperatureStats(out hudMeanTempKelvin, out hudMinTempKelvin, out hudMaxTempKelvin);
-    }
-
-    static string GetTemperatureUnitLabel(TemperatureDisplayUnit unit)
-    {
-        switch (unit)
-        {
-            case TemperatureDisplayUnit.Kelvin: return "K";
-            case TemperatureDisplayUnit.Fahrenheit: return "°F";
-            default: return "°C";
-        }
-    }
-
-    void EnsureHudStyles()
-    {
-        if (hudStyle != null && hudBackgroundStyle != null)
-        {
-            return;
-        }
-
-        hudStyle = new GUIStyle(GUI.skin.label)
-        {
-            fontSize = 12,
-            richText = true,
-            alignment = TextAnchor.UpperLeft,
-            normal =
-            {
-                textColor = Color.white
-            }
-        };
-
-        Texture2D backgroundTexture = new Texture2D(1, 1);
-        backgroundTexture.SetPixel(0, 0, new Color(0f, 0f, 0f, 0.55f));
-        backgroundTexture.Apply();
-
-        hudBackgroundStyle = new GUIStyle(GUI.skin.box)
-        {
-            normal =
-            {
-                background = backgroundTexture
-            }
-        };
+        hudPresenter.Draw(
+            agents,
+            planetResourceMap,
+            chemosynthAgentCount,
+            hydrogenotrophAgentCount,
+            photosynthAgentCount,
+            saprotrophAgentCount,
+            predatorAgentCount,
+            ref temperatureDisplayUnit);
     }
 
 
@@ -814,50 +644,42 @@ public class ReplicatorManager : MonoBehaviour
 
     void LogMetabolismDebugThrottled()
     {
-        metabolismDebugLogTimer += Time.deltaTime;
-        if (metabolismDebugLogTimer < 3f)
-        {
-            return;
-        }
-
-        metabolismDebugLogTimer = 0f;
-        bool unlocked = planetGenerator != null && planetGenerator.PhotosynthesisUnlocked;
-
-        string sulfurTempText = FormatTemperatureDebug(debugChemoTempSum, debugChemoTempCount, debugChemoStressedCount);
-        string hydrogenTempText = FormatTemperatureDebug(debugHydrogenTempSum, debugHydrogenTempCount, debugHydrogenStressedCount);
-        string photoTempText = FormatTemperatureDebug(debugPhotoTempSum, debugPhotoTempCount, debugPhotoStressedCount);
-        string saproTempText = FormatTemperatureDebug(debugSaproTempSum, debugSaproTempCount, debugSaproStressedCount);
-
-
-        float meanH2 = 0f;
-        float maxH2 = 0f;
-        float meanH2S = 0f;
-        float maxH2S = 0f;
-        float avgVentH2S = 0f;
-        float avgVentH2 = 0f;
-        float avgOceanH2 = 0f;
-        float avgOceanH2S = 0f;
-        if (planetResourceMap != null)
-        {
-            planetResourceMap.GetVentChemistryStats(out meanH2, out maxH2, out meanH2S, out maxH2S);
-            if (debugVentPlumeDiagnostics)
-            {
-                planetResourceMap.GetVentPlumeDiagnostics(out avgVentH2S, out avgVentH2, out avgOceanH2, out avgOceanH2S);
-            }
-        }
-
-        string plumeDiagnostics = debugVentPlumeDiagnostics
-            ? $" plume[ventH2S={avgVentH2S:F3} ventH2={avgVentH2:F3} oceanH2={avgOceanH2:F3} oceanH2S={avgOceanH2S:F3}]"
-            : string.Empty;
-
-        Debug.Log(
-            $"Metabolism: sulfur={chemosynthAgentCount} hydrogen={hydrogenotrophAgentCount} photo={photosynthAgentCount} sapro={saprotrophAgentCount} predator={predatorAgentCount} " +
-            $"photoUnlocked={unlocked} saproUnlocked={IsSaprotrophyUnlocked()} " +
-            $"temp[sulfur:{sulfurTempText} hydrogen:{hydrogenTempText} photo:{photoTempText} sapro:{saproTempText}] avgOrganicC={averageOrganicCStore:F3} divisionEligible={divisionEligibleAgentCount} predKillsWindow={predationKillsWindow} avgToxicProteolyticWaste={avgToxicProteolyticWasteDebug:F3} avgDissolvedOrganicLeak={avgDissolvedOrganicLeakDebug:F3} " +
-            $"chem[h2Mean={meanH2:F3} h2Max={maxH2:F3} h2sMean={meanH2S:F3} h2sMax={maxH2S:F3}]" + plumeDiagnostics);
-        Debug.Log($"DeathCauses: sulfur[{FormatDeathCauseDistribution(chemoDeathCauseCounts)}] hydrogen[{FormatDeathCauseDistribution(hydrogenDeathCauseCounts)}] photo[{FormatDeathCauseDistribution(photoDeathCauseCounts)}] sapro[{FormatDeathCauseDistribution(saproDeathCauseCounts)}] predator[{FormatDeathCauseDistribution(predatorDeathCauseCounts)}]");
-        predationKillsWindow = 0;
-        ResetDeathCauseCounters();
+        debugTelemetry.LogMetabolismDebugThrottled(
+            planetGenerator,
+            planetResourceMap,
+            debugVentPlumeDiagnostics,
+            chemosynthAgentCount,
+            hydrogenotrophAgentCount,
+            photosynthAgentCount,
+            saprotrophAgentCount,
+            predatorAgentCount,
+            debugChemoTempSum,
+            debugChemoTempCount,
+            debugChemoStressedCount,
+            debugHydrogenTempSum,
+            debugHydrogenTempCount,
+            debugHydrogenStressedCount,
+            debugPhotoTempSum,
+            debugPhotoTempCount,
+            debugPhotoStressedCount,
+            debugSaproTempSum,
+            debugSaproTempCount,
+            debugSaproStressedCount,
+            averageOrganicCStore,
+            divisionEligibleAgentCount,
+            predationKillsWindow,
+            avgToxicProteolyticWasteDebug,
+            avgDissolvedOrganicLeakDebug,
+            chemoDeathCauseCounts,
+            hydrogenDeathCauseCounts,
+            photoDeathCauseCounts,
+            saproDeathCauseCounts,
+            predatorDeathCauseCounts,
+            temperatureDisplayUnit,
+            IsSaprotrophyUnlocked,
+            FormatDeathCauseDistribution,
+            () => predationKillsWindow = 0,
+            ResetDeathCauseCounters);
     }
 
 
@@ -1017,17 +839,6 @@ public class ReplicatorManager : MonoBehaviour
         return deprived ? (current + dt) : 0f;
     }
 
-    string FormatTemperatureDebug(float tempSum, int count, int stressedCount)
-    {
-        if (count <= 0)
-        {
-            return "n/a";
-        }
-
-        float averageTemp = tempSum / count;
-        float stressedFraction = (float)stressedCount / count;
-        return $"avg={FormatTemperature(averageTemp, temperatureDisplayUnit)},stressed={stressedFraction:P0}";
-    }
     public static float KelvinToCelsius(float k) => k - 273.15f;
 
     public static float KelvinToFahrenheit(float k) => (k - 273.15f) * 9f / 5f + 32f;
@@ -1047,46 +858,24 @@ public class ReplicatorManager : MonoBehaviour
 
     void HandleSpontaneousSpawning()
     {
-        if (!enableSpontaneousSpawning) return;
-
-        if (!firstSpontaneousSpawnHappened && Time.timeSinceLevelLoad >= guaranteedFirstSpawnWithinSeconds)
-        {
-            if (SpawnAgentAtRandomLocation())
-            {
-                firstSpontaneousSpawnHappened = true;
-            }
-        }
-
-        float interval = Mathf.Max(0.05f, spawnAttemptInterval);
-        spawnAttemptTimer += Time.deltaTime;
-
-        while (spawnAttemptTimer >= interval)
-        {
-            spawnAttemptTimer -= interval;
-
-            if (TryRandomSpontaneousSpawn())
-            {
-                firstSpontaneousSpawnHappened = true;
-            }
-        }
+        spawnSystem.HandleSpontaneousSpawning(
+            enableSpontaneousSpawning,
+            guaranteedFirstSpawnWithinSeconds,
+            spawnAttemptInterval,
+            SpawnAgentAtRandomLocation,
+            TryRandomSpontaneousSpawn);
     }
 
     bool TryRandomSpontaneousSpawn()
     {
-        if (agents.Count >= maxPopulation) return false;
-
-        Vector3 randomDir = GetSpawnDirectionCandidate();
-        bool isSeaLocation = IsSeaLocation(randomDir);
-
-        float locationMultiplier = GetLocationSpawnMultiplier(isSeaLocation);
-        float spawnChance = Mathf.Clamp01(spontaneousSpawnChance * locationMultiplier);
-
-        if (UnityEngine.Random.value >= spawnChance)
-        {
-            return false;
-        }
-
-        return SpawnAgentAtDirection(randomDir, CreateDefaultTraits(), null, MetabolismType.Hydrogenotrophy, LocomotionType.PassiveDrift, 0f, out _);
+        return spawnSystem.TryRandomSpontaneousSpawn(
+            agents.Count,
+            maxPopulation,
+            spontaneousSpawnChance,
+            GetSpawnDirectionCandidate,
+            IsSeaLocation,
+            GetLocationSpawnMultiplier,
+            direction => SpawnAgentAtDirection(direction, CreateDefaultTraits(), null, MetabolismType.Hydrogenotrophy, LocomotionType.PassiveDrift, 0f, out _));
     }
 
 
@@ -1641,75 +1430,14 @@ public class ReplicatorManager : MonoBehaviour
 
     void ValidateSessileMovement()
     {
-        if (!debugSessileMovement)
-        {
-            return;
-        }
-
-        float window = Mathf.Max(0.5f, debugSessileMovementWindowSeconds);
-        float epsilon = Mathf.Max(0.00001f, debugSessileMovementEpsilon);
-        float epsilonSqr = epsilon * epsilon;
-        sessileDebugSeen.Clear();
-
-        for (int i = 0; i < agents.Count; i++)
-        {
-            Replicator agent = agents[i];
-            if (agent.locomotion != LocomotionType.Anchored)
-            {
-                sessileDebugPositions.Remove(agent);
-                sessileDebugTimers.Remove(agent);
-                continue;
-            }
-
-            sessileDebugSeen.Add(agent);
-
-            if (!sessileDebugPositions.TryGetValue(agent, out Vector3 baseline))
-            {
-                sessileDebugPositions[agent] = agent.position;
-                sessileDebugTimers[agent] = 0f;
-                continue;
-            }
-
-            float timer = sessileDebugTimers.TryGetValue(agent, out float existingTimer) ? existingTimer : 0f;
-            timer += Time.deltaTime;
-
-            if (timer < window)
-            {
-                sessileDebugTimers[agent] = timer;
-                continue;
-            }
-
-            float distanceSqr = (agent.position - baseline).sqrMagnitude;
-            if (distanceSqr > epsilonSqr)
-            {
-                Debug.LogWarning($"Anchored replicator drift detected. moved={Mathf.Sqrt(distanceSqr):F6} (> {epsilon:F6}) over {timer:F2}s", this);
-            }
-
-            sessileDebugPositions[agent] = agent.position;
-            sessileDebugTimers[agent] = 0f;
-        }
-
-        if (sessileDebugPositions.Count > sessileDebugSeen.Count)
-        {
-            staleSessileAgents.Clear();
-            foreach (Replicator tracked in sessileDebugPositions.Keys)
-            {
-                if (sessileDebugSeen.Contains(tracked))
-                {
-                    continue;
-                }
-
-                staleSessileAgents.Add(tracked);
-            }
-
-            for (int i = 0; i < staleSessileAgents.Count; i++)
-            {
-                Replicator tracked = staleSessileAgents[i];
-                sessileDebugPositions.Remove(tracked);
-                sessileDebugTimers.Remove(tracked);
-            }
-        }
+        debugTelemetry.ValidateSessileMovement(
+            debugSessileMovement,
+            debugSessileMovementWindowSeconds,
+            debugSessileMovementEpsilon,
+            agents,
+            this);
     }
+
 
     void ApplyAmoeboidRunNoise(Replicator agent, float now)
     {
