@@ -261,8 +261,7 @@ public class ReplicatorManager : MonoBehaviour
     private readonly ReplicatorHudPresenter hudPresenter = new ReplicatorHudPresenter();
     private readonly ReplicatorDebugTelemetry debugTelemetry = new ReplicatorDebugTelemetry();
     private bool isInitialized;
-    private float spawnAttemptTimer;
-    private bool firstSpontaneousSpawnHappened;
+    private readonly ReplicatorSpawnSystem spawnSystem = new ReplicatorSpawnSystem();
     private float metabolismTickTimer;
     private float debugChemoTempSum;
     private float debugHydrogenTempSum;
@@ -859,46 +858,24 @@ public class ReplicatorManager : MonoBehaviour
 
     void HandleSpontaneousSpawning()
     {
-        if (!enableSpontaneousSpawning) return;
-
-        if (!firstSpontaneousSpawnHappened && Time.timeSinceLevelLoad >= guaranteedFirstSpawnWithinSeconds)
-        {
-            if (SpawnAgentAtRandomLocation())
-            {
-                firstSpontaneousSpawnHappened = true;
-            }
-        }
-
-        float interval = Mathf.Max(0.05f, spawnAttemptInterval);
-        spawnAttemptTimer += Time.deltaTime;
-
-        while (spawnAttemptTimer >= interval)
-        {
-            spawnAttemptTimer -= interval;
-
-            if (TryRandomSpontaneousSpawn())
-            {
-                firstSpontaneousSpawnHappened = true;
-            }
-        }
+        spawnSystem.HandleSpontaneousSpawning(
+            enableSpontaneousSpawning,
+            guaranteedFirstSpawnWithinSeconds,
+            spawnAttemptInterval,
+            SpawnAgentAtRandomLocation,
+            TryRandomSpontaneousSpawn);
     }
 
     bool TryRandomSpontaneousSpawn()
     {
-        if (agents.Count >= maxPopulation) return false;
-
-        Vector3 randomDir = GetSpawnDirectionCandidate();
-        bool isSeaLocation = IsSeaLocation(randomDir);
-
-        float locationMultiplier = GetLocationSpawnMultiplier(isSeaLocation);
-        float spawnChance = Mathf.Clamp01(spontaneousSpawnChance * locationMultiplier);
-
-        if (UnityEngine.Random.value >= spawnChance)
-        {
-            return false;
-        }
-
-        return SpawnAgentAtDirection(randomDir, CreateDefaultTraits(), null, MetabolismType.Hydrogenotrophy, LocomotionType.PassiveDrift, 0f, out _);
+        return spawnSystem.TryRandomSpontaneousSpawn(
+            agents.Count,
+            maxPopulation,
+            spontaneousSpawnChance,
+            GetSpawnDirectionCandidate,
+            IsSeaLocation,
+            GetLocationSpawnMultiplier,
+            direction => SpawnAgentAtDirection(direction, CreateDefaultTraits(), null, MetabolismType.Hydrogenotrophy, LocomotionType.PassiveDrift, 0f, out _));
     }
 
 
@@ -2163,16 +2140,7 @@ public class ReplicatorManager : MonoBehaviour
         MetabolismType childMetabolism = parent.metabolism;
         if (UnityEngine.Random.value < Mathf.Clamp01(metabolismMutationChance))
         {
-            if (parent.metabolism == MetabolismType.SulfurChemosynthesis)
-            {
-                if (planetGenerator != null
-                    && planetGenerator.PhotosynthesisUnlocked
-                    && IsInsolatedLocation(parent.currentDirection))
-                {
-                    childMetabolism = MetabolismType.Photosynthesis;
-                }
-            }
-            else if (parent.metabolism == MetabolismType.Hydrogenotrophy)
+            if (parent.metabolism == MetabolismType.Hydrogenotrophy)
             {
                 if (planetGenerator != null
                     && planetGenerator.PhotosynthesisUnlocked
