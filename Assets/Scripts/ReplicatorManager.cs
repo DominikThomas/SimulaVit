@@ -1512,6 +1512,15 @@ public class ReplicatorManager : MonoBehaviour
         float tick = Mathf.Max(0.01f, metabolismTickSeconds);
         metabolismTickTimer += Time.deltaTime;
 
+        while (metabolismTickTimer >= tick)
+        {
+            metabolismTickTimer -= tick;
+            MetabolismTick(tick);
+        }
+    }
+
+    void MetabolismTick(float dtTick)
+    {
         var settings = new ReplicatorMetabolismSystem.Settings
         {
             BasalEnergyCostPerSecond = basalEnergyCostPerSecond,
@@ -1540,33 +1549,29 @@ public class ReplicatorManager : MonoBehaviour
             MinSpeedFactor = minSpeedFactor
         };
 
-        while (metabolismTickTimer >= tick)
-        {
-            metabolismTickTimer -= tick;
-            metabolismSystem.MetabolismTick(
-                agents,
-                planetGenerator,
-                planetResourceMap,
-                settings,
-                tick,
-                ResolveEnergyDeathCause,
-                DepositDeathOrganicC,
-                RegisterDeathCause,
-                out ReplicatorMetabolismSystem.DebugSnapshot debugSnapshot);
+        metabolismSystem.MetabolismTick(
+            agents,
+            planetGenerator,
+            planetResourceMap,
+            settings,
+            dtTick,
+            ResolveEnergyDeathCause,
+            DepositDeathOrganicC,
+            RegisterDeathCause,
+            out ReplicatorMetabolismSystem.DebugSnapshot debugSnapshot);
 
-            debugChemoTempSum = debugSnapshot.ChemoTempSum;
-            debugHydrogenTempSum = debugSnapshot.HydrogenTempSum;
-            debugPhotoTempSum = debugSnapshot.PhotoTempSum;
-            debugSaproTempSum = debugSnapshot.SaproTempSum;
-            debugChemoTempCount = debugSnapshot.ChemoTempCount;
-            debugHydrogenTempCount = debugSnapshot.HydrogenTempCount;
-            debugPhotoTempCount = debugSnapshot.PhotoTempCount;
-            debugSaproTempCount = debugSnapshot.SaproTempCount;
-            debugChemoStressedCount = debugSnapshot.ChemoStressedCount;
-            debugHydrogenStressedCount = debugSnapshot.HydrogenStressedCount;
-            debugPhotoStressedCount = debugSnapshot.PhotoStressedCount;
-            debugSaproStressedCount = debugSnapshot.SaproStressedCount;
-        }
+        debugChemoTempSum = debugSnapshot.ChemoTempSum;
+        debugHydrogenTempSum = debugSnapshot.HydrogenTempSum;
+        debugPhotoTempSum = debugSnapshot.PhotoTempSum;
+        debugSaproTempSum = debugSnapshot.SaproTempSum;
+        debugChemoTempCount = debugSnapshot.ChemoTempCount;
+        debugHydrogenTempCount = debugSnapshot.HydrogenTempCount;
+        debugPhotoTempCount = debugSnapshot.PhotoTempCount;
+        debugSaproTempCount = debugSnapshot.SaproTempCount;
+        debugChemoStressedCount = debugSnapshot.ChemoStressedCount;
+        debugHydrogenStressedCount = debugSnapshot.HydrogenStressedCount;
+        debugPhotoStressedCount = debugSnapshot.PhotoStressedCount;
+        debugSaproStressedCount = debugSnapshot.SaproStressedCount;
     }
 
 
