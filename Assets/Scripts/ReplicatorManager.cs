@@ -242,6 +242,9 @@ public class ReplicatorManager : MonoBehaviour
     [Header("HUD")]
     [Tooltip("Draw a small runtime overlay with population and atmosphere stats.")]
     public bool showSimulationHud = true;
+    [Header("Runtime Simulation Timing")]
+    [SerializeField] private float runtimeSpeedMultiplier = 1f;
+    [SerializeField] private int runtimeSimulationStepsPerFrame = 1;
     [Header("Locomotion Debug")]
     public bool enableRunAndTumbleDebug = false;
     public float runAndTumbleDebugWindowSeconds = 2f;
@@ -249,6 +252,16 @@ public class ReplicatorManager : MonoBehaviour
     public bool debugSessileMovement = false;
     [Range(0.5f, 30f)] public float debugSessileMovementWindowSeconds = 3f;
     [Range(0.00001f, 0.1f)] public float debugSessileMovementEpsilon = 0.001f;
+
+    public float RuntimeSpeedMultiplier => runtimeSpeedMultiplier;
+    public int RuntimeSimulationStepsPerFrame => runtimeSimulationStepsPerFrame;
+
+    public void SetSimulationTiming(float speedMultiplier, int stepsPerFrame)
+    {
+        runtimeSpeedMultiplier = Mathf.Max(0f, speedMultiplier);
+        runtimeSimulationStepsPerFrame = Mathf.Max(0, stepsPerFrame);
+    }
+
     private List<Replicator> agents = new List<Replicator>();
 
     [SerializeField] private int chemosynthAgentCount;
