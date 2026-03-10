@@ -2140,16 +2140,7 @@ public class ReplicatorManager : MonoBehaviour
         MetabolismType childMetabolism = parent.metabolism;
         if (UnityEngine.Random.value < Mathf.Clamp01(metabolismMutationChance))
         {
-            if (parent.metabolism == MetabolismType.SulfurChemosynthesis)
-            {
-                if (planetGenerator != null
-                    && planetGenerator.PhotosynthesisUnlocked
-                    && IsInsolatedLocation(parent.currentDirection))
-                {
-                    childMetabolism = MetabolismType.Photosynthesis;
-                }
-            }
-            else if (parent.metabolism == MetabolismType.Hydrogenotrophy)
+            if (parent.metabolism == MetabolismType.Hydrogenotrophy)
             {
                 if (planetGenerator != null
                     && planetGenerator.PhotosynthesisUnlocked
