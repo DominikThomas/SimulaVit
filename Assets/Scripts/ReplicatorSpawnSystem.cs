@@ -3,6 +3,7 @@ using UnityEngine;
 
 public class ReplicatorSpawnSystem
 {
+    private float simulationElapsedSeconds;
     private float spawnAttemptTimer;
     private bool firstSpontaneousSpawnHappened;
 
@@ -10,6 +11,7 @@ public class ReplicatorSpawnSystem
         bool enableSpontaneousSpawning,
         float guaranteedFirstSpawnWithinSeconds,
         float spawnAttemptInterval,
+        float simulationDeltaSeconds,
         Func<bool> tryGuaranteedSpawn,
         Func<bool> tryRandomSpontaneousSpawn)
     {
@@ -18,7 +20,10 @@ public class ReplicatorSpawnSystem
             return;
         }
 
-        if (!firstSpontaneousSpawnHappened && Time.timeSinceLevelLoad >= guaranteedFirstSpawnWithinSeconds)
+        float stepSimulationSeconds = Mathf.Max(0f, simulationDeltaSeconds);
+        simulationElapsedSeconds += stepSimulationSeconds;
+
+        if (!firstSpontaneousSpawnHappened && simulationElapsedSeconds >= guaranteedFirstSpawnWithinSeconds)
         {
             if (tryGuaranteedSpawn())
             {
@@ -27,7 +32,7 @@ public class ReplicatorSpawnSystem
         }
 
         float interval = Mathf.Max(0.05f, spawnAttemptInterval);
-        spawnAttemptTimer += Time.deltaTime;
+        spawnAttemptTimer += stepSimulationSeconds;
 
         while (spawnAttemptTimer >= interval)
         {
