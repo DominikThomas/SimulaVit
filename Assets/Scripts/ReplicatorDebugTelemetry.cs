@@ -88,6 +88,8 @@ public class ReplicatorDebugTelemetry
             $"temp[hydrogen:{hydrogenTempText} sulfur:{sulfurTempText} photo:{photoTempText} sapro:{saproTempText}] avgOrganicC={averageOrganicCStore:F3} divisionEligible={divisionEligibleAgentCount} predKillsWindow={predationKillsWindow} avgToxicProteolyticWaste={avgToxicProteolyticWasteDebug:F3} avgDissolvedOrganicLeak={avgDissolvedOrganicLeakDebug:F3} " +
             $"chem[h2Mean={meanH2:F3} h2Max={maxH2:F3} h2sMean={meanH2S:F3} h2sMax={maxH2S:F3}]" + plumeDiagnostics);
         Debug.Log($"DeathCauses: hydrogen[{formatDeathCauseDistribution(hydrogenDeathCauseCounts)}] sulfur[{formatDeathCauseDistribution(chemoDeathCauseCounts)}] photo[{formatDeathCauseDistribution(photoDeathCauseCounts)}] sapro[{formatDeathCauseDistribution(saproDeathCauseCounts)}] predator[{formatDeathCauseDistribution(predatorDeathCauseCounts)}]");
+        Debug.Log($"Atmosphere composition: CO2[{planetResourceMap.debugGlobalCO2}], O2[{planetResourceMap.debugGlobalO2}] ");
+
         resetPredationKillsWindow();
         resetDeathCauseCounters();
     }
