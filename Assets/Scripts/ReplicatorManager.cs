@@ -288,6 +288,7 @@ public class ReplicatorManager : MonoBehaviour
     private readonly ReplicatorPredationSystem predationSystem = new ReplicatorPredationSystem();
     private readonly ReplicatorSteeringSystem steeringSystem = new ReplicatorSteeringSystem();
     private readonly ReplicatorMovementSystem movementSystem = new ReplicatorMovementSystem();
+    private readonly ReplicatorRenderSystem renderSystem = new ReplicatorRenderSystem();
     private float metabolismTickTimer;
     private float debugChemoTempSum;
     private float debugHydrogenTempSum;
@@ -316,18 +317,8 @@ public class ReplicatorManager : MonoBehaviour
     private readonly List<int> localPredationCandidates = new List<int>(64);
     private readonly Dictionary<int, List<int>> preyAgentsByCell = new Dictionary<int, List<int>>(2048);
 
-    // Arrays for Batching
-    private Matrix4x4[] matrixBatch = new Matrix4x4[1023];
-    private Vector4[] colorBatch = new Vector4[1023];
-    private MaterialPropertyBlock propertyBlock;
-
     private readonly HashSet<int> pendingPredationRemovals = new HashSet<int>();
     private readonly List<int> predationRemovalBuffer = new List<int>(256);
-
-    // Cache shader property IDs once.
-    private static readonly int BaseColorID = Shader.PropertyToID("_BaseColor");
-    private static readonly int ColorID = Shader.PropertyToID("_Color");
-    private static readonly int EmissionID = Shader.PropertyToID("_EmissionColor");
 
     [Header("Debug/Testing")]
     public bool enableRendering = true;
@@ -379,7 +370,6 @@ public class ReplicatorManager : MonoBehaviour
             return;
         }
 
-        propertyBlock = new MaterialPropertyBlock();
         isInitialized = true;
         EnsureDeathCauseCounters();
 
@@ -1639,53 +1629,9 @@ public class ReplicatorManager : MonoBehaviour
 
     void RenderAgents()
     {
-        int batchCount = 0;
-        int totalAgents = agents.Count;
-
-        for (int i = 0; i < totalAgents; i++)
-        {
-            Replicator a = agents[i];
-            matrixBatch[batchCount] = Matrix4x4.TRS(a.position, a.rotation, Vector3.one * (0.1f * Mathf.Max(0.1f, a.size)));
-            colorBatch[batchCount] = a.color;
-            batchCount++;
-
-            if (batchCount == 1023)
-            {
-                FlushBatch(batchCount);
-                batchCount = 0;
-            }
-        }
-
-        if (batchCount > 0)
-        {
-            FlushBatch(batchCount);
-        }
-    }
-
-    void FlushBatch(int count)
-    {
-        Vector4 transparentBlack = Vector4.zero;
-        for (int i = count; i < 1023; i++)
-        {
-            colorBatch[i] = transparentBlack;
-        }
-
-        propertyBlock.SetVectorArray(BaseColorID, colorBatch);
-        propertyBlock.SetVectorArray(ColorID, colorBatch);
-        propertyBlock.SetVectorArray(EmissionID, colorBatch);
-
-        Graphics.DrawMeshInstanced(
+        renderSystem.RenderAgents(
+            agents,
             replicatorMesh,
-            0,
-            replicatorMaterial,
-            matrixBatch,
-            count,
-            propertyBlock,
-            UnityEngine.Rendering.ShadowCastingMode.Off,
-            true,
-            0,
-            null,
-            UnityEngine.Rendering.LightProbeUsage.Off
-        );
+            replicatorMaterial);
     }
 }

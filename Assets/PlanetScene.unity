@@ -637,7 +637,7 @@ MonoBehaviour:
   photosynthesisEnergyPerCo2: 2
   aerobicO2PerC: 0.02
   aerobicEnergyPerC: 0.05
-  photosynthStoreFraction: 0.8
+  photosynthStoreFraction: 0.4
   maxOrganicCStore: 6
   nightRespirationCPerTick: 0.01
   nightRespirationEnergyPerC: 0.05
@@ -647,7 +647,7 @@ MonoBehaviour:
   saprotrophyMutationChance: 0.191
   saproCPerTick: 0.02
   saproO2PerC: 0.02
-  saproEnergyPerC: 0.06
+  saproEnergyPerC: 0.5
   saproAssimilationFraction: 0.2
   saproRespireStoreCPerTick: 0.01
   enablePredators: 1
@@ -655,13 +655,13 @@ MonoBehaviour:
   predatorRequiresMotility: 1
   predatorAttackRange: 0.25
   predatorAttackCooldownSeconds: 1
-  predatorBiteOrganicC: 0.05
-  predatorBiteEnergy: 0.05
+  predatorBiteOrganicC: 0.8
+  predatorBiteEnergy: 0.8
   predatorKillEnergyThreshold: 0.01
   predatorAssimilationFraction: 0.6
-  predatorEnergyPerC: 1
+  predatorEnergyPerC: 0.5
   predatorBasalCostMultiplier: 1.5
-  predatorMoveSpeedMultiplier: 10
+  predatorMoveSpeedMultiplier: 5
   predatorSpawnColorStrength: 1
   enableFear: 1
   fearRadius: 0.6
