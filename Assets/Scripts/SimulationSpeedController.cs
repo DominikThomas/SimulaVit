@@ -11,20 +11,19 @@ public class SimulationSpeedController : MonoBehaviour
     public struct SpeedOption
     {
         public string label;
-        public float timeScale;
         public int simulationStepsPerFrame;
     }
 
     [SerializeField] private SpeedOption[] speedOptions =
     {
-        new SpeedOption { label = "0x", timeScale = 0f, simulationStepsPerFrame = 0 },
-        new SpeedOption { label = "1x", timeScale = 1f, simulationStepsPerFrame = 1 },
-        new SpeedOption { label = "2x", timeScale = 2f, simulationStepsPerFrame = 2 },
-        new SpeedOption { label = "5x", timeScale = 5f, simulationStepsPerFrame = 5 },
-        new SpeedOption { label = "10x", timeScale = 10f, simulationStepsPerFrame = 10 },
-        new SpeedOption { label = "20x", timeScale = 20f, simulationStepsPerFrame = 20 },
-        new SpeedOption { label = "50x", timeScale = 50f, simulationStepsPerFrame = 25 },
-        new SpeedOption { label = "100x", timeScale = 100f, simulationStepsPerFrame = 50 }
+        new SpeedOption { label = "0x", simulationStepsPerFrame = 0 },
+        new SpeedOption { label = "1x", simulationStepsPerFrame = 1 },
+        new SpeedOption { label = "2x", simulationStepsPerFrame = 2 },
+        new SpeedOption { label = "5x", simulationStepsPerFrame = 5 },
+        new SpeedOption { label = "10x", simulationStepsPerFrame = 10 },
+        new SpeedOption { label = "20x", simulationStepsPerFrame = 20 },
+        new SpeedOption { label = "50x", simulationStepsPerFrame = 25 },
+        new SpeedOption { label = "100x", simulationStepsPerFrame = 50 }
     };
 
     [SerializeField] private int selectedOptionIndex = 1;
@@ -82,9 +81,9 @@ public class SimulationSpeedController : MonoBehaviour
 
         SpeedOption active = speedOptions[selectedOptionIndex];
 
-        Time.timeScale = active.timeScale;
+        Time.timeScale = 1f;
         replicatorManager ??= FindFirstObjectByType<ReplicatorManager>();
-        replicatorManager?.SetSimulationTiming(active.timeScale, active.simulationStepsPerFrame);
+        replicatorManager?.SetSimulationTiming(active.simulationStepsPerFrame);
     }
 
     private void EnsureGuiStyles()
