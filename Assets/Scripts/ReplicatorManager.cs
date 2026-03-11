@@ -717,6 +717,7 @@ public class ReplicatorManager : MonoBehaviour
             enableSpontaneousSpawning,
             guaranteedFirstSpawnWithinSeconds,
             spawnAttemptInterval,
+            Time.deltaTime,
             SpawnAgentAtRandomLocation,
             TryRandomSpontaneousSpawn);
     }
