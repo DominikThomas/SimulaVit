@@ -655,11 +655,11 @@ MonoBehaviour:
   predatorRequiresMotility: 1
   predatorAttackRange: 0.25
   predatorAttackCooldownSeconds: 1
-  predatorBiteOrganicC: 0.8
-  predatorBiteEnergy: 0.8
+  predatorBiteOrganicC: 0.4
+  predatorBiteEnergy: 0.4
   predatorKillEnergyThreshold: 0.01
   predatorAssimilationFraction: 0.6
-  predatorEnergyPerC: 0.5
+  predatorEnergyPerC: 0.3
   predatorBasalCostMultiplier: 1.5
   predatorMoveSpeedMultiplier: 5
   predatorSpawnColorStrength: 1
