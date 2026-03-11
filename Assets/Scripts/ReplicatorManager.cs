@@ -205,6 +205,16 @@ public class ReplicatorManager : MonoBehaviour
     public float co2SpawnBiasWeight = 0.5f;
     public float chemoSpawnOptimalTemp = 353.15f; // 80 °C
     public float chemoSpawnTempTolerance = 20f; // Kelvin
+    [Header("Spawn Viability Gates")]
+    [Range(0f, 1f)]
+    [Tooltip("Minimum final hydrogenotrophy spawn score required for spontaneous spawning.")]
+    public float minHydrogenSpawnScore = 0.12f;
+    [Range(0f, 1f)]
+    [Tooltip("Minimum normalized local H2 required for spontaneous hydrogenotroph spawning.")]
+    public float minHydrogenSpawnH2 = 0.08f;
+    [Range(1, 16)]
+    [Tooltip("How many times to retry candidate selection before giving up on this spawn tick.")]
+    public int spontaneousSpawnCandidateRetries = 10;
 
 
     [Header("Spontaneous Spawning")]
@@ -891,9 +901,17 @@ public class ReplicatorManager : MonoBehaviour
             GetSpawnDirectionCandidate,
             IsSeaLocation,
             GetLocationSpawnMultiplier,
-            direction => SpawnAgentAtDirection(direction, CreateDefaultTraits(), null, MetabolismType.Hydrogenotrophy, LocomotionType.PassiveDrift, 0f, out _));
+            IsHydrogenSpawnCandidateViable,
+            spontaneousSpawnCandidateRetries,
+            direction => SpawnAgentAtDirection(
+                direction,
+                CreateDefaultTraits(),
+                null,
+                MetabolismType.Hydrogenotrophy,
+                LocomotionType.PassiveDrift,
+                0f,
+                out _));
     }
-
 
     Vector3 GetSpawnDirectionCandidate()
     {
@@ -941,6 +959,27 @@ public class ReplicatorManager : MonoBehaviour
             Debug.Log($"Hydrogen spawn score: chemistry={chemistryScore:0.00} temp={FormatTemperature(temp, temperatureDisplayUnit)} tempFitness={tempFitness:0.00} final={score:0.00}");
         }
         return score;
+    }
+
+    bool IsHydrogenSpawnCandidateViable(Vector3 direction)
+    {
+        if (planetResourceMap == null || planetGenerator == null)
+        {
+            return true;
+        }
+
+        int resolution = Mathf.Max(1, planetGenerator.resolution);
+        Vector3 normalizedDir = direction.normalized;
+        int cellIndex = PlanetGridIndexing.DirectionToCellIndex(normalizedDir, resolution);
+
+        float h2Availability = NormalizeResource(ResourceType.H2, cellIndex, steerGoodH2);
+        if (h2Availability < minHydrogenSpawnH2)
+        {
+            return false;
+        }
+
+        float score = GetHydrogenotrophySpawnScore(normalizedDir);
+        return score >= minHydrogenSpawnScore;
     }
 
     float GetLocationSpawnMultiplier(bool isSeaLocation)
