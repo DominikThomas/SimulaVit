@@ -595,7 +595,7 @@ MonoBehaviour:
   planetResourceMap: {fileID: 1222684993}
   initialSpawnCount: 0
   maxPopulation: 30000
-  baseAgentColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
+  baseAgentColor: {r: 1, g: 0.968804, b: 0.6084906, a: 1}
   moveSpeed: 4
   turnSpeed: 5
   spawnSpread: 0.01
@@ -744,6 +744,7 @@ MonoBehaviour:
   predatorAgentCount: 0
   averageOrganicCStore: 0
   divisionEligibleAgentCount: 0
+  simulationPipeline: {fileID: 0}
   enableRendering: 1
 --- !u!4 &1064713444
 Transform:
