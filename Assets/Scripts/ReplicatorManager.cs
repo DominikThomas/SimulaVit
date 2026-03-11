@@ -313,7 +313,6 @@ public class ReplicatorManager : MonoBehaviour
     private float avgToxicProteolyticWasteDebug;
     private float avgDissolvedOrganicLeakDebug;
     private float nextScentUpdateTime;
-    private bool preyBinsReady;
     private ReplicatorSteeringSystem.DebugState steeringDebugState;
     private readonly List<int> localPredationCandidates = new List<int>(64);
     private readonly Dictionary<int, List<int>> preyAgentsByCell = new Dictionary<int, List<int>>(2048);
@@ -434,7 +433,6 @@ public class ReplicatorManager : MonoBehaviour
     {
         avgToxicProteolyticWasteDebug = 0f;
         avgDissolvedOrganicLeakDebug = 0f;
-        preyBinsReady = false;
     }
 
     void OnGUI()
@@ -888,7 +886,6 @@ public class ReplicatorManager : MonoBehaviour
         int cellCount = PlanetGridIndexing.GetCellCount(resolution);
         planetResourceMap.EnsureScentArrays(cellCount);
         RebuildPreyCellBins(resolution);
-        preyBinsReady = true;
 
         float leakEmit = Mathf.Max(0f, dissolvedOrganicLeakEmitPerSecond) * interval;
         float wasteEmit = Mathf.Max(0f, toxicProteolyticWasteEmitPerSecond) * interval;
