@@ -59,13 +59,6 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
             return;
         }
 
-        if (!IsManagerInitialized())
-        {
-            managerStartMethod.Invoke(replicatorManager, null);
-        }
-
-        replicatorManager.enableRendering = false;
-        replicatorManager.enabled = false;
     }
 
     public void SetSpeedProfile(SpeedProfile profile)
