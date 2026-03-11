@@ -5,7 +5,7 @@ public class ReplicatorRenderSystem
 {
     private readonly Matrix4x4[] matrixBatch = new Matrix4x4[1023];
     private readonly Vector4[] colorBatch = new Vector4[1023];
-    private readonly MaterialPropertyBlock propertyBlock = new MaterialPropertyBlock();
+    private MaterialPropertyBlock propertyBlock;
 
     private static readonly int BaseColorID = Shader.PropertyToID("_BaseColor");
     private static readonly int ColorID = Shader.PropertyToID("_Color");
@@ -36,6 +36,16 @@ public class ReplicatorRenderSystem
         }
     }
 
+    private MaterialPropertyBlock GetOrCreatePropertyBlock()
+    {
+        if (propertyBlock == null)
+        {
+            propertyBlock = new MaterialPropertyBlock();
+        }
+
+        return propertyBlock;
+    }
+
     private void FlushBatch(int count, Mesh replicatorMesh, Material replicatorMaterial)
     {
         Vector4 transparentBlack = Vector4.zero;
@@ -44,9 +54,10 @@ public class ReplicatorRenderSystem
             colorBatch[i] = transparentBlack;
         }
 
-        propertyBlock.SetVectorArray(BaseColorID, colorBatch);
-        propertyBlock.SetVectorArray(ColorID, colorBatch);
-        propertyBlock.SetVectorArray(EmissionID, colorBatch);
+        MaterialPropertyBlock activePropertyBlock = GetOrCreatePropertyBlock();
+        activePropertyBlock.SetVectorArray(BaseColorID, colorBatch);
+        activePropertyBlock.SetVectorArray(ColorID, colorBatch);
+        activePropertyBlock.SetVectorArray(EmissionID, colorBatch);
 
         Graphics.DrawMeshInstanced(
             replicatorMesh,
@@ -54,7 +65,7 @@ public class ReplicatorRenderSystem
             replicatorMaterial,
             matrixBatch,
             count,
-            propertyBlock,
+            activePropertyBlock,
             UnityEngine.Rendering.ShadowCastingMode.Off,
             true,
             0,
