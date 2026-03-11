@@ -45,6 +45,8 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
 
     private void Awake()
     {
+        replicatorManager = GetComponent<ReplicatorManager>();
+
         if (replicatorManager == null)
         {
             replicatorManager = FindFirstObjectByType<ReplicatorManager>();
