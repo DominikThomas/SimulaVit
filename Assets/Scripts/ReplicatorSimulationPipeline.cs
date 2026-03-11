@@ -8,7 +8,6 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
     [Serializable]
     public struct SpeedProfile
     {
-        public float speedMultiplier;
         public int simulationStepsPerFrame;
     }
 
@@ -18,10 +17,6 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
     [Header("Stepping")]
     [SerializeField, Min(0)] private int simulationStepsPerFrame = 1;
 
-    [Header("Optional render frame skipping")]
-    [SerializeField] private bool allowRenderFrameSkipping = false;
-    [SerializeField, Min(1)] private int renderEveryNFramesAtHighSpeed = 2;
-    [SerializeField] private float renderSkipMinSpeedMultiplier = 20f;
 
     private MethodInfo managerStartMethod;
     private MethodInfo updateScentFieldsMethod;
@@ -39,7 +34,6 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
     private FieldInfo isInitializedField;
 
     private bool reflectionReady;
-    private float activeSpeedMultiplier = 1f;
 
     public int SimulationStepsPerFrame => simulationStepsPerFrame;
 
@@ -65,11 +59,10 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
 
     public void SetSpeedProfile(SpeedProfile profile)
     {
-        activeSpeedMultiplier = Mathf.Max(0f, profile.speedMultiplier);
         simulationStepsPerFrame = Mathf.Max(0, profile.simulationStepsPerFrame);
         if (replicatorManager != null)
         {
-            replicatorManager.SetSimulationTiming(activeSpeedMultiplier, simulationStepsPerFrame);
+            replicatorManager.SetSimulationTiming(simulationStepsPerFrame);
         }
     }
 
@@ -87,10 +80,7 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
 
         UpdateMetabolismCountsAndDebug();
 
-        if (ShouldRenderThisFrame())
-        {
-            renderAgentsMethod.Invoke(replicatorManager, null);
-        }
+        renderAgentsMethod.Invoke(replicatorManager, null);
     }
 
     private void RunSimulationStep()
@@ -117,17 +107,6 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
     {
         updateMetabolismCountsMethod.Invoke(replicatorManager, null);
         logMetabolismDebugThrottledMethod.Invoke(replicatorManager, null);
-    }
-
-    private bool ShouldRenderThisFrame()
-    {
-        if (!allowRenderFrameSkipping || activeSpeedMultiplier < renderSkipMinSpeedMultiplier)
-        {
-            return true;
-        }
-
-        int interval = Mathf.Max(1, renderEveryNFramesAtHighSpeed);
-        return Time.frameCount % interval == 0;
     }
 
     private bool IsManagerInitialized()

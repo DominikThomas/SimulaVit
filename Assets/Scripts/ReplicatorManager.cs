@@ -251,8 +251,10 @@ public class ReplicatorManager : MonoBehaviour
     [Tooltip("Draw a small runtime overlay with population and atmosphere stats.")]
     public bool showSimulationHud = true;
     [Header("Runtime Simulation Timing")]
-    [SerializeField] private float runtimeSpeedMultiplier = 1f;
     [SerializeField] private int runtimeSimulationStepsPerFrame = 1;
+    [SerializeField] private bool allowRenderFrameSkippingAtHighSpeed = false;
+    [SerializeField, Min(1)] private int renderEveryNFramesAtHighSpeed = 2;
+    [SerializeField, Min(1)] private int renderSkipMinStepsPerFrame = 20;
     [Header("Locomotion Debug")]
     public bool enableRunAndTumbleDebug = false;
     public float runAndTumbleDebugWindowSeconds = 2f;
@@ -261,13 +263,11 @@ public class ReplicatorManager : MonoBehaviour
     [Range(0.5f, 30f)] public float debugSessileMovementWindowSeconds = 3f;
     [Range(0.00001f, 0.1f)] public float debugSessileMovementEpsilon = 0.001f;
 
-    public float RuntimeSpeedMultiplier => runtimeSpeedMultiplier;
     public int RuntimeSimulationStepsPerFrame => runtimeSimulationStepsPerFrame;
     public int SimulationStepsPerFrame => runtimeSimulationStepsPerFrame;
 
-    public void SetSimulationTiming(float speedMultiplier, int stepsPerFrame)
+    public void SetSimulationTiming(int stepsPerFrame)
     {
-        runtimeSpeedMultiplier = Mathf.Max(0f, speedMultiplier);
         runtimeSimulationStepsPerFrame = Mathf.Max(0, stepsPerFrame);
     }
 
@@ -420,13 +420,25 @@ public class ReplicatorManager : MonoBehaviour
             ValidateSessileMovement();
         }
 
-        if (enableRendering)
+        if (enableRendering && ShouldRenderThisFrame(stepsPerFrame))
         {
             RenderAgents();
         }
 
         UpdateMetabolismCounts();
         LogMetabolismDebugThrottled();
+    }
+
+
+    bool ShouldRenderThisFrame(int stepsPerFrame)
+    {
+        if (!allowRenderFrameSkippingAtHighSpeed || stepsPerFrame < renderSkipMinStepsPerFrame)
+        {
+            return true;
+        }
+
+        int interval = Mathf.Max(1, renderEveryNFramesAtHighSpeed);
+        return Time.frameCount % interval == 0;
     }
 
     void ResetScentDebugState()
