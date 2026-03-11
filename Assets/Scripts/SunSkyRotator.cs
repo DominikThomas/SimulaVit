@@ -40,6 +40,12 @@ public class SunSkyRotator : MonoBehaviour
     public float skyboxRotationMultiplier = -1f;
     public Material skyboxOverride;
 
+    [Header("Simulation Speed Coupling")]
+    [Tooltip("If enabled, sun/skybox rotation speed scales with ReplicatorManager simulation steps per frame.")]
+    public bool scaleRotationWithSimulationSpeed = true;
+    [Tooltip("Optional explicit reference; if empty, the first ReplicatorManager in scene is used.")]
+    public ReplicatorManager replicatorManager;
+
     private Quaternion initialRotation;
     private float accumulatedOrbitAngle;
     private Vector3 initialOrbitForward;
@@ -55,6 +61,7 @@ public class SunSkyRotator : MonoBehaviour
         initialRotation = transform.rotation;
         CacheInitialOrbitForward();
         SetupViewerReference();
+        ResolveReplicatorManagerReference();
         ResolvePlanetRadius();
         SetupSkybox();
         CreateSunVisual();
@@ -64,7 +71,8 @@ public class SunSkyRotator : MonoBehaviour
 
     void Update()
     {
-        float dt = Time.deltaTime;
+        float simulationSpeedFactor = GetSimulationSpeedFactor();
+        float dt = Time.deltaTime * simulationSpeedFactor;
         Vector3 axis = GetOrbitAxis();
 
         accumulatedOrbitAngle += orbitDegreesPerSecond * dt;
@@ -135,6 +143,30 @@ public class SunSkyRotator : MonoBehaviour
         {
             viewer = Camera.main.transform;
         }
+    }
+
+    void ResolveReplicatorManagerReference()
+    {
+        if (replicatorManager == null)
+        {
+            replicatorManager = FindFirstObjectByType<ReplicatorManager>();
+        }
+    }
+
+    float GetSimulationSpeedFactor()
+    {
+        if (!scaleRotationWithSimulationSpeed)
+        {
+            return 1f;
+        }
+
+        ResolveReplicatorManagerReference();
+        if (replicatorManager == null)
+        {
+            return 1f;
+        }
+
+        return Mathf.Max(0f, replicatorManager.SimulationStepsPerFrame);
     }
 
     void ResolvePlanetRadius()
