@@ -263,6 +263,7 @@ public class ReplicatorManager : MonoBehaviour
 
     public float RuntimeSpeedMultiplier => runtimeSpeedMultiplier;
     public int RuntimeSimulationStepsPerFrame => runtimeSimulationStepsPerFrame;
+    public int SimulationStepsPerFrame => runtimeSimulationStepsPerFrame;
 
     public void SetSimulationTiming(float speedMultiplier, int stepsPerFrame)
     {
@@ -320,8 +321,27 @@ public class ReplicatorManager : MonoBehaviour
     private readonly HashSet<int> pendingPredationRemovals = new HashSet<int>();
     private readonly List<int> predationRemovalBuffer = new List<int>(256);
 
+
+
+    [Header("Pipeline")]
+    [SerializeField] private ReplicatorSimulationPipeline simulationPipeline;
     [Header("Debug/Testing")]
     public bool enableRendering = true;
+
+
+    void Awake()
+    {
+        simulationPipeline = GetComponent<ReplicatorSimulationPipeline>();
+        if (simulationPipeline == null)
+        {
+            simulationPipeline = gameObject.AddComponent<ReplicatorSimulationPipeline>();
+        }
+
+        if (simulationPipeline != null)
+        {
+            simulationPipeline.enabled = false;
+        }
+    }
 
     void ResolvePlanetResourceMapReference()
     {
@@ -380,25 +400,32 @@ public class ReplicatorManager : MonoBehaviour
     {
         if (!isInitialized) return;
 
-        if (useScentPredation && planetResourceMap != null && planetResourceMap.enableScentFields)
+        int stepsPerFrame = Mathf.Max(0, runtimeSimulationStepsPerFrame);
+        for (int i = 0; i < stepsPerFrame; i++)
         {
-            UpdateScentFields();
+            if (useScentPredation && planetResourceMap != null && planetResourceMap.enableScentFields)
+            {
+                UpdateScentFields();
+            }
+            else
+            {
+                ResetScentDebugState();
+            }
+
+            UpdateLifecycle();
+            TickMetabolism();
+            RunPredationPass();
+            HandleSpontaneousSpawning();
+            UpdateRunAndTumbleLocomotion();
+            RunMovementJob();
+            ValidateSessileMovement();
         }
-        else
-        {
-            ResetScentDebugState();
-        }
-        UpdateLifecycle();
-        TickMetabolism();
-        RunPredationPass();
-        HandleSpontaneousSpawning();
-        UpdateRunAndTumbleLocomotion();
-        RunMovementJob();
-        ValidateSessileMovement();
+
         if (enableRendering)
         {
             RenderAgents();
         }
+
         UpdateMetabolismCounts();
         LogMetabolismDebugThrottled();
     }

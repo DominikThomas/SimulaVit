@@ -2,9 +2,6 @@ using UnityEngine;
 
 public class SimulationSpeedController : MonoBehaviour
 {
-    [Header("References")]
-    [SerializeField] private ReplicatorSimulationPipeline simulationPipeline;
-
     [Header("GUI")]
     [SerializeField] private float guiWidth = 420f;
     [SerializeField] private float guiHeight = 52f;
@@ -33,18 +30,11 @@ public class SimulationSpeedController : MonoBehaviour
     [SerializeField] private int selectedOptionIndex = 1;
 
     private GUIStyle labelStyle;
+    private ReplicatorManager replicatorManager;
 
     private void Awake()
     {
-        if (simulationPipeline == null)
-        {
-            simulationPipeline = FindFirstObjectByType<ReplicatorSimulationPipeline>();
-        }
-
-        if (simulationPipeline == null)
-        {
-            simulationPipeline = gameObject.AddComponent<ReplicatorSimulationPipeline>();
-        }
+        replicatorManager = FindFirstObjectByType<ReplicatorManager>();
 
         selectedOptionIndex = Mathf.Clamp(selectedOptionIndex, 0, speedOptions.Length - 1);
         ApplySelectedSpeed();
@@ -93,15 +83,8 @@ public class SimulationSpeedController : MonoBehaviour
         SpeedOption active = speedOptions[selectedOptionIndex];
 
         Time.timeScale = active.timeScale;
-
-        if (simulationPipeline != null)
-        {
-            simulationPipeline.SetSpeedProfile(new ReplicatorSimulationPipeline.SpeedProfile
-            {
-                speedMultiplier = active.timeScale,
-                simulationStepsPerFrame = active.simulationStepsPerFrame
-            });
-        }
+        replicatorManager ??= FindFirstObjectByType<ReplicatorManager>();
+        replicatorManager?.SetSimulationTiming(active.timeScale, active.simulationStepsPerFrame);
     }
 
     private void EnsureGuiStyles()
