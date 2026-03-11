@@ -288,6 +288,7 @@ public class ReplicatorManager : MonoBehaviour
     private readonly ReplicatorLifecycleSystem lifecycleSystem = new ReplicatorLifecycleSystem();
     private readonly ReplicatorMetabolismSystem metabolismSystem = new ReplicatorMetabolismSystem();
     private readonly ReplicatorPredationSystem predationSystem = new ReplicatorPredationSystem();
+    private readonly ReplicatorSteeringSystem steeringSystem = new ReplicatorSteeringSystem();
     private float metabolismTickTimer;
     private float debugChemoTempSum;
     private float debugHydrogenTempSum;
@@ -312,12 +313,7 @@ public class ReplicatorManager : MonoBehaviour
     private float avgDissolvedOrganicLeakDebug;
     private float nextScentUpdateTime;
     private bool preyBinsReady;
-    private float runDurationAccumulator;
-    private float runDurationSampleCount;
-    private float tumbleProbabilityAccumulator;
-    private int tumbleProbabilitySampleCount;
-    private int tumblesThisWindow;
-    private float runAndTumbleDebugTimer;
+    private ReplicatorSteeringSystem.DebugState steeringDebugState;
     private readonly List<int> localPredationCandidates = new List<int>(64);
     private readonly Dictionary<int, List<int>> preyAgentsByCell = new Dictionary<int, List<int>>(2048);
 
@@ -1008,63 +1004,22 @@ public class ReplicatorManager : MonoBehaviour
         return noise < planetGenerator.OceanThresholdNoise;
     }
 
-    public float ComputeLocalHabitatValue(Replicator agent, Vector3 dir, int cellIndex)
+    float NormalizeResource(ResourceType resourceType, int cellIndex, float goodEnoughScale)
     {
-        if (agent == null || planetResourceMap == null)
-        {
-            return 0f;
-        }
-
-        Vector3 normalizedDir = dir.sqrMagnitude > 0f ? dir.normalized : Vector3.up;
-        float temperature = planetResourceMap.GetTemperature(normalizedDir, cellIndex);
-        float tempFitness = ComputeTemperatureFitness(agent, temperature);
-        float foodFitness = ComputeFoodFitness(agent, normalizedDir, cellIndex);
-
-        float score = Mathf.Max(0f, steerTempWeight) * tempFitness
-                    + Mathf.Max(0f, steerFoodWeight) * foodFitness;
-
-        if (useScentPredation && planetResourceMap.enableScentFields)
-        {
-            float dissolvedOrganicLeak = NormalizeScent(planetResourceMap.Get(ResourceType.DissolvedOrganicLeak, cellIndex));
-            float toxicProteolyticWaste = NormalizeScent(planetResourceMap.Get(ResourceType.ToxicProteolyticWaste, cellIndex));
-            float scentTerm;
-            if (agent.metabolism == MetabolismType.Predation)
-            {
-                scentTerm = Mathf.Max(0f, dissolvedOrganicLeakSteerWeight) * dissolvedOrganicLeak - 0.25f * toxicProteolyticWaste;
-            }
-            else
-            {
-                scentTerm = -Mathf.Max(0f, toxicProteolyticWasteSteerWeight) * toxicProteolyticWaste + 0.1f * dissolvedOrganicLeak;
-            }
-
-            score += scentTerm;
-        }
-
-        if (float.IsNaN(score) || float.IsInfinity(score))
-        {
-            return 0f;
-        }
-
-        return Mathf.Clamp(score, 0f, 100f);
+        float scale = Mathf.Max(0.0001f, goodEnoughScale);
+        float value = planetResourceMap.Get(resourceType, cellIndex);
+        float normalized = Mathf.Clamp01(value / scale);
+        return float.IsNaN(normalized) || float.IsInfinity(normalized) ? 0f : normalized;
     }
 
-    float ComputeTemperatureFitness(Replicator agent, float temperature)
+    public float ComputeLocalHabitatValue(Replicator agent, Vector3 dir, int cellIndex)
     {
-        float optimalTemp = 0.5f * (agent.optimalTempMin + agent.optimalTempMax);
-        float tempTolerance = Mathf.Max(0.0001f, 0.5f * (agent.optimalTempMax - agent.optimalTempMin));
-        float lethalMargin = Mathf.Max(0.0001f, agent.lethalTempMargin);
-
-        float distFromOptimal = Mathf.Abs(temperature - optimalTemp);
-        float safeBand = tempTolerance + lethalMargin;
-
-        if (distFromOptimal <= tempTolerance)
-        {
-            return 1f;
-        }
-
-        float outsideTolerance = distFromOptimal - tempTolerance;
-        float fitness = 1f - (outsideTolerance / safeBand);
-        return Mathf.Clamp01(fitness);
+        return steeringSystem.ComputeLocalHabitatValue(
+            agent,
+            dir,
+            cellIndex,
+            planetResourceMap,
+            CreateSteeringSettings());
     }
 
     float ComputeTemperatureFitnessForRange(float temperature, Vector2 range)
@@ -1079,60 +1034,6 @@ public class ReplicatorManager : MonoBehaviour
         float tolerance = Mathf.Max(0.0001f, 0.5f * (max - min));
         float d = temperature < min ? (min - temperature) : (temperature - max);
         return Mathf.Clamp01(1f - (d / tolerance));
-    }
-
-    float ComputeFoodFitness(Replicator agent, Vector3 normalizedDir, int cellIndex)
-    {
-        float co2 = NormalizeResource(ResourceType.CO2, cellIndex, steerGoodCO2);
-
-        switch (agent.metabolism)
-        {
-            case MetabolismType.SulfurChemosynthesis:
-            {
-                float h2s = NormalizeResource(ResourceType.H2S, cellIndex, steerGoodH2S);
-                return Mathf.Min(h2s, co2);
-            }
-            case MetabolismType.Hydrogenotrophy:
-            {
-                float h2 = NormalizeResource(ResourceType.H2, cellIndex, steerGoodH2);
-                return Mathf.Min(h2, co2);
-            }
-            case MetabolismType.Photosynthesis:
-            {
-                float light = Mathf.Clamp01(planetResourceMap.GetInsolation(normalizedDir));
-                return Mathf.Min(light, co2);
-            }
-            case MetabolismType.Saprotrophy:
-            {
-                float organicC = NormalizeResource(ResourceType.OrganicC, cellIndex, steerGoodOrganicC);
-                float o2 = NormalizeResource(ResourceType.O2, cellIndex, steerGoodO2);
-                return Mathf.Min(organicC, o2);
-            }
-            case MetabolismType.Predation:
-            {
-                float o2 = NormalizeResource(ResourceType.O2, cellIndex, steerGoodO2);
-                float dissolvedOrganicLeak = NormalizeScent(planetResourceMap.Get(ResourceType.DissolvedOrganicLeak, cellIndex));
-                return Mathf.Min(o2, dissolvedOrganicLeak);
-            }
-            default:
-                return 0f;
-        }
-    }
-
-    float NormalizeResource(ResourceType resourceType, int cellIndex, float goodEnoughScale)
-    {
-        float scale = Mathf.Max(0.0001f, goodEnoughScale);
-        float value = planetResourceMap.Get(resourceType, cellIndex);
-        float normalized = Mathf.Clamp01(value / scale);
-        return float.IsNaN(normalized) || float.IsInfinity(normalized) ? 0f : normalized;
-    }
-
-
-    float NormalizeScent(float scentValue)
-    {
-        float half = Mathf.Max(0.0001f, scentScoreSaturation);
-        float normalized = scentValue / (scentValue + half);
-        return float.IsNaN(normalized) || float.IsInfinity(normalized) ? 0f : Mathf.Clamp01(normalized);
     }
 
     void UpdateScentFields()
@@ -1286,100 +1187,14 @@ public class ReplicatorManager : MonoBehaviour
 
     void UpdateRunAndTumbleLocomotion()
     {
-        if (agents.Count == 0 || planetGenerator == null || planetResourceMap == null)
-        {
-            return;
-        }
-
-        int resolution = Mathf.Max(1, planetGenerator.resolution);
-        float now = Time.time;
-
-        if (enableRunAndTumbleDebug)
-        {
-            runAndTumbleDebugTimer += Time.deltaTime;
-        }
-
-        for (int i = 0; i < agents.Count; i++)
-        {
-            Replicator agent = agents[i];
-            bool isAmoeboid = agent.locomotion == LocomotionType.Amoeboid;
-            bool isFlagellum = agent.locomotion == LocomotionType.Flagellum;
-            if (!isAmoeboid && !isFlagellum)
-            {
-                continue;
-            }
-
-            Vector3 currentDir = agent.currentDirection.sqrMagnitude > 0f ? agent.currentDirection.normalized : agent.position.normalized;
-            if (agent.moveDirection.sqrMagnitude <= 0.0001f)
-            {
-                agent.moveDirection = currentDir;
-                agent.desiredMoveDir = currentDir;
-            }
-
-            if (now < agent.nextSenseTime)
-            {
-                if (isAmoeboid && amoeboidRunNoiseStrength > 0f)
-                {
-                    ApplyAmoeboidRunNoise(agent, now);
-                }
-                continue;
-            }
-
-            int cellIndex = PlanetGridIndexing.DirectionToCellIndex(currentDir, resolution);
-            float habitatValue = ComputeLocalHabitatValue(agent, currentDir, cellIndex);
-            bool initialized = agent.nextSenseTime > 0f;
-
-            if (!initialized)
-            {
-                agent.tumbleProbability = Mathf.Clamp(baseTumbleProbability, minTumbleProbability, maxTumbleProbability);
-            }
-            else if (habitatValue > agent.lastHabitatValue)
-            {
-                agent.tumbleProbability = Mathf.Clamp(agent.tumbleProbability - Mathf.Max(0f, tumbleDecreaseOnImproving), minTumbleProbability, maxTumbleProbability);
-            }
-            else if (habitatValue < agent.lastHabitatValue)
-            {
-                agent.tumbleProbability = Mathf.Clamp(agent.tumbleProbability + Mathf.Max(0f, tumbleIncreaseOnWorsening), minTumbleProbability, maxTumbleProbability);
-            }
-
-            if (UnityEngine.Random.value < agent.tumbleProbability)
-            {
-                float maxTurnAngle = isFlagellum ? Mathf.Max(0f, flagellumTurnAngleMax) : Mathf.Max(0f, amoeboidTurnAngleMax);
-                agent.moveDirection = GenerateTumbledDirection(agent.moveDirection, currentDir, maxTurnAngle);
-                tumblesThisWindow++;
-            }
-            else if (isAmoeboid && amoeboidRunNoiseStrength > 0f)
-            {
-                ApplyAmoeboidRunNoise(agent, now);
-            }
-
-            agent.desiredMoveDir = agent.moveDirection;
-            agent.lastHabitatValue = habitatValue;
-
-            float baseInterval = isFlagellum ? Mathf.Max(0.01f, flagellumSenseInterval) : Mathf.Max(0.01f, amoeboidSenseInterval);
-            float jitter = isFlagellum ? Mathf.Max(0f, flagellumSenseIntervalJitter) : Mathf.Max(0f, amoeboidSenseIntervalJitter);
-            float runDuration = Mathf.Max(0.01f, baseInterval + UnityEngine.Random.Range(-jitter, jitter));
-            agent.nextSenseTime = now + runDuration;
-
-            runDurationAccumulator += runDuration;
-            runDurationSampleCount += 1f;
-            tumbleProbabilityAccumulator += agent.tumbleProbability;
-            tumbleProbabilitySampleCount++;
-        }
-
-        if (enableRunAndTumbleDebug && runAndTumbleDebugTimer >= Mathf.Max(0.2f, runAndTumbleDebugWindowSeconds))
-        {
-            float avgTumbleProbability = tumbleProbabilitySampleCount > 0 ? tumbleProbabilityAccumulator / tumbleProbabilitySampleCount : 0f;
-            float avgRunDuration = runDurationSampleCount > 0f ? runDurationAccumulator / runDurationSampleCount : 0f;
-            Debug.Log($"Run&Tumble debug: avgTumbleProbability={avgTumbleProbability:0.000}, avgRunDuration={avgRunDuration:0.000}s, tumblesInWindow={tumblesThisWindow}");
-
-            runAndTumbleDebugTimer = 0f;
-            runDurationAccumulator = 0f;
-            runDurationSampleCount = 0f;
-            tumbleProbabilityAccumulator = 0f;
-            tumbleProbabilitySampleCount = 0;
-            tumblesThisWindow = 0;
-        }
+        steeringSystem.UpdateRunAndTumbleLocomotion(
+            agents,
+            planetGenerator,
+            planetResourceMap,
+            CreateSteeringSettings(),
+            Time.deltaTime,
+            Time.time,
+            ref steeringDebugState);
     }
 
     void ValidateSessileMovement()
@@ -1393,47 +1208,37 @@ public class ReplicatorManager : MonoBehaviour
     }
 
 
-    void ApplyAmoeboidRunNoise(Replicator agent, float now)
+    ReplicatorSteeringSystem.Settings CreateSteeringSettings()
     {
-        float noise = Mathf.Sin((now + agent.movementSeed) * 2.7f) * Mathf.Max(0f, amoeboidRunNoiseStrength) * Mathf.Max(0f, amoeboidTurnAngleMax);
-        agent.moveDirection = RotateDirectionAroundSurfaceNormal(agent.moveDirection, agent.currentDirection, noise);
-        agent.desiredMoveDir = agent.moveDirection;
-    }
-
-    Vector3 GenerateTumbledDirection(Vector3 currentMoveDirection, Vector3 surfaceNormal, float maxTurnAngle)
-    {
-        Vector3 baseDirection = currentMoveDirection.sqrMagnitude > 0.0001f ? currentMoveDirection.normalized : surfaceNormal;
-        Vector3 tangent = Vector3.ProjectOnPlane(baseDirection, surfaceNormal);
-        if (tangent.sqrMagnitude <= 0.0001f)
+        return new ReplicatorSteeringSystem.Settings
         {
-            tangent = Vector3.Cross(surfaceNormal, Vector3.up);
-            if (tangent.sqrMagnitude <= 0.0001f)
-            {
-                tangent = Vector3.Cross(surfaceNormal, Vector3.right);
-            }
-        }
-
-        float turnAngle = UnityEngine.Random.Range(-Mathf.Abs(maxTurnAngle), Mathf.Abs(maxTurnAngle));
-        return RotateDirectionAroundSurfaceNormal(tangent.normalized, surfaceNormal, turnAngle);
+            SteerTempWeight = steerTempWeight,
+            SteerFoodWeight = steerFoodWeight,
+            UseScentPredation = useScentPredation,
+            DissolvedOrganicLeakSteerWeight = dissolvedOrganicLeakSteerWeight,
+            ToxicProteolyticWasteSteerWeight = toxicProteolyticWasteSteerWeight,
+            ScentScoreSaturation = scentScoreSaturation,
+            SteerGoodCO2 = steerGoodCO2,
+            SteerGoodH2S = steerGoodH2S,
+            SteerGoodH2 = steerGoodH2,
+            SteerGoodOrganicC = steerGoodOrganicC,
+            SteerGoodO2 = steerGoodO2,
+            BaseTumbleProbability = baseTumbleProbability,
+            MinTumbleProbability = minTumbleProbability,
+            MaxTumbleProbability = maxTumbleProbability,
+            TumbleDecreaseOnImproving = tumbleDecreaseOnImproving,
+            TumbleIncreaseOnWorsening = tumbleIncreaseOnWorsening,
+            FlagellumTurnAngleMax = flagellumTurnAngleMax,
+            AmoeboidTurnAngleMax = amoeboidTurnAngleMax,
+            AmoeboidRunNoiseStrength = amoeboidRunNoiseStrength,
+            FlagellumSenseInterval = flagellumSenseInterval,
+            AmoeboidSenseInterval = amoeboidSenseInterval,
+            FlagellumSenseIntervalJitter = flagellumSenseIntervalJitter,
+            AmoeboidSenseIntervalJitter = amoeboidSenseIntervalJitter,
+            EnableRunAndTumbleDebug = enableRunAndTumbleDebug,
+            RunAndTumbleDebugWindowSeconds = runAndTumbleDebugWindowSeconds
+        };
     }
-
-    Vector3 RotateDirectionAroundSurfaceNormal(Vector3 direction, Vector3 surfaceNormal, float angleDegrees)
-    {
-        Vector3 normal = surfaceNormal.sqrMagnitude > 0.0001f ? surfaceNormal.normalized : Vector3.up;
-        Vector3 tangent = Vector3.ProjectOnPlane(direction, normal);
-        if (tangent.sqrMagnitude <= 0.0001f)
-        {
-            tangent = Vector3.Cross(normal, Vector3.up);
-            if (tangent.sqrMagnitude <= 0.0001f)
-            {
-                tangent = Vector3.Cross(normal, Vector3.right);
-            }
-        }
-
-        Vector3 rotated = Quaternion.AngleAxis(angleDegrees, normal) * tangent.normalized;
-        return rotated.sqrMagnitude > 0.0001f ? rotated.normalized : tangent.normalized;
-    }
-
 
     void UpdateLifecycle()
     {
