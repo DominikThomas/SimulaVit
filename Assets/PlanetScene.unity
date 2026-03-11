@@ -595,7 +595,7 @@ MonoBehaviour:
   planetResourceMap: {fileID: 1222684993}
   initialSpawnCount: 0
   maxPopulation: 30000
-  baseAgentColor: {r: 0.990566, g: 0.96487665, b: 0.6681648, a: 1}
+  baseAgentColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
   moveSpeed: 4
   turnSpeed: 5
   spawnSpread: 0.01
@@ -624,7 +624,7 @@ MonoBehaviour:
   hydrogenotrophyCO2PerTick: 0.01
   hydrogenotrophyEnergyPerTick: 0.5
   hydrogenotrophyStoreFraction: 0.8
-  hydrogenToPhotosynthesisMutationChance: 0.1
+  hydrogenToPhotosynthesisMutationChance: 0.5
   hydrogenToSaprotrophyMutationChance: 0.2
   hydrogenToSulfurMutationChance: 0.4
   locomotionMutationChance: 0.333
@@ -709,11 +709,14 @@ MonoBehaviour:
   dissolvedOrganicLeakSteerWeight: 2
   scentScoreSaturation: 2
   biasSpawnsToChemosynthesisResources: 1
-  spawnResourceProbeAttempts: 128
+  spawnResourceProbeAttempts: 256
   h2SpawnBiasWeight: 2.5
-  co2SpawnBiasWeight: 0
+  co2SpawnBiasWeight: 0.1
   chemoSpawnOptimalTemp: 1
   chemoSpawnTempTolerance: 0.25
+  minHydrogenSpawnScore: 0.12
+  minHydrogenSpawnH2: 0.08
+  spontaneousSpawnCandidateRetries: 16
   enableSpontaneousSpawning: 1
   spawnAttemptInterval: 1
   spontaneousSpawnChance: 0.5
@@ -727,6 +730,8 @@ MonoBehaviour:
   debugVentPlumeDiagnostics: 0
   energyVisualMultiplier: 1
   showSimulationHud: 1
+  runtimeSpeedMultiplier: 1
+  runtimeSimulationStepsPerFrame: 1
   enableRunAndTumbleDebug: 0
   runAndTumbleDebugWindowSeconds: 2
   debugSessileMovement: 0
@@ -807,7 +812,7 @@ MonoBehaviour:
   ventsOnlyBelowSeaLevel: 0
   ventH2SPerTick: 0.01
   ventH2PerTick: 0.006
-  ventCO2PerTick: 0
+  ventCO2PerTick: 0.04
   ventH2SMax: 1
   ventH2Max: 1.5
   h2sDiffuseStrength: 0.08

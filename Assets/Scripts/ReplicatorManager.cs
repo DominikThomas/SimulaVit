@@ -205,6 +205,16 @@ public class ReplicatorManager : MonoBehaviour
     public float co2SpawnBiasWeight = 0.5f;
     public float chemoSpawnOptimalTemp = 353.15f; // 80 °C
     public float chemoSpawnTempTolerance = 20f; // Kelvin
+    [Header("Spawn Viability Gates")]
+    [Range(0f, 1f)]
+    [Tooltip("Minimum final hydrogenotrophy spawn score required for spontaneous spawning.")]
+    public float minHydrogenSpawnScore = 0.12f;
+    [Range(0f, 1f)]
+    [Tooltip("Minimum normalized local H2 required for spontaneous hydrogenotroph spawning.")]
+    public float minHydrogenSpawnH2 = 0.08f;
+    [Range(1, 16)]
+    [Tooltip("How many times to retry candidate selection before giving up on this spawn tick.")]
+    public int spontaneousSpawnCandidateRetries = 10;
 
 
     [Header("Spontaneous Spawning")]
@@ -277,6 +287,7 @@ public class ReplicatorManager : MonoBehaviour
     private readonly ReplicatorSpawnSystem spawnSystem = new ReplicatorSpawnSystem();
     private readonly ReplicatorLifecycleSystem lifecycleSystem = new ReplicatorLifecycleSystem();
     private readonly ReplicatorMetabolismSystem metabolismSystem = new ReplicatorMetabolismSystem();
+    private readonly ReplicatorPredationSystem predationSystem = new ReplicatorPredationSystem();
     private float metabolismTickTimer;
     private float debugChemoTempSum;
     private float debugHydrogenTempSum;
@@ -890,9 +901,17 @@ public class ReplicatorManager : MonoBehaviour
             GetSpawnDirectionCandidate,
             IsSeaLocation,
             GetLocationSpawnMultiplier,
-            direction => SpawnAgentAtDirection(direction, CreateDefaultTraits(), null, MetabolismType.Hydrogenotrophy, LocomotionType.PassiveDrift, 0f, out _));
+            IsHydrogenSpawnCandidateViable,
+            spontaneousSpawnCandidateRetries,
+            direction => SpawnAgentAtDirection(
+                direction,
+                CreateDefaultTraits(),
+                null,
+                MetabolismType.Hydrogenotrophy,
+                LocomotionType.PassiveDrift,
+                0f,
+                out _));
     }
-
 
     Vector3 GetSpawnDirectionCandidate()
     {
@@ -940,6 +959,27 @@ public class ReplicatorManager : MonoBehaviour
             Debug.Log($"Hydrogen spawn score: chemistry={chemistryScore:0.00} temp={FormatTemperature(temp, temperatureDisplayUnit)} tempFitness={tempFitness:0.00} final={score:0.00}");
         }
         return score;
+    }
+
+    bool IsHydrogenSpawnCandidateViable(Vector3 direction)
+    {
+        if (planetResourceMap == null || planetGenerator == null)
+        {
+            return true;
+        }
+
+        int resolution = Mathf.Max(1, planetGenerator.resolution);
+        Vector3 normalizedDir = direction.normalized;
+        int cellIndex = PlanetGridIndexing.DirectionToCellIndex(normalizedDir, resolution);
+
+        float h2Availability = NormalizeResource(ResourceType.H2, cellIndex, steerGoodH2);
+        if (h2Availability < minHydrogenSpawnH2)
+        {
+            return false;
+        }
+
+        float score = GetHydrogenotrophySpawnScore(normalizedDir);
+        return score >= minHydrogenSpawnScore;
     }
 
     float GetLocationSpawnMultiplier(bool isSeaLocation)
@@ -1211,138 +1251,37 @@ public class ReplicatorManager : MonoBehaviour
 
     void RunPredationPass()
     {
-        if (!enablePredators || agents.Count <= 1 || planetGenerator == null)
+        if (planetGenerator == null)
         {
             return;
         }
 
-        float dt = Time.deltaTime;
-        float biteOrganicC = Mathf.Max(0f, predatorBiteOrganicC);
-        float biteEnergy = Mathf.Max(0f, predatorBiteEnergy);
-        float assimilation = Mathf.Clamp01(predatorAssimilationFraction);
-        float cooldownSeconds = Mathf.Max(0f, predatorAttackCooldownSeconds);
-        float energyPerC = Mathf.Max(0f, predatorEnergyPerC);
-        float maxStore = Mathf.Max(0f, maxOrganicCStore);
-        pendingPredationRemovals.Clear();
-
-        int resolution = Mathf.Max(1, planetGenerator.resolution);
-        if (!useScentPredation || !preyBinsReady)
+        ReplicatorPredationSystem.Settings settings = new ReplicatorPredationSystem.Settings
         {
-            return;
-        }
+            EnablePredators = enablePredators,
+            UseScentPredation = useScentPredation,
+            PredatorBiteOrganicC = predatorBiteOrganicC,
+            PredatorBiteEnergy = predatorBiteEnergy,
+            PredatorAssimilationFraction = predatorAssimilationFraction,
+            PredatorAttackCooldownSeconds = predatorAttackCooldownSeconds,
+            PredatorEnergyPerC = predatorEnergyPerC,
+            MaxOrganicCStore = maxOrganicCStore,
+            PredatorKillEnergyThreshold = predatorKillEnergyThreshold,
+        };
 
-        for (int i = agents.Count - 1; i >= 0; i--)
-        {
-            Replicator predator = agents[i];
-            if (!IsPredator(predator))
-            {
-                continue;
-            }
-
-            predator.attackCooldown = Mathf.Max(0f, predator.attackCooldown - dt);
-            if (predator.attackCooldown > 0f)
-            {
-                continue;
-            }
-
-            int predatorCell = PlanetGridIndexing.DirectionToCellIndex(predator.position.normalized, resolution);
-            if (!preyAgentsByCell.TryGetValue(predatorCell, out List<int> preyInCell) || preyInCell.Count == 0)
-            {
-                continue;
-            }
-
-            if (!TryBuildPredationCandidates(i, preyInCell))
-            {
-                continue;
-            }
-
-            int preyIndex = localPredationCandidates[UnityEngine.Random.Range(0, localPredationCandidates.Count)];
-            if (preyIndex < 0 || preyIndex >= agents.Count)
-            {
-                continue;
-            }
-
-            Replicator preyVictim = agents[preyIndex];
-            ApplyPredationBite(predator, preyVictim, biteOrganicC, biteEnergy, assimilation, energyPerC, maxStore);
-            predator.attackCooldown = cooldownSeconds;
-
-            if (preyVictim.energy <= Mathf.Max(0f, predatorKillEnergyThreshold))
-            {
-                RegisterDeathCause(preyVictim.metabolism, DeathCause.Predation);
-                DepositDeathOrganicC(preyVictim);
-                pendingPredationRemovals.Add(preyIndex);
-                predationKillsWindow++;
-            }
-        }
-
-        RemovePredationVictims();
-    }
-
-    bool TryBuildPredationCandidates(int predatorIndex, List<int> preyInCell)
-    {
-        localPredationCandidates.Clear();
-
-        for (int preyListIndex = 0; preyListIndex < preyInCell.Count; preyListIndex++)
-        {
-            int preyIndexCandidate = preyInCell[preyListIndex];
-            if (preyIndexCandidate == predatorIndex || pendingPredationRemovals.Contains(preyIndexCandidate))
-            {
-                continue;
-            }
-
-            localPredationCandidates.Add(preyIndexCandidate);
-        }
-
-        return localPredationCandidates.Count > 0;
-    }
-
-    void ApplyPredationBite(
-        Replicator predator,
-        Replicator preyVictim,
-        float biteOrganicC,
-        float biteEnergy,
-        float assimilation,
-        float energyPerC,
-        float maxStore)
-    {
-        float takeC = Mathf.Min(Mathf.Max(0f, preyVictim.organicCStore), biteOrganicC);
-        preyVictim.organicCStore = Mathf.Max(0f, preyVictim.organicCStore - takeC);
-
-        float takeE = 0f;
-        if (takeC < biteOrganicC && biteEnergy > 0f)
-        {
-            takeE = Mathf.Min(Mathf.Max(0f, preyVictim.energy), biteEnergy);
-            preyVictim.energy = Mathf.Max(0f, preyVictim.energy - takeE);
-        }
-
-        float storedGain = takeC * assimilation;
-        predator.organicCStore = Mathf.Clamp(predator.organicCStore + storedGain, 0f, maxStore);
-        float respiredC = takeC - storedGain;
-        predator.energy += (respiredC * energyPerC) + (takeE * 0.5f);
-    }
-
-    void RemovePredationVictims()
-    {
-        if (pendingPredationRemovals.Count <= 0)
-        {
-            return;
-        }
-
-        predationRemovalBuffer.Clear();
-        foreach (int index in pendingPredationRemovals)
-        {
-            predationRemovalBuffer.Add(index);
-        }
-
-        predationRemovalBuffer.Sort();
-        for (int i = predationRemovalBuffer.Count - 1; i >= 0; i--)
-        {
-            int index = predationRemovalBuffer[i];
-            if (index >= 0 && index < agents.Count)
-            {
-                agents.RemoveAt(index);
-            }
-        }
+        predationSystem.RunPredationPass(
+            agents,
+            settings,
+            Time.deltaTime,
+            Mathf.Max(1, planetGenerator.resolution),
+            preyAgentsByCell,
+            localPredationCandidates,
+            pendingPredationRemovals,
+            predationRemovalBuffer,
+            IsPredator,
+            RegisterDeathCause,
+            DepositDeathOrganicC,
+            ref predationKillsWindow);
     }
 
     void UpdateRunAndTumbleLocomotion()

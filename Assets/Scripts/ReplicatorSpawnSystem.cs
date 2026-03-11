@@ -47,6 +47,8 @@ public class ReplicatorSpawnSystem
         Func<Vector3> getSpawnDirectionCandidate,
         Func<Vector3, bool> isSeaLocation,
         Func<bool, float> getLocationSpawnMultiplier,
+        Func<Vector3, bool> isCandidateViable,
+        int candidateRetries,
         Func<Vector3, bool> trySpawnHydrogenotrophAtDirection)
     {
         if (agentCount >= maxPopulation)
@@ -54,17 +56,32 @@ public class ReplicatorSpawnSystem
             return false;
         }
 
-        Vector3 randomDir = getSpawnDirectionCandidate();
-        bool isSea = isSeaLocation(randomDir);
+        int retries = Mathf.Max(1, candidateRetries);
 
-        float locationMultiplier = getLocationSpawnMultiplier(isSea);
-        float spawnChance = Mathf.Clamp01(spontaneousSpawnChance * locationMultiplier);
-
-        if (UnityEngine.Random.value >= spawnChance)
+        for (int attempt = 0; attempt < retries; attempt++)
         {
-            return false;
+            Vector3 randomDir = getSpawnDirectionCandidate();
+
+            if (!isCandidateViable(randomDir))
+            {
+                continue;
+            }
+
+            bool isSea = isSeaLocation(randomDir);
+            float locationMultiplier = getLocationSpawnMultiplier(isSea);
+            float spawnChance = Mathf.Clamp01(spontaneousSpawnChance * locationMultiplier);
+
+            if (UnityEngine.Random.value >= spawnChance)
+            {
+                continue;
+            }
+
+            if (trySpawnHydrogenotrophAtDirection(randomDir))
+            {
+                return true;
+            }
         }
 
-        return trySpawnHydrogenotrophAtDirection(randomDir);
+        return false;
     }
 }
