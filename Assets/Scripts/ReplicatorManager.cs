@@ -803,22 +803,22 @@ public class ReplicatorManager : MonoBehaviour
         if (cachedCount > 0)
         {
             int samples = Mathf.Clamp(spontaneousSpawnDetailedSampleCount, 1, cachedCount);
-            Vector3 bestDirection = GetDirectionForCellIndex(spontaneousHydrogenSpawnCandidateCells[UnityEngine.Random.Range(0, cachedCount)]);
-            float bestScore = -1f;
+            Vector3 cachedBestDirection = GetDirectionForCellIndex(spontaneousHydrogenSpawnCandidateCells[UnityEngine.Random.Range(0, cachedCount)]);
+            float cachedBestScore = -1f;
 
             for (int i = 0; i < samples; i++)
             {
                 int candidateCell = spontaneousHydrogenSpawnCandidateCells[UnityEngine.Random.Range(0, cachedCount)];
                 Vector3 candidate = GetDirectionForCellIndex(candidateCell);
                 float score = GetHydrogenotrophySpawnScore(candidate);
-                if (score > bestScore)
+                if (score > cachedBestScore)
                 {
-                    bestScore = score;
-                    bestDirection = candidate;
+                    cachedBestScore = score;
+                    cachedBestDirection = candidate;
                 }
             }
 
-            return bestDirection;
+            return cachedBestDirection;
         }
 
         int attempts = Mathf.Max(1, spawnResourceProbeAttempts);
