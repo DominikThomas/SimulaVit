@@ -60,3 +60,72 @@ Suggested compare workflow:
 2. Compare marker timings over 300–600 frames at representative populations.
 3. Run at low (`1`) and high (`>=20`) `simulationStepsPerFrame`.
 4. Focus on total `MetabolismTick` cost and HotLoop share.
+
+## 9) Measurement checkpoint playbook (post-current migration)
+
+### Concise benchmark checklist
+Use this exact sequence so each checkpoint can be compared apples-to-apples:
+
+1. **Lock scenario**: same scene (`PlanetScene`), same seed/settings, same camera path, same quality level.
+2. **Profile in Player or Development build** (not Deep Profile) and capture **300-600 warm frames** after initial spawn settles.
+3. Run two operating points:
+   - `simulationStepsPerFrame = 1` (real-time behavior)
+   - `simulationStepsPerFrame >= 20` (CPU stress / fast-forward behavior)
+4. For each run, log:
+   - total population and predator count,
+   - median + p95 frame time,
+   - GC Allocated In Frame,
+   - median + p95 of the markers listed below.
+5. Repeat each operating point 3 times and compare medians (ignore single-run spikes).
+
+### Existing profiler markers to compare
+
+#### Population-state + metabolism markers (already used for migration proof)
+- `ReplicatorPopulationState.SyncFromAgents`
+- `ReplicatorMetabolismSystem.HotLoop`
+- `ReplicatorPopulationState.SyncToAgents`
+- `ReplicatorMetabolismSystem.RemoveDeadAgents`
+
+#### Adjacent system markers for next-step direction
+- `ReplicatorMovementSystem.SyncFromPopulationState`
+- `ReplicatorMovementSystem.SyncToAgents`
+- `ReplicatorSteeringSystem.SyncFromPopulationState`
+- `ReplicatorSteeringSystem.HotLoop`
+- `ReplicatorSteeringSystem.SyncToAgents`
+- `ReplicatorManager.PopulationStateSyncForLocomotion`
+- `ReplicatorManager.UpdateScentFields`
+- `ReplicatorManager.SkipScentFields.NoPredators` (sanity marker that tells you scent work was skipped)
+
+### Practical interpretation guide (choose the next optimization step)
+
+Use marker share of the simulation frame (not absolute ms alone) as the decision signal.
+
+1. **Choose more SoA migration next** when either is true:
+   - any `Sync*` marker family is a large tax versus its system hot loop,
+   - the combined `SyncFrom + SyncTo` cost scales faster than population growth.
+
+   This means object<->array marshaling is dominating and more systems should run directly on packed arrays before syncing.
+
+2. **Choose Jobs/Burst on hot loops next** when either is true:
+   - `ReplicatorMetabolismSystem.HotLoop` and/or `ReplicatorSteeringSystem.HotLoop` dominates while sync cost is comparatively small,
+   - cost rises roughly linearly with agent count and stays compute-bound.
+
+   This indicates loop math itself is the bottleneck, so parallelizing/pushing Burst-friendly kernels gives best ROI.
+
+3. **Choose render-side optimization next** when simulation markers are stable but frame time is still high:
+   - simulation markers consume a minority of frame time,
+   - render-thread/GPU timelines are heavier than simulation on the same workload.
+
+   In this case simulation migration is no longer first-order; optimize instancing/material/property-block churn and visual workload first.
+
+4. **Choose spawn/lifecycle ownership cleanup next** when removal/spawn churn spikes:
+   - `ReplicatorMetabolismSystem.RemoveDeadAgents` shows bursty p95 spikes,
+   - spikes correlate with population turnover events rather than steady-state count.
+
+   This suggests ownership/deferred-removal paths are causing uneven frame pacing; move lifecycle/spawn to cleaner ownership boundaries next.
+
+### Fast rule-of-thumb decision matrix
+- **Sync heavy** -> continue **SoA migration**.
+- **HotLoop heavy** -> do **Jobs/Burst**.
+- **Simulation light but frame heavy** -> do **render optimization**.
+- **Spiky remove/spawn costs** -> do **lifecycle ownership cleanup**.
