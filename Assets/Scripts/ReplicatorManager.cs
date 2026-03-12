@@ -334,7 +334,6 @@ public class ReplicatorManager : MonoBehaviour
     private float simulationTimeSeconds;
     private float currentStepDeltaTime;
     private ReplicatorSteeringSystem.DebugState steeringDebugState;
-    private readonly List<int> localPredationCandidates = new List<int>(64);
     private readonly Dictionary<int, List<int>> preyAgentsByCell = new Dictionary<int, List<int>>(2048);
     private readonly List<int> spontaneousHydrogenSpawnCandidateCells = new List<int>(1024);
     private int spontaneousSpawnCandidateCacheLastRefreshStep = -1;
@@ -342,8 +341,6 @@ public class ReplicatorManager : MonoBehaviour
     private int predatorPresenceCacheStep = -1;
     private bool predatorPresenceCached;
 
-    private readonly HashSet<int> pendingPredationRemovals = new HashSet<int>();
-    private readonly List<int> predationRemovalBuffer = new List<int>(256);
 
 
 
@@ -1190,10 +1187,6 @@ public class ReplicatorManager : MonoBehaviour
             currentStepDeltaTime,
             Mathf.Max(1, planetGenerator.resolution),
             preyAgentsByCell,
-            localPredationCandidates,
-            pendingPredationRemovals,
-            predationRemovalBuffer,
-            IsPredator,
             RegisterDeathCause,
             DepositDeathOrganicC,
             DepositPredationOrganicCAtLocation,

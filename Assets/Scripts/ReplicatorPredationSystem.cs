@@ -4,6 +4,10 @@ using UnityEngine;
 
 public class ReplicatorPredationSystem
 {
+    private readonly List<int> localPredationCandidates = new List<int>(64);
+    private readonly HashSet<int> pendingPredationRemovals = new HashSet<int>();
+    private readonly List<int> predationRemovalBuffer = new List<int>(256);
+
     public struct Settings
     {
         public bool EnablePredators;
@@ -24,10 +28,6 @@ public class ReplicatorPredationSystem
         float deltaTime,
         int resolution,
         Dictionary<int, List<int>> preyAgentsByCell,
-        List<int> localPredationCandidates,
-        HashSet<int> pendingPredationRemovals,
-        List<int> predationRemovalBuffer,
-        Func<Replicator, bool> isPredator,
         Action<MetabolismType, DeathCause> registerDeathCause,
         Action<Replicator> depositDeathOrganicC,
         Action<Replicator, float> depositPredationOrganicC,
