@@ -711,7 +711,7 @@ MonoBehaviour:
   dissolvedOrganicLeakSteerWeight: 2
   scentScoreSaturation: 2
   biasSpawnsToChemosynthesisResources: 1
-  spawnResourceProbeAttempts: 256
+  spawnResourceProbeAttempts: 64
   h2SpawnBiasWeight: 2.5
   co2SpawnBiasWeight: 0.1
   chemoSpawnOptimalTemp: 1
@@ -719,11 +719,15 @@ MonoBehaviour:
   minHydrogenSpawnScore: 0.12
   minHydrogenSpawnH2: 0.08
   spontaneousSpawnCandidateRetries: 16
+  spontaneousSpawnCandidateCacheRefreshSteps: 30
+  spontaneousSpawnDetailedSampleCount: 8
   enableSpontaneousSpawning: 1
   spawnAttemptInterval: 1
   spontaneousSpawnChance: 0.5
   guaranteedFirstSpawnWithinSeconds: 10
   seaSpawnPreference: 0.5
+  disableSpontaneousSpawningAtPopulation: 1000
+  reenableSpontaneousSpawningAtPopulation: 200
   defaultSpawnOnlyInSea: 1
   defaultReplicateOnlyInSea: 1
   defaultMoveOnlyInSea: 0
