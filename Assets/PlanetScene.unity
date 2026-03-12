@@ -340,6 +340,8 @@ MonoBehaviour:
   rotateSkybox: 1
   skyboxRotationMultiplier: -1
   skyboxOverride: {fileID: 0}
+  scaleRotationWithSimulationSpeed: 1
+  replicatorManager: {fileID: 0}
 --- !u!1 &370080324
 GameObject:
   m_ObjectHideFlags: 0
@@ -730,8 +732,10 @@ MonoBehaviour:
   debugVentPlumeDiagnostics: 0
   energyVisualMultiplier: 1
   showSimulationHud: 1
-  runtimeSpeedMultiplier: 1
   runtimeSimulationStepsPerFrame: 1
+  allowRenderFrameSkippingAtHighSpeed: 0
+  renderEveryNFramesAtHighSpeed: 2
+  renderSkipMinStepsPerFrame: 20
   enableRunAndTumbleDebug: 0
   runAndTumbleDebugWindowSeconds: 2
   debugSessileMovement: 0
@@ -812,7 +816,7 @@ MonoBehaviour:
   ventTickSeconds: 0.5
   ventsOnlyBelowSeaLevel: 0
   ventH2SPerTick: 0.01
-  ventH2PerTick: 0.006
+  ventH2PerTick: 0.06
   ventCO2PerTick: 0.04
   ventH2SMax: 1
   ventH2Max: 1.5
