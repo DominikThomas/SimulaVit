@@ -314,6 +314,8 @@ public class ReplicatorManager : MonoBehaviour
     private float avgToxicProteolyticWasteDebug;
     private float avgDissolvedOrganicLeakDebug;
     private float nextScentUpdateTime;
+    private float simulationTimeSeconds;
+    private float currentStepDeltaTime;
     private ReplicatorSteeringSystem.DebugState steeringDebugState;
     private readonly List<int> localPredationCandidates = new List<int>(64);
     private readonly Dictionary<int, List<int>> preyAgentsByCell = new Dictionary<int, List<int>>(2048);
@@ -403,6 +405,9 @@ public class ReplicatorManager : MonoBehaviour
         int stepsPerFrame = Mathf.Max(0, runtimeSimulationStepsPerFrame);
         for (int i = 0; i < stepsPerFrame; i++)
         {
+            currentStepDeltaTime = Time.deltaTime;
+            simulationTimeSeconds += currentStepDeltaTime;
+
             if (useScentPredation && planetResourceMap != null && planetResourceMap.enableScentFields)
             {
                 UpdateScentFields();
@@ -728,7 +733,7 @@ public class ReplicatorManager : MonoBehaviour
             enableSpontaneousSpawning,
             guaranteedFirstSpawnWithinSeconds,
             spawnAttemptInterval,
-            Time.deltaTime,
+            currentStepDeltaTime,
             SpawnAgentAtRandomLocation,
             TryRandomSpontaneousSpawn);
     }
@@ -884,12 +889,12 @@ public class ReplicatorManager : MonoBehaviour
     void UpdateScentFields()
     {
         float interval = Mathf.Max(0.01f, scentEmitInterval);
-        if (Time.time < nextScentUpdateTime)
+        if (simulationTimeSeconds < nextScentUpdateTime)
         {
             return;
         }
 
-        nextScentUpdateTime = Time.time + interval;
+        nextScentUpdateTime = simulationTimeSeconds + interval;
 
         if (planetResourceMap == null)
         {
@@ -1017,7 +1022,7 @@ public class ReplicatorManager : MonoBehaviour
         predationSystem.RunPredationPass(
             agents,
             settings,
-            Time.deltaTime,
+            currentStepDeltaTime,
             Mathf.Max(1, planetGenerator.resolution),
             preyAgentsByCell,
             localPredationCandidates,
@@ -1036,8 +1041,8 @@ public class ReplicatorManager : MonoBehaviour
             planetGenerator,
             planetResourceMap,
             CreateSteeringSettings(),
-            Time.deltaTime,
-            Time.time,
+            currentStepDeltaTime,
+            simulationTimeSeconds,
             ref steeringDebugState);
     }
 
@@ -1089,7 +1094,7 @@ public class ReplicatorManager : MonoBehaviour
         int resolution = planetGenerator != null ? planetGenerator.resolution : 1;
         lifecycleSystem.UpdateLifecycle(
             agents,
-            Time.deltaTime,
+            currentStepDeltaTime,
             reproductionRate,
             enableCarbonLimitedDivision,
             divisionEnergyCost,
@@ -1111,7 +1116,7 @@ public class ReplicatorManager : MonoBehaviour
     void TickMetabolism()
     {
         float tick = Mathf.Max(0.01f, metabolismTickSeconds);
-        metabolismTickTimer += Time.deltaTime;
+        metabolismTickTimer += currentStepDeltaTime;
 
         while (metabolismTickTimer >= tick)
         {
@@ -1220,8 +1225,8 @@ public class ReplicatorManager : MonoBehaviour
             agents,
             settings,
             planetGenerator,
-            Time.deltaTime,
-            Time.time);
+            currentStepDeltaTime,
+            simulationTimeSeconds);
     }
 
     void Reset()
