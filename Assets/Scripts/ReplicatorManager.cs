@@ -286,6 +286,7 @@ public class ReplicatorManager : MonoBehaviour
     private readonly ReplicatorSpawnSystem spawnSystem = new ReplicatorSpawnSystem();
     private readonly ReplicatorLifecycleSystem lifecycleSystem = new ReplicatorLifecycleSystem();
     private readonly ReplicatorMetabolismSystem metabolismSystem = new ReplicatorMetabolismSystem();
+    private readonly ReplicatorPopulationState populationState = new ReplicatorPopulationState();
     private readonly ReplicatorPredationSystem predationSystem = new ReplicatorPredationSystem();
     private readonly ReplicatorSteeringSystem steeringSystem = new ReplicatorSteeringSystem();
     private readonly ReplicatorMovementSystem movementSystem = new ReplicatorMovementSystem();
@@ -1151,6 +1152,7 @@ public class ReplicatorManager : MonoBehaviour
 
         metabolismSystem.MetabolismTick(
             agents,
+            populationState,
             planetGenerator,
             planetResourceMap,
             settings,
