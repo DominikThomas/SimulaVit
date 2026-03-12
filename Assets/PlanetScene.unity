@@ -663,7 +663,7 @@ MonoBehaviour:
   predatorAssimilationFraction: 0.6
   predatorEnergyPerC: 0.3
   predatorBasalCostMultiplier: 1.5
-  predatorMoveSpeedMultiplier: 5
+  predatorMoveSpeedMultiplier: 0.7
   predatorSpawnColorStrength: 1
   enableFear: 1
   fearRadius: 0.6
@@ -725,9 +725,9 @@ MonoBehaviour:
   guaranteedFirstSpawnWithinSeconds: 10
   seaSpawnPreference: 0.5
   defaultSpawnOnlyInSea: 1
-  defaultReplicateOnlyInSea: 0
+  defaultReplicateOnlyInSea: 1
   defaultMoveOnlyInSea: 0
-  defaultSurfaceMoveSpeedMultiplier: 0.4
+  defaultSurfaceMoveSpeedMultiplier: 0.05
   colorByEnergy: 1
   debugVentPlumeDiagnostics: 0
   energyVisualMultiplier: 1
