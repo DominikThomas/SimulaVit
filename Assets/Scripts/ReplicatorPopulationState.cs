@@ -18,6 +18,8 @@ public class ReplicatorPopulationState
     public float[] Energy = new float[0];
     public float[] OrganicCStore = new float[0];
     public float[] SpeedFactor = new float[0];
+    public float[] AttackCooldown = new float[0];
+    public float[] FearCooldown = new float[0];
     public bool[] Alive = new bool[0];
 
     public MetabolismType[] Metabolism = new MetabolismType[0];
@@ -70,6 +72,8 @@ public class ReplicatorPopulationState
             Energy[i] = a.energy;
             OrganicCStore[i] = a.organicCStore;
             SpeedFactor[i] = a.speedFactor;
+            AttackCooldown[i] = a.attackCooldown;
+            FearCooldown[i] = a.fearCooldown;
             Metabolism[i] = a.metabolism;
             Locomotion[i] = a.locomotion;
             Alive[i] = true;
@@ -138,6 +142,38 @@ public class ReplicatorPopulationState
         }
     }
 
+    public void SyncPredationFieldsFromAgents(List<Replicator> agents)
+    {
+        Count = agents.Count;
+        EnsureCapacity(Count);
+
+        for (int i = 0; i < Count; i++)
+        {
+            Replicator a = agents[i];
+            Position[i] = a.position;
+            Metabolism[i] = a.metabolism;
+            Energy[i] = a.energy;
+            OrganicCStore[i] = a.organicCStore;
+            AttackCooldown[i] = a.attackCooldown;
+        }
+    }
+
+    public void SyncPredationFieldsToAgents(List<Replicator> agents)
+    {
+        int count = Mathf.Min(Count, agents.Count);
+        for (int i = 0; i < count; i++)
+        {
+            CopyPredationEntryToAgent(i, agents[i]);
+        }
+    }
+
+    public void CopyPredationEntryToAgent(int index, Replicator agent)
+    {
+        agent.energy = Energy[index];
+        agent.organicCStore = OrganicCStore[index];
+        agent.attackCooldown = AttackCooldown[index];
+    }
+
     public void CopyEntryToAgent(int index, Replicator agent)
     {
         agent.position = Position[index];
@@ -148,6 +184,8 @@ public class ReplicatorPopulationState
         agent.energy = Energy[index];
         agent.organicCStore = OrganicCStore[index];
         agent.speedFactor = SpeedFactor[index];
+        agent.attackCooldown = AttackCooldown[index];
+        agent.fearCooldown = FearCooldown[index];
         agent.starveCo2Seconds = StarveCo2Seconds[index];
         agent.starveH2sSeconds = StarveH2sSeconds[index];
         agent.starveH2Seconds = StarveH2Seconds[index];
@@ -176,6 +214,8 @@ public class ReplicatorPopulationState
         Energy = new float[newCapacity];
         OrganicCStore = new float[newCapacity];
         SpeedFactor = new float[newCapacity];
+        AttackCooldown = new float[newCapacity];
+        FearCooldown = new float[newCapacity];
         Alive = new bool[newCapacity];
         Metabolism = new MetabolismType[newCapacity];
         Locomotion = new LocomotionType[newCapacity];

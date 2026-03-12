@@ -1023,7 +1023,8 @@ public class ReplicatorManager : MonoBehaviour
             int resolution = Mathf.Max(1, planetGenerator.resolution);
             int cellCount = PlanetGridIndexing.GetCellCount(resolution);
             planetResourceMap.EnsureScentArrays(cellCount);
-            RebuildPreyCellBins(resolution);
+            populationState.SyncPredationFieldsFromAgents(agents);
+            RebuildPreyCellBins(resolution, populationState);
 
             float leakEmit = Mathf.Max(0f, dissolvedOrganicLeakEmitPerSecond) * interval;
             float wasteEmit = Mathf.Max(0f, toxicProteolyticWasteEmitPerSecond) * interval;
@@ -1084,17 +1085,18 @@ public class ReplicatorManager : MonoBehaviour
         return predatorPresenceCached;
     }
 
-    void RebuildPreyCellBins(int resolution)
+    void RebuildPreyCellBins(int resolution, ReplicatorPopulationState state)
     {
         preyAgentsByCell.Clear();
-        for (int i = 0; i < agents.Count; i++)
+        int count = Mathf.Min(agents.Count, state != null ? state.Count : 0);
+        for (int i = 0; i < count; i++)
         {
-            if (IsPredator(agents[i]))
+            if (state.Metabolism[i] == MetabolismType.Predation)
             {
                 continue;
             }
 
-            int cellIndex = PlanetGridIndexing.DirectionToCellIndex(agents[i].position.normalized, resolution);
+            int cellIndex = PlanetGridIndexing.DirectionToCellIndex(state.Position[i].normalized, resolution);
             if (!preyAgentsByCell.TryGetValue(cellIndex, out List<int> preyIndices))
             {
                 preyIndices = new List<int>(4);
@@ -1183,6 +1185,7 @@ public class ReplicatorManager : MonoBehaviour
 
         predationSystem.RunPredationPass(
             agents,
+            populationState,
             settings,
             currentStepDeltaTime,
             Mathf.Max(1, planetGenerator.resolution),
