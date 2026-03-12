@@ -15,6 +15,7 @@ public class ReplicatorManager : MonoBehaviour
 {
     private static readonly ProfilerMarker PredatorScentUpdateMarker = new ProfilerMarker("ReplicatorManager.UpdateScentFields");
     private static readonly ProfilerMarker PredatorScentSkipNoPredatorsMarker = new ProfilerMarker("ReplicatorManager.SkipScentFields.NoPredators");
+    private static readonly ProfilerMarker PopulationStateSyncForLocomotionMarker = new ProfilerMarker("ReplicatorManager.PopulationStateSyncForLocomotion");
 
     [Header("Settings")]
     public Mesh replicatorMesh;
@@ -332,6 +333,7 @@ public class ReplicatorManager : MonoBehaviour
     private float nextScentUpdateTime;
     private float simulationTimeSeconds;
     private float currentStepDeltaTime;
+    private bool metabolismTickRanThisStep;
     private ReplicatorSteeringSystem.DebugState steeringDebugState;
     private readonly List<int> localPredationCandidates = new List<int>(64);
     private readonly Dictionary<int, List<int>> preyAgentsByCell = new Dictionary<int, List<int>>(2048);
@@ -429,6 +431,7 @@ public class ReplicatorManager : MonoBehaviour
             currentStepDeltaTime = Time.deltaTime;
             simulationTimeSeconds += currentStepDeltaTime;
             simulationStepCount++;
+            metabolismTickRanThisStep = false;
 
             if (ShouldProcessPredatorScent())
             {
@@ -443,8 +446,9 @@ public class ReplicatorManager : MonoBehaviour
             TickMetabolism();
             RunPredationPass();
             HandleSpontaneousSpawning();
-            UpdateRunAndTumbleLocomotion();
-            RunMovementJob();
+            bool populationStatePrimedForLocomotion = PreparePopulationStateForLocomotion();
+            UpdateRunAndTumbleLocomotion(populationStatePrimedForLocomotion);
+            RunMovementJob(populationStatePrimedForLocomotion);
             ValidateSessileMovement();
         }
 
@@ -1194,7 +1198,7 @@ public class ReplicatorManager : MonoBehaviour
             ref predationKillsWindow);
     }
 
-    void UpdateRunAndTumbleLocomotion()
+    void UpdateRunAndTumbleLocomotion(bool populationStatePrimed)
     {
         steeringSystem.UpdateRunAndTumbleLocomotion(
             agents,
@@ -1204,7 +1208,28 @@ public class ReplicatorManager : MonoBehaviour
             CreateSteeringSettings(),
             currentStepDeltaTime,
             simulationTimeSeconds,
+            populationStatePrimed,
             ref steeringDebugState);
+    }
+
+    bool PreparePopulationStateForLocomotion()
+    {
+        if (agents.Count == 0)
+        {
+            return false;
+        }
+
+        if (metabolismTickRanThisStep)
+        {
+            return true;
+        }
+
+        using (PopulationStateSyncForLocomotionMarker.Auto())
+        {
+            populationState.SyncFromAgents(agents);
+        }
+
+        return true;
     }
 
     void ValidateSessileMovement()
@@ -1282,6 +1307,7 @@ public class ReplicatorManager : MonoBehaviour
         while (metabolismTickTimer >= tick)
         {
             metabolismTickTimer -= tick;
+            metabolismTickRanThisStep = true;
             MetabolismTick(tick);
         }
     }
@@ -1367,7 +1393,7 @@ public class ReplicatorManager : MonoBehaviour
         }
     }
 
-    void RunMovementJob()
+    void RunMovementJob(bool populationStatePrimed)
     {
         ReplicatorMovementSystem.Settings settings = new ReplicatorMovementSystem.Settings
         {
@@ -1388,7 +1414,8 @@ public class ReplicatorManager : MonoBehaviour
             settings,
             planetGenerator,
             currentStepDeltaTime,
-            simulationTimeSeconds);
+            simulationTimeSeconds,
+            populationStatePrimed);
     }
 
     void Reset()

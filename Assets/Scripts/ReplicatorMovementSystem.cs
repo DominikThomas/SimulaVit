@@ -38,7 +38,8 @@ public class ReplicatorMovementSystem
         Settings settings,
         PlanetGenerator planetGenerator,
         float deltaTime,
-        float timeValue)
+        float timeValue,
+        bool populationStatePrimed)
     {
         int count = agents.Count;
         if (count == 0)
@@ -48,7 +49,10 @@ public class ReplicatorMovementSystem
 
         EnsureJobBufferCapacity(count);
 
-        populationState.SyncMovementFieldsFromAgents(agents);
+        if (!populationStatePrimed)
+        {
+            populationState.SyncMovementFieldsFromAgents(agents);
+        }
 
         using (MovementSyncFromPopulationStateMarker.Auto())
         {
@@ -59,10 +63,10 @@ public class ReplicatorMovementSystem
                 jobRotations[i] = agent.rotation;
                 jobMoveOnlyInSea[i] = agent.traits.moveOnlyInSea;
                 jobSurfaceMoveSpeedMultipliers[i] = Mathf.Max(0.01f, agent.traits.surfaceMoveSpeedMultiplier);
-                jobMovementSeeds[i] = agent.movementSeed;
+                jobMovementSeeds[i] = populationState.MovementSeed[i];
                 jobSpeedFactors[i] = Mathf.Clamp(populationState.SpeedFactor[i], settings.MinSpeedFactor, 1f);
                 jobLocomotionTypes[i] = (int)populationState.Locomotion[i];
-                jobDesiredMoveDirs[i] = agent.desiredMoveDir;
+                jobDesiredMoveDirs[i] = populationState.DesiredMoveDirection[i];
             }
         }
 
