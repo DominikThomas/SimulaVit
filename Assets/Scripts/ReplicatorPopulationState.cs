@@ -16,6 +16,7 @@ public class ReplicatorPopulationState
     public Vector3[] DesiredMoveDirection = new Vector3[0];
     public Vector3[] Velocity = new Vector3[0];
     public float[] Energy = new float[0];
+    public float[] Age = new float[0];
     public float[] OrganicCStore = new float[0];
     public float[] SpeedFactor = new float[0];
     public float[] AttackCooldown = new float[0];
@@ -70,6 +71,7 @@ public class ReplicatorPopulationState
             DesiredMoveDirection[i] = a.desiredMoveDir;
             Velocity[i] = a.velocity;
             Energy[i] = a.energy;
+            Age[i] = a.age;
             OrganicCStore[i] = a.organicCStore;
             SpeedFactor[i] = a.speedFactor;
             AttackCooldown[i] = a.attackCooldown;
@@ -116,6 +118,18 @@ public class ReplicatorPopulationState
             TumbleProbability[i] = a.tumbleProbability;
             NextSenseTime[i] = a.nextSenseTime;
             MovementSeed[i] = a.movementSeed;
+        }
+    }
+
+    public void SyncLifecycleFieldsFromAgents(List<Replicator> agents)
+    {
+        Count = agents.Count;
+        EnsureCapacity(Count);
+
+        for (int i = 0; i < Count; i++)
+        {
+            Replicator a = agents[i];
+            Age[i] = a.age;
         }
     }
 
@@ -182,6 +196,7 @@ public class ReplicatorPopulationState
         agent.desiredMoveDir = DesiredMoveDirection[index];
         agent.velocity = Velocity[index];
         agent.energy = Energy[index];
+        agent.age = Age[index];
         agent.organicCStore = OrganicCStore[index];
         agent.speedFactor = SpeedFactor[index];
         agent.attackCooldown = AttackCooldown[index];
@@ -212,6 +227,7 @@ public class ReplicatorPopulationState
         DesiredMoveDirection = new Vector3[newCapacity];
         Velocity = new Vector3[newCapacity];
         Energy = new float[newCapacity];
+        Age = new float[newCapacity];
         OrganicCStore = new float[newCapacity];
         SpeedFactor = new float[newCapacity];
         AttackCooldown = new float[newCapacity];
