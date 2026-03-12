@@ -1196,6 +1196,7 @@ public class ReplicatorManager : MonoBehaviour
             IsPredator,
             RegisterDeathCause,
             DepositDeathOrganicC,
+            DepositPredationOrganicCAtLocation,
             ref predationKillsWindow);
     }
 
@@ -1364,6 +1365,25 @@ public class ReplicatorManager : MonoBehaviour
     }
 
 
+
+
+    void DepositPredationOrganicCAtLocation(Replicator agent, float amount)
+    {
+        if (planetResourceMap == null || planetGenerator == null)
+        {
+            return;
+        }
+
+        float depositAmount = Mathf.Max(0f, amount);
+        if (depositAmount <= 0f)
+        {
+            return;
+        }
+
+        int resolution = Mathf.Max(1, planetGenerator.resolution);
+        int cellIndex = PlanetGridIndexing.DirectionToCellIndex(agent.position.normalized, resolution);
+        planetResourceMap.Add(ResourceType.OrganicC, cellIndex, depositAmount);
+    }
 
     void DepositDeathOrganicC(Replicator agent)
     {

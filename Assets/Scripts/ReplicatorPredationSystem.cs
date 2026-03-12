@@ -30,6 +30,7 @@ public class ReplicatorPredationSystem
         Func<Replicator, bool> isPredator,
         Action<MetabolismType, DeathCause> registerDeathCause,
         Action<Replicator> depositDeathOrganicC,
+        Action<Replicator, float> depositPredationOrganicC,
         ref int predationKillsWindow)
     {
         if (!settings.EnablePredators || agents.Count <= 1 || populationState == null)
@@ -43,7 +44,6 @@ public class ReplicatorPredationSystem
         float biteEnergy = Mathf.Max(0f, settings.PredatorBiteEnergy);
         float assimilation = Mathf.Clamp01(settings.PredatorAssimilationFraction);
         float cooldownSeconds = Mathf.Max(0f, settings.PredatorAttackCooldownSeconds);
-        float energyPerC = Mathf.Max(0f, settings.PredatorEnergyPerC);
         float maxStore = Mathf.Max(0f, settings.MaxOrganicCStore);
         pendingPredationRemovals.Clear();
 
@@ -82,14 +82,19 @@ public class ReplicatorPredationSystem
                 continue;
             }
 
-            ApplyPredationBite(populationState, i, preyIndex, biteOrganicC, biteEnergy, assimilation, energyPerC, maxStore);
+            Replicator preyVictim = agents[preyIndex];
+            float leakedOrganicC = ApplyPredationBite(populationState, i, preyIndex, biteOrganicC, biteEnergy, assimilation, maxStore);
+            if (leakedOrganicC > 0f)
+            {
+                depositPredationOrganicC?.Invoke(preyVictim, leakedOrganicC);
+            }
+
             populationState.AttackCooldown[i] = cooldownSeconds;
 
             if (populationState.Energy[preyIndex] <= Mathf.Max(0f, settings.PredatorKillEnergyThreshold))
             {
                 registerDeathCause(populationState.Metabolism[preyIndex], DeathCause.Predation);
 
-                Replicator preyVictim = agents[preyIndex];
                 populationState.CopyPredationEntryToAgent(preyIndex, preyVictim);
                 depositDeathOrganicC(preyVictim);
 
@@ -124,14 +129,13 @@ public class ReplicatorPredationSystem
         return localPredationCandidates.Count > 0;
     }
 
-    private void ApplyPredationBite(
+    private float ApplyPredationBite(
         ReplicatorPopulationState populationState,
         int predatorIndex,
         int preyIndex,
         float biteOrganicC,
         float biteEnergy,
         float assimilation,
-        float energyPerC,
         float maxStore)
     {
         float preyOrganicC = Mathf.Max(0f, populationState.OrganicCStore[preyIndex]);
@@ -148,8 +152,9 @@ public class ReplicatorPredationSystem
 
         float storedGain = takeC * assimilation;
         populationState.OrganicCStore[predatorIndex] = Mathf.Clamp(populationState.OrganicCStore[predatorIndex] + storedGain, 0f, maxStore);
-        float respiredC = takeC - storedGain;
-        populationState.Energy[predatorIndex] += (respiredC * energyPerC) + (takeE * 0.5f);
+        float leakedC = takeC - storedGain;
+        populationState.Energy[predatorIndex] += takeE * 0.5f;
+        return leakedC;
     }
 
     private void RemovePredationVictims(
