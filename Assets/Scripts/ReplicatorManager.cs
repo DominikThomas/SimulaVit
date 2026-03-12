@@ -217,6 +217,12 @@ public class ReplicatorManager : MonoBehaviour
     [Range(1, 16)]
     [Tooltip("How many times to retry candidate selection before giving up on this spawn tick.")]
     public int spontaneousSpawnCandidateRetries = 10;
+    [Range(1, 2048)]
+    [Tooltip("How many simulation steps between coarse hydrogenotroph spawn candidate cache rebuilds.")]
+    public int spontaneousSpawnCandidateCacheRefreshSteps = 30;
+    [Range(1, 64)]
+    [Tooltip("How many cached coarse candidates to score in detail per spawn direction pick.")]
+    public int spontaneousSpawnDetailedSampleCount = 8;
 
 
     [Header("Spontaneous Spawning")]
@@ -329,6 +335,9 @@ public class ReplicatorManager : MonoBehaviour
     private ReplicatorSteeringSystem.DebugState steeringDebugState;
     private readonly List<int> localPredationCandidates = new List<int>(64);
     private readonly Dictionary<int, List<int>> preyAgentsByCell = new Dictionary<int, List<int>>(2048);
+    private readonly List<int> spontaneousHydrogenSpawnCandidateCells = new List<int>(1024);
+    private int spontaneousSpawnCandidateCacheLastRefreshStep = -1;
+    private int simulationStepCount;
 
     private readonly HashSet<int> pendingPredationRemovals = new HashSet<int>();
     private readonly List<int> predationRemovalBuffer = new List<int>(256);
@@ -417,6 +426,7 @@ public class ReplicatorManager : MonoBehaviour
         {
             currentStepDeltaTime = Time.deltaTime;
             simulationTimeSeconds += currentStepDeltaTime;
+            simulationStepCount++;
 
             if (ShouldProcessPredatorScent())
             {
@@ -747,6 +757,8 @@ public class ReplicatorManager : MonoBehaviour
 
     void HandleSpontaneousSpawning()
     {
+        RefreshSpontaneousHydrogenSpawnCandidateCacheIfNeeded();
+
         spawnSystem.HandleSpontaneousSpawning(
             enableSpontaneousSpawning,
             guaranteedFirstSpawnWithinSeconds,
@@ -787,6 +799,28 @@ public class ReplicatorManager : MonoBehaviour
             return UnityEngine.Random.onUnitSphere;
         }
 
+        int cachedCount = spontaneousHydrogenSpawnCandidateCells.Count;
+        if (cachedCount > 0)
+        {
+            int samples = Mathf.Clamp(spontaneousSpawnDetailedSampleCount, 1, cachedCount);
+            Vector3 cachedBestDirection = GetDirectionForCellIndex(spontaneousHydrogenSpawnCandidateCells[UnityEngine.Random.Range(0, cachedCount)]);
+            float cachedBestScore = -1f;
+
+            for (int i = 0; i < samples; i++)
+            {
+                int candidateCell = spontaneousHydrogenSpawnCandidateCells[UnityEngine.Random.Range(0, cachedCount)];
+                Vector3 candidate = GetDirectionForCellIndex(candidateCell);
+                float score = GetHydrogenotrophySpawnScore(candidate);
+                if (score > cachedBestScore)
+                {
+                    cachedBestScore = score;
+                    cachedBestDirection = candidate;
+                }
+            }
+
+            return cachedBestDirection;
+        }
+
         int attempts = Mathf.Max(1, spawnResourceProbeAttempts);
         Vector3 bestDirection = UnityEngine.Random.onUnitSphere;
         float bestScore = -1f;
@@ -803,6 +837,64 @@ public class ReplicatorManager : MonoBehaviour
         }
 
         return bestDirection;
+    }
+
+    void RefreshSpontaneousHydrogenSpawnCandidateCacheIfNeeded()
+    {
+        if (!biasSpawnsToChemosynthesisResources || planetResourceMap == null || planetGenerator == null)
+        {
+            spontaneousHydrogenSpawnCandidateCells.Clear();
+            spontaneousSpawnCandidateCacheLastRefreshStep = simulationStepCount;
+            return;
+        }
+
+        int refreshSteps = Mathf.Max(1, spontaneousSpawnCandidateCacheRefreshSteps);
+        if (spontaneousSpawnCandidateCacheLastRefreshStep >= 0
+            && simulationStepCount - spontaneousSpawnCandidateCacheLastRefreshStep < refreshSteps)
+        {
+            return;
+        }
+
+        spontaneousSpawnCandidateCacheLastRefreshStep = simulationStepCount;
+        spontaneousHydrogenSpawnCandidateCells.Clear();
+
+        int resolution = Mathf.Max(1, planetGenerator.resolution);
+        int cellCount = PlanetGridIndexing.GetCellCount(resolution);
+        for (int cell = 0; cell < cellCount; cell++)
+        {
+            float h2Availability = NormalizeResource(ResourceType.H2, cell, steerGoodH2);
+            if (h2Availability >= minHydrogenSpawnH2)
+            {
+                spontaneousHydrogenSpawnCandidateCells.Add(cell);
+            }
+        }
+    }
+
+    Vector3 GetDirectionForCellIndex(int cell)
+    {
+        int resolution = Mathf.Max(1, planetGenerator.resolution);
+        int cellsPerFace = resolution * resolution;
+        int face = Mathf.Clamp(cell / cellsPerFace, 0, 5);
+        int local = Mathf.Clamp(cell % cellsPerFace, 0, cellsPerFace - 1);
+
+        int x = local % resolution;
+        int y = local / resolution;
+
+        float u = ((x + 0.5f) / resolution) * 2f - 1f;
+        float v = ((y + 0.5f) / resolution) * 2f - 1f;
+
+        Vector3 pointOnCube;
+        switch (face)
+        {
+            case 0: pointOnCube = new Vector3(u, 1f, -v); break;
+            case 1: pointOnCube = new Vector3(-u, -1f, -v); break;
+            case 2: pointOnCube = new Vector3(-1f, -v, -u); break;
+            case 3: pointOnCube = new Vector3(1f, -v, u); break;
+            case 4: pointOnCube = new Vector3(-v, u, 1f); break;
+            default: pointOnCube = new Vector3(-v, -u, -1f); break;
+        }
+
+        return pointOnCube.normalized;
     }
 
     float GetHydrogenotrophySpawnScore(Vector3 direction)
