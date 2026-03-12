@@ -1223,6 +1223,7 @@ public class ReplicatorManager : MonoBehaviour
 
         movementSystem.RunMovementJob(
             agents,
+            populationState,
             settings,
             planetGenerator,
             currentStepDeltaTime,

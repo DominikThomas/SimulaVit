@@ -2,9 +2,13 @@ using System.Collections.Generic;
 using Unity.Collections;
 using Unity.Jobs;
 using UnityEngine;
+using Unity.Profiling;
 
 public class ReplicatorMovementSystem
 {
+    private static readonly ProfilerMarker MovementSyncFromPopulationStateMarker = new ProfilerMarker("ReplicatorMovementSystem.SyncFromPopulationState");
+    private static readonly ProfilerMarker MovementSyncToAgentsMarker = new ProfilerMarker("ReplicatorMovementSystem.SyncToAgents");
+
     public struct Settings
     {
         public float MoveSpeed;
@@ -30,6 +34,7 @@ public class ReplicatorMovementSystem
 
     public void RunMovementJob(
         List<Replicator> agents,
+        ReplicatorPopulationState populationState,
         Settings settings,
         PlanetGenerator planetGenerator,
         float deltaTime,
@@ -43,16 +48,22 @@ public class ReplicatorMovementSystem
 
         EnsureJobBufferCapacity(count);
 
-        for (int i = 0; i < count; i++)
+        populationState.SyncMovementFieldsFromAgents(agents);
+
+        using (MovementSyncFromPopulationStateMarker.Auto())
         {
-            jobPositions[i] = agents[i].position;
-            jobRotations[i] = agents[i].rotation;
-            jobMoveOnlyInSea[i] = agents[i].traits.moveOnlyInSea;
-            jobSurfaceMoveSpeedMultipliers[i] = Mathf.Max(0.01f, agents[i].traits.surfaceMoveSpeedMultiplier);
-            jobMovementSeeds[i] = agents[i].movementSeed;
-            jobSpeedFactors[i] = Mathf.Clamp(agents[i].speedFactor, settings.MinSpeedFactor, 1f);
-            jobLocomotionTypes[i] = (int)agents[i].locomotion;
-            jobDesiredMoveDirs[i] = agents[i].desiredMoveDir;
+            for (int i = 0; i < count; i++)
+            {
+                Replicator agent = agents[i];
+                jobPositions[i] = populationState.Position[i];
+                jobRotations[i] = agent.rotation;
+                jobMoveOnlyInSea[i] = agent.traits.moveOnlyInSea;
+                jobSurfaceMoveSpeedMultipliers[i] = Mathf.Max(0.01f, agent.traits.surfaceMoveSpeedMultiplier);
+                jobMovementSeeds[i] = agent.movementSeed;
+                jobSpeedFactors[i] = Mathf.Clamp(populationState.SpeedFactor[i], settings.MinSpeedFactor, 1f);
+                jobLocomotionTypes[i] = (int)populationState.Locomotion[i];
+                jobDesiredMoveDirs[i] = agent.desiredMoveDir;
+            }
         }
 
         ReplicatorUpdateJob job = new ReplicatorUpdateJob
@@ -89,12 +100,19 @@ public class ReplicatorMovementSystem
         JobHandle handle = job.Schedule(count, 32);
         handle.Complete();
 
-        for (int i = 0; i < count; i++)
+        using (MovementSyncToAgentsMarker.Auto())
         {
-            Replicator agent = agents[i];
-            agent.position = jobPositions[i];
-            agent.rotation = jobRotations[i];
-            agent.currentDirection = agent.position.normalized;
+            for (int i = 0; i < count; i++)
+            {
+                Replicator agent = agents[i];
+                Vector3 newPosition = jobPositions[i];
+                Vector3 newDirection = newPosition.normalized;
+                populationState.Position[i] = newPosition;
+                populationState.CurrentDirection[i] = newDirection;
+                agent.position = newPosition;
+                agent.rotation = jobRotations[i];
+                agent.currentDirection = newDirection;
+            }
         }
     }
 
