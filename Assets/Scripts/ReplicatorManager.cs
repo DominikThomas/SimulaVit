@@ -2,6 +2,7 @@ using UnityEngine;
 using System.Collections.Generic;
 using System;
 using UnityEngine.Serialization;
+using Unity.Profiling;
 
 public enum TemperatureDisplayUnit
 {
@@ -12,6 +13,9 @@ public enum TemperatureDisplayUnit
 
 public class ReplicatorManager : MonoBehaviour
 {
+    private static readonly ProfilerMarker PredatorScentUpdateMarker = new ProfilerMarker("ReplicatorManager.UpdateScentFields");
+    private static readonly ProfilerMarker PredatorScentSkipNoPredatorsMarker = new ProfilerMarker("ReplicatorManager.SkipScentFields.NoPredators");
+
     [Header("Settings")]
     public Mesh replicatorMesh;
     public Material replicatorMaterial;
@@ -408,7 +412,7 @@ public class ReplicatorManager : MonoBehaviour
             currentStepDeltaTime = Time.deltaTime;
             simulationTimeSeconds += currentStepDeltaTime;
 
-            if (useScentPredation && planetResourceMap != null && planetResourceMap.enableScentFields)
+            if (ShouldProcessPredatorScent())
             {
                 UpdateScentFields();
             }
@@ -433,6 +437,14 @@ public class ReplicatorManager : MonoBehaviour
 
         UpdateMetabolismCounts();
         LogMetabolismDebugThrottled();
+    }
+
+    public bool ShouldProcessPredatorScent()
+    {
+        return useScentPredation
+            && planetResourceMap != null
+            && planetResourceMap.enableScentFields
+            && HasAnyPredators();
     }
 
 
@@ -888,43 +900,71 @@ public class ReplicatorManager : MonoBehaviour
 
     void UpdateScentFields()
     {
-        float interval = Mathf.Max(0.01f, scentEmitInterval);
-        if (simulationTimeSeconds < nextScentUpdateTime)
+        using (PredatorScentUpdateMarker.Auto())
         {
-            return;
+            float interval = Mathf.Max(0.01f, scentEmitInterval);
+            if (simulationTimeSeconds < nextScentUpdateTime)
+            {
+                return;
+            }
+
+            nextScentUpdateTime = simulationTimeSeconds + interval;
+
+            if (planetResourceMap == null)
+            {
+                return;
+            }
+
+            int resolution = Mathf.Max(1, planetGenerator.resolution);
+            int cellCount = PlanetGridIndexing.GetCellCount(resolution);
+            planetResourceMap.EnsureScentArrays(cellCount);
+            RebuildPreyCellBins(resolution);
+
+            float leakEmit = Mathf.Max(0f, dissolvedOrganicLeakEmitPerSecond) * interval;
+            float wasteEmit = Mathf.Max(0f, toxicProteolyticWasteEmitPerSecond) * interval;
+            bool hasPredator = false;
+
+            for (int i = 0; i < agents.Count; i++)
+            {
+                Replicator agent = agents[i];
+                int cellIndex = PlanetGridIndexing.DirectionToCellIndex(agent.position.normalized, resolution);
+                if (IsPredator(agent))
+                {
+                    hasPredator = true;
+                    planetResourceMap.AddScent(ResourceType.ToxicProteolyticWaste, cellIndex, wasteEmit);
+                }
+                else
+                {
+                    planetResourceMap.AddScent(ResourceType.DissolvedOrganicLeak, cellIndex, leakEmit);
+                }
+            }
+
+            if (!hasPredator)
+            {
+                using (PredatorScentSkipNoPredatorsMarker.Auto())
+                {
+                    ResetScentDebugState();
+                }
+
+                return;
+            }
+
+            planetResourceMap.ApplyScentDecayAndDiffuse(interval);
+            SampleScentDiagnostics();
         }
+    }
 
-        nextScentUpdateTime = simulationTimeSeconds + interval;
-
-        if (planetResourceMap == null)
-        {
-            return;
-        }
-
-        int resolution = Mathf.Max(1, planetGenerator.resolution);
-        int cellCount = PlanetGridIndexing.GetCellCount(resolution);
-        planetResourceMap.EnsureScentArrays(cellCount);
-        RebuildPreyCellBins(resolution);
-
-        float leakEmit = Mathf.Max(0f, dissolvedOrganicLeakEmitPerSecond) * interval;
-        float wasteEmit = Mathf.Max(0f, toxicProteolyticWasteEmitPerSecond) * interval;
-
+    bool HasAnyPredators()
+    {
         for (int i = 0; i < agents.Count; i++)
         {
-            Replicator agent = agents[i];
-            int cellIndex = PlanetGridIndexing.DirectionToCellIndex(agent.position.normalized, resolution);
-            if (IsPredator(agent))
+            if (IsPredator(agents[i]))
             {
-                planetResourceMap.AddScent(ResourceType.ToxicProteolyticWaste, cellIndex, wasteEmit);
-            }
-            else
-            {
-                planetResourceMap.AddScent(ResourceType.DissolvedOrganicLeak, cellIndex, leakEmit);
+                return true;
             }
         }
 
-        planetResourceMap.ApplyScentDecayAndDiffuse(interval);
-        SampleScentDiagnostics();
+        return false;
     }
 
     void RebuildPreyCellBins(int resolution)
@@ -1063,7 +1103,7 @@ public class ReplicatorManager : MonoBehaviour
         {
             SteerTempWeight = steerTempWeight,
             SteerFoodWeight = steerFoodWeight,
-            UseScentPredation = useScentPredation,
+            UseScentPredation = ShouldProcessPredatorScent(),
             DissolvedOrganicLeakSteerWeight = dissolvedOrganicLeakSteerWeight,
             ToxicProteolyticWasteSteerWeight = toxicProteolyticWasteSteerWeight,
             ScentScoreSaturation = scentScoreSaturation,
