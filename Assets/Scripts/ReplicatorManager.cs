@@ -1198,6 +1198,7 @@ public class ReplicatorManager : MonoBehaviour
     {
         steeringSystem.UpdateRunAndTumbleLocomotion(
             agents,
+            populationState,
             planetGenerator,
             planetResourceMap,
             CreateSteeringSettings(),
