@@ -333,7 +333,6 @@ public class ReplicatorManager : MonoBehaviour
     private float nextScentUpdateTime;
     private float simulationTimeSeconds;
     private float currentStepDeltaTime;
-    private bool metabolismTickRanThisStep;
     private ReplicatorSteeringSystem.DebugState steeringDebugState;
     private readonly List<int> localPredationCandidates = new List<int>(64);
     private readonly Dictionary<int, List<int>> preyAgentsByCell = new Dictionary<int, List<int>>(2048);
@@ -431,7 +430,6 @@ public class ReplicatorManager : MonoBehaviour
             currentStepDeltaTime = Time.deltaTime;
             simulationTimeSeconds += currentStepDeltaTime;
             simulationStepCount++;
-            metabolismTickRanThisStep = false;
 
             if (ShouldProcessPredatorScent())
             {
@@ -1219,15 +1217,6 @@ public class ReplicatorManager : MonoBehaviour
             return false;
         }
 
-        bool canReuseMetabolismSync = metabolismTickRanThisStep
-            && populationState.Count == agents.Count
-            && populationState.Position.Length >= agents.Count;
-
-        if (canReuseMetabolismSync)
-        {
-            return true;
-        }
-
         using (PopulationStateSyncForLocomotionMarker.Auto())
         {
             populationState.SyncFromAgents(agents);
@@ -1311,7 +1300,6 @@ public class ReplicatorManager : MonoBehaviour
         while (metabolismTickTimer >= tick)
         {
             metabolismTickTimer -= tick;
-            metabolismTickRanThisStep = true;
             MetabolismTick(tick);
         }
     }
