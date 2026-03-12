@@ -653,7 +653,7 @@ MonoBehaviour:
   saproAssimilationFraction: 0.2
   saproRespireStoreCPerTick: 0.01
   enablePredators: 1
-  predatorMutationChance: 0.637
+  predatorMutationChance: 0.02
   predatorRequiresMotility: 1
   predatorAttackRange: 0.25
   predatorAttackCooldownSeconds: 1

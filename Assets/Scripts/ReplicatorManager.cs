@@ -1270,6 +1270,7 @@ public class ReplicatorManager : MonoBehaviour
         int resolution = planetGenerator != null ? planetGenerator.resolution : 1;
         lifecycleSystem.UpdateLifecycle(
             agents,
+            populationState,
             currentStepDeltaTime,
             reproductionRate,
             enableCarbonLimitedDivision,

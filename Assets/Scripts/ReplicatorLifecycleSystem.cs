@@ -8,6 +8,7 @@ public class ReplicatorLifecycleSystem
 
     public void UpdateLifecycle(
         List<Replicator> agents,
+        ReplicatorPopulationState populationState,
         float deltaTime,
         float reproductionRate,
         bool enableCarbonLimitedDivision,
@@ -29,10 +30,16 @@ public class ReplicatorLifecycleSystem
         float organicCSum = 0f;
         int eligibleForDivisionCount = 0;
 
+        // Transitional migration step: mirror lifecycle age into PopulationState
+        // while keeping List<Replicator> as the authoritative source of truth.
+        populationState.SyncLifecycleFieldsFromAgents(agents);
+
         for (int i = agents.Count - 1; i >= 0; i--)
         {
             Replicator agent = agents[i];
-            agent.age += deltaTime;
+            float updatedAge = agent.age + deltaTime;
+            agent.age = updatedAge;
+            populationState.Age[i] = updatedAge;
 
             if (agent.age > agent.maxLifespan)
             {
