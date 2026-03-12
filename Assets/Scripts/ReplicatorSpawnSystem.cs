@@ -6,16 +6,28 @@ public class ReplicatorSpawnSystem
     private float simulationElapsedSeconds;
     private float spawnAttemptTimer;
     private bool firstSpontaneousSpawnHappened;
+    private bool spontaneousSpawningAllowedByPopulation = true;
 
     public void HandleSpontaneousSpawning(
         bool enableSpontaneousSpawning,
         float guaranteedFirstSpawnWithinSeconds,
         float spawnAttemptInterval,
         float simulationDeltaSeconds,
+        Func<int> getTotalPopulation,
+        int disableSpontaneousSpawningAtPopulation,
+        int reenableSpontaneousSpawningAtPopulation,
         Func<bool> tryGuaranteedSpawn,
         Func<bool> tryRandomSpontaneousSpawn)
     {
         if (!enableSpontaneousSpawning)
+        {
+            return;
+        }
+
+        if (!UpdatePopulationHysteresis(
+                getTotalPopulation(),
+                disableSpontaneousSpawningAtPopulation,
+                reenableSpontaneousSpawningAtPopulation))
         {
             return;
         }
@@ -38,11 +50,42 @@ public class ReplicatorSpawnSystem
         {
             spawnAttemptTimer -= interval;
 
+            if (!UpdatePopulationHysteresis(
+                    getTotalPopulation(),
+                    disableSpontaneousSpawningAtPopulation,
+                    reenableSpontaneousSpawningAtPopulation))
+            {
+                break;
+            }
+
             if (tryRandomSpontaneousSpawn())
             {
                 firstSpontaneousSpawnHappened = true;
             }
         }
+    }
+
+    private bool UpdatePopulationHysteresis(
+        int totalPopulation,
+        int disableSpontaneousSpawningAtPopulation,
+        int reenableSpontaneousSpawningAtPopulation)
+    {
+        int disableThreshold = Mathf.Max(0, disableSpontaneousSpawningAtPopulation);
+        int reenableThreshold = Mathf.Clamp(reenableSpontaneousSpawningAtPopulation, 0, disableThreshold);
+
+        if (spontaneousSpawningAllowedByPopulation)
+        {
+            if (totalPopulation >= disableThreshold)
+            {
+                spontaneousSpawningAllowedByPopulation = false;
+            }
+        }
+        else if (totalPopulation <= reenableThreshold)
+        {
+            spontaneousSpawningAllowedByPopulation = true;
+        }
+
+        return spontaneousSpawningAllowedByPopulation;
     }
 
     public bool TryRandomSpontaneousSpawn(

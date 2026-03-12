@@ -234,6 +234,12 @@ public class ReplicatorManager : MonoBehaviour
     [Range(0f, 1f)]
     [Tooltip("0 = land-only bias, 0.5 = balanced, 1 = sea-only bias (when ocean is enabled).")]
     public float seaSpawnPreference = 1.0f;
+    [Min(0)]
+    [Tooltip("Disables spontaneous spawning while total population is at or above this value.")]
+    public int disableSpontaneousSpawningAtPopulation = 1000;
+    [Min(0)]
+    [Tooltip("Re-enables spontaneous spawning when total population falls to or below this value.")]
+    public int reenableSpontaneousSpawningAtPopulation = 200;
 
     [Header("Default Traits")]
     [Tooltip("If enabled, newly created replicators can only be spawned in sea locations.")]
@@ -746,6 +752,9 @@ public class ReplicatorManager : MonoBehaviour
             guaranteedFirstSpawnWithinSeconds,
             spawnAttemptInterval,
             currentStepDeltaTime,
+            () => agents.Count,
+            disableSpontaneousSpawningAtPopulation,
+            reenableSpontaneousSpawningAtPopulation,
             SpawnAgentAtRandomLocation,
             TryRandomSpontaneousSpawn);
     }
