@@ -102,6 +102,7 @@ public class ReplicatorPopulationState
             CurrentDirection[i] = a.currentDirection;
             MoveDirection[i] = a.moveDirection;
             DesiredMoveDirection[i] = a.desiredMoveDir;
+            SpeedFactor[i] = a.speedFactor;
             Locomotion[i] = a.locomotion;
             Metabolism[i] = a.metabolism;
             OptimalTempMin[i] = a.optimalTempMin;

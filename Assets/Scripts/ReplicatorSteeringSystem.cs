@@ -159,6 +159,7 @@ public class ReplicatorSteeringSystem
         in Settings settings,
         float deltaTime,
         float now,
+        bool populationStatePrimed,
         ref DebugState debugState)
     {
         if (agents.Count == 0 || populationState == null || planetGenerator == null || planetResourceMap == null)
@@ -173,9 +174,12 @@ public class ReplicatorSteeringSystem
             debugState.RunAndTumbleDebugTimer += deltaTime;
         }
 
-        using (SteeringSyncFromPopulationStateMarker.Auto())
+        if (!populationStatePrimed)
         {
-            populationState.SyncSteeringFieldsFromAgents(agents);
+            using (SteeringSyncFromPopulationStateMarker.Auto())
+            {
+                populationState.SyncSteeringFieldsFromAgents(agents);
+            }
         }
 
         using (SteeringHotLoopMarker.Auto())
