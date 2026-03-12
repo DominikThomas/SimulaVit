@@ -1219,7 +1219,11 @@ public class ReplicatorManager : MonoBehaviour
             return false;
         }
 
-        if (metabolismTickRanThisStep)
+        bool canReuseMetabolismSync = metabolismTickRanThisStep
+            && populationState.Count == agents.Count
+            && populationState.Position.Length >= agents.Count;
+
+        if (canReuseMetabolismSync)
         {
             return true;
         }
