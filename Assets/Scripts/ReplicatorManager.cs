@@ -338,6 +338,8 @@ public class ReplicatorManager : MonoBehaviour
     private readonly List<int> spontaneousHydrogenSpawnCandidateCells = new List<int>(1024);
     private int spontaneousSpawnCandidateCacheLastRefreshStep = -1;
     private int simulationStepCount;
+    private int predatorPresenceCacheStep = -1;
+    private bool predatorPresenceCached;
 
     private readonly HashSet<int> pendingPredationRemovals = new HashSet<int>();
     private readonly List<int> predationRemovalBuffer = new List<int>(256);
@@ -460,7 +462,7 @@ public class ReplicatorManager : MonoBehaviour
         return useScentPredation
             && planetResourceMap != null
             && planetResourceMap.enableScentFields
-            && HasAnyPredators();
+            && HasPredatorsThisStep();
     }
 
 
@@ -757,8 +759,6 @@ public class ReplicatorManager : MonoBehaviour
 
     void HandleSpontaneousSpawning()
     {
-        RefreshSpontaneousHydrogenSpawnCandidateCacheIfNeeded();
-
         spawnSystem.HandleSpontaneousSpawning(
             enableSpontaneousSpawning,
             guaranteedFirstSpawnWithinSeconds,
@@ -773,6 +773,8 @@ public class ReplicatorManager : MonoBehaviour
 
     bool TryRandomSpontaneousSpawn()
     {
+        RefreshSpontaneousHydrogenSpawnCandidateCacheIfNeeded();
+
         return spawnSystem.TryRandomSpontaneousSpawn(
             agents.Count,
             maxPopulation,
@@ -1068,6 +1070,18 @@ public class ReplicatorManager : MonoBehaviour
         return false;
     }
 
+    bool HasPredatorsThisStep()
+    {
+        if (predatorPresenceCacheStep == simulationStepCount)
+        {
+            return predatorPresenceCached;
+        }
+
+        predatorPresenceCacheStep = simulationStepCount;
+        predatorPresenceCached = HasAnyPredators();
+        return predatorPresenceCached;
+    }
+
     void RebuildPreyCellBins(int resolution)
     {
         preyAgentsByCell.Clear();
@@ -1143,6 +1157,11 @@ public class ReplicatorManager : MonoBehaviour
     void RunPredationPass()
     {
         if (planetGenerator == null)
+        {
+            return;
+        }
+
+        if (!HasPredatorsThisStep())
         {
             return;
         }
