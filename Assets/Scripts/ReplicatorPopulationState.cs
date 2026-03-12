@@ -13,6 +13,7 @@ public class ReplicatorPopulationState
     public Vector3[] Position = new Vector3[0];
     public Vector3[] CurrentDirection = new Vector3[0];
     public Vector3[] MoveDirection = new Vector3[0];
+    public Vector3[] DesiredMoveDirection = new Vector3[0];
     public Vector3[] Velocity = new Vector3[0];
     public float[] Energy = new float[0];
     public float[] OrganicCStore = new float[0];
@@ -33,6 +34,11 @@ public class ReplicatorPopulationState
     public float[] StarveOrganicCFoodSeconds = new float[0];
     public float[] StarveO2Seconds = new float[0];
     public float[] StarveStoredCSeconds = new float[0];
+
+    public float[] LastHabitatValue = new float[0];
+    public float[] TumbleProbability = new float[0];
+    public float[] NextSenseTime = new float[0];
+    public float[] MovementSeed = new float[0];
 
     public void SyncMovementFieldsFromAgents(List<Replicator> agents)
     {
@@ -59,6 +65,7 @@ public class ReplicatorPopulationState
             Position[i] = a.position;
             CurrentDirection[i] = a.currentDirection;
             MoveDirection[i] = a.moveDirection;
+            DesiredMoveDirection[i] = a.desiredMoveDir;
             Velocity[i] = a.velocity;
             Energy[i] = a.energy;
             OrganicCStore[i] = a.organicCStore;
@@ -76,6 +83,48 @@ public class ReplicatorPopulationState
             StarveOrganicCFoodSeconds[i] = a.starveOrganicCFoodSeconds;
             StarveO2Seconds[i] = a.starveO2Seconds;
             StarveStoredCSeconds[i] = a.starveStoredCSeconds;
+            LastHabitatValue[i] = a.lastHabitatValue;
+            TumbleProbability[i] = a.tumbleProbability;
+            NextSenseTime[i] = a.nextSenseTime;
+            MovementSeed[i] = a.movementSeed;
+        }
+    }
+
+    public void SyncSteeringFieldsFromAgents(List<Replicator> agents)
+    {
+        Count = agents.Count;
+        EnsureCapacity(Count);
+
+        for (int i = 0; i < Count; i++)
+        {
+            Replicator a = agents[i];
+            Position[i] = a.position;
+            CurrentDirection[i] = a.currentDirection;
+            MoveDirection[i] = a.moveDirection;
+            DesiredMoveDirection[i] = a.desiredMoveDir;
+            Locomotion[i] = a.locomotion;
+            Metabolism[i] = a.metabolism;
+            OptimalTempMin[i] = a.optimalTempMin;
+            OptimalTempMax[i] = a.optimalTempMax;
+            LethalTempMargin[i] = a.lethalTempMargin;
+            LastHabitatValue[i] = a.lastHabitatValue;
+            TumbleProbability[i] = a.tumbleProbability;
+            NextSenseTime[i] = a.nextSenseTime;
+            MovementSeed[i] = a.movementSeed;
+        }
+    }
+
+    public void SyncSteeringFieldsToAgents(List<Replicator> agents)
+    {
+        int count = Mathf.Min(Count, agents.Count);
+        for (int i = 0; i < count; i++)
+        {
+            Replicator agent = agents[i];
+            agent.moveDirection = MoveDirection[i];
+            agent.desiredMoveDir = DesiredMoveDirection[i];
+            agent.lastHabitatValue = LastHabitatValue[i];
+            agent.tumbleProbability = TumbleProbability[i];
+            agent.nextSenseTime = NextSenseTime[i];
         }
     }
 
@@ -93,6 +142,7 @@ public class ReplicatorPopulationState
         agent.position = Position[index];
         agent.currentDirection = CurrentDirection[index];
         agent.moveDirection = MoveDirection[index];
+        agent.desiredMoveDir = DesiredMoveDirection[index];
         agent.velocity = Velocity[index];
         agent.energy = Energy[index];
         agent.organicCStore = OrganicCStore[index];
@@ -104,6 +154,9 @@ public class ReplicatorPopulationState
         agent.starveOrganicCFoodSeconds = StarveOrganicCFoodSeconds[index];
         agent.starveO2Seconds = StarveO2Seconds[index];
         agent.starveStoredCSeconds = StarveStoredCSeconds[index];
+        agent.lastHabitatValue = LastHabitatValue[index];
+        agent.tumbleProbability = TumbleProbability[index];
+        agent.nextSenseTime = NextSenseTime[index];
     }
 
     void EnsureCapacity(int required)
@@ -117,6 +170,7 @@ public class ReplicatorPopulationState
         Position = new Vector3[newCapacity];
         CurrentDirection = new Vector3[newCapacity];
         MoveDirection = new Vector3[newCapacity];
+        DesiredMoveDirection = new Vector3[newCapacity];
         Velocity = new Vector3[newCapacity];
         Energy = new float[newCapacity];
         OrganicCStore = new float[newCapacity];
@@ -134,5 +188,9 @@ public class ReplicatorPopulationState
         StarveOrganicCFoodSeconds = new float[newCapacity];
         StarveO2Seconds = new float[newCapacity];
         StarveStoredCSeconds = new float[newCapacity];
+        LastHabitatValue = new float[newCapacity];
+        TumbleProbability = new float[newCapacity];
+        NextSenseTime = new float[newCapacity];
+        MovementSeed = new float[newCapacity];
     }
 }
