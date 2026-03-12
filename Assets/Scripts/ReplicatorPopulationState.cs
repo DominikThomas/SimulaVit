@@ -43,12 +43,8 @@ public class ReplicatorPopulationState
         {
             Replicator a = agents[i];
             Position[i] = a.position;
-            CurrentDirection[i] = a.currentDirection;
-            MoveDirection[i] = a.moveDirection;
-            Velocity[i] = a.velocity;
             SpeedFactor[i] = a.speedFactor;
             Locomotion[i] = a.locomotion;
-            Alive[i] = true;
         }
     }
 
