@@ -181,10 +181,7 @@ public class VentVisualizer : MonoBehaviour
         propertyBlock.SetColor("_EmissionColor", Color.red * emission);
         renderer.SetPropertyBlock(propertyBlock);
 
-        if (underwater)
-        {
-            AttachSoot(marker.transform, normalizedStrength);
-        }
+        AttachSoot(marker.transform, normalizedStrength);
     }
 
     private void AttachSoot(Transform marker, float normalizedStrength)
@@ -433,8 +430,7 @@ public class VentVisualizer : MonoBehaviour
         propertyBlock.SetColor("_EmissionColor", Color.red * emission);
         renderer.SetPropertyBlock(propertyBlock);
 
-        if (underwater)
-            AttachSoot(marker.transform, normalizedStrength);
+        AttachSoot(marker.transform, normalizedStrength);
     }
 
 }
