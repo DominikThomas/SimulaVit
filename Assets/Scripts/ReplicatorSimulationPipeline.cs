@@ -85,7 +85,7 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
 
     private void RunSimulationStep()
     {
-        if (replicatorManager.useScentPredation && replicatorManager.planetResourceMap != null && replicatorManager.planetResourceMap.enableScentFields)
+        if (replicatorManager.ShouldProcessPredatorScent())
         {
             updateScentFieldsMethod.Invoke(replicatorManager, null);
         }
