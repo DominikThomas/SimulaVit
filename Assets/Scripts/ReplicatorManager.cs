@@ -1873,6 +1873,7 @@ public class ReplicatorManager : MonoBehaviour
     {
         renderSystem.RenderAgents(
             agents,
+            populationState,
             replicatorMesh,
             replicatorMaterial);
     }

@@ -11,22 +11,41 @@ public class ReplicatorRenderSystem
     private static readonly int ColorID = Shader.PropertyToID("_Color");
     private static readonly int EmissionID = Shader.PropertyToID("_EmissionColor");
 
-    public void RenderAgents(List<Replicator> agents, Mesh replicatorMesh, Material replicatorMaterial)
+    public void RenderAgents(List<Replicator> agents, ReplicatorPopulationState populationState, Mesh replicatorMesh, Material replicatorMaterial)
     {
         int batchCount = 0;
         int totalAgents = agents.Count;
 
-        for (int i = 0; i < totalAgents; i++)
+        if (populationState != null && populationState.Count == totalAgents)
         {
-            Replicator a = agents[i];
-            matrixBatch[batchCount] = Matrix4x4.TRS(a.position, a.rotation, Vector3.one * (0.1f * Mathf.Max(0.1f, a.size)));
-            colorBatch[batchCount] = a.color;
-            batchCount++;
-
-            if (batchCount == 1023)
+            for (int i = 0; i < totalAgents; i++)
             {
-                FlushBatch(batchCount, replicatorMesh, replicatorMaterial);
-                batchCount = 0;
+                float scale = 0.1f * Mathf.Max(0.1f, populationState.Size[i]);
+                matrixBatch[batchCount] = Matrix4x4.TRS(populationState.Position[i], populationState.Rotation[i], Vector3.one * scale);
+                colorBatch[batchCount] = populationState.Color[i];
+                batchCount++;
+
+                if (batchCount == 1023)
+                {
+                    FlushBatch(batchCount, replicatorMesh, replicatorMaterial);
+                    batchCount = 0;
+                }
+            }
+        }
+        else
+        {
+            for (int i = 0; i < totalAgents; i++)
+            {
+                Replicator a = agents[i];
+                matrixBatch[batchCount] = Matrix4x4.TRS(a.position, a.rotation, Vector3.one * (0.1f * Mathf.Max(0.1f, a.size)));
+                colorBatch[batchCount] = a.color;
+                batchCount++;
+
+                if (batchCount == 1023)
+                {
+                    FlushBatch(batchCount, replicatorMesh, replicatorMaterial);
+                    batchCount = 0;
+                }
             }
         }
 

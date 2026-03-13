@@ -11,6 +11,7 @@ public class ReplicatorPopulationState
     public int Count { get; private set; }
 
     public Vector3[] Position = new Vector3[0];
+    public Quaternion[] Rotation = new Quaternion[0];
     public Vector3[] CurrentDirection = new Vector3[0];
     public Vector3[] MoveDirection = new Vector3[0];
     public Vector3[] DesiredMoveDirection = new Vector3[0];
@@ -42,6 +43,8 @@ public class ReplicatorPopulationState
     public float[] TumbleProbability = new float[0];
     public float[] NextSenseTime = new float[0];
     public float[] MovementSeed = new float[0];
+    public float[] Size = new float[0];
+    public Color[] Color = new Color[0];
 
     public void SyncMovementFieldsFromAgents(List<Replicator> agents)
     {
@@ -66,6 +69,7 @@ public class ReplicatorPopulationState
         {
             Replicator a = agents[i];
             Position[i] = a.position;
+            Rotation[i] = a.rotation;
             CurrentDirection[i] = a.currentDirection;
             MoveDirection[i] = a.moveDirection;
             DesiredMoveDirection[i] = a.desiredMoveDir;
@@ -93,6 +97,8 @@ public class ReplicatorPopulationState
             TumbleProbability[i] = a.tumbleProbability;
             NextSenseTime[i] = a.nextSenseTime;
             MovementSeed[i] = a.movementSeed;
+            Size[i] = a.size;
+            Color[i] = a.color;
         }
     }
 
@@ -222,6 +228,7 @@ public class ReplicatorPopulationState
 
         int newCapacity = Mathf.NextPowerOfTwo(Mathf.Max(4, required));
         Position = new Vector3[newCapacity];
+        Rotation = new Quaternion[newCapacity];
         CurrentDirection = new Vector3[newCapacity];
         MoveDirection = new Vector3[newCapacity];
         DesiredMoveDirection = new Vector3[newCapacity];
@@ -249,5 +256,7 @@ public class ReplicatorPopulationState
         TumbleProbability = new float[newCapacity];
         NextSenseTime = new float[newCapacity];
         MovementSeed = new float[newCapacity];
+        Size = new float[newCapacity];
+        Color = new Color[newCapacity];
     }
 }

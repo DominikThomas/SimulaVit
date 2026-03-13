@@ -112,6 +112,7 @@ public class ReplicatorMovementSystem
                 Vector3 newPosition = jobPositions[i];
                 Vector3 newDirection = newPosition.normalized;
                 populationState.Position[i] = newPosition;
+                populationState.Rotation[i] = jobRotations[i];
                 populationState.CurrentDirection[i] = newDirection;
                 agent.position = newPosition;
                 agent.rotation = jobRotations[i];
