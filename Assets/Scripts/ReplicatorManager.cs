@@ -283,6 +283,8 @@ public class ReplicatorManager : MonoBehaviour
 
     public int RuntimeSimulationStepsPerFrame => runtimeSimulationStepsPerFrame;
     public int SimulationStepsPerFrame => runtimeSimulationStepsPerFrame;
+    public int TotalPopulation => agents.Count;
+    public int PredatorCount => predatorAgentCount;
 
     public void SetSimulationTiming(int stepsPerFrame)
     {
