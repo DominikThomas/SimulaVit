@@ -16,6 +16,7 @@ public class ReplicatorManager : MonoBehaviour
     private static readonly ProfilerMarker PredatorScentUpdateMarker = new ProfilerMarker("ReplicatorManager.UpdateScentFields");
     private static readonly ProfilerMarker PredatorScentSkipNoPredatorsMarker = new ProfilerMarker("ReplicatorManager.SkipScentFields.NoPredators");
     private static readonly ProfilerMarker PopulationStateSyncForLocomotionMarker = new ProfilerMarker("ReplicatorManager.PopulationStateSyncForLocomotion");
+    private static readonly ProfilerMarker SteeringThrottleSkipMarker = new ProfilerMarker("ReplicatorManager.SteeringThrottleSkip");
 
     [Header("Settings")]
     public Mesh replicatorMesh;
@@ -338,6 +339,7 @@ public class ReplicatorManager : MonoBehaviour
     private readonly List<int> spontaneousHydrogenSpawnCandidateCells = new List<int>(1024);
     private int spontaneousSpawnCandidateCacheLastRefreshStep = -1;
     private int simulationStepCount;
+    private int steeringRecomputeCounter;
     private int predatorPresenceCacheStep = -1;
     private bool predatorPresenceCached;
 
@@ -1195,6 +1197,14 @@ public class ReplicatorManager : MonoBehaviour
 
     void UpdateRunAndTumbleLocomotion(bool populationStatePrimed)
     {
+        if (!ShouldRecomputeSteeringThisStep())
+        {
+            using (SteeringThrottleSkipMarker.Auto())
+            {
+                return;
+            }
+        }
+
         steeringSystem.UpdateRunAndTumbleLocomotion(
             agents,
             populationState,
@@ -1205,6 +1215,33 @@ public class ReplicatorManager : MonoBehaviour
             simulationTimeSeconds,
             populationStatePrimed,
             ref steeringDebugState);
+    }
+
+    bool ShouldRecomputeSteeringThisStep()
+    {
+        int interval = GetSteeringRecomputeInterval(Mathf.Max(1, runtimeSimulationStepsPerFrame));
+        int phase = steeringRecomputeCounter++;
+        return interval <= 1 || (phase % interval) == 0;
+    }
+
+    static int GetSteeringRecomputeInterval(int stepsPerFrame)
+    {
+        if (stepsPerFrame >= 50)
+        {
+            return 8;
+        }
+
+        if (stepsPerFrame >= 20)
+        {
+            return 4;
+        }
+
+        if (stepsPerFrame >= 5)
+        {
+            return 2;
+        }
+
+        return 1;
     }
 
     bool PreparePopulationStateForLocomotion()
