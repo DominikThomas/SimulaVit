@@ -22,6 +22,12 @@ public class PlanetGenerator : MonoBehaviour
     [Range(0f, 1f)] public float oceanDepth = 0.35f;
     public Material oceanMaterial;
 
+    [Header("Atmosphere")]
+    public bool enableAtmosphere = true;
+    [Tooltip("Atmosphere shell radius multiplier relative to planet radius.")]
+    [Range(1.001f, 1.2f)] public float atmosphereRadiusMultiplier = 1.04f;
+    public Material atmosphereMaterial;
+
     [Header("Randomization")]
     public bool randomizeOnStart = false;
     public bool useRandomSeed = true;
@@ -42,6 +48,10 @@ public class PlanetGenerator : MonoBehaviour
     private MeshFilter oceanMeshFilter;
     private MeshRenderer oceanMeshRenderer;
     private Mesh oceanMesh;
+
+    private MeshFilter atmosphereMeshFilter;
+    private MeshRenderer atmosphereMeshRenderer;
+    private Mesh atmosphereMesh;
 
     private float oceanNoiseThreshold;
 
@@ -65,6 +75,7 @@ public class PlanetGenerator : MonoBehaviour
         }
 
         SetupOceanLayer();
+        SetupAtmosphereLayer();
     }
 
     void Start()
@@ -114,6 +125,33 @@ public class PlanetGenerator : MonoBehaviour
         }
     }
 
+    void SetupAtmosphereLayer()
+    {
+        Transform existing = transform.Find("Atmosphere Layer");
+        GameObject atmosphereObj = existing != null ? existing.gameObject : new GameObject("Atmosphere Layer");
+        atmosphereObj.transform.SetParent(transform, false);
+        atmosphereObj.layer = gameObject.layer;
+
+        atmosphereMeshFilter = GetOrAddComponent<MeshFilter>(atmosphereObj);
+        atmosphereMeshRenderer = GetOrAddComponent<MeshRenderer>(atmosphereObj);
+
+        if (atmosphereMesh == null)
+        {
+            atmosphereMesh = new Mesh { name = "Planet Atmosphere" };
+        }
+
+        atmosphereMeshFilter.sharedMesh = atmosphereMesh;
+
+        if (atmosphereMaterial != null)
+        {
+            atmosphereMeshRenderer.sharedMaterial = atmosphereMaterial;
+        }
+
+        // Draw atmosphere after planet/ocean if transparency sorting gets awkward.
+        atmosphereMeshRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        atmosphereMeshRenderer.receiveShadows = false;
+    }
+
     void GeneratePlanet()
     {
         Vector3[] faceDirections =
@@ -156,15 +194,19 @@ public class PlanetGenerator : MonoBehaviour
 
         Vector3[] terrainVertices = new Vector3[unitVertices.Count];
         Vector3[] oceanVertices = new Vector3[unitVertices.Count];
+        Vector3[] atmosphereVertices = new Vector3[unitVertices.Count];
 
         for (int i = 0; i < unitVertices.Count; i++)
         {
             Vector3 dir = unitVertices[i];
             float terrainRadius = GetSurfaceRadiusFromNoise(noiseSamples[i]);
             float seaRadius = GetOceanRadius();
+            float shellBaseRadius = enableOcean ? seaRadius : radius;
+            float atmosphereRadius = shellBaseRadius * atmosphereRadiusMultiplier;
 
             terrainVertices[i] = dir * terrainRadius;
             oceanVertices[i] = dir * seaRadius;
+            atmosphereVertices[i] = dir * atmosphereRadius;
         }
 
         mesh.Clear();
@@ -201,6 +243,31 @@ public class PlanetGenerator : MonoBehaviour
             if (oceanMaterial != null)
             {
                 oceanMeshRenderer.sharedMaterial = oceanMaterial;
+            }
+        }
+
+        if (atmosphereMesh == null)
+        {
+            atmosphereMesh = new Mesh { name = "Planet Atmosphere" };
+        }
+
+        atmosphereMesh.Clear();
+        atmosphereMesh.vertices = atmosphereVertices;
+        atmosphereMesh.triangles = allTriangles.ToArray();
+        atmosphereMesh.RecalculateBounds();
+        atmosphereMesh.RecalculateNormals();
+
+        if (atmosphereMeshFilter != null)
+        {
+            atmosphereMeshFilter.sharedMesh = atmosphereMesh;
+        }
+
+        if (atmosphereMeshRenderer != null)
+        {
+            atmosphereMeshRenderer.enabled = enableAtmosphere;
+            if (atmosphereMaterial != null)
+            {
+                atmosphereMeshRenderer.sharedMaterial = atmosphereMaterial;
             }
         }
     }
