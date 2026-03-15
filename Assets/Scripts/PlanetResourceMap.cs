@@ -179,6 +179,7 @@ public class PlanetResourceMap : MonoBehaviour
     private float[] ventHeatTmp;
     private float[] h2sMixTmp;
     private float[] h2MixTmp;
+    private float[] o2TransferDemandTmp;
     private float[] scentWasteTmp;
     private float[] scentLeakTmp;
     private int[] ventHeatNeighbors;
@@ -413,6 +414,7 @@ public class PlanetResourceMap : MonoBehaviour
         ventHeatTmp = new float[cellCount];
         h2sMixTmp = new float[cellCount];
         h2MixTmp = new float[cellCount];
+        o2TransferDemandTmp = new float[cellCount];
         ventHeatNeighbors = new int[cellCount * NeighborCount];
         oceanMask = new byte[cellCount];
         ConfigureOceanDissolvedSpecies(cellCount);
@@ -729,9 +731,18 @@ public class PlanetResourceMap : MonoBehaviour
             return;
         }
 
-        float rate = Mathf.Max(0f, fe2PlusOxidationRatePerSecond);
-        float o2PerFe2 = Mathf.Max(0f, o2ConsumptionPerFe2PlusOxidized);
-        if (rate <= 0f || o2PerFe2 <= 0f)
+        // If reduced dissolved iron remains, treat atmospheric O2 as rapidly exchangeable
+        // with the ocean surface, then let Fe2+ oxidation consume it in ocean cells.
+        float totalOceanFe2 = 0f;
+        for (int cell = 0; cell < dissolvedFe2Plus.Length; cell++)
+        {
+            if (oceanMask[cell] != 0)
+            {
+                totalOceanFe2 += Mathf.Max(0f, dissolvedFe2Plus[cell]);
+            }
+        }
+
+        if (totalOceanFe2 <= 1e-6f)
         {
             return;
         }
@@ -741,7 +752,7 @@ public class PlanetResourceMap : MonoBehaviour
         {
             if (oceanMask[cell] == 0)
             {
-                totalAtmosphericO2 += o2[cell];
+                totalAtmosphericO2 += Mathf.Max(0f, o2[cell]);
             }
         }
 
@@ -750,41 +761,7 @@ public class PlanetResourceMap : MonoBehaviour
             return;
         }
 
-        float[] o2DemandByOceanCell = h2MixTmp;
-        if (o2DemandByOceanCell == null || o2DemandByOceanCell.Length != o2.Length)
-        {
-            return;
-        }
-
-        float totalDemand = 0f;
-        for (int cell = 0; cell < dissolvedFe2Plus.Length; cell++)
-        {
-            if (oceanMask[cell] == 0)
-            {
-                o2DemandByOceanCell[cell] = 0f;
-                continue;
-            }
-
-            float fe2 = dissolvedFe2Plus[cell];
-            if (fe2 <= 0f)
-            {
-                o2DemandByOceanCell[cell] = 0f;
-                continue;
-            }
-
-            float desiredOxidation = fe2 * rate * Mathf.Max(0f, dt);
-            float requiredO2 = desiredOxidation * o2PerFe2;
-            float demand = Mathf.Max(0f, requiredO2 - o2[cell]);
-            o2DemandByOceanCell[cell] = demand;
-            totalDemand += demand;
-        }
-
-        if (totalDemand <= 0f)
-        {
-            return;
-        }
-
-        float transferableO2 = Mathf.Min(totalAtmosphericO2, totalDemand * transferFraction);
+        float transferableO2 = totalAtmosphericO2 * transferFraction;
         if (transferableO2 <= 0f)
         {
             return;
@@ -793,17 +770,12 @@ public class PlanetResourceMap : MonoBehaviour
         float toRemove = transferableO2;
         for (int cell = 0; cell < o2.Length; cell++)
         {
-            if (oceanMask[cell] != 0)
+            if (oceanMask[cell] != 0 || toRemove <= 0f)
             {
                 continue;
             }
 
-            if (toRemove <= 0f)
-            {
-                break;
-            }
-
-            float share = totalAtmosphericO2 > 0f ? o2[cell] / totalAtmosphericO2 : 0f;
+            float share = totalAtmosphericO2 > 0f ? Mathf.Max(0f, o2[cell]) / totalAtmosphericO2 : 0f;
             float remove = Mathf.Min(o2[cell], transferableO2 * share);
             o2[cell] = Mathf.Max(0f, o2[cell] - remove);
             toRemove -= remove;
@@ -830,16 +802,26 @@ public class PlanetResourceMap : MonoBehaviour
             return;
         }
 
+        float[] feWeights = o2TransferDemandTmp;
+        if (feWeights == null || feWeights.Length != dissolvedFe2Plus.Length)
+        {
+            return;
+        }
+
         for (int cell = 0; cell < dissolvedFe2Plus.Length; cell++)
         {
-            float demand = o2DemandByOceanCell[cell];
-            if (demand <= 0f)
+            feWeights[cell] = oceanMask[cell] != 0 ? Mathf.Max(0f, dissolvedFe2Plus[cell]) : 0f;
+        }
+
+        for (int cell = 0; cell < dissolvedFe2Plus.Length; cell++)
+        {
+            float weight = feWeights[cell];
+            if (weight <= 0f)
             {
                 continue;
             }
 
-            float add = transferredO2 * (demand / totalDemand);
-            o2[cell] += add;
+            o2[cell] += transferredO2 * (weight / totalOceanFe2);
         }
     }
 
