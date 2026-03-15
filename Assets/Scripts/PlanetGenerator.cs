@@ -55,6 +55,8 @@ public class PlanetGenerator : MonoBehaviour
 
     private float oceanNoiseThreshold;
 
+    public MeshRenderer OceanRenderer => oceanMeshRenderer;
+
     void Awake()
     {
         meshFilter = GetOrAddComponent<MeshFilter>(gameObject);
@@ -240,10 +242,6 @@ public class PlanetGenerator : MonoBehaviour
         if (oceanMeshRenderer != null)
         {
             oceanMeshRenderer.enabled = enableOcean;
-            if (oceanMaterial != null)
-            {
-                oceanMeshRenderer.sharedMaterial = oceanMaterial;
-            }
         }
 
         if (atmosphereMesh == null)

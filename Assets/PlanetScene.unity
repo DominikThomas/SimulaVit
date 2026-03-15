@@ -839,8 +839,21 @@ MonoBehaviour:
   atmosphereTickSeconds: 0.5
   landExchangeRate: 0.25
   oceanExchangeRate: 0.05
+  atmosphereToOceanO2TransferFractionPerTick: 1
   debugGlobalCO2: 5
   debugGlobalO2: 0.010003356
+  initialDissolvedFe2PlusPerOceanCell: 4
+  ventDissolvedFe2PlusPerTick: 0
+  fe2PlusOxidationRatePerSecond: 0.4
+  o2ConsumptionPerFe2PlusOxidized: 0.25
+  debugDissolvedFe2PlusOceanMean: 0
+  debugDissolvedFe2PlusTotal: 0
+  debugDissolvedFe2PlusRemainingFraction: 1
+  debugFeTotal: 0
+  updateOceanColorFromDissolvedFe2Plus: 1
+  ironRichOceanColor: {r: 0.09812211, g: 0.4245283, b: 0.25743943, a: 1}
+  oxygenatedOceanColor: {r: 0.18, g: 0.4, b: 0.75, a: 1}
+  oceanColorLerpSpeed: 2
   baseTempKelvin: 273.15
   insolationTempGain: 35
   ventTempGain: 120
