@@ -18,8 +18,7 @@ public enum ResourceType
     Ca = 9,
     DissolvedOrganicLeak = 10,
     ToxicProteolyticWaste = 11,
-    DissolvedFe2Plus = 12,
-    OxidizedFeSediment = 13
+    DissolvedFe2Plus = 12
 }
 
 [DisallowMultipleComponent]
@@ -108,7 +107,7 @@ public class PlanetResourceMap : MonoBehaviour
     public float debugDissolvedFe2PlusOceanMean;
     public float debugDissolvedFe2PlusTotal;
     [Range(0f, 1f)] public float debugDissolvedFe2PlusRemainingFraction = 1f;
-    public float debugOxidizedFeSedimentTotal;
+    public float debugFeTotal;
 
     [Header("Temperature Model")]
     public float baseTempKelvin = 273.15f; // 0 °C baseline
@@ -165,7 +164,6 @@ public class PlanetResourceMap : MonoBehaviour
     private float[] s0;
     private float[] p;
     private float[] fe;
-    private float[] oxidizedFeSediment;
     private float[] si;
     private float[] ca;
     private readonly Dictionary<ResourceType, float[]> oceanDissolvedResources = new Dictionary<ResourceType, float[]>();
@@ -404,7 +402,6 @@ public class PlanetResourceMap : MonoBehaviour
         s0 = new float[cellCount];
         p = new float[cellCount];
         fe = new float[cellCount];
-        oxidizedFeSediment = new float[cellCount];
         si = new float[cellCount];
         ca = new float[cellCount];
         cellDirections = new Vector3[cellCount];
@@ -444,7 +441,6 @@ public class PlanetResourceMap : MonoBehaviour
             fe[cell] = Mathf.Max(0f, ironScale * ironNoise);
             si[cell] = Mathf.Max(0f, baselineSi + siliconPatchScale * (siliconNoise - 0.5f));
             ca[cell] = Mathf.Max(0f, baselineCa + calciumPatchScale * (calciumNoise - 0.5f));
-            oxidizedFeSediment[cell] = 0f;
 
             if (oceanMask[cell] != 0)
             {
@@ -1100,7 +1096,7 @@ public class PlanetResourceMap : MonoBehaviour
     private void ApplyDissolvedFe2PlusOxidation(float dt)
     {
         float[] dissolvedFe2Plus = GetOceanDissolvedArray(ResourceType.DissolvedFe2Plus);
-        if (!isInitialized || dissolvedFe2Plus == null || o2 == null || oxidizedFeSediment == null || oceanMask == null)
+        if (!isInitialized || dissolvedFe2Plus == null || o2 == null || fe == null || oceanMask == null)
         {
             return;
         }
@@ -1139,7 +1135,7 @@ public class PlanetResourceMap : MonoBehaviour
 
             dissolvedFe2Plus[cell] = availableFe2 - oxidizedFe2;
             o2[cell] = Mathf.Max(0f, availableO2 - (oxidizedFe2 * o2PerFe2));
-            oxidizedFeSediment[cell] += oxidizedFe2;
+            fe[cell] += oxidizedFe2;
         }
     }
 
@@ -1151,7 +1147,7 @@ public class PlanetResourceMap : MonoBehaviour
             debugDissolvedFe2PlusOceanMean = 0f;
             debugDissolvedFe2PlusTotal = 0f;
             debugDissolvedFe2PlusRemainingFraction = 0f;
-            debugOxidizedFeSedimentTotal = 0f;
+            debugFeTotal = 0f;
             return;
         }
 
@@ -1166,12 +1162,12 @@ public class PlanetResourceMap : MonoBehaviour
             }
 
             dissolvedTotal += dissolvedFe2Plus[cell];
-            oxidizedTotal += oxidizedFeSediment[cell];
+            oxidizedTotal += fe[cell];
             oceanCount++;
         }
 
         debugDissolvedFe2PlusTotal = dissolvedTotal;
-        debugOxidizedFeSedimentTotal = oxidizedTotal;
+        debugFeTotal = oxidizedTotal;
         debugDissolvedFe2PlusOceanMean = oceanCount > 0 ? dissolvedTotal / oceanCount : 0f;
 
         if (initialDissolvedFe2PlusTotal <= 0f)
@@ -1441,7 +1437,6 @@ public class PlanetResourceMap : MonoBehaviour
             case ResourceType.S0: return s0;
             case ResourceType.P: return p;
             case ResourceType.Fe: return fe;
-            case ResourceType.OxidizedFeSediment: return oxidizedFeSediment;
             case ResourceType.Si: return si;
             case ResourceType.Ca: return ca;
             case ResourceType.DissolvedOrganicLeak: return dissolvedOrganicLeak;
@@ -1557,9 +1552,8 @@ public class PlanetResourceMap : MonoBehaviour
             case ResourceType.H2: return Mathf.Max(0.0001f, ventH2Max > 0f ? ventH2Max : ventStrengthMax);
             case ResourceType.S0: return Mathf.Max(0.0001f, baselineS0);
             case ResourceType.P: return Mathf.Max(0.0001f, phosphorusScale);
-            case ResourceType.Fe: return Mathf.Max(0.0001f, ironScale);
+            case ResourceType.Fe: return Mathf.Max(0.0001f, initialDissolvedFe2PlusPerOceanCell);
             case ResourceType.DissolvedFe2Plus: return Mathf.Max(0.0001f, initialDissolvedFe2PlusPerOceanCell);
-            case ResourceType.OxidizedFeSediment: return Mathf.Max(0.0001f, initialDissolvedFe2PlusPerOceanCell);
             case ResourceType.Si: return Mathf.Max(0.0001f, baselineSi + siliconPatchScale);
             case ResourceType.Ca: return Mathf.Max(0.0001f, baselineCa + calciumPatchScale);
             case ResourceType.DissolvedOrganicLeak: return Mathf.Max(0.0001f, scentMaxPerCell);

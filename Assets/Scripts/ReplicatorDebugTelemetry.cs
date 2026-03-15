@@ -72,7 +72,6 @@ public class ReplicatorDebugTelemetry
         float dissolvedFe2OceanMean = 0f;
         float dissolvedFe2Total = 0f;
         float dissolvedFe2RemainingFraction = 0f;
-        float oxidizedFeSedimentTotal = 0f;
         if (planetResourceMap != null)
         {
             planetResourceMap.GetVentChemistryStats(out meanH2, out maxH2, out meanH2S, out maxH2S);
@@ -84,7 +83,6 @@ public class ReplicatorDebugTelemetry
             dissolvedFe2OceanMean = planetResourceMap.debugDissolvedFe2PlusOceanMean;
             dissolvedFe2Total = planetResourceMap.debugDissolvedFe2PlusTotal;
             dissolvedFe2RemainingFraction = planetResourceMap.debugDissolvedFe2PlusRemainingFraction;
-            oxidizedFeSedimentTotal = planetResourceMap.debugOxidizedFeSedimentTotal;
         }
 
         string plumeDiagnostics = debugVentPlumeDiagnostics
@@ -98,7 +96,7 @@ public class ReplicatorDebugTelemetry
             $"chem[h2Mean={meanH2:F3} h2Max={maxH2:F3} h2sMean={meanH2S:F3} h2sMax={maxH2S:F3} fe2OceanMean={dissolvedFe2OceanMean:F3} fe2Total={dissolvedFe2Total:F1}]" + plumeDiagnostics);
         Debug.Log($"DeathCauses: hydrogen[{formatDeathCauseDistribution(hydrogenDeathCauseCounts)}] sulfur[{formatDeathCauseDistribution(chemoDeathCauseCounts)}] photo[{formatDeathCauseDistribution(photoDeathCauseCounts)}] sapro[{formatDeathCauseDistribution(saproDeathCauseCounts)}] predator[{formatDeathCauseDistribution(predatorDeathCauseCounts)}]");
         Debug.Log($"Atmosphere composition: CO2[{planetResourceMap.debugGlobalCO2}], O2[{planetResourceMap.debugGlobalO2}]");
-        Debug.Log($"Ocean chemistry: DissolvedFe2+[{dissolvedFe2OceanMean:F3} avg, {dissolvedFe2Total:F1} total, {(dissolvedFe2RemainingFraction * 100f):F1}% remaining], OxidizedFeSediment[{oxidizedFeSedimentTotal:F1}]");
+        Debug.Log($"Ocean chemistry: DissolvedFe2+[{dissolvedFe2OceanMean:F3} avg, {dissolvedFe2Total:F1} total, {(dissolvedFe2RemainingFraction * 100f):F1}% remaining]");
 
         resetPredationKillsWindow();
         resetDeathCauseCounters();
