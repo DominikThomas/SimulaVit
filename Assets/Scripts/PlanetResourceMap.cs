@@ -109,6 +109,18 @@ public class PlanetResourceMap : MonoBehaviour
     [Range(0f, 1f)] public float debugDissolvedFe2PlusRemainingFraction = 1f;
     public float debugFeTotal;
 
+    [Header("Ocean Visuals")]
+    public bool updateOceanColorFromDissolvedFe2Plus = true;
+    public Color ironRichOceanColor = new Color(0.22f, 0.55f, 0.38f, 1f);
+    public Color oxygenatedOceanColor = new Color(0.18f, 0.40f, 0.75f, 1f);
+    [Range(0.01f, 10f)] public float oceanColorLerpSpeed = 2f;
+
+    private Material oceanMaterialInstance;
+    private Color currentOceanColor;
+
+    private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
+    private static readonly int ColorId = Shader.PropertyToID("_Color");
+
     [Header("Temperature Model")]
     public float baseTempKelvin = 273.15f; // 0 °C baseline
     public float insolationTempGain = 35f; // +35 K at full sun
@@ -209,6 +221,7 @@ public class PlanetResourceMap : MonoBehaviour
     private void Start()
     {
         InitializeIfNeeded();
+        InitializeOceanVisuals();
     }
 
     private void Update()
@@ -247,6 +260,8 @@ public class PlanetResourceMap : MonoBehaviour
                 UpdateOceanChemistryDebugStats();
             }
         }
+
+        UpdateOceanVisuals();
     }
 
     public float Get(ResourceType t, int cell)
@@ -1178,6 +1193,46 @@ public class PlanetResourceMap : MonoBehaviour
         debugDissolvedFe2PlusRemainingFraction = initialDissolvedFe2PlusTotal > 0f
             ? Mathf.Clamp01(dissolvedTotal / initialDissolvedFe2PlusTotal)
             : 0f;
+    }
+
+    private void InitializeOceanVisuals()
+    {
+        if (planetGenerator == null || planetGenerator.OceanRenderer == null)
+            return;
+
+        oceanMaterialInstance = planetGenerator.OceanRenderer.material;
+        currentOceanColor = GetTargetOceanColor();
+        ApplyOceanColor(currentOceanColor);
+    }
+
+    private Color GetTargetOceanColor()
+    {
+        float fe2Remaining = Mathf.Clamp01(debugDissolvedFe2PlusRemainingFraction);
+        return Color.Lerp(oxygenatedOceanColor, ironRichOceanColor, fe2Remaining);
+    }
+
+    private void UpdateOceanVisuals()
+    {
+        if (!updateOceanColorFromDissolvedFe2Plus || oceanMaterialInstance == null)
+            return;
+
+        Color targetColor = GetTargetOceanColor();
+        float t = 1f - Mathf.Exp(-oceanColorLerpSpeed * Time.deltaTime);
+        currentOceanColor = Color.Lerp(currentOceanColor, targetColor, t);
+
+        ApplyOceanColor(currentOceanColor);
+    }
+
+    private void ApplyOceanColor(Color color)
+    {
+        if (oceanMaterialInstance == null)
+            return;
+
+        if (oceanMaterialInstance.HasProperty(BaseColorId))
+            oceanMaterialInstance.SetColor(BaseColorId, color);
+
+        if (oceanMaterialInstance.HasProperty(ColorId))
+            oceanMaterialInstance.SetColor(ColorId, color);
     }
 
     private void ApplyNaturalOxidation()

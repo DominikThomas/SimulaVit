@@ -849,7 +849,11 @@ MonoBehaviour:
   debugDissolvedFe2PlusOceanMean: 0
   debugDissolvedFe2PlusTotal: 0
   debugDissolvedFe2PlusRemainingFraction: 1
-  debugOxidizedFeSedimentTotal: 0
+  debugFeTotal: 0
+  updateOceanColorFromDissolvedFe2Plus: 1
+  ironRichOceanColor: {r: 0.09812211, g: 0.4245283, b: 0.25743943, a: 1}
+  oxygenatedOceanColor: {r: 0.18, g: 0.4, b: 0.75, a: 1}
+  oceanColorLerpSpeed: 2
   baseTempKelvin: 273.15
   insolationTempGain: 35
   ventTempGain: 120
