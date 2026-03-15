@@ -1,22 +1,25 @@
 using UnityEngine;
+using System.Collections.Generic;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
 
 public enum ResourceType
 {
-    CO2,
-    O2,
-    OrganicC,
-    H2S,
-    H2,
-    S0,
-    P,
-    Fe,
-    Si,
-    Ca,
-    DissolvedOrganicLeak,
-    ToxicProteolyticWaste
+    CO2 = 0,
+    O2 = 1,
+    OrganicC = 2,
+    H2S = 3,
+    H2 = 4,
+    S0 = 5,
+    P = 6,
+    Fe = 7,
+    Si = 8,
+    Ca = 9,
+    DissolvedOrganicLeak = 10,
+    ToxicProteolyticWaste = 11,
+    DissolvedFe2Plus = 12,
+    OxidizedFeSediment = 13
 }
 
 [DisallowMultipleComponent]
@@ -89,6 +92,22 @@ public class PlanetResourceMap : MonoBehaviour
     public float debugGlobalCO2;
     public float debugGlobalO2;
 
+    [Header("Ocean Dissolved Chemistry")]
+    [Tooltip("Initial dissolved Fe2+ loaded into each ocean cell. Represents a large reduced-iron ocean reservoir before oxygenation.")]
+    public float initialDissolvedFe2PlusPerOceanCell = 8f;
+    [Tooltip("Optional vent source of dissolved Fe2+ per vent tick, scaled by vent strength.")]
+    public float ventDissolvedFe2PlusPerTick = 0f;
+    [Tooltip("First-order dissolved Fe2+ oxidation rate (s^-1).")]
+    public float fe2PlusOxidationRatePerSecond = 0.004f;
+    [Tooltip("O2 consumed per 1 Fe2+ oxidized. Simplified stoichiometry for tunable oxygen sink strength.")]
+    public float o2ConsumptionPerFe2PlusOxidized = 0.25f;
+
+    [Header("Ocean Chemistry Debug")]
+    public float debugDissolvedFe2PlusOceanMean;
+    public float debugDissolvedFe2PlusTotal;
+    [Range(0f, 1f)] public float debugDissolvedFe2PlusRemainingFraction = 1f;
+    public float debugOxidizedFeSedimentTotal;
+
     [Header("Temperature Model")]
     public float baseTempKelvin = 273.15f; // 0 °C baseline
     public float insolationTempGain = 35f; // +35 K at full sun
@@ -144,8 +163,11 @@ public class PlanetResourceMap : MonoBehaviour
     private float[] s0;
     private float[] p;
     private float[] fe;
+    private float[] oxidizedFeSediment;
     private float[] si;
     private float[] ca;
+    private readonly Dictionary<ResourceType, float[]> oceanDissolvedResources = new Dictionary<ResourceType, float[]>();
+    private float initialDissolvedFe2PlusTotal;
 
     private bool isInitialized;
     public float[] ventStrength;
@@ -217,7 +239,9 @@ public class PlanetResourceMap : MonoBehaviour
                 atmosphereTimer -= atmosphereTick;
                 ApplyAtmosphereMixing();
                 ApplyNaturalOxidation();
+                ApplyDissolvedFe2PlusOxidation(atmosphereTick);
                 ApplyLocalResourceMixing(atmosphereTick);
+                UpdateOceanChemistryDebugStats();
             }
         }
     }
@@ -239,6 +263,11 @@ public class PlanetResourceMap : MonoBehaviour
             return;
         }
 
+        if (IsOceanDissolvedResource(t) && !IsOceanCell(cell))
+        {
+            return;
+        }
+
         float[] arr = GetArray(t);
         arr[cell] = Mathf.Max(0f, arr[cell] + delta);
     }
@@ -246,6 +275,16 @@ public class PlanetResourceMap : MonoBehaviour
     public bool IsVolatile(ResourceType t)
     {
         return t == ResourceType.CO2 || t == ResourceType.O2;
+    }
+
+    public bool IsOceanDissolvedResource(ResourceType resourceType)
+    {
+        if (resourceType == ResourceType.DissolvedFe2Plus)
+        {
+            return true;
+        }
+
+        return oceanDissolvedResources.ContainsKey(resourceType);
     }
 
     public bool IsOceanCell(int cell)
@@ -360,6 +399,7 @@ public class PlanetResourceMap : MonoBehaviour
         s0 = new float[cellCount];
         p = new float[cellCount];
         fe = new float[cellCount];
+        oxidizedFeSediment = new float[cellCount];
         si = new float[cellCount];
         ca = new float[cellCount];
         cellDirections = new Vector3[cellCount];
@@ -371,6 +411,7 @@ public class PlanetResourceMap : MonoBehaviour
         h2MixTmp = new float[cellCount];
         ventHeatNeighbors = new int[cellCount * NeighborCount];
         oceanMask = new byte[cellCount];
+        ConfigureOceanDissolvedSpecies(cellCount);
         EnsureScentArrays(cellCount);
 
         int ventCount = 0;
@@ -397,6 +438,12 @@ public class PlanetResourceMap : MonoBehaviour
             fe[cell] = Mathf.Max(0f, ironScale * ironNoise);
             si[cell] = Mathf.Max(0f, baselineSi + siliconPatchScale * (siliconNoise - 0.5f));
             ca[cell] = Mathf.Max(0f, baselineCa + calciumPatchScale * (calciumNoise - 0.5f));
+            oxidizedFeSediment[cell] = 0f;
+
+            if (oceanMask[cell] != 0)
+            {
+                SetOceanDissolvedInitial(ResourceType.DissolvedFe2Plus, cell, Mathf.Max(0f, initialDissolvedFe2PlusPerOceanCell));
+            }
 
             float ventNoise = HighFrequencyNoise(dir);
             bool isVent = ventNoise > ventThreshold;
@@ -440,9 +487,45 @@ public class PlanetResourceMap : MonoBehaviour
 
         ventTimer = 0f;
         atmosphereTimer = 0f;
-        UpdateAtmosphereDebugMeans();
+        initialDissolvedFe2PlusTotal = 0f;
         isInitialized = true;
+        UpdateAtmosphereDebugMeans();
+        UpdateOceanChemistryDebugStats();
         Debug.Log($"Initialized {VentCount} vents", this);
+    }
+
+    private void ConfigureOceanDissolvedSpecies(int cellCount)
+    {
+        oceanDissolvedResources.Clear();
+        RegisterOceanDissolvedSpecies(ResourceType.DissolvedFe2Plus, cellCount);
+        // Future dissolved ocean species (for example DissolvedCa / DissolvedSi)
+        // can be registered here without changing the rest of the resource map flow.
+    }
+
+    private void RegisterOceanDissolvedSpecies(ResourceType resourceType, int cellCount)
+    {
+        if (cellCount <= 0)
+        {
+            return;
+        }
+
+        oceanDissolvedResources[resourceType] = new float[cellCount];
+    }
+
+    private void SetOceanDissolvedInitial(ResourceType resourceType, int cell, float value)
+    {
+        float[] array = GetOceanDissolvedArray(resourceType);
+        if (array == null || cell < 0 || cell >= array.Length)
+        {
+            return;
+        }
+
+        array[cell] = Mathf.Max(0f, value);
+    }
+
+    private float[] GetOceanDissolvedArray(ResourceType resourceType)
+    {
+        return oceanDissolvedResources.TryGetValue(resourceType, out float[] array) ? array : null;
     }
 
     public void EnsureScentArrays()
@@ -834,7 +917,8 @@ public class PlanetResourceMap : MonoBehaviour
 
         float h2sPerTick = Mathf.Max(0f, ventH2SPerTick);
         float h2PerTick = Mathf.Max(0f, ventH2PerTick);
-        if (Mathf.Approximately(h2sPerTick, 0f) && Mathf.Approximately(h2PerTick, 0f))
+        float dissolvedFe2PlusPerTick = Mathf.Max(0f, ventDissolvedFe2PlusPerTick);
+        if (Mathf.Approximately(h2sPerTick, 0f) && Mathf.Approximately(h2PerTick, 0f) && Mathf.Approximately(dissolvedFe2PlusPerTick, 0f))
         {
             return;
         }
@@ -875,6 +959,7 @@ public class PlanetResourceMap : MonoBehaviour
             Add(ResourceType.H2S, cell, h2sPerTick * cellVentStrength);
             Add(ResourceType.H2, cell, h2PerTick * cellVentStrength);
             Add(ResourceType.CO2, cell, Mathf.Max(0f, ventCO2PerTick) * cellVentStrength);
+            Add(ResourceType.DissolvedFe2Plus, cell, dissolvedFe2PlusPerTick * cellVentStrength);
             if (applyH2SCap)
             {
                 h2s[cell] = Mathf.Min(h2s[cell], ventH2SMax);
@@ -885,6 +970,95 @@ public class PlanetResourceMap : MonoBehaviour
                 h2[cell] = Mathf.Min(h2[cell], ventH2Max);
             }
         }
+
+        UpdateOceanChemistryDebugStats();
+    }
+
+    private void ApplyDissolvedFe2PlusOxidation(float dt)
+    {
+        float[] dissolvedFe2Plus = GetOceanDissolvedArray(ResourceType.DissolvedFe2Plus);
+        if (!isInitialized || dissolvedFe2Plus == null || o2 == null || oxidizedFeSediment == null || oceanMask == null)
+        {
+            return;
+        }
+
+        // Simplified redox sink:
+        // Fe2+(dissolved, ocean) + O2 -> oxidized Fe sediment (locked).
+        // Uses the existing local O2 field; oxidized sediment is intentionally non-recycled.
+        float rate = Mathf.Max(0f, fe2PlusOxidationRatePerSecond);
+        float o2PerFe2 = Mathf.Max(0f, o2ConsumptionPerFe2PlusOxidized);
+        if (rate <= 0f || o2PerFe2 <= 0f)
+        {
+            return;
+        }
+
+        for (int cell = 0; cell < dissolvedFe2Plus.Length; cell++)
+        {
+            if (oceanMask[cell] == 0)
+            {
+                continue;
+            }
+
+            float availableFe2 = dissolvedFe2Plus[cell];
+            float availableO2 = o2[cell];
+            if (availableFe2 <= 0f || availableO2 <= 0f)
+            {
+                continue;
+            }
+
+            float desiredOxidation = availableFe2 * rate * Mathf.Max(0f, dt);
+            float maxByO2 = availableO2 / o2PerFe2;
+            float oxidizedFe2 = Mathf.Min(availableFe2, desiredOxidation, maxByO2);
+            if (oxidizedFe2 <= 0f)
+            {
+                continue;
+            }
+
+            dissolvedFe2Plus[cell] = availableFe2 - oxidizedFe2;
+            o2[cell] = Mathf.Max(0f, availableO2 - (oxidizedFe2 * o2PerFe2));
+            oxidizedFeSediment[cell] += oxidizedFe2;
+        }
+    }
+
+    private void UpdateOceanChemistryDebugStats()
+    {
+        float[] dissolvedFe2Plus = GetOceanDissolvedArray(ResourceType.DissolvedFe2Plus);
+        if (!isInitialized || oceanMask == null || dissolvedFe2Plus == null)
+        {
+            debugDissolvedFe2PlusOceanMean = 0f;
+            debugDissolvedFe2PlusTotal = 0f;
+            debugDissolvedFe2PlusRemainingFraction = 0f;
+            debugOxidizedFeSedimentTotal = 0f;
+            return;
+        }
+
+        float dissolvedTotal = 0f;
+        float oxidizedTotal = 0f;
+        int oceanCount = 0;
+        for (int cell = 0; cell < oceanMask.Length; cell++)
+        {
+            if (oceanMask[cell] == 0)
+            {
+                continue;
+            }
+
+            dissolvedTotal += dissolvedFe2Plus[cell];
+            oxidizedTotal += oxidizedFeSediment[cell];
+            oceanCount++;
+        }
+
+        debugDissolvedFe2PlusTotal = dissolvedTotal;
+        debugOxidizedFeSedimentTotal = oxidizedTotal;
+        debugDissolvedFe2PlusOceanMean = oceanCount > 0 ? dissolvedTotal / oceanCount : 0f;
+
+        if (initialDissolvedFe2PlusTotal <= 0f)
+        {
+            initialDissolvedFe2PlusTotal = Mathf.Max(0f, dissolvedTotal);
+        }
+
+        debugDissolvedFe2PlusRemainingFraction = initialDissolvedFe2PlusTotal > 0f
+            ? Mathf.Clamp01(dissolvedTotal / initialDissolvedFe2PlusTotal)
+            : 0f;
     }
 
     private void ApplyNaturalOxidation()
@@ -1128,6 +1302,12 @@ public class PlanetResourceMap : MonoBehaviour
 
     private float[] GetArray(ResourceType type)
     {
+        float[] dissolvedArray = GetOceanDissolvedArray(type);
+        if (dissolvedArray != null)
+        {
+            return dissolvedArray;
+        }
+
         switch (type)
         {
             case ResourceType.CO2: return co2;
@@ -1138,6 +1318,7 @@ public class PlanetResourceMap : MonoBehaviour
             case ResourceType.S0: return s0;
             case ResourceType.P: return p;
             case ResourceType.Fe: return fe;
+            case ResourceType.OxidizedFeSediment: return oxidizedFeSediment;
             case ResourceType.Si: return si;
             case ResourceType.Ca: return ca;
             case ResourceType.DissolvedOrganicLeak: return dissolvedOrganicLeak;
@@ -1222,6 +1403,10 @@ public class PlanetResourceMap : MonoBehaviour
         landExchangeRate = Mathf.Max(0f, landExchangeRate);
         oceanExchangeRate = Mathf.Max(0f, oceanExchangeRate);
         naturalOxidationFractionPerTick = Mathf.Clamp01(naturalOxidationFractionPerTick);
+        initialDissolvedFe2PlusPerOceanCell = Mathf.Max(0f, initialDissolvedFe2PlusPerOceanCell);
+        ventDissolvedFe2PlusPerTick = Mathf.Max(0f, ventDissolvedFe2PlusPerTick);
+        fe2PlusOxidationRatePerSecond = Mathf.Max(0f, fe2PlusOxidationRatePerSecond);
+        o2ConsumptionPerFe2PlusOxidized = Mathf.Max(0f, o2ConsumptionPerFe2PlusOxidized);
         dissolvedOrganicLeakDecayPerSecond = Mathf.Max(0f, dissolvedOrganicLeakDecayPerSecond);
         toxicProteolyticWasteDecayPerSecond = Mathf.Max(0f, toxicProteolyticWasteDecayPerSecond);
         scentDiffusePasses = Mathf.Clamp(scentDiffusePasses, 0, 4);
@@ -1249,6 +1434,8 @@ public class PlanetResourceMap : MonoBehaviour
             case ResourceType.S0: return Mathf.Max(0.0001f, baselineS0);
             case ResourceType.P: return Mathf.Max(0.0001f, phosphorusScale);
             case ResourceType.Fe: return Mathf.Max(0.0001f, ironScale);
+            case ResourceType.DissolvedFe2Plus: return Mathf.Max(0.0001f, initialDissolvedFe2PlusPerOceanCell);
+            case ResourceType.OxidizedFeSediment: return Mathf.Max(0.0001f, initialDissolvedFe2PlusPerOceanCell);
             case ResourceType.Si: return Mathf.Max(0.0001f, baselineSi + siliconPatchScale);
             case ResourceType.Ca: return Mathf.Max(0.0001f, baselineCa + calciumPatchScale);
             case ResourceType.DissolvedOrganicLeak: return Mathf.Max(0.0001f, scentMaxPerCell);

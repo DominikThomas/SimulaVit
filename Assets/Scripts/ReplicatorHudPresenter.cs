@@ -71,12 +71,17 @@ public class ReplicatorHudPresenter
         float co2Pct = (globalCo2 / atmosphereTotal) * 100f;
         float o2Pct = (globalO2 / atmosphereTotal) * 100f;
 
+        float dissolvedFe2Total = planetResourceMap != null ? planetResourceMap.debugDissolvedFe2PlusTotal : 0f;
+        float dissolvedFe2OceanMean = planetResourceMap != null ? planetResourceMap.debugDissolvedFe2PlusOceanMean : 0f;
+        float dissolvedFe2RemainingPct = planetResourceMap != null ? planetResourceMap.debugDissolvedFe2PlusRemainingFraction * 100f : 0f;
+
         SampleHudTemperatureStats(planetResourceMap);
 
         string atmosphereText =
             "Atmosphere (global average)\n" +
             $"CO2: {globalCo2:0.000} ({co2Pct:0.0}%)\n" +
             $"O2: {globalO2:0.000} ({o2Pct:0.0}%)\n" +
+            $"Dissolved Fe2+: {dissolvedFe2OceanMean:0.000} avg / {dissolvedFe2Total:0.0} total ({dissolvedFe2RemainingPct:0.0}% rem)\n" +
             $"Temp Mean: {ReplicatorManager.FormatTemperature(hudMeanTempKelvin, temperatureDisplayUnit)}\n" +
             $"Temp Min: {ReplicatorManager.FormatTemperature(hudMinTempKelvin, temperatureDisplayUnit)}\n" +
             $"Temp Max: {ReplicatorManager.FormatTemperature(hudMaxTempKelvin, temperatureDisplayUnit)}";
