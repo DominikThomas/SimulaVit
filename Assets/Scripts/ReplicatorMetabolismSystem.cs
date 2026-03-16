@@ -28,6 +28,14 @@ public class ReplicatorMetabolismSystem
         public float HydrogenotrophyH2PerTick;
         public float HydrogenotrophyEnergyPerTick;
         public float HydrogenotrophyStoreFraction;
+        public float FermentationOrganicCPerTick;
+        public float FermentationEnergyPerTick;
+        public float MethanogenesisCO2PerTick;
+        public float MethanogenesisH2PerTick;
+        public float MethanogenesisEnergyPerTick;
+        public float MethanotrophyCH4PerTick;
+        public float MethanotrophyO2PerTick;
+        public float MethanotrophyEnergyPerTick;
         public float ChemosynthesisCo2NeedPerTick;
         public float ChemosynthesisH2sNeedPerTick;
         public float ChemosynthesisEnergyPerTick;
@@ -123,7 +131,7 @@ public class ReplicatorMetabolismSystem
                 debugSnapshot.HydrogenTempCount++;
                 if (!insideOptimalBand) debugSnapshot.HydrogenStressedCount++;
             }
-            else if (metabolism == MetabolismType.Saprotrophy || metabolism == MetabolismType.Predation)
+            else if (metabolism == MetabolismType.Saprotrophy || metabolism == MetabolismType.Predation || metabolism == MetabolismType.Fermentation || metabolism == MetabolismType.Methanotrophy)
             {
                 debugSnapshot.SaproTempSum += temp;
                 debugSnapshot.SaproTempCount++;
@@ -270,6 +278,8 @@ public class ReplicatorMetabolismSystem
                 populationState.StarveOrganicCFoodSeconds[i] = UpdateStarveTimer(populationState.StarveOrganicCFoodSeconds[i], lackFood, dtTick);
                 populationState.StarveO2Seconds[i] = UpdateStarveTimer(populationState.StarveO2Seconds[i], lackO2, dtTick);
                 populationState.StarveStoredCSeconds[i] = UpdateStarveTimer(populationState.StarveStoredCSeconds[i], lackStoredC, dtTick);
+                populationState.StarveCh4Seconds[i] = 0f;
+                populationState.O2ToxicSeconds[i] = 0f;
                 populationState.StarveCo2Seconds[i] = 0f;
                 populationState.StarveH2sSeconds[i] = 0f;
                 populationState.StarveH2Seconds[i] = 0f;
@@ -296,6 +306,8 @@ public class ReplicatorMetabolismSystem
                 populationState.StarveOrganicCFoodSeconds[i] = UpdateStarveTimer(populationState.StarveOrganicCFoodSeconds[i], lackFood, dtTick);
                 populationState.StarveO2Seconds[i] = UpdateStarveTimer(populationState.StarveO2Seconds[i], lackO2, dtTick);
                 populationState.StarveStoredCSeconds[i] = UpdateStarveTimer(populationState.StarveStoredCSeconds[i], lackStoredC, dtTick);
+                populationState.StarveCh4Seconds[i] = 0f;
+                populationState.O2ToxicSeconds[i] = 0f;
                 populationState.StarveCo2Seconds[i] = 0f;
                 populationState.StarveH2sSeconds[i] = 0f;
                 populationState.StarveLightSeconds[i] = 0f;
@@ -345,6 +357,111 @@ public class ReplicatorMetabolismSystem
                 populationState.StarveLightSeconds[i] = 0f;
                 populationState.StarveOrganicCFoodSeconds[i] = 0f;
                 populationState.StarveO2Seconds[i] = 0f;
+                populationState.StarveCh4Seconds[i] = 0f;
+                populationState.O2ToxicSeconds[i] = 0f;
+                populationState.StarveStoredCSeconds[i] = 0f;
+            }
+            else if (metabolism == MetabolismType.Fermentation)
+            {
+                float cNeed = Mathf.Max(0f, settings.FermentationOrganicCPerTick);
+                float organicCAvailable = planetResourceMap.Get(ResourceType.OrganicC, cellIndex);
+                float pulled = Mathf.Min(cNeed, organicCAvailable);
+                bool lackOrganicC = cNeed > 0f && pulled <= Mathf.Epsilon;
+
+                if (pulled > 0f)
+                {
+                    planetResourceMap.Add(ResourceType.OrganicC, cellIndex, -pulled);
+                    planetResourceMap.Add(ResourceType.H2, cellIndex, pulled);
+                    planetResourceMap.Add(ResourceType.CO2, cellIndex, pulled);
+                    populationState.Energy[i] += Mathf.Max(0f, settings.FermentationEnergyPerTick) * (pulled / Mathf.Max(0.0001f, cNeed)) * performance;
+                }
+
+                populationState.StarveOrganicCFoodSeconds[i] = UpdateStarveTimer(populationState.StarveOrganicCFoodSeconds[i], lackOrganicC, dtTick);
+                populationState.StarveCo2Seconds[i] = 0f;
+                populationState.StarveH2sSeconds[i] = 0f;
+                populationState.StarveH2Seconds[i] = 0f;
+                populationState.StarveLightSeconds[i] = 0f;
+                populationState.StarveO2Seconds[i] = 0f;
+                populationState.StarveCh4Seconds[i] = 0f;
+                populationState.StarveStoredCSeconds[i] = 0f;
+                populationState.O2ToxicSeconds[i] = 0f;
+            }
+            else if (metabolism == MetabolismType.Methanogenesis)
+            {
+                float co2Need = Mathf.Max(0f, settings.MethanogenesisCO2PerTick);
+                float h2Need = Mathf.Max(0f, settings.MethanogenesisH2PerTick);
+                float co2Available = planetResourceMap.Get(ResourceType.CO2, cellIndex);
+                float h2Available = planetResourceMap.Get(ResourceType.H2, cellIndex);
+                float pulledRatio = Mathf.Clamp01(Mathf.Min(co2Need <= Mathf.Epsilon ? 1f : co2Available / co2Need, h2Need <= Mathf.Epsilon ? 1f : h2Available / h2Need));
+                bool lackCo2 = false;
+                bool lackH2 = false;
+
+                if (pulledRatio > 0f)
+                {
+                    float co2Consumed = co2Need * pulledRatio;
+                    float h2Consumed = h2Need * pulledRatio;
+                    planetResourceMap.Add(ResourceType.CO2, cellIndex, -co2Consumed);
+                    planetResourceMap.Add(ResourceType.H2, cellIndex, -h2Consumed);
+                    planetResourceMap.Add(ResourceType.CH4, cellIndex, co2Consumed);
+                    populationState.Energy[i] += Mathf.Max(0f, settings.MethanogenesisEnergyPerTick) * pulledRatio * performance;
+                }
+                else
+                {
+                    lackCo2 = co2Need > 0f && co2Available <= Mathf.Epsilon;
+                    lackH2 = h2Need > 0f && h2Available <= Mathf.Epsilon;
+                }
+
+                populationState.StarveCo2Seconds[i] = UpdateStarveTimer(populationState.StarveCo2Seconds[i], lackCo2, dtTick);
+                populationState.StarveH2Seconds[i] = UpdateStarveTimer(populationState.StarveH2Seconds[i], lackH2, dtTick);
+                populationState.StarveH2sSeconds[i] = 0f;
+                populationState.StarveLightSeconds[i] = 0f;
+                populationState.StarveOrganicCFoodSeconds[i] = 0f;
+                populationState.StarveO2Seconds[i] = 0f;
+                populationState.StarveCh4Seconds[i] = 0f;
+                populationState.StarveStoredCSeconds[i] = 0f;
+                populationState.O2ToxicSeconds[i] = 0f;
+            }
+            else if (metabolism == MetabolismType.Methanotrophy)
+            {
+                float ch4Need = Mathf.Max(0f, settings.MethanotrophyCH4PerTick);
+                float o2Need = Mathf.Max(0f, settings.MethanotrophyO2PerTick);
+                float ch4Available = planetResourceMap.Get(ResourceType.CH4, cellIndex);
+                float o2Available = planetResourceMap.Get(ResourceType.O2, cellIndex);
+                float pulledRatio = Mathf.Clamp01(Mathf.Min(ch4Need <= Mathf.Epsilon ? 1f : ch4Available / ch4Need, o2Need <= Mathf.Epsilon ? 1f : o2Available / o2Need));
+                bool lackCh4 = false;
+                bool lackO2 = false;
+                bool o2Toxic = false;
+                float comfortMax = Mathf.Max(0f, populationState.O2ComfortMax[i]);
+                float stressMax = Mathf.Max(comfortMax, populationState.O2StressMax[i]);
+
+                if (pulledRatio > 0f)
+                {
+                    float ch4Consumed = ch4Need * pulledRatio;
+                    float o2Consumed = o2Need * pulledRatio;
+                    planetResourceMap.Add(ResourceType.CH4, cellIndex, -ch4Consumed);
+                    planetResourceMap.Add(ResourceType.O2, cellIndex, -o2Consumed);
+                    planetResourceMap.Add(ResourceType.CO2, cellIndex, ch4Consumed);
+                    populationState.Energy[i] += Mathf.Max(0f, settings.MethanotrophyEnergyPerTick) * pulledRatio * performance;
+                }
+                else
+                {
+                    lackCh4 = ch4Need > 0f && ch4Available <= Mathf.Epsilon;
+                    lackO2 = o2Need > 0f && o2Available <= Mathf.Epsilon;
+                }
+
+                if (stressMax > 0f && o2Available > comfortMax)
+                {
+                    o2Toxic = o2Available > stressMax;
+                }
+
+                populationState.StarveCh4Seconds[i] = UpdateStarveTimer(populationState.StarveCh4Seconds[i], lackCh4, dtTick);
+                populationState.StarveO2Seconds[i] = UpdateStarveTimer(populationState.StarveO2Seconds[i], lackO2, dtTick);
+                populationState.O2ToxicSeconds[i] = UpdateStarveTimer(populationState.O2ToxicSeconds[i], o2Toxic, dtTick);
+                populationState.StarveCo2Seconds[i] = 0f;
+                populationState.StarveH2sSeconds[i] = 0f;
+                populationState.StarveH2Seconds[i] = 0f;
+                populationState.StarveLightSeconds[i] = 0f;
+                populationState.StarveOrganicCFoodSeconds[i] = 0f;
                 populationState.StarveStoredCSeconds[i] = 0f;
             }
             else
@@ -399,6 +516,12 @@ public class ReplicatorMetabolismSystem
                 populationState.StarveStoredCSeconds[i] = UpdateStarveTimer(populationState.StarveStoredCSeconds[i], lackStoredC, dtTick);
                 populationState.StarveLightSeconds[i] = 0f;
                 populationState.StarveOrganicCFoodSeconds[i] = 0f;
+            }
+
+            if (metabolism != MetabolismType.Methanotrophy)
+            {
+                populationState.StarveCh4Seconds[i] = 0f;
+                populationState.O2ToxicSeconds[i] = 0f;
             }
 
             float metabolismBasalCostMultiplier = metabolism == MetabolismType.Predation ? Mathf.Max(0f, settings.PredatorBasalCostMultiplier) : 1f;

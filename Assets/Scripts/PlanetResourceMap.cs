@@ -11,14 +11,15 @@ public enum ResourceType
     OrganicC = 2,
     H2S = 3,
     H2 = 4,
-    S0 = 5,
-    P = 6,
-    Fe = 7,
-    Si = 8,
-    Ca = 9,
-    DissolvedOrganicLeak = 10,
-    ToxicProteolyticWaste = 11,
-    DissolvedFe2Plus = 12
+    CH4 = 5,
+    S0 = 6,
+    P = 7,
+    Fe = 8,
+    Si = 9,
+    Ca = 10,
+    DissolvedOrganicLeak = 11,
+    ToxicProteolyticWaste = 12,
+    DissolvedFe2Plus = 13
 }
 
 [DisallowMultipleComponent]
@@ -34,6 +35,7 @@ public class PlanetResourceMap : MonoBehaviour
     [Header("Resource Baselines")]
     public float baselineCO2 = 1.0f;
     public float baselineO2 = 0.01f;
+    public float baselineCH4 = 0f;
     public float baselineS0 = 0.05f;
     public float baselineSi = 0.35f;
     public float baselineCa = 0.25f;
@@ -92,6 +94,7 @@ public class PlanetResourceMap : MonoBehaviour
     [Header("Atmosphere Debug")]
     public float debugGlobalCO2;
     public float debugGlobalO2;
+    public float debugGlobalCH4;
 
     [Header("Ocean Dissolved Chemistry")]
     [Tooltip("Initial dissolved Fe2+ loaded into each ocean cell. Represents a large reduced-iron ocean reservoir before oxygenation.")]
@@ -173,6 +176,7 @@ public class PlanetResourceMap : MonoBehaviour
     private float[] organicC;
     private float[] h2s;
     private float[] h2;
+    private float[] ch4;
     private float[] s0;
     private float[] p;
     private float[] fe;
@@ -292,7 +296,7 @@ public class PlanetResourceMap : MonoBehaviour
 
     public bool IsVolatile(ResourceType t)
     {
-        return t == ResourceType.CO2 || t == ResourceType.O2;
+        return t == ResourceType.CO2 || t == ResourceType.O2 || t == ResourceType.CH4;
     }
 
     public bool IsOceanDissolvedResource(ResourceType resourceType)
@@ -414,6 +418,7 @@ public class PlanetResourceMap : MonoBehaviour
         organicC = new float[cellCount];
         h2s = new float[cellCount];
         h2 = new float[cellCount];
+        ch4 = new float[cellCount];
         s0 = new float[cellCount];
         p = new float[cellCount];
         fe = new float[cellCount];
@@ -445,6 +450,7 @@ public class PlanetResourceMap : MonoBehaviour
             co2[cell] = baselineCO2;
             o2[cell] = baselineO2;
             organicC[cell] = 0f;
+            ch4[cell] = baselineCH4;
             s0[cell] = baselineS0;
 
             float phosphorusNoise = SampleResourceNoise(dir, new Vector3(13.7f, -4.2f, 9.9f));
@@ -691,11 +697,13 @@ public class PlanetResourceMap : MonoBehaviour
         {
             debugGlobalCO2 = 0f;
             debugGlobalO2 = 0f;
+            debugGlobalCH4 = 0f;
             return;
         }
 
         float totalCO2 = 0f;
         float totalAtmosphereO2 = 0f;
+        float totalAtmosphereCH4 = 0f;
         int atmosphereCellCount = 0;
         for (int cell = 0; cell < cellCount; cell++)
         {
@@ -703,6 +711,7 @@ public class PlanetResourceMap : MonoBehaviour
             if (oceanMask[cell] == 0)
             {
                 totalAtmosphereO2 += o2[cell];
+                totalAtmosphereCH4 += ch4[cell];
                 atmosphereCellCount++;
             }
         }
@@ -710,6 +719,7 @@ public class PlanetResourceMap : MonoBehaviour
         float invCellCount = 1f / cellCount;
         float globalCO2 = totalCO2 * invCellCount;
         float globalO2 = atmosphereCellCount > 0 ? totalAtmosphereO2 / atmosphereCellCount : 0f;
+        float globalCH4 = atmosphereCellCount > 0 ? totalAtmosphereCH4 / atmosphereCellCount : 0f;
 
         float landRate = Mathf.Max(0f, landExchangeRate);
         float oceanRate = Mathf.Max(0f, oceanExchangeRate);
@@ -720,9 +730,11 @@ public class PlanetResourceMap : MonoBehaviour
 
             float mixedCO2 = co2[cell] + exchangeRate * (globalCO2 - co2[cell]);
             float mixedO2 = o2[cell] + exchangeRate * (globalO2 - o2[cell]);
+            float mixedCH4 = ch4[cell] + exchangeRate * (globalCH4 - ch4[cell]);
 
             co2[cell] = Mathf.Max(0f, mixedCO2);
             o2[cell] = Mathf.Max(0f, mixedO2);
+            ch4[cell] = Mathf.Max(0f, mixedCH4);
         }
 
         UpdateAtmosphereDebugMeans();
@@ -1017,15 +1029,17 @@ public class PlanetResourceMap : MonoBehaviour
 
     private void UpdateAtmosphereDebugMeans()
     {
-        if (co2 == null || o2 == null || co2.Length == 0)
+        if (co2 == null || o2 == null || ch4 == null || co2.Length == 0)
         {
             debugGlobalCO2 = 0f;
             debugGlobalO2 = 0f;
+            debugGlobalCH4 = 0f;
             return;
         }
 
         float totalCO2 = 0f;
         float totalAtmosphereO2 = 0f;
+        float totalAtmosphereCH4 = 0f;
         int atmosphereCellCount = 0;
         for (int cell = 0; cell < co2.Length; cell++)
         {
@@ -1033,6 +1047,7 @@ public class PlanetResourceMap : MonoBehaviour
             if (oceanMask != null && oceanMask[cell] == 0)
             {
                 totalAtmosphereO2 += o2[cell];
+                totalAtmosphereCH4 += ch4[cell];
                 atmosphereCellCount++;
             }
         }
@@ -1040,6 +1055,7 @@ public class PlanetResourceMap : MonoBehaviour
         float invCellCount = 1f / co2.Length;
         debugGlobalCO2 = totalCO2 * invCellCount;
         debugGlobalO2 = atmosphereCellCount > 0 ? totalAtmosphereO2 / atmosphereCellCount : 0f;
+        debugGlobalCH4 = atmosphereCellCount > 0 ? totalAtmosphereCH4 / atmosphereCellCount : 0f;
     }
 
     private void ApplyVentReplenishment()
@@ -1489,6 +1505,7 @@ public class PlanetResourceMap : MonoBehaviour
             case ResourceType.OrganicC: return organicC;
             case ResourceType.H2S: return h2s;
             case ResourceType.H2: return h2;
+            case ResourceType.CH4: return ch4;
             case ResourceType.S0: return s0;
             case ResourceType.P: return p;
             case ResourceType.Fe: return fe;
@@ -1592,7 +1609,7 @@ public class PlanetResourceMap : MonoBehaviour
 
     private string BuildDebugLabelText(int cellIndex)
     {
-        return $"{debugViewType}: {Get(debugViewType, cellIndex):0.###}\nCO2: {Get(ResourceType.CO2, cellIndex):0.###}\nH2: {Get(ResourceType.H2, cellIndex):0.###}\nH2S: {Get(ResourceType.H2S, cellIndex):0.###}\nS0: {Get(ResourceType.S0, cellIndex):0.###}";
+        return $"{debugViewType}: {Get(debugViewType, cellIndex):0.###}\nCO2: {Get(ResourceType.CO2, cellIndex):0.###}\nH2: {Get(ResourceType.H2, cellIndex):0.###}\nCH4: {Get(ResourceType.CH4, cellIndex):0.###}\nH2S: {Get(ResourceType.H2S, cellIndex):0.###}\nS0: {Get(ResourceType.S0, cellIndex):0.###}";
     }
 
 
@@ -1605,6 +1622,7 @@ public class PlanetResourceMap : MonoBehaviour
             case ResourceType.OrganicC: return 1f;
             case ResourceType.H2S: return Mathf.Max(0.0001f, ventH2SMax > 0f ? ventH2SMax : ventStrengthMax);
             case ResourceType.H2: return Mathf.Max(0.0001f, ventH2Max > 0f ? ventH2Max : ventStrengthMax);
+            case ResourceType.CH4: return Mathf.Max(0.0001f, baselineCH4 <= 0f ? 1f : baselineCH4);
             case ResourceType.S0: return Mathf.Max(0.0001f, baselineS0);
             case ResourceType.P: return Mathf.Max(0.0001f, phosphorusScale);
             case ResourceType.Fe: return Mathf.Max(0.0001f, initialDissolvedFe2PlusPerOceanCell);

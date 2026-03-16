@@ -6,7 +6,10 @@ public enum MetabolismType
     Hydrogenotrophy,
     Photosynthesis,
     Saprotrophy,
-    Predation
+    Predation,
+    Fermentation,
+    Methanogenesis,
+    Methanotrophy
 }
 
 public enum DeathCause
@@ -20,10 +23,12 @@ public enum DeathCause
     Lack_Light,
     Lack_OrganicC_Food,
     Lack_O2,
+    Lack_CH4,
     Lack_StoredC,
     Predation,
     TemperatureTooHigh,
-    TemperatureTooLow
+    TemperatureTooLow,
+    O2_Toxicity
 }
 
 public enum LocomotionType
@@ -79,7 +84,11 @@ public class Replicator
     public float starveLightSeconds;
     public float starveOrganicCFoodSeconds;
     public float starveO2Seconds;
+    public float starveCh4Seconds;
     public float starveStoredCSeconds;
+    public float o2ToxicSeconds;
+    public float o2ComfortMax;
+    public float o2StressMax;
     public DeathCause lastDeathCauseCandidate;
 
     // Movement data
@@ -118,6 +127,17 @@ public class Replicator
         lastHabitatValue = 0f;
         tumbleProbability = 0f;
         nextSenseTime = 0f;
+        starveCo2Seconds = 0f;
+        starveH2sSeconds = 0f;
+        starveH2Seconds = 0f;
+        starveLightSeconds = 0f;
+        starveOrganicCFoodSeconds = 0f;
+        starveO2Seconds = 0f;
+        starveCh4Seconds = 0f;
+        starveStoredCSeconds = 0f;
+        o2ToxicSeconds = 0f;
+        o2ComfortMax = 1f;
+        o2StressMax = 1f;
         lastDeathCauseCandidate = DeathCause.Unknown;
     }
 }
