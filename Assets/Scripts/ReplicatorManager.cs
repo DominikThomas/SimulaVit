@@ -88,6 +88,11 @@ public class ReplicatorManager : MonoBehaviour
     [Range(0f, 1f)] public float hydrogenToSaprotrophyMutationChance = 0.003f;
     [Range(0f, 1f)] public float hydrogenToSulfurMutationChance = 0.003f;
 
+    [Header("Anaerobic Transition Mutation")]
+    [Range(0f, 1f)] public float saprotrophyToFermentationMutationChance = 0.002f;
+    [Range(0f, 1f)] public float fermentationToMethanogenesisMutationChance = 0.002f;
+    [Range(0f, 1f)] public float methanogenesisToMethanotrophyMutationChance = 0.0015f;
+
     [Header("Locomotion Mutation")]
     [Range(0f, 1f)] public float locomotionMutationChance = 0.01f;
     [Range(0f, 1f)] public float locomotionUpgradeChance = 0.5f;
@@ -1556,7 +1561,6 @@ public class ReplicatorManager : MonoBehaviour
         randomDir = randomDir.normalized;
 
         MetabolismType childMetabolism = parent.metabolism;
-        // TODO: Add mutation pathway tuning for Fermentation/Methanogenesis/Methanotrophy in a balancing pass.
         if (UnityEngine.Random.value < Mathf.Clamp01(metabolismMutationChance))
         {
             if (parent.metabolism == MetabolismType.Hydrogenotrophy)
@@ -1572,6 +1576,21 @@ public class ReplicatorManager : MonoBehaviour
                 {
                     childMetabolism = MetabolismType.SulfurChemosynthesis;
                 }
+            }
+            else if (parent.metabolism == MetabolismType.Saprotrophy
+                && UnityEngine.Random.value < Mathf.Clamp01(saprotrophyToFermentationMutationChance))
+            {
+                childMetabolism = MetabolismType.Fermentation;
+            }
+            else if (parent.metabolism == MetabolismType.Fermentation
+                && UnityEngine.Random.value < Mathf.Clamp01(fermentationToMethanogenesisMutationChance))
+            {
+                childMetabolism = MetabolismType.Methanogenesis;
+            }
+            else if (parent.metabolism == MetabolismType.Methanogenesis
+                && UnityEngine.Random.value < Mathf.Clamp01(methanogenesisToMethanotrophyMutationChance))
+            {
+                childMetabolism = MetabolismType.Methanotrophy;
             }
             else if (allowReverseMetabolismMutation)
             {
