@@ -1,6 +1,7 @@
 using UnityEngine;
 using System.Collections.Generic;
 using System;
+using System.Globalization;
 using UnityEngine.Serialization;
 using Unity.Profiling;
 
@@ -324,6 +325,7 @@ public class ReplicatorManager : MonoBehaviour
     public int SimulationStepsPerFrame => runtimeSimulationStepsPerFrame;
     public int TotalPopulation => agents.Count;
     public int PredatorCount => predatorAgentCount;
+    public double SimulationTimeSeconds => simulationTimeSeconds;
 
     public void SetSimulationTiming(int stepsPerFrame)
     {
@@ -396,6 +398,7 @@ public class ReplicatorManager : MonoBehaviour
     private int steeringRecomputeCounter;
     private int predatorPresenceCacheStep = -1;
     private bool predatorPresenceCached;
+    private static bool hasConfiguredTelemetryLogStackTraces;
 
 
 
@@ -408,6 +411,8 @@ public class ReplicatorManager : MonoBehaviour
 
     void Awake()
     {
+        ConfigureRoutineLogStackTraces();
+
         simulationPipeline = GetComponent<ReplicatorSimulationPipeline>();
         if (simulationPipeline == null)
         {
@@ -418,6 +423,17 @@ public class ReplicatorManager : MonoBehaviour
         {
             simulationPipeline.enabled = false;
         }
+    }
+
+    private static void ConfigureRoutineLogStackTraces()
+    {
+        if (hasConfiguredTelemetryLogStackTraces)
+        {
+            return;
+        }
+
+        Application.SetStackTraceLogType(LogType.Log, StackTraceLogType.None);
+        hasConfiguredTelemetryLogStackTraces = true;
     }
 
     void ResolvePlanetResourceMapReference()
@@ -621,55 +637,82 @@ public class ReplicatorManager : MonoBehaviour
 
     void LogMetabolismDebugThrottled()
     {
-        debugTelemetry.LogMetabolismDebugThrottled(
-            planetGenerator,
-            planetResourceMap,
-            debugVentPlumeDiagnostics,
-            chemosynthAgentCount,
-            hydrogenotrophAgentCount,
-            photosynthAgentCount,
-            saprotrophAgentCount,
-            predatorAgentCount,
-            fermenterAgentCount,
-            methanogenAgentCount,
-            methanotrophAgentCount,
-            debugChemoTempSum,
-            debugChemoTempCount,
-            debugChemoStressedCount,
-            debugHydrogenTempSum,
-            debugHydrogenTempCount,
-            debugHydrogenStressedCount,
-            debugPhotoTempSum,
-            debugPhotoTempCount,
-            debugPhotoStressedCount,
-            debugSaproTempSum,
-            debugSaproTempCount,
-            debugSaproStressedCount,
-            debugPhotosynthLightModeCount,
-            debugPhotosynthDarkAerobicModeCount,
-            debugPhotosynthDarkAnoxicFallbackModeCount,
-            debugPhotosynthDarkAnoxicOrganicCConsumedPerTick,
-            debugPhotosynthDarkAnoxicEnergyGeneratedPerTick,
-            debugPhotosynthDarkAnoxicCO2ReleasedPerTick,
-            debugPhotosynthDarkAnoxicH2ReleasedPerTick,
-            averageOrganicCStore,
-            divisionEligibleAgentCount,
-            predationKillsWindow,
-            avgToxicProteolyticWasteDebug,
-            avgDissolvedOrganicLeakDebug,
-            chemoDeathCauseCounts,
-            hydrogenDeathCauseCounts,
-            photoDeathCauseCounts,
-            saproDeathCauseCounts,
-            fermentDeathCauseCounts,
-            methanogenDeathCauseCounts,
-            methanotrophDeathCauseCounts,
-            predatorDeathCauseCounts,
-            temperatureDisplayUnit,
-            IsSaprotrophyUnlocked,
-            FormatDeathCauseDistribution,
-            () => predationKillsWindow = 0,
-            ResetDeathCauseCounters);
+        bool didLog = debugTelemetry.LogMetabolismDebugThrottled(BuildTelemetrySnapshot());
+        if (!didLog)
+        {
+            return;
+        }
+
+        predationKillsWindow = 0;
+        ResetDeathCauseCounters();
+    }
+
+    private ReplicatorTelemetrySnapshot BuildTelemetrySnapshot()
+    {
+        ReplicatorTelemetrySnapshot snapshot = new ReplicatorTelemetrySnapshot
+        {
+            SimulationTimestamp = GetSimulationTimeStamp(),
+            PhotosynthesisUnlocked = planetGenerator != null && planetGenerator.PhotosynthesisUnlocked,
+            SaprotrophyUnlocked = IsSaprotrophyUnlocked(),
+            ChemosynthCount = chemosynthAgentCount,
+            HydrogenotrophCount = hydrogenotrophAgentCount,
+            PhotosynthCount = photosynthAgentCount,
+            SaprotrophCount = saprotrophAgentCount,
+            PredatorCount = predatorAgentCount,
+            FermenterCount = fermenterAgentCount,
+            MethanogenCount = methanogenAgentCount,
+            MethanotrophCount = methanotrophAgentCount,
+            SulfurTempSum = debugChemoTempSum,
+            SulfurTempCount = debugChemoTempCount,
+            SulfurTempStressedCount = debugChemoStressedCount,
+            HydrogenTempSum = debugHydrogenTempSum,
+            HydrogenTempCount = debugHydrogenTempCount,
+            HydrogenTempStressedCount = debugHydrogenStressedCount,
+            PhotoTempSum = debugPhotoTempSum,
+            PhotoTempCount = debugPhotoTempCount,
+            PhotoTempStressedCount = debugPhotoStressedCount,
+            SaproTempSum = debugSaproTempSum,
+            SaproTempCount = debugSaproTempCount,
+            SaproTempStressedCount = debugSaproStressedCount,
+            AverageOrganicCStore = averageOrganicCStore,
+            DivisionEligibleCount = divisionEligibleAgentCount,
+            PredationKillsWindow = predationKillsWindow,
+            AverageToxicProteolyticWaste = avgToxicProteolyticWasteDebug,
+            AverageDissolvedOrganicLeak = avgDissolvedOrganicLeakDebug,
+            ChemoDeathCauseCounts = chemoDeathCauseCounts,
+            HydrogenDeathCauseCounts = hydrogenDeathCauseCounts,
+            PhotoDeathCauseCounts = photoDeathCauseCounts,
+            SaproDeathCauseCounts = saproDeathCauseCounts,
+            FermentDeathCauseCounts = fermentDeathCauseCounts,
+            MethanogenDeathCauseCounts = methanogenDeathCauseCounts,
+            MethanotrophDeathCauseCounts = methanotrophDeathCauseCounts,
+            PredatorDeathCauseCounts = predatorDeathCauseCounts,
+            TemperatureDisplayUnit = temperatureDisplayUnit,
+            IncludeVentPlumeDiagnostics = debugVentPlumeDiagnostics
+        };
+
+        if (planetResourceMap != null)
+        {
+            planetResourceMap.GetVentChemistryStats(out snapshot.MeanH2, out snapshot.MaxH2, out snapshot.MeanH2S, out snapshot.MaxH2S);
+            if (debugVentPlumeDiagnostics)
+            {
+                planetResourceMap.GetVentPlumeDiagnostics(out snapshot.AvgVentH2S, out snapshot.AvgVentH2, out snapshot.AvgOceanH2, out snapshot.AvgOceanH2S);
+            }
+
+            snapshot.AtmosphereCO2 = planetResourceMap.debugGlobalCO2;
+            snapshot.AtmosphereO2 = planetResourceMap.debugGlobalO2;
+            snapshot.AtmosphereCH4 = planetResourceMap.debugGlobalCH4;
+            snapshot.DissolvedFe2OceanMean = planetResourceMap.debugDissolvedFe2PlusOceanMean;
+            snapshot.DissolvedFe2Total = planetResourceMap.debugDissolvedFe2PlusTotal;
+            snapshot.DissolvedFe2RemainingFraction = planetResourceMap.debugDissolvedFe2PlusRemainingFraction;
+        }
+
+        return snapshot;
+    }
+
+    public string GetSimulationTimeStamp()
+    {
+        return $"t={simulationTimeSeconds.ToString("000000.0", CultureInfo.InvariantCulture)}s";
     }
 
 
@@ -723,71 +766,6 @@ public class ReplicatorManager : MonoBehaviour
                                 : (metabolism == MetabolismType.Predation ? predatorDeathCauseCounts : chemoDeathCauseCounts))))));
 
         counts[causeIndex]++;
-    }
-
-    string FormatDeathCauseDistribution(int[] counts)
-    {
-        if (counts == null)
-        {
-            return "n/a";
-        }
-
-        int total = 0;
-        for (int i = 0; i < counts.Length; i++)
-        {
-            total += counts[i];
-        }
-
-        if (total <= 0)
-        {
-            return "n/a";
-        }
-
-        System.Text.StringBuilder sb = new System.Text.StringBuilder();
-        for (int i = 0; i < counts.Length; i++)
-        {
-            int count = counts[i];
-            if (count <= 0)
-            {
-                continue;
-            }
-
-            if (sb.Length > 0)
-            {
-                sb.Append(' ');
-            }
-
-            DeathCause cause = (DeathCause)i;
-            float pct = (100f * count) / total;
-            sb.Append(DeathCauseShortLabel(cause));
-            sb.Append('=');
-            sb.Append(pct.ToString("0"));
-            sb.Append('%');
-        }
-
-        return sb.ToString();
-    }
-
-    string DeathCauseShortLabel(DeathCause cause)
-    {
-        switch (cause)
-        {
-            case DeathCause.OldAge: return "OldAge";
-            case DeathCause.EnergyDepletion: return "Energy";
-            case DeathCause.TemperatureTooHigh: return "TempHigh";
-            case DeathCause.TemperatureTooLow: return "TempLow";
-            case DeathCause.Lack_CO2: return "CO2";
-            case DeathCause.Lack_H2S: return "H2S";
-            case DeathCause.Lack_H2: return "H2";
-            case DeathCause.Lack_Light: return "Light";
-            case DeathCause.Lack_OrganicC_Food: return "OrgC";
-            case DeathCause.Lack_O2: return "O2";
-            case DeathCause.Lack_CH4: return "CH4";
-            case DeathCause.Lack_StoredC: return "StoredC";
-            case DeathCause.O2_Toxicity: return "O2Tox";
-            case DeathCause.Predation: return "Predation";
-            default: return "Unknown";
-        }
     }
 
     DeathCause ResolveEnergyDeathCause(Replicator agent)
