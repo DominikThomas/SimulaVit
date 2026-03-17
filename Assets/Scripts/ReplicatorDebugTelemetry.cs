@@ -1,6 +1,69 @@
-using System;
 using System.Collections.Generic;
+using System.Text;
 using UnityEngine;
+
+public sealed class ReplicatorTelemetrySnapshot
+{
+    public string SimulationTimestamp;
+    public bool PhotosynthesisUnlocked;
+    public bool SaprotrophyUnlocked;
+
+    public int ChemosynthCount;
+    public int HydrogenotrophCount;
+    public int PhotosynthCount;
+    public int SaprotrophCount;
+    public int PredatorCount;
+    public int FermenterCount;
+    public int MethanogenCount;
+    public int MethanotrophCount;
+
+    public float SulfurTempSum;
+    public int SulfurTempCount;
+    public int SulfurTempStressedCount;
+    public float HydrogenTempSum;
+    public int HydrogenTempCount;
+    public int HydrogenTempStressedCount;
+    public float PhotoTempSum;
+    public int PhotoTempCount;
+    public int PhotoTempStressedCount;
+    public float SaproTempSum;
+    public int SaproTempCount;
+    public int SaproTempStressedCount;
+
+    public float AverageOrganicCStore;
+    public int DivisionEligibleCount;
+    public int PredationKillsWindow;
+    public float AverageToxicProteolyticWaste;
+    public float AverageDissolvedOrganicLeak;
+
+    public int[] ChemoDeathCauseCounts;
+    public int[] HydrogenDeathCauseCounts;
+    public int[] PhotoDeathCauseCounts;
+    public int[] SaproDeathCauseCounts;
+    public int[] FermentDeathCauseCounts;
+    public int[] MethanogenDeathCauseCounts;
+    public int[] MethanotrophDeathCauseCounts;
+    public int[] PredatorDeathCauseCounts;
+
+    public float MeanH2;
+    public float MaxH2;
+    public float MeanH2S;
+    public float MaxH2S;
+    public bool IncludeVentPlumeDiagnostics;
+    public float AvgVentH2S;
+    public float AvgVentH2;
+    public float AvgOceanH2;
+    public float AvgOceanH2S;
+
+    public float AtmosphereCO2;
+    public float AtmosphereO2;
+    public float AtmosphereCH4;
+    public float DissolvedFe2OceanMean;
+    public float DissolvedFe2Total;
+    public float DissolvedFe2RemainingFraction;
+
+    public TemperatureDisplayUnit TemperatureDisplayUnit;
+}
 
 public class ReplicatorDebugTelemetry
 {
@@ -10,102 +73,24 @@ public class ReplicatorDebugTelemetry
     private readonly HashSet<Replicator> sessileDebugSeen = new HashSet<Replicator>();
     private readonly List<Replicator> staleSessileAgents = new List<Replicator>(128);
 
-    public void LogMetabolismDebugThrottled(
-        PlanetGenerator planetGenerator,
-        PlanetResourceMap planetResourceMap,
-        bool debugVentPlumeDiagnostics,
-        int chemosynthAgentCount,
-        int hydrogenotrophAgentCount,
-        int photosynthAgentCount,
-        int saprotrophAgentCount,
-        int predatorAgentCount,
-        int fermenterAgentCount,
-        int methanogenAgentCount,
-        int methanotrophAgentCount,
-        float debugChemoTempSum,
-        int debugChemoTempCount,
-        int debugChemoStressedCount,
-        float debugHydrogenTempSum,
-        int debugHydrogenTempCount,
-        int debugHydrogenStressedCount,
-        float debugPhotoTempSum,
-        int debugPhotoTempCount,
-        int debugPhotoStressedCount,
-        float debugSaproTempSum,
-        int debugSaproTempCount,
-        int debugSaproStressedCount,
-        float averageOrganicCStore,
-        int divisionEligibleAgentCount,
-        int predationKillsWindow,
-        float avgToxicProteolyticWasteDebug,
-        float avgDissolvedOrganicLeakDebug,
-        int[] chemoDeathCauseCounts,
-        int[] hydrogenDeathCauseCounts,
-        int[] photoDeathCauseCounts,
-        int[] saproDeathCauseCounts,
-        int[] fermentDeathCauseCounts,
-        int[] methanogenDeathCauseCounts,
-        int[] methanotrophDeathCauseCounts,
-        int[] predatorDeathCauseCounts,
-        TemperatureDisplayUnit temperatureDisplayUnit,
-        Func<bool> isSaprotrophyUnlocked,
-        Func<int[], string> formatDeathCauseDistribution,
-        Action resetPredationKillsWindow,
-        Action resetDeathCauseCounters)
+    public bool LogMetabolismDebugThrottled(ReplicatorTelemetrySnapshot snapshot)
     {
         metabolismDebugLogTimer += Time.deltaTime;
         if (metabolismDebugLogTimer < 3f)
         {
-            return;
+            return false;
         }
 
         metabolismDebugLogTimer = 0f;
-        bool unlocked = planetGenerator != null && planetGenerator.PhotosynthesisUnlocked;
+        string prefix = $"[SIM {snapshot.SimulationTimestamp}]";
 
-        string sulfurTempText = FormatTemperatureDebug(debugChemoTempSum, debugChemoTempCount, debugChemoStressedCount, temperatureDisplayUnit);
-        string hydrogenTempText = FormatTemperatureDebug(debugHydrogenTempSum, debugHydrogenTempCount, debugHydrogenStressedCount, temperatureDisplayUnit);
-        string photoTempText = FormatTemperatureDebug(debugPhotoTempSum, debugPhotoTempCount, debugPhotoStressedCount, temperatureDisplayUnit);
-        string saproTempText = FormatTemperatureDebug(debugSaproTempSum, debugSaproTempCount, debugSaproStressedCount, temperatureDisplayUnit);
-
-        float meanH2 = 0f;
-        float maxH2 = 0f;
-        float meanH2S = 0f;
-        float maxH2S = 0f;
-        float avgVentH2S = 0f;
-        float avgVentH2 = 0f;
-        float avgOceanH2 = 0f;
-        float avgOceanH2S = 0f;
-        float dissolvedFe2OceanMean = 0f;
-        float dissolvedFe2Total = 0f;
-        float dissolvedFe2RemainingFraction = 0f;
-        if (planetResourceMap != null)
-        {
-            planetResourceMap.GetVentChemistryStats(out meanH2, out maxH2, out meanH2S, out maxH2S);
-            if (debugVentPlumeDiagnostics)
-            {
-                planetResourceMap.GetVentPlumeDiagnostics(out avgVentH2S, out avgVentH2, out avgOceanH2, out avgOceanH2S);
-            }
-
-            dissolvedFe2OceanMean = planetResourceMap.debugDissolvedFe2PlusOceanMean;
-            dissolvedFe2Total = planetResourceMap.debugDissolvedFe2PlusTotal;
-            dissolvedFe2RemainingFraction = planetResourceMap.debugDissolvedFe2PlusRemainingFraction;
-        }
-
-        string plumeDiagnostics = debugVentPlumeDiagnostics
-            ? $" plume[ventH2S={avgVentH2S:F3} ventH2={avgVentH2:F3} oceanH2={avgOceanH2:F3} oceanH2S={avgOceanH2S:F3}]"
-            : string.Empty;
-
-        Debug.Log(
-            $"Metabolism: hydrogen={hydrogenotrophAgentCount} sulfur={chemosynthAgentCount} photo={photosynthAgentCount} sapro={saprotrophAgentCount} predator={predatorAgentCount} ferment={fermenterAgentCount} methanogen={methanogenAgentCount} methanotroph={methanotrophAgentCount} " +
-            $"photoUnlocked={unlocked} saproUnlocked={isSaprotrophyUnlocked()} " +
-            $"temp[hydrogen:{hydrogenTempText} sulfur:{sulfurTempText} photo:{photoTempText} sapro:{saproTempText}] avgOrganicC={averageOrganicCStore:F3} divisionEligible={divisionEligibleAgentCount} predKillsWindow={predationKillsWindow} avgToxicProteolyticWaste={avgToxicProteolyticWasteDebug:F3} avgDissolvedOrganicLeak={avgDissolvedOrganicLeakDebug:F3} " +
-            $"chem[h2Mean={meanH2:F3} h2Max={maxH2:F3} h2sMean={meanH2S:F3} h2sMax={maxH2S:F3} fe2OceanMean={dissolvedFe2OceanMean:F3} fe2Total={dissolvedFe2Total:F1}]" + plumeDiagnostics);
-        Debug.Log($"DeathCauses: hydrogen[{formatDeathCauseDistribution(hydrogenDeathCauseCounts)}] sulfur[{formatDeathCauseDistribution(chemoDeathCauseCounts)}] photo[{formatDeathCauseDistribution(photoDeathCauseCounts)}] sapro[{formatDeathCauseDistribution(saproDeathCauseCounts)}] ferment[{formatDeathCauseDistribution(fermentDeathCauseCounts)}] methanogen[{formatDeathCauseDistribution(methanogenDeathCauseCounts)}] methanotroph[{formatDeathCauseDistribution(methanotrophDeathCauseCounts)}] predator[{formatDeathCauseDistribution(predatorDeathCauseCounts)}]");
-        Debug.Log($"Atmosphere composition: CO2[{planetResourceMap.debugGlobalCO2}], O2[{planetResourceMap.debugGlobalO2}], CH4[{planetResourceMap.debugGlobalCH4}]");
-        Debug.Log($"Ocean chemistry: DissolvedFe2+[{dissolvedFe2OceanMean:F3} avg, {dissolvedFe2Total:F1} total, {(dissolvedFe2RemainingFraction * 100f):F1}% remaining]");
-
-        resetPredationKillsWindow();
-        resetDeathCauseCounters();
+        Debug.Log($"{prefix} Pop: {FormatPopulation(snapshot)}");
+        Debug.Log($"{prefix} Temp: {FormatTemperatureSummary(snapshot)}");
+        Debug.Log($"{prefix} Deaths: {FormatDeathCauses(snapshot)}");
+        Debug.Log($"{prefix} Atmosphere: CO2={snapshot.AtmosphereCO2:F6} O2={snapshot.AtmosphereO2:F6} CH4={snapshot.AtmosphereCH4:F6}");
+        Debug.Log($"{prefix} Ocean: Fe2+=avg {snapshot.DissolvedFe2OceanMean:F3} total {snapshot.DissolvedFe2Total:F1} remaining {(snapshot.DissolvedFe2RemainingFraction * 100f):F1}%");
+        Debug.Log($"{prefix} Resources: {FormatChemistrySummary(snapshot)}");
+        return true;
     }
 
     public void ValidateSessileMovement(
@@ -185,6 +170,106 @@ public class ReplicatorDebugTelemetry
         }
     }
 
+    private static string FormatPopulation(ReplicatorTelemetrySnapshot snapshot)
+    {
+        string unlocked = FormatUnlocked(snapshot.PhotosynthesisUnlocked, snapshot.SaprotrophyUnlocked);
+        return $"H={snapshot.HydrogenotrophCount} S={snapshot.ChemosynthCount} P={snapshot.PhotosynthCount} Sa={snapshot.SaprotrophCount} Pr={snapshot.PredatorCount} F={snapshot.FermenterCount} Mg={snapshot.MethanogenCount} Mt={snapshot.MethanotrophCount} | unlocked: {unlocked} | divEligible={snapshot.DivisionEligibleCount} | predKills={snapshot.PredationKillsWindow}";
+    }
+
+    private static string FormatTemperatureSummary(ReplicatorTelemetrySnapshot snapshot)
+    {
+        return string.Format(
+            "H {0} | S {1} | P {2} | Sa {3}",
+            FormatTemperatureDebug(snapshot.HydrogenTempSum, snapshot.HydrogenTempCount, snapshot.HydrogenTempStressedCount, snapshot.TemperatureDisplayUnit),
+            FormatTemperatureDebug(snapshot.SulfurTempSum, snapshot.SulfurTempCount, snapshot.SulfurTempStressedCount, snapshot.TemperatureDisplayUnit),
+            FormatTemperatureDebug(snapshot.PhotoTempSum, snapshot.PhotoTempCount, snapshot.PhotoTempStressedCount, snapshot.TemperatureDisplayUnit),
+            FormatTemperatureDebug(snapshot.SaproTempSum, snapshot.SaproTempCount, snapshot.SaproTempStressedCount, snapshot.TemperatureDisplayUnit));
+    }
+
+    private static string FormatDeathCauses(ReplicatorTelemetrySnapshot snapshot)
+    {
+        return $"H[{FormatDeathCauseSummary(snapshot.HydrogenDeathCauseCounts)}] S[{FormatDeathCauseSummary(snapshot.ChemoDeathCauseCounts)}] P[{FormatDeathCauseSummary(snapshot.PhotoDeathCauseCounts)}] Sa[{FormatDeathCauseSummary(snapshot.SaproDeathCauseCounts)}] F[{FormatDeathCauseSummary(snapshot.FermentDeathCauseCounts)}] Mg[{FormatDeathCauseSummary(snapshot.MethanogenDeathCauseCounts)}] Mt[{FormatDeathCauseSummary(snapshot.MethanotrophDeathCauseCounts)}] Pr[{FormatDeathCauseSummary(snapshot.PredatorDeathCauseCounts)}]";
+    }
+
+    private static string FormatChemistrySummary(ReplicatorTelemetrySnapshot snapshot)
+    {
+        string plume = snapshot.IncludeVentPlumeDiagnostics
+            ? $" | plume: ventH2S={snapshot.AvgVentH2S:F3} ventH2={snapshot.AvgVentH2:F3} oceanH2={snapshot.AvgOceanH2:F3} oceanH2S={snapshot.AvgOceanH2S:F3}"
+            : string.Empty;
+
+        return $"OrgC={snapshot.AverageOrganicCStore:F3} toxWaste={snapshot.AverageToxicProteolyticWaste:F3} dissolvedLeak={snapshot.AverageDissolvedOrganicLeak:F3} | chem: H2 mean={snapshot.MeanH2:F3} max={snapshot.MaxH2:F3}, H2S mean={snapshot.MeanH2S:F3} max={snapshot.MaxH2S:F3}{plume}";
+    }
+
+    private static string FormatUnlocked(bool photosynthesisUnlocked, bool saprotrophyUnlocked)
+    {
+        if (photosynthesisUnlocked && saprotrophyUnlocked)
+        {
+            return "photo,sapro";
+        }
+
+        if (photosynthesisUnlocked)
+        {
+            return "photo";
+        }
+
+        if (saprotrophyUnlocked)
+        {
+            return "sapro";
+        }
+
+        return "none";
+    }
+
+    private static string FormatDeathCauseSummary(int[] counts)
+    {
+        if (counts == null)
+        {
+            return "n/a";
+        }
+
+        StringBuilder sb = new StringBuilder(48);
+        for (int i = 0; i < counts.Length; i++)
+        {
+            int count = counts[i];
+            if (count <= 0)
+            {
+                continue;
+            }
+
+            if (sb.Length > 0)
+            {
+                sb.Append(' ');
+            }
+
+            sb.Append(DeathCauseShortLabel((DeathCause)i));
+            sb.Append(count);
+        }
+
+        return sb.Length > 0 ? sb.ToString() : "n/a";
+    }
+
+    private static string DeathCauseShortLabel(DeathCause cause)
+    {
+        switch (cause)
+        {
+            case DeathCause.OldAge: return "Age";
+            case DeathCause.EnergyDepletion: return "En";
+            case DeathCause.TemperatureTooHigh: return "Th";
+            case DeathCause.TemperatureTooLow: return "Tl";
+            case DeathCause.Lack_CO2: return "CO2";
+            case DeathCause.Lack_H2S: return "H2S";
+            case DeathCause.Lack_H2: return "H2";
+            case DeathCause.Lack_Light: return "Light";
+            case DeathCause.Lack_OrganicC_Food: return "OrgC";
+            case DeathCause.Lack_O2: return "O2";
+            case DeathCause.Lack_CH4: return "CH4";
+            case DeathCause.Lack_StoredC: return "StC";
+            case DeathCause.O2_Toxicity: return "O2Tox";
+            case DeathCause.Predation: return "Pred";
+            default: return "?";
+        }
+    }
+
     private static string FormatTemperatureDebug(float tempSum, int count, int stressedCount, TemperatureDisplayUnit temperatureDisplayUnit)
     {
         if (count <= 0)
@@ -194,6 +279,6 @@ public class ReplicatorDebugTelemetry
 
         float averageTemp = tempSum / count;
         float stressedFraction = (float)stressedCount / count;
-        return $"avg={ReplicatorManager.FormatTemperature(averageTemp, temperatureDisplayUnit)},stressed={stressedFraction:P0}";
+        return $"{ReplicatorManager.FormatTemperature(averageTemp, temperatureDisplayUnit)} ({stressedFraction:P0} stress)";
     }
 }
