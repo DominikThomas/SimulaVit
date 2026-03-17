@@ -89,7 +89,7 @@ public class ReplicatorManager : MonoBehaviour
     [Range(0f, 1f)] public float hydrogenToSulfurMutationChance = 0.003f;
 
     [Header("Anaerobic Transition Mutation")]
-    [Range(0f, 1f)] public float saprotrophyToFermentationMutationChance = 0.002f;
+    [Range(0f, 1f)] public float hydrogenToFermentationMutationChance = 0.002f;
     [Range(0f, 1f)] public float fermentationToMethanogenesisMutationChance = 0.002f;
     [Range(0f, 1f)] public float methanogenesisToMethanotrophyMutationChance = 0.0015f;
 
@@ -1576,11 +1576,10 @@ public class ReplicatorManager : MonoBehaviour
                 {
                     childMetabolism = MetabolismType.SulfurChemosynthesis;
                 }
-            }
-            else if (parent.metabolism == MetabolismType.Saprotrophy
-                && UnityEngine.Random.value < Mathf.Clamp01(saprotrophyToFermentationMutationChance))
-            {
-                childMetabolism = MetabolismType.Fermentation;
+                else if (UnityEngine.Random.value < Mathf.Clamp01(hydrogenToFermentationMutationChance))
+                {
+                    childMetabolism = MetabolismType.Fermentation;
+                }
             }
             else if (parent.metabolism == MetabolismType.Fermentation
                 && UnityEngine.Random.value < Mathf.Clamp01(fermentationToMethanogenesisMutationChance))
