@@ -84,10 +84,10 @@ public class ReplicatorDebugTelemetry
         metabolismDebugLogTimer = 0f;
         string prefix = $"[SIM {snapshot.SimulationTimestamp}]";
 
-        Debug.Log($"{prefix} Pop: {FormatPopulation(snapshot)}");
-        Debug.Log($"{prefix} Temp: {FormatTemperatureSummary(snapshot)}");
-        Debug.Log($"{prefix} Deaths: {FormatDeathCauses(snapshot)}");
-        Debug.Log($"{prefix} Atmosphere: CO2={snapshot.AtmosphereCO2:F6} O2={snapshot.AtmosphereO2:F6} CH4={snapshot.AtmosphereCH4:F6}");
+        Debug.Log($"{prefix} Population: {FormatPopulation(snapshot)}");
+        Debug.Log($"{prefix} Temperature: {FormatTemperatureSummary(snapshot)}");
+        Debug.Log($"{prefix} DeathCauses: {FormatDeathCauses(snapshot)}");
+        Debug.Log($"{prefix} Atmosphere: CO2={snapshot.AtmosphereCO2:F3} O2={snapshot.AtmosphereO2:F3} CH4={snapshot.AtmosphereCH4:F3}");
         Debug.Log($"{prefix} Ocean: Fe2+=avg {snapshot.DissolvedFe2OceanMean:F3} total {snapshot.DissolvedFe2Total:F1} remaining {(snapshot.DissolvedFe2RemainingFraction * 100f):F1}%");
         Debug.Log($"{prefix} Resources: {FormatChemistrySummary(snapshot)}");
         return true;
@@ -173,13 +173,13 @@ public class ReplicatorDebugTelemetry
     private static string FormatPopulation(ReplicatorTelemetrySnapshot snapshot)
     {
         string unlocked = FormatUnlocked(snapshot.PhotosynthesisUnlocked, snapshot.SaprotrophyUnlocked);
-        return $"H={snapshot.HydrogenotrophCount} S={snapshot.ChemosynthCount} P={snapshot.PhotosynthCount} Sa={snapshot.SaprotrophCount} Pr={snapshot.PredatorCount} F={snapshot.FermenterCount} Mg={snapshot.MethanogenCount} Mt={snapshot.MethanotrophCount} | unlocked: {unlocked} | divEligible={snapshot.DivisionEligibleCount} | predKills={snapshot.PredationKillsWindow}";
+        return $"Hydrogen={snapshot.HydrogenotrophCount} Sulfur={snapshot.ChemosynthCount} Photo={snapshot.PhotosynthCount} Sapro={snapshot.SaprotrophCount} Predator={snapshot.PredatorCount} Ferment={snapshot.FermenterCount} Methanogen={snapshot.MethanogenCount} Methanotroph={snapshot.MethanotrophCount} | unlocked: {unlocked} | divEligible={snapshot.DivisionEligibleCount} | predKills={snapshot.PredationKillsWindow}";
     }
 
     private static string FormatTemperatureSummary(ReplicatorTelemetrySnapshot snapshot)
     {
         return string.Format(
-            "H {0} | S {1} | P {2} | Sa {3}",
+            "Hydrogen {0} | Sulfur {1} | Photo {2} | Sapro {3}",
             FormatTemperatureDebug(snapshot.HydrogenTempSum, snapshot.HydrogenTempCount, snapshot.HydrogenTempStressedCount, snapshot.TemperatureDisplayUnit),
             FormatTemperatureDebug(snapshot.SulfurTempSum, snapshot.SulfurTempCount, snapshot.SulfurTempStressedCount, snapshot.TemperatureDisplayUnit),
             FormatTemperatureDebug(snapshot.PhotoTempSum, snapshot.PhotoTempCount, snapshot.PhotoTempStressedCount, snapshot.TemperatureDisplayUnit),
@@ -188,7 +188,7 @@ public class ReplicatorDebugTelemetry
 
     private static string FormatDeathCauses(ReplicatorTelemetrySnapshot snapshot)
     {
-        return $"H[{FormatDeathCauseSummary(snapshot.HydrogenDeathCauseCounts)}] S[{FormatDeathCauseSummary(snapshot.ChemoDeathCauseCounts)}] P[{FormatDeathCauseSummary(snapshot.PhotoDeathCauseCounts)}] Sa[{FormatDeathCauseSummary(snapshot.SaproDeathCauseCounts)}] F[{FormatDeathCauseSummary(snapshot.FermentDeathCauseCounts)}] Mg[{FormatDeathCauseSummary(snapshot.MethanogenDeathCauseCounts)}] Mt[{FormatDeathCauseSummary(snapshot.MethanotrophDeathCauseCounts)}] Pr[{FormatDeathCauseSummary(snapshot.PredatorDeathCauseCounts)}]";
+        return $"Hydrogen[{FormatDeathCauseSummary(snapshot.HydrogenDeathCauseCounts)}] Sulfur[{FormatDeathCauseSummary(snapshot.ChemoDeathCauseCounts)}] Photo[{FormatDeathCauseSummary(snapshot.PhotoDeathCauseCounts)}] Sapro[{FormatDeathCauseSummary(snapshot.SaproDeathCauseCounts)}] Ferment[{FormatDeathCauseSummary(snapshot.FermentDeathCauseCounts)}] Methanogen[{FormatDeathCauseSummary(snapshot.MethanogenDeathCauseCounts)}] Methanotroph[{FormatDeathCauseSummary(snapshot.MethanotrophDeathCauseCounts)}] Predator[{FormatDeathCauseSummary(snapshot.PredatorDeathCauseCounts)}]";
     }
 
     private static string FormatChemistrySummary(ReplicatorTelemetrySnapshot snapshot)
@@ -227,6 +227,17 @@ public class ReplicatorDebugTelemetry
             return "n/a";
         }
 
+        int total = 0;
+        for (int i = 0; i < counts.Length; i++)
+        {
+            total += counts[i];
+        }
+
+        if (total <= 0)
+        {
+            return "n/a";
+        }
+
         StringBuilder sb = new StringBuilder(48);
         for (int i = 0; i < counts.Length; i++)
         {
@@ -241,8 +252,12 @@ public class ReplicatorDebugTelemetry
                 sb.Append(' ');
             }
 
-            sb.Append(DeathCauseShortLabel((DeathCause)i));
-            sb.Append(count);
+            DeathCause cause = (DeathCause)i;
+            float pct = (100f * count) / total;
+            sb.Append(DeathCauseShortLabel(cause));
+            sb.Append('=');
+            sb.Append(pct.ToString("0"));
+            sb.Append('%');
         }
 
         return sb.Length > 0 ? sb.ToString() : "n/a";
@@ -253,9 +268,9 @@ public class ReplicatorDebugTelemetry
         switch (cause)
         {
             case DeathCause.OldAge: return "Age";
-            case DeathCause.EnergyDepletion: return "En";
-            case DeathCause.TemperatureTooHigh: return "Th";
-            case DeathCause.TemperatureTooLow: return "Tl";
+            case DeathCause.EnergyDepletion: return "Energy";
+            case DeathCause.TemperatureTooHigh: return "TempHi";
+            case DeathCause.TemperatureTooLow: return "TempLo";
             case DeathCause.Lack_CO2: return "CO2";
             case DeathCause.Lack_H2S: return "H2S";
             case DeathCause.Lack_H2: return "H2";
@@ -263,9 +278,9 @@ public class ReplicatorDebugTelemetry
             case DeathCause.Lack_OrganicC_Food: return "OrgC";
             case DeathCause.Lack_O2: return "O2";
             case DeathCause.Lack_CH4: return "CH4";
-            case DeathCause.Lack_StoredC: return "StC";
+            case DeathCause.Lack_StoredC: return "StoredC";
             case DeathCause.O2_Toxicity: return "O2Tox";
-            case DeathCause.Predation: return "Pred";
+            case DeathCause.Predation: return "Predation";
             default: return "?";
         }
     }
