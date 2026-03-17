@@ -76,12 +76,15 @@ public class ReplicatorManager : MonoBehaviour
     [Range(0f, 1f)] public float hydrogenotrophyStoreFraction = 0.8f;
     public float fermentationOrganicCPerTick = 0.02f;
     public float fermentationEnergyPerTick = 0.04f;
+    [Range(0f, 1f)] public float fermentationAssimilationFraction = 0.15f;
     public float methanogenesisH2PerTick = 0.02f;
     public float methanogenesisCO2PerTick = 0.01f;
     public float methanogenesisEnergyPerTick = 0.03f;
+    [Range(0f, 1f)] public float methanogenesisAssimilationFraction = 0.15f;
     public float methanotrophyCH4PerTick = 0.01f;
     public float methanotrophyO2PerTick = 0.01f;
     public float methanotrophyEnergyPerTick = 0.04f;
+    [Range(0f, 1f)] public float methanotrophyAssimilationFraction = 0.15f;
 
     [Header("Hydrogen Metabolism Mutation")]
     [Range(0f, 1f)] public float hydrogenToPhotosynthesisMutationChance = 0.003f;
@@ -348,6 +351,9 @@ public class ReplicatorManager : MonoBehaviour
     private int[] hydrogenDeathCauseCounts;
     private int[] photoDeathCauseCounts;
     private int[] saproDeathCauseCounts;
+    private int[] fermentDeathCauseCounts;
+    private int[] methanogenDeathCauseCounts;
+    private int[] methanotrophDeathCauseCounts;
     private int[] predatorDeathCauseCounts;
     private int predationKillsWindow;
     private float avgToxicProteolyticWasteDebug;
@@ -621,6 +627,9 @@ public class ReplicatorManager : MonoBehaviour
             hydrogenDeathCauseCounts,
             photoDeathCauseCounts,
             saproDeathCauseCounts,
+            fermentDeathCauseCounts,
+            methanogenDeathCauseCounts,
+            methanotrophDeathCauseCounts,
             predatorDeathCauseCounts,
             temperatureDisplayUnit,
             IsSaprotrophyUnlocked,
@@ -637,12 +646,15 @@ public class ReplicatorManager : MonoBehaviour
         if (hydrogenDeathCauseCounts == null || hydrogenDeathCauseCounts.Length != len) hydrogenDeathCauseCounts = new int[len];
         if (photoDeathCauseCounts == null || photoDeathCauseCounts.Length != len) photoDeathCauseCounts = new int[len];
         if (saproDeathCauseCounts == null || saproDeathCauseCounts.Length != len) saproDeathCauseCounts = new int[len];
+        if (fermentDeathCauseCounts == null || fermentDeathCauseCounts.Length != len) fermentDeathCauseCounts = new int[len];
+        if (methanogenDeathCauseCounts == null || methanogenDeathCauseCounts.Length != len) methanogenDeathCauseCounts = new int[len];
+        if (methanotrophDeathCauseCounts == null || methanotrophDeathCauseCounts.Length != len) methanotrophDeathCauseCounts = new int[len];
         if (predatorDeathCauseCounts == null || predatorDeathCauseCounts.Length != len) predatorDeathCauseCounts = new int[len];
     }
 
     void ResetDeathCauseCounters()
     {
-        if (chemoDeathCauseCounts == null || hydrogenDeathCauseCounts == null || photoDeathCauseCounts == null || saproDeathCauseCounts == null || predatorDeathCauseCounts == null)
+        if (chemoDeathCauseCounts == null || hydrogenDeathCauseCounts == null || photoDeathCauseCounts == null || saproDeathCauseCounts == null || fermentDeathCauseCounts == null || methanogenDeathCauseCounts == null || methanotrophDeathCauseCounts == null || predatorDeathCauseCounts == null)
         {
             return;
         }
@@ -651,6 +663,9 @@ public class ReplicatorManager : MonoBehaviour
         System.Array.Clear(hydrogenDeathCauseCounts, 0, hydrogenDeathCauseCounts.Length);
         System.Array.Clear(photoDeathCauseCounts, 0, photoDeathCauseCounts.Length);
         System.Array.Clear(saproDeathCauseCounts, 0, saproDeathCauseCounts.Length);
+        System.Array.Clear(fermentDeathCauseCounts, 0, fermentDeathCauseCounts.Length);
+        System.Array.Clear(methanogenDeathCauseCounts, 0, methanogenDeathCauseCounts.Length);
+        System.Array.Clear(methanotrophDeathCauseCounts, 0, methanotrophDeathCauseCounts.Length);
         System.Array.Clear(predatorDeathCauseCounts, 0, predatorDeathCauseCounts.Length);
     }
 
@@ -663,7 +678,15 @@ public class ReplicatorManager : MonoBehaviour
             ? hydrogenDeathCauseCounts
             : (metabolism == MetabolismType.Photosynthesis
                 ? photoDeathCauseCounts
-                : ((metabolism == MetabolismType.Saprotrophy || metabolism == MetabolismType.Fermentation || metabolism == MetabolismType.Methanogenesis || metabolism == MetabolismType.Methanotrophy) ? saproDeathCauseCounts : (metabolism == MetabolismType.Predation ? predatorDeathCauseCounts : chemoDeathCauseCounts)));
+                : (metabolism == MetabolismType.Saprotrophy
+                    ? saproDeathCauseCounts
+                    : (metabolism == MetabolismType.Fermentation
+                        ? fermentDeathCauseCounts
+                        : (metabolism == MetabolismType.Methanogenesis
+                            ? methanogenDeathCauseCounts
+                            : (metabolism == MetabolismType.Methanotrophy
+                                ? methanotrophDeathCauseCounts
+                                : (metabolism == MetabolismType.Predation ? predatorDeathCauseCounts : chemoDeathCauseCounts))))));
 
         counts[causeIndex]++;
     }
@@ -1420,12 +1443,15 @@ public class ReplicatorManager : MonoBehaviour
             HydrogenotrophyStoreFraction = hydrogenotrophyStoreFraction,
             FermentationOrganicCPerTick = fermentationOrganicCPerTick,
             FermentationEnergyPerTick = fermentationEnergyPerTick,
+            FermentationAssimilationFraction = fermentationAssimilationFraction,
             MethanogenesisCO2PerTick = methanogenesisCO2PerTick,
             MethanogenesisH2PerTick = methanogenesisH2PerTick,
             MethanogenesisEnergyPerTick = methanogenesisEnergyPerTick,
+            MethanogenesisAssimilationFraction = methanogenesisAssimilationFraction,
             MethanotrophyCH4PerTick = methanotrophyCH4PerTick,
             MethanotrophyO2PerTick = methanotrophyO2PerTick,
             MethanotrophyEnergyPerTick = methanotrophyEnergyPerTick,
+            MethanotrophyAssimilationFraction = methanotrophyAssimilationFraction,
             ChemosynthesisCo2NeedPerTick = chemosynthesisCo2NeedPerTick,
             ChemosynthesisH2sNeedPerTick = chemosynthesisH2sNeedPerTick,
             ChemosynthesisEnergyPerTick = chemosynthesisEnergyPerTick,
