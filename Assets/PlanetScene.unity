@@ -604,7 +604,7 @@ MonoBehaviour:
   moveSpeed: 4
   turnSpeed: 5
   spawnSpread: 0.01
-  reproductionRate: 1
+  reproductionRate: 0.5
   minLifespan: 360
   maxLifespan: 600
   metabolismTickSeconds: 0.5
@@ -653,10 +653,10 @@ MonoBehaviour:
   anchoredToAmoeboidMutationChance: 0.01
   allowReverseMetabolismMutation: 0
   photosynthesisCo2PerTickAtFullInsolation: 0.02
-  photosynthesisEnergyPerCo2: 1.8
+  photosynthesisEnergyPerCo2: 1.7
   aerobicO2PerC: 0.02
   aerobicEnergyPerC: 0.05
-  photosynthStoreFraction: 0.4
+  photosynthStoreFraction: 0.5
   maxOrganicCStore: 6
   nightRespirationCPerTick: 0.01
   nightRespirationEnergyPerC: 0.05
@@ -688,7 +688,7 @@ MonoBehaviour:
   fearMinDot: 0
   fearRequiresMotility: 1
   sulfurChemoTempRange: {x: 333.15, y: 393.15}
-  hydrogenTempRange: {x: 294.15, y: 343.15}
+  hydrogenTempRange: {x: 293.15, y: 343.15}
   photoTempRange: {x: 283.15, y: 313.15}
   saproTempRange: {x: 278.15, y: 308.15}
   predatorTempRange: {x: 283.15, y: 313.15}
@@ -864,7 +864,7 @@ MonoBehaviour:
   debugGlobalCO2: 5
   debugGlobalO2: 0.010003356
   debugGlobalCH4: 0
-  initialDissolvedFe2PlusPerOceanCell: 6
+  initialDissolvedFe2PlusPerOceanCell: 8
   ventDissolvedFe2PlusPerTick: 0
   fe2PlusOxidationRatePerSecond: 0.4
   o2ConsumptionPerFe2PlusOxidized: 0.25
