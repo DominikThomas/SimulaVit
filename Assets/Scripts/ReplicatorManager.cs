@@ -124,6 +124,26 @@ public class ReplicatorManager : MonoBehaviour
     public float nightRespirationEnergyPerC = 0.05f;
     public float nightRespirationO2PerC = 0.02f;
 
+    [Header("Photosynth Dark Anoxic Fallback")]
+    [Tooltip("Enable weak fermentation-like dark survival for photosynths when O2 is unavailable. This is maintenance only and should remain much weaker than aerobic dark respiration.")]
+    public bool photosynthDarkAnoxicEnabled = true;
+    [Tooltip("Stored organic C consumed per metabolism tick by dark anoxic fallback.")]
+    public float photosynthDarkAnoxicOrganicCUseRate = 0.008f;
+    [Tooltip("Energy yield multiplier relative to aerobic dark respiration from the same carbon.")]
+    [Range(0f, 1f)] public float photosynthDarkAnoxicEnergyYieldMultiplier = 0.2f;
+    [Tooltip("Upper bound on fraction of basal maintenance that anoxic dark fallback can cover per tick.")]
+    [Range(0f, 1f)] public float photosynthDarkAnoxicMaxFractionOfBaseMaintenanceCovered = 0.65f;
+    [Tooltip("Additional stress multiplier applied while using the dark anoxic fallback.")]
+    [Range(1f, 3f)] public float photosynthDarkAnoxicStressMultiplier = 1.3f;
+    [Tooltip("If false, photosynths in dark anoxic fallback are prevented from division.")]
+    public bool photosynthDarkAnoxicCanReplicate = false;
+    [Tooltip("Fraction of consumed stored carbon released as CO2 during dark anoxic fallback.")]
+    [Range(0f, 1f)] public float photosynthDarkAnoxicCO2ReleaseFraction = 0.55f;
+    [Tooltip("Small fraction of consumed stored carbon released as H2 byproduct.")]
+    [Range(0f, 1f)] public float photosynthDarkAnoxicH2ReleaseFraction = 0.03f;
+    [Tooltip("Tiny dissolved-organics leakage fraction coupled into ecosystem scent/organic leakage fields.")]
+    [Range(0f, 0.2f)] public float photosynthDarkAnoxicOrganicLeakFraction = 0.01f;
+
     [Header("Chemosynth Carbon Storage / Respiration")]
     [Range(0f, 1f)] public float chemosynthStoreFraction = 1.0f; // fraction of chemo CO2 consumed that becomes organicCStore
     public float chemoRespirationCPerTick = 0.01f;               // max C from store per tick when starving
@@ -346,6 +366,13 @@ public class ReplicatorManager : MonoBehaviour
     private int debugHydrogenStressedCount;
     private int debugPhotoStressedCount;
     private int debugSaproStressedCount;
+    [SerializeField] private int debugPhotosynthLightModeCount;
+    [SerializeField] private int debugPhotosynthDarkAerobicModeCount;
+    [SerializeField] private int debugPhotosynthDarkAnoxicFallbackModeCount;
+    [SerializeField] private float debugPhotosynthDarkAnoxicOrganicCConsumedPerTick;
+    [SerializeField] private float debugPhotosynthDarkAnoxicEnergyGeneratedPerTick;
+    [SerializeField] private float debugPhotosynthDarkAnoxicCO2ReleasedPerTick;
+    [SerializeField] private float debugPhotosynthDarkAnoxicH2ReleasedPerTick;
     private float nextChemoSpawnDebugLogTime;
     private int[] chemoDeathCauseCounts;
     private int[] hydrogenDeathCauseCounts;
@@ -618,6 +645,13 @@ public class ReplicatorManager : MonoBehaviour
             debugSaproTempSum,
             debugSaproTempCount,
             debugSaproStressedCount,
+            debugPhotosynthLightModeCount,
+            debugPhotosynthDarkAerobicModeCount,
+            debugPhotosynthDarkAnoxicFallbackModeCount,
+            debugPhotosynthDarkAnoxicOrganicCConsumedPerTick,
+            debugPhotosynthDarkAnoxicEnergyGeneratedPerTick,
+            debugPhotosynthDarkAnoxicCO2ReleasedPerTick,
+            debugPhotosynthDarkAnoxicH2ReleasedPerTick,
             averageOrganicCStore,
             divisionEligibleAgentCount,
             predationKillsWindow,
@@ -1434,6 +1468,15 @@ public class ReplicatorManager : MonoBehaviour
             PhotosynthesisEnergyPerCo2 = photosynthesisEnergyPerCo2,
             PhotosynthStoreFraction = photosynthStoreFraction,
             NightRespirationCPerTick = nightRespirationCPerTick,
+            PhotosynthDarkAnoxicEnabled = photosynthDarkAnoxicEnabled,
+            PhotosynthDarkAnoxicOrganicCUseRate = photosynthDarkAnoxicOrganicCUseRate,
+            PhotosynthDarkAnoxicEnergyYieldMultiplier = photosynthDarkAnoxicEnergyYieldMultiplier,
+            PhotosynthDarkAnoxicMaxFractionOfBaseMaintenanceCovered = photosynthDarkAnoxicMaxFractionOfBaseMaintenanceCovered,
+            PhotosynthDarkAnoxicStressMultiplier = photosynthDarkAnoxicStressMultiplier,
+            PhotosynthDarkAnoxicCanReplicate = photosynthDarkAnoxicCanReplicate,
+            PhotosynthDarkAnoxicCO2ReleaseFraction = photosynthDarkAnoxicCO2ReleaseFraction,
+            PhotosynthDarkAnoxicH2ReleaseFraction = photosynthDarkAnoxicH2ReleaseFraction,
+            PhotosynthDarkAnoxicOrganicLeakFraction = photosynthDarkAnoxicOrganicLeakFraction,
             SaproCPerTick = saproCPerTick,
             SaproAssimilationFraction = saproAssimilationFraction,
             SaproRespireStoreCPerTick = saproRespireStoreCPerTick,
@@ -1486,6 +1529,14 @@ public class ReplicatorManager : MonoBehaviour
         debugHydrogenStressedCount = debugSnapshot.HydrogenStressedCount;
         debugPhotoStressedCount = debugSnapshot.PhotoStressedCount;
         debugSaproStressedCount = debugSnapshot.SaproStressedCount;
+        debugPhotosynthLightModeCount = debugSnapshot.PhotosynthLightModeCount;
+        debugPhotosynthDarkAerobicModeCount = debugSnapshot.PhotosynthDarkAerobicModeCount;
+        debugPhotosynthDarkAnoxicFallbackModeCount = debugSnapshot.PhotosynthDarkAnoxicFallbackModeCount;
+        float fallbackCount = Mathf.Max(1, debugSnapshot.PhotosynthDarkAnoxicFallbackModeCount);
+        debugPhotosynthDarkAnoxicOrganicCConsumedPerTick = debugSnapshot.PhotosynthDarkAnoxicOrganicCConsumed / fallbackCount;
+        debugPhotosynthDarkAnoxicEnergyGeneratedPerTick = debugSnapshot.PhotosynthDarkAnoxicEnergyGenerated / fallbackCount;
+        debugPhotosynthDarkAnoxicCO2ReleasedPerTick = debugSnapshot.PhotosynthDarkAnoxicCO2Released / fallbackCount;
+        debugPhotosynthDarkAnoxicH2ReleasedPerTick = debugSnapshot.PhotosynthDarkAnoxicH2Released / fallbackCount;
     }
 
 

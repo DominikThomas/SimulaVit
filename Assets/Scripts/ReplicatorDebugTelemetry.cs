@@ -34,6 +34,13 @@ public class ReplicatorDebugTelemetry
         float debugSaproTempSum,
         int debugSaproTempCount,
         int debugSaproStressedCount,
+        int debugPhotosynthLightModeCount,
+        int debugPhotosynthDarkAerobicModeCount,
+        int debugPhotosynthDarkAnoxicFallbackModeCount,
+        float debugPhotosynthDarkAnoxicOrganicCConsumedPerTick,
+        float debugPhotosynthDarkAnoxicEnergyGeneratedPerTick,
+        float debugPhotosynthDarkAnoxicCO2ReleasedPerTick,
+        float debugPhotosynthDarkAnoxicH2ReleasedPerTick,
         float averageOrganicCStore,
         int divisionEligibleAgentCount,
         int predationKillsWindow,
@@ -98,7 +105,8 @@ public class ReplicatorDebugTelemetry
         Debug.Log(
             $"Metabolism: hydrogen={hydrogenotrophAgentCount} sulfur={chemosynthAgentCount} photo={photosynthAgentCount} sapro={saprotrophAgentCount} predator={predatorAgentCount} ferment={fermenterAgentCount} methanogen={methanogenAgentCount} methanotroph={methanotrophAgentCount} " +
             $"photoUnlocked={unlocked} saproUnlocked={isSaprotrophyUnlocked()} " +
-            $"temp[hydrogen:{hydrogenTempText} sulfur:{sulfurTempText} photo:{photoTempText} sapro:{saproTempText}] avgOrganicC={averageOrganicCStore:F3} divisionEligible={divisionEligibleAgentCount} predKillsWindow={predationKillsWindow} avgToxicProteolyticWaste={avgToxicProteolyticWasteDebug:F3} avgDissolvedOrganicLeak={avgDissolvedOrganicLeakDebug:F3} " +
+            $"temp[hydrogen:{hydrogenTempText} sulfur:{sulfurTempText} photo:{photoTempText} sapro:{saproTempText}] photoModes[light={debugPhotosynthLightModeCount} darkAerobic={debugPhotosynthDarkAerobicModeCount} darkAnoxic={debugPhotosynthDarkAnoxicFallbackModeCount}] " +
+            $"photoAnoxicAvg[c={debugPhotosynthDarkAnoxicOrganicCConsumedPerTick:F4} e={debugPhotosynthDarkAnoxicEnergyGeneratedPerTick:F4} co2={debugPhotosynthDarkAnoxicCO2ReleasedPerTick:F4} h2={debugPhotosynthDarkAnoxicH2ReleasedPerTick:F4}] avgOrganicC={averageOrganicCStore:F3} divisionEligible={divisionEligibleAgentCount} predKillsWindow={predationKillsWindow} avgToxicProteolyticWaste={avgToxicProteolyticWasteDebug:F3} avgDissolvedOrganicLeak={avgDissolvedOrganicLeakDebug:F3} " +
             $"chem[h2Mean={meanH2:F3} h2Max={maxH2:F3} h2sMean={meanH2S:F3} h2sMax={maxH2S:F3} fe2OceanMean={dissolvedFe2OceanMean:F3} fe2Total={dissolvedFe2Total:F1}]" + plumeDiagnostics);
         Debug.Log($"DeathCauses: hydrogen[{formatDeathCauseDistribution(hydrogenDeathCauseCounts)}] sulfur[{formatDeathCauseDistribution(chemoDeathCauseCounts)}] photo[{formatDeathCauseDistribution(photoDeathCauseCounts)}] sapro[{formatDeathCauseDistribution(saproDeathCauseCounts)}] ferment[{formatDeathCauseDistribution(fermentDeathCauseCounts)}] methanogen[{formatDeathCauseDistribution(methanogenDeathCauseCounts)}] methanotroph[{formatDeathCauseDistribution(methanotrophDeathCauseCounts)}] predator[{formatDeathCauseDistribution(predatorDeathCauseCounts)}]");
         Debug.Log($"Atmosphere composition: CO2[{planetResourceMap.debugGlobalCO2}], O2[{planetResourceMap.debugGlobalO2}], CH4[{planetResourceMap.debugGlobalCH4}]");

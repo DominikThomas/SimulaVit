@@ -89,6 +89,7 @@ public class Replicator
     public float o2ToxicSeconds;
     public float o2ComfortMax;
     public float o2StressMax;
+    public bool canReplicate;
     public DeathCause lastDeathCauseCandidate;
 
     // Movement data
@@ -138,6 +139,7 @@ public class Replicator
         o2ToxicSeconds = 0f;
         o2ComfortMax = 1f;
         o2StressMax = 1f;
+        canReplicate = true;
         lastDeathCauseCandidate = DeathCause.Unknown;
     }
 }

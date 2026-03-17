@@ -54,9 +54,10 @@ public class ReplicatorLifecycleSystem
 
             organicCSum += Mathf.Max(0f, agent.organicCStore);
 
-            bool hasEnergyForDivision = enableCarbonLimitedDivision
+            bool canReplicate = agent.canReplicate;
+            bool hasEnergyForDivision = canReplicate && (enableCarbonLimitedDivision
                 ? agent.energy >= Mathf.Max(0f, divisionEnergyCost)
-                : agent.energy >= replicationEnergyCost;
+                : agent.energy >= replicationEnergyCost);
 
             bool hasCarbonForDivision = true;
             if (enableCarbonLimitedDivision)

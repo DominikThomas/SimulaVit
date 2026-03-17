@@ -42,6 +42,7 @@ public class ReplicatorPopulationState
     public float[] O2ToxicSeconds = new float[0];
     public float[] O2ComfortMax = new float[0];
     public float[] O2StressMax = new float[0];
+    public bool[] CanReplicate = new bool[0];
 
     public float[] LastHabitatValue = new float[0];
     public float[] TumbleProbability = new float[0];
@@ -101,6 +102,7 @@ public class ReplicatorPopulationState
             O2ToxicSeconds[i] = a.o2ToxicSeconds;
             O2ComfortMax[i] = a.o2ComfortMax;
             O2StressMax[i] = a.o2StressMax;
+            CanReplicate[i] = a.canReplicate;
             LastHabitatValue[i] = a.lastHabitatValue;
             TumbleProbability[i] = a.tumbleProbability;
             NextSenseTime[i] = a.nextSenseTime;
@@ -226,6 +228,7 @@ public class ReplicatorPopulationState
         agent.o2ToxicSeconds = O2ToxicSeconds[index];
         agent.o2ComfortMax = O2ComfortMax[index];
         agent.o2StressMax = O2StressMax[index];
+        agent.canReplicate = CanReplicate[index];
         agent.lastHabitatValue = LastHabitatValue[index];
         agent.tumbleProbability = TumbleProbability[index];
         agent.nextSenseTime = NextSenseTime[index];
@@ -268,6 +271,7 @@ public class ReplicatorPopulationState
         O2ToxicSeconds = new float[newCapacity];
         O2ComfortMax = new float[newCapacity];
         O2StressMax = new float[newCapacity];
+        CanReplicate = new bool[newCapacity];
         LastHabitatValue = new float[newCapacity];
         TumbleProbability = new float[newCapacity];
         NextSenseTime = new float[newCapacity];
