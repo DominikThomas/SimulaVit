@@ -604,7 +604,7 @@ MonoBehaviour:
   moveSpeed: 4
   turnSpeed: 5
   spawnSpread: 0.01
-  reproductionRate: 1
+  reproductionRate: 0.5
   minLifespan: 360
   maxLifespan: 600
   metabolismTickSeconds: 0.5
@@ -631,12 +631,15 @@ MonoBehaviour:
   hydrogenotrophyStoreFraction: 0.8
   fermentationOrganicCPerTick: 0.02
   fermentationEnergyPerTick: 4
+  fermentationAssimilationFraction: 0.15
   methanogenesisH2PerTick: 0.02
   methanogenesisCO2PerTick: 0.01
   methanogenesisEnergyPerTick: 3
+  methanogenesisAssimilationFraction: 0.15
   methanotrophyCH4PerTick: 0.01
   methanotrophyO2PerTick: 0.01
   methanotrophyEnergyPerTick: 4
+  methanotrophyAssimilationFraction: 0.15
   hydrogenToPhotosynthesisMutationChance: 0.5
   hydrogenToSaprotrophyMutationChance: 0.2
   hydrogenToSulfurMutationChance: 0.4
@@ -646,14 +649,14 @@ MonoBehaviour:
   locomotionMutationChance: 0.333
   locomotionUpgradeChance: 0.5
   locomotionAnchoredMutationChance: 0.05
-  allowAnchoredToAmoeboidMutation: 0
-  anchoredToAmoeboidMutationChance: 0.001
+  allowAnchoredToAmoeboidMutation: 1
+  anchoredToAmoeboidMutationChance: 0.01
   allowReverseMetabolismMutation: 0
   photosynthesisCo2PerTickAtFullInsolation: 0.02
-  photosynthesisEnergyPerCo2: 1
+  photosynthesisEnergyPerCo2: 1.7
   aerobicO2PerC: 0.02
   aerobicEnergyPerC: 0.05
-  photosynthStoreFraction: 0.4
+  photosynthStoreFraction: 0.5
   maxOrganicCStore: 6
   nightRespirationCPerTick: 0.01
   nightRespirationEnergyPerC: 0.05
@@ -685,12 +688,12 @@ MonoBehaviour:
   fearMinDot: 0
   fearRequiresMotility: 1
   sulfurChemoTempRange: {x: 333.15, y: 393.15}
-  hydrogenTempRange: {x: 294.15, y: 343.15}
+  hydrogenTempRange: {x: 293.15, y: 343.15}
   photoTempRange: {x: 283.15, y: 313.15}
   saproTempRange: {x: 278.15, y: 308.15}
-  predatorTempRange: {x: 283.15, y: 323.15}
+  predatorTempRange: {x: 283.15, y: 313.15}
   fermentationTempRange: {x: 285.15, y: 330.15}
-  methanogenesisTempRange: {x: 305.15, y: 355.15}
+  methanogenesisTempRange: {x: 283.15, y: 355.15}
   methanotrophyTempRange: {x: 280.15, y: 320.15}
   defaultLethalMargin: 20
   tempMutationChance: 0.02
@@ -823,8 +826,8 @@ MonoBehaviour:
   sunLight: {fileID: 0}
   sunSkyRotator: {fileID: 0}
   baselineCO2: 5
-  baselineO2: 0.01
-  baselineCH4: 0
+  baselineO2: 0
+  baselineCH4: 0.01
   baselineS0: 0.05
   baselineSi: 0.35
   baselineCa: 0.25
@@ -842,7 +845,7 @@ MonoBehaviour:
   ventsOnlyBelowSeaLevel: 0
   ventH2SPerTick: 0.01
   ventH2PerTick: 0.06
-  ventCO2PerTick: 0.04
+  ventCO2PerTick: 0.2
   ventH2SMax: 1
   ventH2Max: 1.5
   h2sDiffuseStrength: 0.08
