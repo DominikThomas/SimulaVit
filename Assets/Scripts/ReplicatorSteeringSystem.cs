@@ -126,6 +126,15 @@ public class ReplicatorSteeringSystem
                     NormalizeResource(planetResourceMap, ResourceType.O2, cellIndex, settings.SteerGoodO2),
                     NormalizeScent(planetResourceMap.Get(ResourceType.DissolvedOrganicLeak, cellIndex), settings.ScentScoreSaturation));
                 break;
+            case MetabolismType.Fermentation:
+                foodFitness = NormalizeResource(planetResourceMap, ResourceType.OrganicC, cellIndex, settings.SteerGoodOrganicC);
+                break;
+            case MetabolismType.Methanogenesis:
+                foodFitness = Mathf.Min(NormalizeResource(planetResourceMap, ResourceType.H2, cellIndex, settings.SteerGoodH2), co2);
+                break;
+            case MetabolismType.Methanotrophy:
+                foodFitness = Mathf.Min(NormalizeResource(planetResourceMap, ResourceType.CH4, cellIndex, settings.SteerGoodH2), NormalizeResource(planetResourceMap, ResourceType.O2, cellIndex, settings.SteerGoodO2));
+                break;
             default:
                 foodFitness = 0f;
                 break;
@@ -325,6 +334,21 @@ public class ReplicatorSteeringSystem
                 float o2 = NormalizeResource(planetResourceMap, ResourceType.O2, cellIndex, settings.SteerGoodO2);
                 float dissolvedOrganicLeak = NormalizeScent(planetResourceMap.Get(ResourceType.DissolvedOrganicLeak, cellIndex), settings.ScentScoreSaturation);
                 return Mathf.Min(o2, dissolvedOrganicLeak);
+            }
+            case MetabolismType.Fermentation:
+            {
+                return NormalizeResource(planetResourceMap, ResourceType.OrganicC, cellIndex, settings.SteerGoodOrganicC);
+            }
+            case MetabolismType.Methanogenesis:
+            {
+                float h2 = NormalizeResource(planetResourceMap, ResourceType.H2, cellIndex, settings.SteerGoodH2);
+                return Mathf.Min(h2, co2);
+            }
+            case MetabolismType.Methanotrophy:
+            {
+                float ch4 = NormalizeResource(planetResourceMap, ResourceType.CH4, cellIndex, settings.SteerGoodH2);
+                float o2 = NormalizeResource(planetResourceMap, ResourceType.O2, cellIndex, settings.SteerGoodO2);
+                return Mathf.Min(ch4, o2);
             }
             default:
                 return 0f;

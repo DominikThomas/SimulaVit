@@ -37,7 +37,11 @@ public class ReplicatorPopulationState
     public float[] StarveLightSeconds = new float[0];
     public float[] StarveOrganicCFoodSeconds = new float[0];
     public float[] StarveO2Seconds = new float[0];
+    public float[] StarveCh4Seconds = new float[0];
     public float[] StarveStoredCSeconds = new float[0];
+    public float[] O2ToxicSeconds = new float[0];
+    public float[] O2ComfortMax = new float[0];
+    public float[] O2StressMax = new float[0];
 
     public float[] LastHabitatValue = new float[0];
     public float[] TumbleProbability = new float[0];
@@ -92,7 +96,11 @@ public class ReplicatorPopulationState
             StarveLightSeconds[i] = a.starveLightSeconds;
             StarveOrganicCFoodSeconds[i] = a.starveOrganicCFoodSeconds;
             StarveO2Seconds[i] = a.starveO2Seconds;
+            StarveCh4Seconds[i] = a.starveCh4Seconds;
             StarveStoredCSeconds[i] = a.starveStoredCSeconds;
+            O2ToxicSeconds[i] = a.o2ToxicSeconds;
+            O2ComfortMax[i] = a.o2ComfortMax;
+            O2StressMax[i] = a.o2StressMax;
             LastHabitatValue[i] = a.lastHabitatValue;
             TumbleProbability[i] = a.tumbleProbability;
             NextSenseTime[i] = a.nextSenseTime;
@@ -213,7 +221,11 @@ public class ReplicatorPopulationState
         agent.starveLightSeconds = StarveLightSeconds[index];
         agent.starveOrganicCFoodSeconds = StarveOrganicCFoodSeconds[index];
         agent.starveO2Seconds = StarveO2Seconds[index];
+        agent.starveCh4Seconds = StarveCh4Seconds[index];
         agent.starveStoredCSeconds = StarveStoredCSeconds[index];
+        agent.o2ToxicSeconds = O2ToxicSeconds[index];
+        agent.o2ComfortMax = O2ComfortMax[index];
+        agent.o2StressMax = O2StressMax[index];
         agent.lastHabitatValue = LastHabitatValue[index];
         agent.tumbleProbability = TumbleProbability[index];
         agent.nextSenseTime = NextSenseTime[index];
@@ -251,7 +263,11 @@ public class ReplicatorPopulationState
         StarveLightSeconds = new float[newCapacity];
         StarveOrganicCFoodSeconds = new float[newCapacity];
         StarveO2Seconds = new float[newCapacity];
+        StarveCh4Seconds = new float[newCapacity];
         StarveStoredCSeconds = new float[newCapacity];
+        O2ToxicSeconds = new float[newCapacity];
+        O2ComfortMax = new float[newCapacity];
+        O2StressMax = new float[newCapacity];
         LastHabitatValue = new float[newCapacity];
         TumbleProbability = new float[newCapacity];
         NextSenseTime = new float[newCapacity];

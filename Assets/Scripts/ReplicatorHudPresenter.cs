@@ -10,6 +10,9 @@ public class ReplicatorHudPresenter
     private readonly int[] photosynthByLocomotion = new int[4];
     private readonly int[] saprotrophByLocomotion = new int[4];
     private readonly int[] predatorByLocomotion = new int[4];
+    private readonly int[] fermentByLocomotion = new int[4];
+    private readonly int[] methanogenByLocomotion = new int[4];
+    private readonly int[] methanotrophByLocomotion = new int[4];
 
     private GUIStyle hudStyle;
     private GUIStyle hudBackgroundStyle;
@@ -26,6 +29,9 @@ public class ReplicatorHudPresenter
         int photosynthAgentCount,
         int saprotrophAgentCount,
         int predatorAgentCount,
+        int fermenterAgentCount,
+        int methanogenAgentCount,
+        int methanotrophAgentCount,
         ref TemperatureDisplayUnit temperatureDisplayUnit)
     {
         EnsureHudStyles();
@@ -37,6 +43,9 @@ public class ReplicatorHudPresenter
         Array.Clear(photosynthByLocomotion, 0, photosynthByLocomotion.Length);
         Array.Clear(saprotrophByLocomotion, 0, saprotrophByLocomotion.Length);
         Array.Clear(predatorByLocomotion, 0, predatorByLocomotion.Length);
+        Array.Clear(fermentByLocomotion, 0, fermentByLocomotion.Length);
+        Array.Clear(methanogenByLocomotion, 0, methanogenByLocomotion.Length);
+        Array.Clear(methanotrophByLocomotion, 0, methanotrophByLocomotion.Length);
 
         for (int i = 0; i < agents.Count; i++)
         {
@@ -59,6 +68,18 @@ public class ReplicatorHudPresenter
             {
                 predatorByLocomotion[locomotionIndex]++;
             }
+            else if (agents[i].metabolism == MetabolismType.Fermentation)
+            {
+                fermentByLocomotion[locomotionIndex]++;
+            }
+            else if (agents[i].metabolism == MetabolismType.Methanogenesis)
+            {
+                methanogenByLocomotion[locomotionIndex]++;
+            }
+            else if (agents[i].metabolism == MetabolismType.Methanotrophy)
+            {
+                methanotrophByLocomotion[locomotionIndex]++;
+            }
             else
             {
                 chemosynthByLocomotion[locomotionIndex]++;
@@ -67,9 +88,11 @@ public class ReplicatorHudPresenter
 
         float globalCo2 = planetResourceMap != null ? planetResourceMap.debugGlobalCO2 : 0f;
         float globalO2 = planetResourceMap != null ? planetResourceMap.debugGlobalO2 : 0f;
-        float atmosphereTotal = Mathf.Max(0.0001f, globalCo2 + globalO2);
+        float globalCH4 = planetResourceMap != null ? planetResourceMap.debugGlobalCH4 : 0f;
+        float atmosphereTotal = Mathf.Max(0.0001f, globalCo2 + globalO2 + globalCH4);
         float co2Pct = (globalCo2 / atmosphereTotal) * 100f;
         float o2Pct = (globalO2 / atmosphereTotal) * 100f;
+        float ch4Pct = (globalCH4 / atmosphereTotal) * 100f;
 
         float dissolvedFe2Total = planetResourceMap != null ? planetResourceMap.debugDissolvedFe2PlusTotal : 0f;
         float dissolvedFe2OceanMean = planetResourceMap != null ? planetResourceMap.debugDissolvedFe2PlusOceanMean : 0f;
@@ -81,6 +104,7 @@ public class ReplicatorHudPresenter
             "Atmosphere (global average)\n" +
             $"CO2: {globalCo2:0.000} ({co2Pct:0.0}%)\n" +
             $"O2: {globalO2:0.000} ({o2Pct:0.0}%)\n" +
+            $"CH4: {globalCH4:0.000} ({ch4Pct:0.0}%)\n" +
             $"Dissolved Fe2+: {dissolvedFe2OceanMean:0.000} avg / {dissolvedFe2Total:0.0} total ({dissolvedFe2RemainingPct:0.0}% rem)\n" +
             $"Temp Mean: {ReplicatorManager.FormatTemperature(hudMeanTempKelvin, temperatureDisplayUnit)}\n" +
             $"Temp Min: {ReplicatorManager.FormatTemperature(hudMinTempKelvin, temperatureDisplayUnit)}\n" +
@@ -107,6 +131,18 @@ public class ReplicatorHudPresenter
         if (predatorAgentCount > 0)
         {
             replicatorsText += $"\n<color=#FF5A5A>Predator:</color> {FormatLocomotionCounts(predatorByLocomotion)} ({(100f * predatorAgentCount / safeTotal):0.0}%)";
+        }
+        if (fermenterAgentCount > 0)
+        {
+            replicatorsText += $"\n<color=#FF8C1A>Ferment:</color> {FormatLocomotionCounts(fermentByLocomotion)} ({(100f * fermenterAgentCount / safeTotal):0.0}%)";
+        }
+        if (methanogenAgentCount > 0)
+        {
+            replicatorsText += $"\n<color=#9955E6>Methanogen:</color> {FormatLocomotionCounts(methanogenByLocomotion)} ({(100f * methanogenAgentCount / safeTotal):0.0}%)";
+        }
+        if (methanotrophAgentCount > 0)
+        {
+            replicatorsText += $"\n<color=#FF73BF>Methanotroph:</color> {FormatLocomotionCounts(methanotrophByLocomotion)} ({(100f * methanotrophAgentCount / safeTotal):0.0}%)";
         }
 
         const float panelWidth = 250f;

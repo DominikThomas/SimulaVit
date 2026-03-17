@@ -19,6 +19,9 @@ public class ReplicatorDebugTelemetry
         int photosynthAgentCount,
         int saprotrophAgentCount,
         int predatorAgentCount,
+        int fermenterAgentCount,
+        int methanogenAgentCount,
+        int methanotrophAgentCount,
         float debugChemoTempSum,
         int debugChemoTempCount,
         int debugChemoStressedCount,
@@ -90,12 +93,12 @@ public class ReplicatorDebugTelemetry
             : string.Empty;
 
         Debug.Log(
-            $"Metabolism: hydrogen={hydrogenotrophAgentCount} sulfur={chemosynthAgentCount} photo={photosynthAgentCount} sapro={saprotrophAgentCount} predator={predatorAgentCount} " +
+            $"Metabolism: hydrogen={hydrogenotrophAgentCount} sulfur={chemosynthAgentCount} photo={photosynthAgentCount} sapro={saprotrophAgentCount} predator={predatorAgentCount} ferment={fermenterAgentCount} methanogen={methanogenAgentCount} methanotroph={methanotrophAgentCount} " +
             $"photoUnlocked={unlocked} saproUnlocked={isSaprotrophyUnlocked()} " +
             $"temp[hydrogen:{hydrogenTempText} sulfur:{sulfurTempText} photo:{photoTempText} sapro:{saproTempText}] avgOrganicC={averageOrganicCStore:F3} divisionEligible={divisionEligibleAgentCount} predKillsWindow={predationKillsWindow} avgToxicProteolyticWaste={avgToxicProteolyticWasteDebug:F3} avgDissolvedOrganicLeak={avgDissolvedOrganicLeakDebug:F3} " +
             $"chem[h2Mean={meanH2:F3} h2Max={maxH2:F3} h2sMean={meanH2S:F3} h2sMax={maxH2S:F3} fe2OceanMean={dissolvedFe2OceanMean:F3} fe2Total={dissolvedFe2Total:F1}]" + plumeDiagnostics);
         Debug.Log($"DeathCauses: hydrogen[{formatDeathCauseDistribution(hydrogenDeathCauseCounts)}] sulfur[{formatDeathCauseDistribution(chemoDeathCauseCounts)}] photo[{formatDeathCauseDistribution(photoDeathCauseCounts)}] sapro[{formatDeathCauseDistribution(saproDeathCauseCounts)}] predator[{formatDeathCauseDistribution(predatorDeathCauseCounts)}]");
-        Debug.Log($"Atmosphere composition: CO2[{planetResourceMap.debugGlobalCO2}], O2[{planetResourceMap.debugGlobalO2}]");
+        Debug.Log($"Atmosphere composition: CO2[{planetResourceMap.debugGlobalCO2}], O2[{planetResourceMap.debugGlobalO2}], CH4[{planetResourceMap.debugGlobalCH4}]");
         Debug.Log($"Ocean chemistry: DissolvedFe2+[{dissolvedFe2OceanMean:F3} avg, {dissolvedFe2Total:F1} total, {(dissolvedFe2RemainingFraction * 100f):F1}% remaining]");
 
         resetPredationKillsWindow();

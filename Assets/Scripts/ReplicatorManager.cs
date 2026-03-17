@@ -74,11 +74,24 @@ public class ReplicatorManager : MonoBehaviour
     public float hydrogenotrophyCO2PerTick = 0.01f;
     public float hydrogenotrophyEnergyPerTick = 8f;
     [Range(0f, 1f)] public float hydrogenotrophyStoreFraction = 0.8f;
+    public float fermentationOrganicCPerTick = 0.02f;
+    public float fermentationEnergyPerTick = 0.04f;
+    public float methanogenesisH2PerTick = 0.02f;
+    public float methanogenesisCO2PerTick = 0.01f;
+    public float methanogenesisEnergyPerTick = 0.03f;
+    public float methanotrophyCH4PerTick = 0.01f;
+    public float methanotrophyO2PerTick = 0.01f;
+    public float methanotrophyEnergyPerTick = 0.04f;
 
     [Header("Hydrogen Metabolism Mutation")]
     [Range(0f, 1f)] public float hydrogenToPhotosynthesisMutationChance = 0.003f;
     [Range(0f, 1f)] public float hydrogenToSaprotrophyMutationChance = 0.003f;
     [Range(0f, 1f)] public float hydrogenToSulfurMutationChance = 0.003f;
+
+    [Header("Anaerobic Transition Mutation")]
+    [Range(0f, 1f)] public float hydrogenToFermentationMutationChance = 0.002f;
+    [Range(0f, 1f)] public float fermentationToMethanogenesisMutationChance = 0.002f;
+    [Range(0f, 1f)] public float methanogenesisToMethanotrophyMutationChance = 0.0015f;
 
     [Header("Locomotion Mutation")]
     [Range(0f, 1f)] public float locomotionMutationChance = 0.01f;
@@ -149,6 +162,9 @@ public class ReplicatorManager : MonoBehaviour
     public Vector2 photoTempRange = new Vector2(283.15f, 313.15f); // 10-40 °C
     public Vector2 saproTempRange = new Vector2(278.15f, 308.15f); // 5-35 °C
     public Vector2 predatorTempRange = new Vector2(283.15f, 323.15f); // 10-50 °C
+    public Vector2 fermentationTempRange = new Vector2(285.15f, 330.15f);
+    public Vector2 methanogenesisTempRange = new Vector2(305.15f, 355.15f);
+    public Vector2 methanotrophyTempRange = new Vector2(280.15f, 320.15f);
     public float defaultLethalMargin = 20f; // Kelvin (~20 °C beyond optimal range before death)
     [Range(0f, 1f)] public float tempMutationChance = 0.02f;
     public float tempMutationScale = 2f; // Kelvin mutation scale
@@ -298,6 +314,9 @@ public class ReplicatorManager : MonoBehaviour
     [SerializeField] private int photosynthAgentCount;
     [SerializeField] private int saprotrophAgentCount;
     [SerializeField] private int predatorAgentCount;
+    [SerializeField] private int fermenterAgentCount;
+    [SerializeField] private int methanogenAgentCount;
+    [SerializeField] private int methanotrophAgentCount;
     [SerializeField] private float averageOrganicCStore;
     [SerializeField] private int divisionEligibleAgentCount;
     private readonly ReplicatorHudPresenter hudPresenter = new ReplicatorHudPresenter();
@@ -501,6 +520,9 @@ public class ReplicatorManager : MonoBehaviour
             photosynthAgentCount,
             saprotrophAgentCount,
             predatorAgentCount,
+            fermenterAgentCount,
+            methanogenAgentCount,
+            methanotrophAgentCount,
             ref temperatureDisplayUnit);
     }
 
@@ -512,6 +534,9 @@ public class ReplicatorManager : MonoBehaviour
         int photo = 0;
         int sapro = 0;
         int predator = 0;
+        int ferment = 0;
+        int methanogen = 0;
+        int methanotroph = 0;
 
         for (int i = 0; i < agents.Count; i++)
         {
@@ -531,6 +556,18 @@ public class ReplicatorManager : MonoBehaviour
             {
                 predator++;
             }
+            else if (agents[i].metabolism == MetabolismType.Fermentation)
+            {
+                ferment++;
+            }
+            else if (agents[i].metabolism == MetabolismType.Methanogenesis)
+            {
+                methanogen++;
+            }
+            else if (agents[i].metabolism == MetabolismType.Methanotrophy)
+            {
+                methanotroph++;
+            }
             else
             {
                 sapro++;
@@ -542,6 +579,9 @@ public class ReplicatorManager : MonoBehaviour
         photosynthAgentCount = photo;
         saprotrophAgentCount = sapro;
         predatorAgentCount = predator;
+        fermenterAgentCount = ferment;
+        methanogenAgentCount = methanogen;
+        methanotrophAgentCount = methanotroph;
     }
 
 
@@ -557,6 +597,9 @@ public class ReplicatorManager : MonoBehaviour
             photosynthAgentCount,
             saprotrophAgentCount,
             predatorAgentCount,
+            fermenterAgentCount,
+            methanogenAgentCount,
+            methanotrophAgentCount,
             debugChemoTempSum,
             debugChemoTempCount,
             debugChemoStressedCount,
@@ -620,7 +663,7 @@ public class ReplicatorManager : MonoBehaviour
             ? hydrogenDeathCauseCounts
             : (metabolism == MetabolismType.Photosynthesis
                 ? photoDeathCauseCounts
-                : (metabolism == MetabolismType.Saprotrophy ? saproDeathCauseCounts : (metabolism == MetabolismType.Predation ? predatorDeathCauseCounts : chemoDeathCauseCounts)));
+                : ((metabolism == MetabolismType.Saprotrophy || metabolism == MetabolismType.Fermentation || metabolism == MetabolismType.Methanogenesis || metabolism == MetabolismType.Methanotrophy) ? saproDeathCauseCounts : (metabolism == MetabolismType.Predation ? predatorDeathCauseCounts : chemoDeathCauseCounts)));
 
         counts[causeIndex]++;
     }
@@ -682,7 +725,9 @@ public class ReplicatorManager : MonoBehaviour
             case DeathCause.Lack_Light: return "Light";
             case DeathCause.Lack_OrganicC_Food: return "OrgC";
             case DeathCause.Lack_O2: return "O2";
+            case DeathCause.Lack_CH4: return "CH4";
             case DeathCause.Lack_StoredC: return "StoredC";
+            case DeathCause.O2_Toxicity: return "O2Tox";
             case DeathCause.Predation: return "Predation";
             default: return "Unknown";
         }
@@ -728,6 +773,18 @@ public class ReplicatorManager : MonoBehaviour
         {
             best = agent.starveO2Seconds;
             cause = DeathCause.Lack_O2;
+        }
+
+        if (agent.starveCh4Seconds >= threshold && agent.starveCh4Seconds > best)
+        {
+            best = agent.starveCh4Seconds;
+            cause = DeathCause.Lack_CH4;
+        }
+
+        if (agent.o2ToxicSeconds >= threshold && agent.o2ToxicSeconds > best)
+        {
+            best = agent.o2ToxicSeconds;
+            cause = DeathCause.O2_Toxicity;
         }
 
         if (agent.starveStoredCSeconds >= threshold && agent.starveStoredCSeconds > best)
@@ -1361,6 +1418,14 @@ public class ReplicatorManager : MonoBehaviour
             HydrogenotrophyH2PerTick = hydrogenotrophyH2PerTick,
             HydrogenotrophyEnergyPerTick = hydrogenotrophyEnergyPerTick,
             HydrogenotrophyStoreFraction = hydrogenotrophyStoreFraction,
+            FermentationOrganicCPerTick = fermentationOrganicCPerTick,
+            FermentationEnergyPerTick = fermentationEnergyPerTick,
+            MethanogenesisCO2PerTick = methanogenesisCO2PerTick,
+            MethanogenesisH2PerTick = methanogenesisH2PerTick,
+            MethanogenesisEnergyPerTick = methanogenesisEnergyPerTick,
+            MethanotrophyCH4PerTick = methanotrophyCH4PerTick,
+            MethanotrophyO2PerTick = methanotrophyO2PerTick,
+            MethanotrophyEnergyPerTick = methanotrophyEnergyPerTick,
             ChemosynthesisCo2NeedPerTick = chemosynthesisCo2NeedPerTick,
             ChemosynthesisH2sNeedPerTick = chemosynthesisH2sNeedPerTick,
             ChemosynthesisEnergyPerTick = chemosynthesisEnergyPerTick,
@@ -1511,6 +1576,20 @@ public class ReplicatorManager : MonoBehaviour
                 {
                     childMetabolism = MetabolismType.SulfurChemosynthesis;
                 }
+                else if (UnityEngine.Random.value < Mathf.Clamp01(hydrogenToFermentationMutationChance))
+                {
+                    childMetabolism = MetabolismType.Fermentation;
+                }
+            }
+            else if (parent.metabolism == MetabolismType.Fermentation
+                && UnityEngine.Random.value < Mathf.Clamp01(fermentationToMethanogenesisMutationChance))
+            {
+                childMetabolism = MetabolismType.Methanogenesis;
+            }
+            else if (parent.metabolism == MetabolismType.Methanogenesis
+                && UnityEngine.Random.value < Mathf.Clamp01(methanogenesisToMethanotrophyMutationChance))
+            {
+                childMetabolism = MetabolismType.Methanotrophy;
             }
             else if (allowReverseMetabolismMutation)
             {
@@ -1828,6 +1907,21 @@ public class ReplicatorManager : MonoBehaviour
             return predatorTempRange;
         }
 
+        if (metabolism == MetabolismType.Fermentation)
+        {
+            return fermentationTempRange;
+        }
+
+        if (metabolism == MetabolismType.Methanogenesis)
+        {
+            return methanogenesisTempRange;
+        }
+
+        if (metabolism == MetabolismType.Methanotrophy)
+        {
+            return methanotrophyTempRange;
+        }
+
         return sulfurChemoTempRange;
     }
 
@@ -1872,6 +1966,21 @@ public class ReplicatorManager : MonoBehaviour
         return displacement + 0.05f;
     }
 
+
+    Color GetMetabolismBaseColor(MetabolismType metabolism)
+    {
+        switch (metabolism)
+        {
+            case MetabolismType.Photosynthesis: return new Color(0.52f, 0.95f, 0.52f);
+            case MetabolismType.Saprotrophy: return new Color(0.4f, 0.7f, 1f);
+            case MetabolismType.Predation: return new Color(1f, 0.35f, 0.35f);
+            case MetabolismType.Hydrogenotrophy: return new Color(0.86f, 1f, 0.98f);
+            case MetabolismType.Fermentation: return new Color(1.0f, 0.55f, 0.1f);
+            case MetabolismType.Methanogenesis: return new Color(0.6f, 0.3f, 0.9f);
+            case MetabolismType.Methanotrophy: return new Color(1.0f, 0.45f, 0.75f);
+            default: return Color.yellow;
+        }
+    }
     Color CalculateAgentColor(float age, float lifeRemaining, float energy, MetabolismType metabolism)
     {
         float intensity = 1.0f;

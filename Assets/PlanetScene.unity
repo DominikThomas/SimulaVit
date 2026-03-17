@@ -534,7 +534,7 @@ MonoBehaviour:
   persistence: 0.5
   noiseOffset: {x: 1, y: 1, z: 1}
   enableOcean: 1
-  oceanCoveragePercent: 45
+  oceanCoveragePercent: 70
   oceanDepth: 0.981
   oceanMaterial: {fileID: 2100000, guid: 46dc3c30d5ba4a64c9711ded62b7dd02, type: 2}
   enableAtmosphere: 1
@@ -629,9 +629,20 @@ MonoBehaviour:
   hydrogenotrophyCO2PerTick: 0.01
   hydrogenotrophyEnergyPerTick: 0.5
   hydrogenotrophyStoreFraction: 0.8
+  fermentationOrganicCPerTick: 0.02
+  fermentationEnergyPerTick: 4
+  methanogenesisH2PerTick: 0.02
+  methanogenesisCO2PerTick: 0.01
+  methanogenesisEnergyPerTick: 3
+  methanotrophyCH4PerTick: 0.01
+  methanotrophyO2PerTick: 0.01
+  methanotrophyEnergyPerTick: 4
   hydrogenToPhotosynthesisMutationChance: 0.5
   hydrogenToSaprotrophyMutationChance: 0.2
   hydrogenToSulfurMutationChance: 0.4
+  hydrogenToFermentationMutationChance: 0.3
+  fermentationToMethanogenesisMutationChance: 0.2
+  methanogenesisToMethanotrophyMutationChance: 0.15
   locomotionMutationChance: 0.333
   locomotionUpgradeChance: 0.5
   locomotionAnchoredMutationChance: 0.05
@@ -639,7 +650,7 @@ MonoBehaviour:
   anchoredToAmoeboidMutationChance: 0.001
   allowReverseMetabolismMutation: 0
   photosynthesisCo2PerTickAtFullInsolation: 0.02
-  photosynthesisEnergyPerCo2: 2
+  photosynthesisEnergyPerCo2: 1
   aerobicO2PerC: 0.02
   aerobicEnergyPerC: 0.05
   photosynthStoreFraction: 0.4
@@ -674,10 +685,13 @@ MonoBehaviour:
   fearMinDot: 0
   fearRequiresMotility: 1
   sulfurChemoTempRange: {x: 333.15, y: 393.15}
-  hydrogenTempRange: {x: 293.15, y: 343.15}
+  hydrogenTempRange: {x: 294.15, y: 343.15}
   photoTempRange: {x: 283.15, y: 313.15}
   saproTempRange: {x: 278.15, y: 308.15}
   predatorTempRange: {x: 283.15, y: 323.15}
+  fermentationTempRange: {x: 285.15, y: 330.15}
+  methanogenesisTempRange: {x: 305.15, y: 355.15}
+  methanotrophyTempRange: {x: 280.15, y: 320.15}
   defaultLethalMargin: 20
   tempMutationChance: 0.02
   tempMutationScale: 2
@@ -753,6 +767,9 @@ MonoBehaviour:
   photosynthAgentCount: 0
   saprotrophAgentCount: 0
   predatorAgentCount: 0
+  fermenterAgentCount: 0
+  methanogenAgentCount: 0
+  methanotrophAgentCount: 0
   averageOrganicCStore: 0
   divisionEligibleAgentCount: 0
   simulationPipeline: {fileID: 0}
@@ -807,6 +824,7 @@ MonoBehaviour:
   sunSkyRotator: {fileID: 0}
   baselineCO2: 5
   baselineO2: 0.01
+  baselineCH4: 0
   baselineS0: 0.05
   baselineSi: 0.35
   baselineCa: 0.25
@@ -842,7 +860,8 @@ MonoBehaviour:
   atmosphereToOceanO2TransferFractionPerTick: 1
   debugGlobalCO2: 5
   debugGlobalO2: 0.010003356
-  initialDissolvedFe2PlusPerOceanCell: 4
+  debugGlobalCH4: 0
+  initialDissolvedFe2PlusPerOceanCell: 8
   ventDissolvedFe2PlusPerTick: 0
   fe2PlusOxidationRatePerSecond: 0.4
   o2ConsumptionPerFe2PlusOxidized: 0.25
@@ -851,7 +870,7 @@ MonoBehaviour:
   debugDissolvedFe2PlusRemainingFraction: 1
   debugFeTotal: 0
   updateOceanColorFromDissolvedFe2Plus: 1
-  ironRichOceanColor: {r: 0.09812211, g: 0.4245283, b: 0.25743943, a: 1}
+  ironRichOceanColor: {r: 0.22, g: 0.55, b: 0.38, a: 1}
   oxygenatedOceanColor: {r: 0.18, g: 0.4, b: 0.75, a: 1}
   oceanColorLerpSpeed: 2
   baseTempKelvin: 273.15
