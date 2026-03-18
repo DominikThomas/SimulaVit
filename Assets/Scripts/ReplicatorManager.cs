@@ -95,7 +95,7 @@ public class ReplicatorManager : MonoBehaviour
     [Header("Anaerobic Transition Mutation")]
     [Range(0f, 1f)] public float hydrogenToFermentationMutationChance = 0.002f;
     [Range(0f, 1f)] public float fermentationToMethanogenesisMutationChance = 0.002f;
-    [Range(0f, 1f)] public float methanogenesisToMethanotrophyMutationChance = 0.0015f;
+    [Range(0f, 1f)] public float hydrogenToMethanotrophyMutationChance = 0.0015f;
 
     [Header("Locomotion Mutation")]
     [Range(0f, 1f)] public float locomotionMutationChance = 0.01f;
@@ -124,6 +124,26 @@ public class ReplicatorManager : MonoBehaviour
     public float nightRespirationCPerTick = 0.01f;
     public float nightRespirationEnergyPerC = 0.05f;
     public float nightRespirationO2PerC = 0.02f;
+
+    [Header("Photosynth Dark Anoxic Fallback")]
+    [Tooltip("Enable weak fermentation-like dark survival for photosynths when O2 is unavailable. This is maintenance only and should remain much weaker than aerobic dark respiration.")]
+    public bool photosynthDarkAnoxicEnabled = true;
+    [Tooltip("Stored organic C consumed per metabolism tick by dark anoxic fallback.")]
+    public float photosynthDarkAnoxicOrganicCUseRate = 0.008f;
+    [Tooltip("Energy yield multiplier relative to aerobic dark respiration from the same carbon.")]
+    [Range(0f, 1f)] public float photosynthDarkAnoxicEnergyYieldMultiplier = 0.2f;
+    [Tooltip("Upper bound on fraction of basal maintenance that anoxic dark fallback can cover per tick.")]
+    [Range(0f, 1f)] public float photosynthDarkAnoxicMaxFractionOfBaseMaintenanceCovered = 0.65f;
+    [Tooltip("Additional stress multiplier applied while using the dark anoxic fallback.")]
+    [Range(1f, 3f)] public float photosynthDarkAnoxicStressMultiplier = 1.3f;
+    [Tooltip("If false, photosynths in dark anoxic fallback are prevented from division.")]
+    public bool photosynthDarkAnoxicCanReplicate = false;
+    [Tooltip("Fraction of consumed stored carbon released as CO2 during dark anoxic fallback.")]
+    [Range(0f, 1f)] public float photosynthDarkAnoxicCO2ReleaseFraction = 0.55f;
+    [Tooltip("Small fraction of consumed stored carbon released as H2 byproduct.")]
+    [Range(0f, 1f)] public float photosynthDarkAnoxicH2ReleaseFraction = 0.03f;
+    [Tooltip("Tiny dissolved-organics leakage fraction coupled into ecosystem scent/organic leakage fields.")]
+    [Range(0f, 0.2f)] public float photosynthDarkAnoxicOrganicLeakFraction = 0.01f;
 
     [Header("Chemosynth Carbon Storage / Respiration")]
     [Range(0f, 1f)] public float chemosynthStoreFraction = 1.0f; // fraction of chemo CO2 consumed that becomes organicCStore
@@ -348,6 +368,13 @@ public class ReplicatorManager : MonoBehaviour
     private int debugHydrogenStressedCount;
     private int debugPhotoStressedCount;
     private int debugSaproStressedCount;
+    [SerializeField] private int debugPhotosynthLightModeCount;
+    [SerializeField] private int debugPhotosynthDarkAerobicModeCount;
+    [SerializeField] private int debugPhotosynthDarkAnoxicFallbackModeCount;
+    [SerializeField] private float debugPhotosynthDarkAnoxicOrganicCConsumedPerTick;
+    [SerializeField] private float debugPhotosynthDarkAnoxicEnergyGeneratedPerTick;
+    [SerializeField] private float debugPhotosynthDarkAnoxicCO2ReleasedPerTick;
+    [SerializeField] private float debugPhotosynthDarkAnoxicH2ReleasedPerTick;
     private float nextChemoSpawnDebugLogTime;
     private int[] chemoDeathCauseCounts;
     private int[] hydrogenDeathCauseCounts;
@@ -1419,6 +1446,15 @@ public class ReplicatorManager : MonoBehaviour
             PhotosynthesisEnergyPerCo2 = photosynthesisEnergyPerCo2,
             PhotosynthStoreFraction = photosynthStoreFraction,
             NightRespirationCPerTick = nightRespirationCPerTick,
+            PhotosynthDarkAnoxicEnabled = photosynthDarkAnoxicEnabled,
+            PhotosynthDarkAnoxicOrganicCUseRate = photosynthDarkAnoxicOrganicCUseRate,
+            PhotosynthDarkAnoxicEnergyYieldMultiplier = photosynthDarkAnoxicEnergyYieldMultiplier,
+            PhotosynthDarkAnoxicMaxFractionOfBaseMaintenanceCovered = photosynthDarkAnoxicMaxFractionOfBaseMaintenanceCovered,
+            PhotosynthDarkAnoxicStressMultiplier = photosynthDarkAnoxicStressMultiplier,
+            PhotosynthDarkAnoxicCanReplicate = photosynthDarkAnoxicCanReplicate,
+            PhotosynthDarkAnoxicCO2ReleaseFraction = photosynthDarkAnoxicCO2ReleaseFraction,
+            PhotosynthDarkAnoxicH2ReleaseFraction = photosynthDarkAnoxicH2ReleaseFraction,
+            PhotosynthDarkAnoxicOrganicLeakFraction = photosynthDarkAnoxicOrganicLeakFraction,
             SaproCPerTick = saproCPerTick,
             SaproAssimilationFraction = saproAssimilationFraction,
             SaproRespireStoreCPerTick = saproRespireStoreCPerTick,
@@ -1471,6 +1507,14 @@ public class ReplicatorManager : MonoBehaviour
         debugHydrogenStressedCount = debugSnapshot.HydrogenStressedCount;
         debugPhotoStressedCount = debugSnapshot.PhotoStressedCount;
         debugSaproStressedCount = debugSnapshot.SaproStressedCount;
+        debugPhotosynthLightModeCount = debugSnapshot.PhotosynthLightModeCount;
+        debugPhotosynthDarkAerobicModeCount = debugSnapshot.PhotosynthDarkAerobicModeCount;
+        debugPhotosynthDarkAnoxicFallbackModeCount = debugSnapshot.PhotosynthDarkAnoxicFallbackModeCount;
+        float fallbackCount = Mathf.Max(1, debugSnapshot.PhotosynthDarkAnoxicFallbackModeCount);
+        debugPhotosynthDarkAnoxicOrganicCConsumedPerTick = debugSnapshot.PhotosynthDarkAnoxicOrganicCConsumed / fallbackCount;
+        debugPhotosynthDarkAnoxicEnergyGeneratedPerTick = debugSnapshot.PhotosynthDarkAnoxicEnergyGenerated / fallbackCount;
+        debugPhotosynthDarkAnoxicCO2ReleasedPerTick = debugSnapshot.PhotosynthDarkAnoxicCO2Released / fallbackCount;
+        debugPhotosynthDarkAnoxicH2ReleasedPerTick = debugSnapshot.PhotosynthDarkAnoxicH2Released / fallbackCount;
     }
 
 
@@ -1597,15 +1641,18 @@ public class ReplicatorManager : MonoBehaviour
             {
                 childMetabolism = MetabolismType.Methanogenesis;
             }
-            else if (parent.metabolism == MetabolismType.Methanogenesis
-                && UnityEngine.Random.value < Mathf.Clamp01(methanogenesisToMethanotrophyMutationChance))
-            {
-                childMetabolism = MetabolismType.Methanotrophy;
-            }
             else if (allowReverseMetabolismMutation)
             {
                 childMetabolism = MetabolismType.Hydrogenotrophy;
             }
+        }
+
+        if (childMetabolism != MetabolismType.Methanotrophy
+            && parent.metabolism == MetabolismType.Hydrogenotrophy
+            && UnityEngine.Random.value < Mathf.Clamp01(hydrogenToMethanotrophyMutationChance)
+            && CanMutateToMethanotrophy())
+        {
+            childMetabolism = MetabolismType.Methanotrophy;
         }
 
         if (childMetabolism != MetabolismType.Saprotrophy
@@ -1730,6 +1777,17 @@ public class ReplicatorManager : MonoBehaviour
         float globalOrganicC = EstimateGlobalOrganicC();
 
         return globalO2 > minGlobalO2 && globalOrganicC > minGlobalOrganicC;
+    }
+
+    bool CanMutateToMethanotrophy()
+    {
+        const float minGlobalO2 = 0.01f;
+        const float minGlobalMethane = 0.01f;
+
+        float globalO2 = planetResourceMap.debugGlobalO2;
+        float globalMethane = planetResourceMap.debugGlobalCH4;
+
+        return globalO2 > minGlobalO2 && globalMethane > minGlobalMethane;
     }
 
     float EstimateGlobalOrganicC()
@@ -1982,13 +2040,13 @@ public class ReplicatorManager : MonoBehaviour
     {
         switch (metabolism)
         {
-            case MetabolismType.Photosynthesis: return new Color(0.52f, 0.95f, 0.52f);
-            case MetabolismType.Saprotrophy: return new Color(0.4f, 0.7f, 1f);
-            case MetabolismType.Predation: return new Color(1f, 0.35f, 0.35f);
+            case MetabolismType.Photosynthesis: return Color.green;
+            case MetabolismType.Saprotrophy: return Color.blue;
+            case MetabolismType.Predation: return Color.red;
             case MetabolismType.Hydrogenotrophy: return new Color(0.86f, 1f, 0.98f);
-            case MetabolismType.Fermentation: return new Color(1.0f, 0.55f, 0.1f);
-            case MetabolismType.Methanogenesis: return new Color(0.6f, 0.3f, 0.9f);
-            case MetabolismType.Methanotrophy: return new Color(1.0f, 0.45f, 0.75f);
+            case MetabolismType.Fermentation: return Color.orangeRed;
+            case MetabolismType.Methanogenesis: return Color.purple;
+            case MetabolismType.Methanotrophy: return Color.pink;
             default: return Color.yellow;
         }
     }
@@ -2015,15 +2073,7 @@ public class ReplicatorManager : MonoBehaviour
             intensity *= Mathf.Lerp(0.2f, 1.5f, energyScale);
         }
 
-        Color predatorBaseColor = Color.Lerp(Color.red, Color.white, 1f - Mathf.Clamp01(predatorSpawnColorStrength));
-        Color metabolismBaseColor = metabolism == MetabolismType.Photosynthesis
-            ? Color.green
-            : metabolism == MetabolismType.Saprotrophy
-                ? Color.blue
-                : metabolism == MetabolismType.Predation
-                    ? predatorBaseColor
-                    : metabolism == MetabolismType.Hydrogenotrophy ? new Color(0.86f, 1f, 0.98f) : Color.yellow;
-        Color finalColor = metabolismBaseColor * intensity;
+        Color finalColor = GetMetabolismBaseColor(metabolism) * intensity;
         finalColor.a = alpha;
         return finalColor;
     }

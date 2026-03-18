@@ -21,6 +21,15 @@ public class ReplicatorMetabolismSystem
         public float PhotosynthesisEnergyPerCo2;
         public float PhotosynthStoreFraction;
         public float NightRespirationCPerTick;
+        public bool PhotosynthDarkAnoxicEnabled;
+        public float PhotosynthDarkAnoxicOrganicCUseRate;
+        public float PhotosynthDarkAnoxicEnergyYieldMultiplier;
+        public float PhotosynthDarkAnoxicMaxFractionOfBaseMaintenanceCovered;
+        public float PhotosynthDarkAnoxicStressMultiplier;
+        public bool PhotosynthDarkAnoxicCanReplicate;
+        public float PhotosynthDarkAnoxicCO2ReleaseFraction;
+        public float PhotosynthDarkAnoxicH2ReleaseFraction;
+        public float PhotosynthDarkAnoxicOrganicLeakFraction;
         public float SaproCPerTick;
         public float SaproAssimilationFraction;
         public float SaproRespireStoreCPerTick;
@@ -63,6 +72,13 @@ public class ReplicatorMetabolismSystem
         public int HydrogenStressedCount;
         public int PhotoStressedCount;
         public int SaproStressedCount;
+        public int PhotosynthLightModeCount;
+        public int PhotosynthDarkAerobicModeCount;
+        public int PhotosynthDarkAnoxicFallbackModeCount;
+        public float PhotosynthDarkAnoxicOrganicCConsumed;
+        public float PhotosynthDarkAnoxicEnergyGenerated;
+        public float PhotosynthDarkAnoxicCO2Released;
+        public float PhotosynthDarkAnoxicH2Released;
     }
 
     public void MetabolismTick(
@@ -122,6 +138,10 @@ public class ReplicatorMetabolismSystem
             float stress = insideOptimalBand ? 0f : Mathf.Clamp01(d / lethalMargin);
             float performance = insideOptimalBand ? 1f : Mathf.Lerp(0.7f, 0.1f, stress);
 
+            populationState.CanReplicate[i] = true;
+            float metabolismStressMultiplier = 1f;
+            float speedCapMultiplier = 1f;
+
             if (metabolism == MetabolismType.Photosynthesis)
             {
                 debugSnapshot.PhotoTempSum += temp;
@@ -160,59 +180,22 @@ public class ReplicatorMetabolismSystem
 
             if (metabolism == MetabolismType.Photosynthesis)
             {
-                float insolation = Mathf.Clamp01(planetResourceMap.GetInsolation(dir));
-                bool lackCo2 = false;
-                bool lackLight = false;
-                bool lackO2 = false;
-                bool lackStoredC = false;
-
-                if (insolation > 0f)
-                {
-                    float co2Need = Mathf.Max(0f, settings.PhotosynthesisCo2PerTickAtFullInsolation) * insolation;
-                    float co2Available = planetResourceMap.Get(ResourceType.CO2, cellIndex);
-                    float co2Consumed = Mathf.Min(co2Need, co2Available);
-
-                    lackCo2 = co2Need > 0f && co2Consumed <= Mathf.Epsilon;
-
-                    if (co2Consumed > 0f)
-                    {
-                        planetResourceMap.Add(ResourceType.CO2, cellIndex, -co2Consumed);
-                        planetResourceMap.Add(ResourceType.O2, cellIndex, co2Consumed);
-
-                        float producedEnergy = co2Consumed * Mathf.Max(0f, settings.PhotosynthesisEnergyPerCo2) * performance;
-                        populationState.Energy[i] += producedEnergy;
-
-                        float storedOrganicC = Mathf.Max(0f, settings.PhotosynthStoreFraction) * co2Consumed;
-                        if (storedOrganicC > 0f)
-                            populationState.OrganicCStore[i] = Mathf.Clamp(populationState.OrganicCStore[i] + storedOrganicC, 0f, maxStore);
-                    }
-                }
-                else
-                {
-                    float desiredResp = Mathf.Max(0f, settings.NightRespirationCPerTick);
-                    float o2Available = planetResourceMap.Get(ResourceType.O2, cellIndex);
-                    bool hasStore = populationState.OrganicCStore[i] > 0f;
-                    lackLight = !hasStore;
-                    lackStoredC = !hasStore && desiredResp > 0f;
-                    lackO2 = hasStore && desiredResp > 0f && o2Available <= Mathf.Epsilon;
-
-                    float gained = AerobicRespireFromStore(ref populationState.OrganicCStore[i], ref populationState.Energy[i], cellIndex, desiredResp, o2PerC, energyPerC, planetResourceMap);
-                    if (gained > 0f)
-                    {
-                        populationState.Energy[i] -= gained * (1f - performance);
-                        lackLight = false;
-                        lackStoredC = false;
-                        lackO2 = false;
-                    }
-                }
-
-                populationState.StarveCo2Seconds[i] = UpdateStarveTimer(populationState.StarveCo2Seconds[i], lackCo2, dtTick);
-                populationState.StarveLightSeconds[i] = UpdateStarveTimer(populationState.StarveLightSeconds[i], lackLight, dtTick);
-                populationState.StarveO2Seconds[i] = UpdateStarveTimer(populationState.StarveO2Seconds[i], lackO2, dtTick);
-                populationState.StarveStoredCSeconds[i] = UpdateStarveTimer(populationState.StarveStoredCSeconds[i], lackStoredC, dtTick);
-                populationState.StarveH2sSeconds[i] = 0f;
-                populationState.StarveH2Seconds[i] = 0f;
-                populationState.StarveOrganicCFoodSeconds[i] = 0f;
+                ProcessPhotosynthesisMetabolism(
+                    populationState,
+                    i,
+                    dir,
+                    cellIndex,
+                    planetResourceMap,
+                    settings,
+                    performance,
+                    basalCost,
+                    o2PerC,
+                    energyPerC,
+                    maxStore,
+                    dtTick,
+                    ref metabolismStressMultiplier,
+                    ref speedCapMultiplier,
+                    ref debugSnapshot);
             }
             else if (metabolism == MetabolismType.Saprotrophy)
             {
@@ -576,9 +559,9 @@ public class ReplicatorMetabolismSystem
             }
 
             float metabolismBasalCostMultiplier = metabolism == MetabolismType.Predation ? Mathf.Max(0f, settings.PredatorBasalCostMultiplier) : 1f;
-            float stressedBasal = basalCost * metabolismBasalCostMultiplier * (1f + stress);
+            float stressedBasal = basalCost * metabolismBasalCostMultiplier * (1f + stress * metabolismStressMultiplier);
             float speedMultiplier = metabolism == MetabolismType.Predation ? Mathf.Max(0f, settings.PredatorMoveSpeedMultiplier) : 1f;
-            populationState.SpeedFactor[i] = Mathf.Clamp((populationState.Energy[i] / safeEnergyForFullSpeed) * performance * speedMultiplier, settings.MinSpeedFactor, 1f);
+            populationState.SpeedFactor[i] = Mathf.Clamp((populationState.Energy[i] / safeEnergyForFullSpeed) * performance * speedMultiplier, settings.MinSpeedFactor, speedCapMultiplier);
             float movementCost = 0f;
             switch (locomotion)
             {
@@ -630,6 +613,250 @@ public class ReplicatorMetabolismSystem
                 agents.RemoveAt(index);
             }
         }
+    }
+
+    private static void ProcessPhotosynthesisMetabolism(
+        ReplicatorPopulationState populationState,
+        int index,
+        Vector3 dir,
+        int cellIndex,
+        PlanetResourceMap planetResourceMap,
+        Settings settings,
+        float performance,
+        float basalCost,
+        float o2PerC,
+        float energyPerC,
+        float maxStore,
+        float dtTick,
+        ref float metabolismStressMultiplier,
+        ref float speedCapMultiplier,
+        ref DebugSnapshot debugSnapshot)
+    {
+        float insolation = Mathf.Clamp01(planetResourceMap.GetInsolation(dir));
+        bool lackCo2 = false;
+        bool lackLight = false;
+        bool lackO2 = false;
+        bool lackStoredC = false;
+
+        if (TryPhotosynthesisEnergyGain(populationState, index, cellIndex, planetResourceMap, settings, insolation, performance))
+        {
+            debugSnapshot.PhotosynthLightModeCount++;
+        }
+        else
+        {
+            if (insolation > 0f)
+            {
+                float co2Need = Mathf.Max(0f, settings.PhotosynthesisCo2PerTickAtFullInsolation) * insolation;
+                float co2Available = planetResourceMap.Get(ResourceType.CO2, cellIndex);
+                lackCo2 = co2Need > 0f && co2Available <= Mathf.Epsilon;
+            }
+
+            float gainedAerobic = TryPhotosynthAerobicDarkRespiration(populationState, index, cellIndex, planetResourceMap, settings, o2PerC, energyPerC, performance, out lackStoredC, out lackO2);
+            if (gainedAerobic > 0f)
+            {
+                debugSnapshot.PhotosynthDarkAerobicModeCount++;
+            }
+            else
+            {
+                bool usedFallback = TryPhotosynthAnoxicDarkFallback(
+                    populationState,
+                    index,
+                    cellIndex,
+                    planetResourceMap,
+                    settings,
+                    basalCost,
+                    performance,
+                    out float fallbackUsed,
+                    out float fallbackEnergy,
+                    out float fallbackCO2,
+                    out float fallbackH2);
+
+                if (usedFallback)
+                {
+                    // Simplified biology abstraction: this is weak fermentation-like dark maintenance from stored photosynthate,
+                    // not full anaerobic respiration. It keeps pre-oxygenation photosynths alive overnight but much weaker than aerobic nights.
+                    debugSnapshot.PhotosynthDarkAnoxicFallbackModeCount++;
+                    debugSnapshot.PhotosynthDarkAnoxicOrganicCConsumed += fallbackUsed;
+                    debugSnapshot.PhotosynthDarkAnoxicEnergyGenerated += fallbackEnergy;
+                    debugSnapshot.PhotosynthDarkAnoxicCO2Released += fallbackCO2;
+                    debugSnapshot.PhotosynthDarkAnoxicH2Released += fallbackH2;
+                    populationState.CanReplicate[index] = settings.PhotosynthDarkAnoxicCanReplicate;
+                    speedCapMultiplier = Mathf.Min(speedCapMultiplier, 0.5f);
+                    metabolismStressMultiplier = Mathf.Max(1f, settings.PhotosynthDarkAnoxicStressMultiplier);
+                    lackLight = false;
+                    lackStoredC = false;
+                    lackO2 = false;
+                }
+                else
+                {
+                    lackLight = true;
+                }
+            }
+        }
+
+        if (insolation <= 0f)
+        {
+            if (populationState.OrganicCStore[index] <= Mathf.Epsilon)
+            {
+                lackStoredC = true;
+            }
+
+            if (planetResourceMap.Get(ResourceType.O2, cellIndex) <= Mathf.Epsilon)
+            {
+                bool fallbackPossible = settings.PhotosynthDarkAnoxicEnabled && populationState.OrganicCStore[index] > Mathf.Epsilon;
+                lackO2 = !fallbackPossible;
+            }
+        }
+
+        populationState.StarveCo2Seconds[index] = UpdateStarveTimer(populationState.StarveCo2Seconds[index], lackCo2, dtTick);
+        populationState.StarveLightSeconds[index] = UpdateStarveTimer(populationState.StarveLightSeconds[index], lackLight, dtTick);
+        populationState.StarveO2Seconds[index] = UpdateStarveTimer(populationState.StarveO2Seconds[index], lackO2, dtTick);
+        populationState.StarveStoredCSeconds[index] = UpdateStarveTimer(populationState.StarveStoredCSeconds[index], lackStoredC, dtTick);
+        populationState.StarveH2sSeconds[index] = 0f;
+        populationState.StarveH2Seconds[index] = 0f;
+        populationState.StarveOrganicCFoodSeconds[index] = 0f;
+    }
+
+    private static bool TryPhotosynthesisEnergyGain(
+        ReplicatorPopulationState populationState,
+        int index,
+        int cellIndex,
+        PlanetResourceMap planetResourceMap,
+        Settings settings,
+        float insolation,
+        float performance)
+    {
+        if (insolation <= 0f)
+        {
+            return false;
+        }
+
+        float co2Need = Mathf.Max(0f, settings.PhotosynthesisCo2PerTickAtFullInsolation) * insolation;
+        float co2Available = planetResourceMap.Get(ResourceType.CO2, cellIndex);
+        float co2Consumed = Mathf.Min(co2Need, co2Available);
+        if (co2Consumed <= 0f)
+        {
+            return false;
+        }
+
+        planetResourceMap.Add(ResourceType.CO2, cellIndex, -co2Consumed);
+        planetResourceMap.Add(ResourceType.O2, cellIndex, co2Consumed);
+
+        float producedEnergy = co2Consumed * Mathf.Max(0f, settings.PhotosynthesisEnergyPerCo2) * performance;
+        populationState.Energy[index] += producedEnergy;
+
+        float storedOrganicC = Mathf.Max(0f, settings.PhotosynthStoreFraction) * co2Consumed;
+        if (storedOrganicC > 0f)
+        {
+            populationState.OrganicCStore[index] = Mathf.Clamp(populationState.OrganicCStore[index] + storedOrganicC, 0f, Mathf.Max(0f, settings.MaxOrganicCStore));
+        }
+
+        return true;
+    }
+
+    private static float TryPhotosynthAerobicDarkRespiration(
+        ReplicatorPopulationState populationState,
+        int index,
+        int cellIndex,
+        PlanetResourceMap planetResourceMap,
+        Settings settings,
+        float o2PerC,
+        float energyPerC,
+        float performance,
+        out bool lackStoredC,
+        out bool lackO2)
+    {
+        float desiredResp = Mathf.Max(0f, settings.NightRespirationCPerTick);
+        float o2Available = planetResourceMap.Get(ResourceType.O2, cellIndex);
+        bool hasStore = populationState.OrganicCStore[index] > 0f;
+        lackStoredC = !hasStore && desiredResp > 0f;
+        lackO2 = hasStore && desiredResp > 0f && o2Available <= Mathf.Epsilon;
+
+        float gained = AerobicRespireFromStore(ref populationState.OrganicCStore[index], ref populationState.Energy[index], cellIndex, desiredResp, o2PerC, energyPerC, planetResourceMap);
+        if (gained > 0f)
+        {
+            populationState.Energy[index] -= gained * (1f - performance);
+            lackStoredC = false;
+            lackO2 = false;
+        }
+
+        return gained;
+    }
+
+    private static bool TryPhotosynthAnoxicDarkFallback(
+        ReplicatorPopulationState populationState,
+        int index,
+        int cellIndex,
+        PlanetResourceMap planetResourceMap,
+        Settings settings,
+        float basalCost,
+        float performance,
+        out float organicCUsed,
+        out float energyGenerated,
+        out float co2Released,
+        out float h2Released)
+    {
+        organicCUsed = 0f;
+        energyGenerated = 0f;
+        co2Released = 0f;
+        h2Released = 0f;
+
+        if (!settings.PhotosynthDarkAnoxicEnabled)
+        {
+            return false;
+        }
+
+        if (planetResourceMap.Get(ResourceType.O2, cellIndex) > Mathf.Epsilon)
+        {
+            return false;
+        }
+
+        float stored = populationState.OrganicCStore[index];
+        if (stored <= Mathf.Epsilon)
+        {
+            return false;
+        }
+
+        float cUseRate = Mathf.Max(0f, settings.PhotosynthDarkAnoxicOrganicCUseRate);
+        float cToUse = Mathf.Min(stored, cUseRate);
+        if (cToUse <= 0f)
+        {
+            return false;
+        }
+
+        float aerobicEquivalentEnergy = cToUse * Mathf.Max(0f, settings.AerobicEnergyPerC);
+        float weakEnergy = aerobicEquivalentEnergy * Mathf.Clamp01(settings.PhotosynthDarkAnoxicEnergyYieldMultiplier) * performance;
+
+        float maxMaintenance = Mathf.Max(0f, basalCost) * Mathf.Clamp01(settings.PhotosynthDarkAnoxicMaxFractionOfBaseMaintenanceCovered);
+        energyGenerated = Mathf.Min(weakEnergy, maxMaintenance);
+        if (energyGenerated <= 0f)
+        {
+            return false;
+        }
+
+        organicCUsed = cToUse;
+        populationState.OrganicCStore[index] = Mathf.Max(0f, stored - organicCUsed);
+        populationState.Energy[index] += energyGenerated;
+
+        co2Released = organicCUsed * Mathf.Clamp01(settings.PhotosynthDarkAnoxicCO2ReleaseFraction);
+        if (co2Released > 0f)
+        {
+            planetResourceMap.Add(ResourceType.CO2, cellIndex, co2Released);
+        }
+
+        h2Released = organicCUsed * Mathf.Clamp01(settings.PhotosynthDarkAnoxicH2ReleaseFraction);
+        if (h2Released > 0f)
+        {
+            planetResourceMap.Add(ResourceType.H2, cellIndex, h2Released);
+        }
+
+        float dissolvedOrganicLeak = organicCUsed * Mathf.Clamp01(settings.PhotosynthDarkAnoxicOrganicLeakFraction);
+        if (dissolvedOrganicLeak > 0f)
+        {
+            planetResourceMap.Add(ResourceType.DissolvedOrganicLeak, cellIndex, dissolvedOrganicLeak);
+        }
+
+        return true;
     }
 
     private static float UpdateStarveTimer(float current, bool deprived, float dt)
