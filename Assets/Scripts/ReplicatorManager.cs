@@ -95,7 +95,7 @@ public class ReplicatorManager : MonoBehaviour
     [Header("Anaerobic Transition Mutation")]
     [Range(0f, 1f)] public float hydrogenToFermentationMutationChance = 0.002f;
     [Range(0f, 1f)] public float fermentationToMethanogenesisMutationChance = 0.002f;
-    [Range(0f, 1f)] public float methanogenesisToMethanotrophyMutationChance = 0.0015f;
+    [Range(0f, 1f)] public float hydrogenToMethanotrophyMutationChance = 0.0015f;
 
     [Header("Locomotion Mutation")]
     [Range(0f, 1f)] public float locomotionMutationChance = 0.01f;
@@ -1641,15 +1641,18 @@ public class ReplicatorManager : MonoBehaviour
             {
                 childMetabolism = MetabolismType.Methanogenesis;
             }
-            else if (parent.metabolism == MetabolismType.Methanogenesis
-                && UnityEngine.Random.value < Mathf.Clamp01(methanogenesisToMethanotrophyMutationChance))
-            {
-                childMetabolism = MetabolismType.Methanotrophy;
-            }
             else if (allowReverseMetabolismMutation)
             {
                 childMetabolism = MetabolismType.Hydrogenotrophy;
             }
+        }
+
+        if (childMetabolism != MetabolismType.Methanotrophy
+            && parent.metabolism == MetabolismType.Hydrogenotrophy
+            && UnityEngine.Random.value < Mathf.Clamp01(hydrogenToMethanotrophyMutationChance)
+            && CanMutateToMethanotrophy())
+        {
+            childMetabolism = MetabolismType.Methanotrophy;
         }
 
         if (childMetabolism != MetabolismType.Saprotrophy
@@ -1774,6 +1777,17 @@ public class ReplicatorManager : MonoBehaviour
         float globalOrganicC = EstimateGlobalOrganicC();
 
         return globalO2 > minGlobalO2 && globalOrganicC > minGlobalOrganicC;
+    }
+
+    bool CanMutateToMethanotrophy()
+    {
+        const float minGlobalO2 = 0.01f;
+        const float minGlobalMethane = 0.01f;
+
+        float globalO2 = planetResourceMap.debugGlobalO2;
+        float globalMethane = planetResourceMap.debugGlobalCH4;
+
+        return globalO2 > minGlobalO2 && globalMethane > minGlobalMethane;
     }
 
     float EstimateGlobalOrganicC()
@@ -2026,13 +2040,13 @@ public class ReplicatorManager : MonoBehaviour
     {
         switch (metabolism)
         {
-            case MetabolismType.Photosynthesis: return new Color(0.52f, 0.95f, 0.52f);
-            case MetabolismType.Saprotrophy: return new Color(0.4f, 0.7f, 1f);
-            case MetabolismType.Predation: return new Color(1f, 0.35f, 0.35f);
+            case MetabolismType.Photosynthesis: return Color.green;
+            case MetabolismType.Saprotrophy: return Color.blue;
+            case MetabolismType.Predation: return Color.red;
             case MetabolismType.Hydrogenotrophy: return new Color(0.86f, 1f, 0.98f);
-            case MetabolismType.Fermentation: return new Color(1.0f, 0.55f, 0.1f);
-            case MetabolismType.Methanogenesis: return new Color(0.6f, 0.3f, 0.9f);
-            case MetabolismType.Methanotrophy: return new Color(1.0f, 0.45f, 0.75f);
+            case MetabolismType.Fermentation: return Color.orangeRed;
+            case MetabolismType.Methanogenesis: return Color.purple;
+            case MetabolismType.Methanotrophy: return Color.pink;
             default: return Color.yellow;
         }
     }
@@ -2059,15 +2073,7 @@ public class ReplicatorManager : MonoBehaviour
             intensity *= Mathf.Lerp(0.2f, 1.5f, energyScale);
         }
 
-        Color predatorBaseColor = Color.Lerp(Color.red, Color.white, 1f - Mathf.Clamp01(predatorSpawnColorStrength));
-        Color metabolismBaseColor = metabolism == MetabolismType.Photosynthesis
-            ? Color.green
-            : metabolism == MetabolismType.Saprotrophy
-                ? Color.blue
-                : metabolism == MetabolismType.Predation
-                    ? predatorBaseColor
-                    : metabolism == MetabolismType.Hydrogenotrophy ? new Color(0.86f, 1f, 0.98f) : Color.yellow;
-        Color finalColor = metabolismBaseColor * intensity;
+        Color finalColor = GetMetabolismBaseColor(metabolism) * intensity;
         finalColor.a = alpha;
         return finalColor;
     }
