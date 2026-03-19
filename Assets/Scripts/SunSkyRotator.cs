@@ -71,8 +71,7 @@ public class SunSkyRotator : MonoBehaviour
 
     void Update()
     {
-        float simulationSpeedFactor = GetSimulationSpeedFactor();
-        float dt = Time.deltaTime * simulationSpeedFactor;
+        float dt = GetSimulationDeltaTime();
         Vector3 axis = GetOrbitAxis();
 
         accumulatedOrbitAngle += orbitDegreesPerSecond * dt;
@@ -153,20 +152,20 @@ public class SunSkyRotator : MonoBehaviour
         }
     }
 
-    float GetSimulationSpeedFactor()
+    float GetSimulationDeltaTime()
     {
         if (!scaleRotationWithSimulationSpeed)
         {
-            return 1f;
+            return Time.unscaledDeltaTime;
         }
 
         ResolveReplicatorManagerReference();
         if (replicatorManager == null)
         {
-            return 1f;
+            return Time.unscaledDeltaTime;
         }
 
-        return Mathf.Max(0f, replicatorManager.SimulationStepsPerFrame);
+        return Mathf.Max(0f, replicatorManager.FrameSimulationDeltaTime);
     }
 
     void ResolvePlanetRadius()
