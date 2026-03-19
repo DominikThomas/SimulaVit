@@ -326,6 +326,8 @@ public class ReplicatorManager : MonoBehaviour
     public float SimulationSpeedMultiplier => simulationPipeline != null ? simulationPipeline.SimulationSpeedMultiplier : runtimeSimulationStepsPerFrame;
     public float SimulationDeltaTime => simulationPipeline != null ? simulationPipeline.SimulationDeltaTime : 0f;
     public float FrameSimulationDeltaTime => simulationPipeline != null ? simulationPipeline.FrameSimulationDeltaTime : 0f;
+    public bool ShouldAdvanceSimulation => simulationPipeline != null && simulationPipeline.ShouldAdvanceSimulation;
+    public bool PauseDetected => simulationPipeline != null && simulationPipeline.PauseDetected;
     public int TotalPopulation => agents.Count;
     public int PredatorCount => predatorAgentCount;
     public double SimulationTimeSeconds => simulationPipeline != null ? simulationPipeline.SimulationTimeSeconds : simulationTimeSeconds;

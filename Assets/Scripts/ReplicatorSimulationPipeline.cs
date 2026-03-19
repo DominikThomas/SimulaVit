@@ -1,5 +1,8 @@
 using System;
 using UnityEngine;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 [DefaultExecutionOrder(-1000)]
 public class ReplicatorSimulationPipeline : MonoBehaviour
@@ -22,6 +25,10 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
     [SerializeField] private float frameSimulationDeltaTime;
     [SerializeField] private double simulationTimeSeconds;
     [SerializeField] private bool movementUsesAuthoritativeSimulationDelta = true;
+    [SerializeField] private bool shouldAdvanceSimulation = true;
+    [SerializeField] private bool pauseDetected;
+
+    private bool discardNextFrameDelta;
 
     public int SimulationStepsPerFrame => simulationStepsPerFrame;
     public float SimulationSpeedMultiplier => simulationSpeedMultiplier;
@@ -30,6 +37,8 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
     public float FrameSimulationDeltaTime => frameSimulationDeltaTime;
     public double SimulationTimeSeconds => simulationTimeSeconds;
     public bool MovementUsesAuthoritativeSimulationDelta => movementUsesAuthoritativeSimulationDelta;
+    public bool ShouldAdvanceSimulation => shouldAdvanceSimulation;
+    public bool PauseDetected => pauseDetected;
 
     private void Awake()
     {
@@ -48,7 +57,53 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
         }
 
         SetSimulationStepsPerFrame(replicatorManager.RuntimeSimulationStepsPerFrame);
+
+#if UNITY_EDITOR
+        EditorApplication.pauseStateChanged += OnEditorPauseStateChanged;
+#endif
     }
+
+    private void OnDestroy()
+    {
+#if UNITY_EDITOR
+        EditorApplication.pauseStateChanged -= OnEditorPauseStateChanged;
+#endif
+    }
+
+    private void OnApplicationPause(bool isPaused)
+    {
+        pauseDetected = isPaused || IsEditorPaused();
+        discardNextFrameDelta = true;
+        if (pauseDetected)
+        {
+            ResetFrameTiming();
+        }
+    }
+
+    private void OnApplicationFocus(bool hasFocus)
+    {
+        if (!hasFocus)
+        {
+            pauseDetected = true;
+            discardNextFrameDelta = true;
+            ResetFrameTiming();
+            return;
+        }
+
+        discardNextFrameDelta = true;
+    }
+
+#if UNITY_EDITOR
+    private void OnEditorPauseStateChanged(PauseState pauseState)
+    {
+        pauseDetected = pauseState == PauseState.Paused;
+        discardNextFrameDelta = true;
+        if (pauseDetected)
+        {
+            ResetFrameTiming();
+        }
+    }
+#endif
 
     public void SetSpeedProfile(SpeedProfile profile)
     {
@@ -66,6 +121,29 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
     {
         if (replicatorManager == null || !replicatorManager.IsInitializedForSimulation)
         {
+            shouldAdvanceSimulation = false;
+            ResetFrameTiming();
+            return;
+        }
+
+        pauseDetected = IsApplicationPauseDetected();
+        shouldAdvanceSimulation = simulationStepsPerFrame > 0 && !pauseDetected;
+
+        if (!shouldAdvanceSimulation)
+        {
+            ResetFrameTiming();
+            if (!pauseDetected && replicatorManager.enableRendering && replicatorManager.ShouldRenderThisFrame(simulationStepsPerFrame))
+            {
+                replicatorManager.RenderAgents();
+            }
+
+            return;
+        }
+
+        if (discardNextFrameDelta)
+        {
+            discardNextFrameDelta = false;
+            ResetFrameTiming();
             return;
         }
 
@@ -86,6 +164,33 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
 
         replicatorManager.UpdateMetabolismCounts();
         replicatorManager.LogMetabolismDebugThrottled();
+    }
+
+    private void ResetFrameTiming()
+    {
+        simulationSpeedMultiplier = simulationStepsPerFrame;
+        frameDeltaTime = 0f;
+        simulationDeltaTime = 0f;
+        frameSimulationDeltaTime = 0f;
+    }
+
+    private bool IsApplicationPauseDetected()
+    {
+        if (Application.isPaused)
+        {
+            return true;
+        }
+
+        return IsEditorPaused();
+    }
+
+    private static bool IsEditorPaused()
+    {
+#if UNITY_EDITOR
+        return EditorApplication.isPaused;
+#else
+        return false;
+#endif
     }
 
     private void RunSimulationStep(float stepDeltaTime)
