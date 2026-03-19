@@ -1,6 +1,8 @@
 using System;
-using System.Reflection;
 using UnityEngine;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 [DefaultExecutionOrder(-1000)]
 public class ReplicatorSimulationPipeline : MonoBehaviour
@@ -16,26 +18,27 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
 
     [Header("Stepping")]
     [SerializeField, Min(0)] private int simulationStepsPerFrame = 1;
+    [Header("Diagnostics")]
+    [SerializeField] private float simulationSpeedMultiplier = 1f;
+    [SerializeField] private float frameDeltaTime;
+    [SerializeField] private float simulationDeltaTime;
+    [SerializeField] private float frameSimulationDeltaTime;
+    [SerializeField] private double simulationTimeSeconds;
+    [SerializeField] private bool movementUsesAuthoritativeSimulationDelta = true;
+    [SerializeField] private bool shouldAdvanceSimulation = true;
+    [SerializeField] private bool pauseDetected;
 
-
-    private MethodInfo managerStartMethod;
-    private MethodInfo updateScentFieldsMethod;
-    private MethodInfo resetScentDebugStateMethod;
-    private MethodInfo updateLifecycleMethod;
-    private MethodInfo tickMetabolismMethod;
-    private MethodInfo runPredationPassMethod;
-    private MethodInfo handleSpontaneousSpawningMethod;
-    private MethodInfo updateRunAndTumbleLocomotionMethod;
-    private MethodInfo runMovementJobMethod;
-    private MethodInfo validateSessileMovementMethod;
-    private MethodInfo updateMetabolismCountsMethod;
-    private MethodInfo logMetabolismDebugThrottledMethod;
-    private MethodInfo renderAgentsMethod;
-    private FieldInfo isInitializedField;
-
-    private bool reflectionReady;
+    private bool discardNextFrameDelta;
 
     public int SimulationStepsPerFrame => simulationStepsPerFrame;
+    public float SimulationSpeedMultiplier => simulationSpeedMultiplier;
+    public float FrameDeltaTime => frameDeltaTime;
+    public float SimulationDeltaTime => simulationDeltaTime;
+    public float FrameSimulationDeltaTime => frameSimulationDeltaTime;
+    public double SimulationTimeSeconds => simulationTimeSeconds;
+    public bool MovementUsesAuthoritativeSimulationDelta => movementUsesAuthoritativeSimulationDelta;
+    public bool ShouldAdvanceSimulation => shouldAdvanceSimulation;
+    public bool PauseDetected => pauseDetected;
 
     private void Awake()
     {
@@ -46,117 +49,171 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
             replicatorManager = FindFirstObjectByType<ReplicatorManager>();
         }
 
-        CacheReflection();
-
-        if (replicatorManager == null || !reflectionReady)
+        if (replicatorManager == null)
         {
             enabled = false;
             Debug.LogError("ReplicatorSimulationPipeline could not locate a valid ReplicatorManager.", this);
             return;
         }
 
+        SetSimulationStepsPerFrame(replicatorManager.RuntimeSimulationStepsPerFrame);
+
+#if UNITY_EDITOR
+        EditorApplication.pauseStateChanged += OnEditorPauseStateChanged;
+#endif
     }
+
+    private void OnDestroy()
+    {
+#if UNITY_EDITOR
+        EditorApplication.pauseStateChanged -= OnEditorPauseStateChanged;
+#endif
+    }
+
+    private void OnApplicationPause(bool isPaused)
+    {
+        pauseDetected = isPaused || IsEditorPaused();
+        discardNextFrameDelta = true;
+        if (pauseDetected)
+        {
+            ResetFrameTiming();
+        }
+    }
+
+    private void OnApplicationFocus(bool hasFocus)
+    {
+        if (!hasFocus)
+        {
+            pauseDetected = true;
+            discardNextFrameDelta = true;
+            ResetFrameTiming();
+            return;
+        }
+
+        discardNextFrameDelta = true;
+    }
+
+#if UNITY_EDITOR
+    private void OnEditorPauseStateChanged(PauseState pauseState)
+    {
+        pauseDetected = pauseState == PauseState.Paused;
+        discardNextFrameDelta = true;
+        if (pauseDetected)
+        {
+            ResetFrameTiming();
+        }
+    }
+#endif
 
     public void SetSpeedProfile(SpeedProfile profile)
     {
-        simulationStepsPerFrame = Mathf.Max(0, profile.simulationStepsPerFrame);
-        if (replicatorManager != null)
-        {
-            replicatorManager.SetSimulationTiming(simulationStepsPerFrame);
-        }
+        SetSimulationStepsPerFrame(profile.simulationStepsPerFrame);
+        replicatorManager?.SetSimulationTiming(simulationStepsPerFrame);
     }
 
-    private void Update()
+    public void SetSimulationStepsPerFrame(int stepsPerFrame)
     {
-        if (replicatorManager == null || !IsManagerInitialized())
+        simulationStepsPerFrame = Mathf.Max(0, stepsPerFrame);
+        simulationSpeedMultiplier = simulationStepsPerFrame;
+    }
+
+    public void RunFrame()
+    {
+        if (replicatorManager == null || !replicatorManager.IsInitializedForSimulation)
         {
+            shouldAdvanceSimulation = false;
+            ResetFrameTiming();
             return;
         }
+
+        pauseDetected = IsApplicationPauseDetected();
+        shouldAdvanceSimulation = simulationStepsPerFrame > 0 && !pauseDetected;
+
+        if (!shouldAdvanceSimulation)
+        {
+            ResetFrameTiming();
+            if (!pauseDetected && replicatorManager.enableRendering && replicatorManager.ShouldRenderThisFrame(simulationStepsPerFrame))
+            {
+                replicatorManager.RenderAgents();
+            }
+
+            return;
+        }
+
+        if (discardNextFrameDelta)
+        {
+            discardNextFrameDelta = false;
+            ResetFrameTiming();
+            return;
+        }
+
+        frameDeltaTime = Time.unscaledDeltaTime;
+        simulationSpeedMultiplier = simulationStepsPerFrame;
+        simulationDeltaTime = simulationStepsPerFrame > 0 ? frameDeltaTime : 0f;
+        frameSimulationDeltaTime = simulationDeltaTime * simulationStepsPerFrame;
 
         for (int i = 0; i < simulationStepsPerFrame; i++)
         {
-            RunSimulationStep();
+            RunSimulationStep(simulationDeltaTime);
         }
 
-        UpdateMetabolismCountsAndDebug();
+        if (replicatorManager.enableRendering && replicatorManager.ShouldRenderThisFrame(simulationStepsPerFrame))
+        {
+            replicatorManager.RenderAgents();
+        }
 
-        renderAgentsMethod.Invoke(replicatorManager, null);
+        replicatorManager.UpdateMetabolismCounts();
+        replicatorManager.LogMetabolismDebugThrottled();
     }
 
-    private void RunSimulationStep()
+    private void ResetFrameTiming()
     {
+        simulationSpeedMultiplier = simulationStepsPerFrame;
+        frameDeltaTime = 0f;
+        simulationDeltaTime = 0f;
+        frameSimulationDeltaTime = 0f;
+    }
+
+    private bool IsApplicationPauseDetected()
+    {
+        if (Application.isPaused)
+        {
+            return true;
+        }
+
+        return IsEditorPaused();
+    }
+
+    private static bool IsEditorPaused()
+    {
+#if UNITY_EDITOR
+        return EditorApplication.isPaused;
+#else
+        return false;
+#endif
+    }
+
+    private void RunSimulationStep(float stepDeltaTime)
+    {
+        simulationTimeSeconds += stepDeltaTime;
+        replicatorManager.AdvanceSimulationStep(stepDeltaTime, simulationTimeSeconds);
+
         if (replicatorManager.ShouldProcessPredatorScent())
         {
-            updateScentFieldsMethod.Invoke(replicatorManager, null);
+            replicatorManager.UpdateScentFields(simulationTimeSeconds);
         }
         else
         {
-            resetScentDebugStateMethod.Invoke(replicatorManager, null);
+            replicatorManager.ResetScentDebugState();
         }
 
-        updateLifecycleMethod.Invoke(replicatorManager, null);
-        tickMetabolismMethod.Invoke(replicatorManager, null);
-        runPredationPassMethod.Invoke(replicatorManager, null);
-        handleSpontaneousSpawningMethod.Invoke(replicatorManager, null);
-        updateRunAndTumbleLocomotionMethod.Invoke(replicatorManager, null);
-        runMovementJobMethod.Invoke(replicatorManager, null);
-        validateSessileMovementMethod.Invoke(replicatorManager, null);
-    }
-
-    private void UpdateMetabolismCountsAndDebug()
-    {
-        updateMetabolismCountsMethod.Invoke(replicatorManager, null);
-        logMetabolismDebugThrottledMethod.Invoke(replicatorManager, null);
-    }
-
-    private bool IsManagerInitialized()
-    {
-        return isInitializedField != null && (bool)isInitializedField.GetValue(replicatorManager);
-    }
-
-    private void CacheReflection()
-    {
-        if (replicatorManager == null)
-        {
-            return;
-        }
-
-        BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
-        Type managerType = typeof(ReplicatorManager);
-
-        managerStartMethod = managerType.GetMethod("Start", flags);
-        updateScentFieldsMethod = managerType.GetMethod("UpdateScentFields", flags);
-        resetScentDebugStateMethod = managerType.GetMethod("ResetScentDebugState", flags);
-        updateLifecycleMethod = managerType.GetMethod("UpdateLifecycle", flags);
-        tickMetabolismMethod = managerType.GetMethod("TickMetabolism", flags);
-        runPredationPassMethod = managerType.GetMethod("RunPredationPass", flags);
-        handleSpontaneousSpawningMethod = managerType.GetMethod("HandleSpontaneousSpawning", flags);
-        updateRunAndTumbleLocomotionMethod = managerType.GetMethod("UpdateRunAndTumbleLocomotion", flags);
-        runMovementJobMethod = managerType.GetMethod("RunMovementJob", flags);
-        validateSessileMovementMethod = managerType.GetMethod("ValidateSessileMovement", flags);
-        updateMetabolismCountsMethod = managerType.GetMethod("UpdateMetabolismCounts", flags);
-        logMetabolismDebugThrottledMethod = managerType.GetMethod("LogMetabolismDebugThrottled", flags);
-        renderAgentsMethod = managerType.GetMethod("RenderAgents", flags);
-        isInitializedField = managerType.GetField("isInitialized", flags);
-
-        reflectionReady = managerStartMethod != null
-            && updateScentFieldsMethod != null
-            && resetScentDebugStateMethod != null
-            && updateLifecycleMethod != null
-            && tickMetabolismMethod != null
-            && runPredationPassMethod != null
-            && handleSpontaneousSpawningMethod != null
-            && updateRunAndTumbleLocomotionMethod != null
-            && runMovementJobMethod != null
-            && validateSessileMovementMethod != null
-            && updateMetabolismCountsMethod != null
-            && logMetabolismDebugThrottledMethod != null
-            && renderAgentsMethod != null
-            && isInitializedField != null;
-
-        if (!reflectionReady)
-        {
-            Debug.LogError("ReplicatorSimulationPipeline failed to bind required ReplicatorManager internals.", this);
-        }
+        replicatorManager.UpdateLifecycle(stepDeltaTime);
+        replicatorManager.TickMetabolism(stepDeltaTime);
+        replicatorManager.RunPredationPass(stepDeltaTime);
+        replicatorManager.HandleSpontaneousSpawning(stepDeltaTime);
+        bool populationStatePrimedForLocomotion = replicatorManager.PreparePopulationStateForLocomotion();
+        replicatorManager.UpdateRunAndTumbleLocomotion(populationStatePrimedForLocomotion, stepDeltaTime, simulationTimeSeconds);
+        replicatorManager.RunMovementJob(populationStatePrimedForLocomotion, stepDeltaTime, simulationTimeSeconds);
+        replicatorManager.ValidateSessileMovement();
     }
 }

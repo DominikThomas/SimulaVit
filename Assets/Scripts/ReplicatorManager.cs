@@ -322,14 +322,24 @@ public class ReplicatorManager : MonoBehaviour
     [Range(0.00001f, 0.1f)] public float debugSessileMovementEpsilon = 0.001f;
 
     public int RuntimeSimulationStepsPerFrame => runtimeSimulationStepsPerFrame;
-    public int SimulationStepsPerFrame => runtimeSimulationStepsPerFrame;
+    public int SimulationStepsPerFrame => simulationPipeline != null ? simulationPipeline.SimulationStepsPerFrame : runtimeSimulationStepsPerFrame;
+    public float SimulationSpeedMultiplier => simulationPipeline != null ? simulationPipeline.SimulationSpeedMultiplier : runtimeSimulationStepsPerFrame;
+    public float SimulationDeltaTime => simulationPipeline != null ? simulationPipeline.SimulationDeltaTime : 0f;
+    public float FrameSimulationDeltaTime => simulationPipeline != null ? simulationPipeline.FrameSimulationDeltaTime : 0f;
+    public bool ShouldAdvanceSimulation => simulationPipeline != null && simulationPipeline.ShouldAdvanceSimulation;
+    public bool PauseDetected => simulationPipeline != null && simulationPipeline.PauseDetected;
     public int TotalPopulation => agents.Count;
     public int PredatorCount => predatorAgentCount;
-    public double SimulationTimeSeconds => simulationTimeSeconds;
+    public double SimulationTimeSeconds => simulationPipeline != null ? simulationPipeline.SimulationTimeSeconds : simulationTimeSeconds;
+    public bool IsInitializedForSimulation => isInitialized;
 
     public void SetSimulationTiming(int stepsPerFrame)
     {
         runtimeSimulationStepsPerFrame = Mathf.Max(0, stepsPerFrame);
+        if (simulationPipeline != null)
+        {
+            simulationPipeline.SetSimulationStepsPerFrame(runtimeSimulationStepsPerFrame);
+        }
     }
 
     private List<Replicator> agents = new List<Replicator>();
@@ -388,7 +398,7 @@ public class ReplicatorManager : MonoBehaviour
     private float avgToxicProteolyticWasteDebug;
     private float avgDissolvedOrganicLeakDebug;
     private float nextScentUpdateTime;
-    private float simulationTimeSeconds;
+    private double simulationTimeSeconds;
     private float currentStepDeltaTime;
     private ReplicatorSteeringSystem.DebugState steeringDebugState;
     private readonly Dictionary<int, List<int>> preyAgentsByCell = new Dictionary<int, List<int>>(2048);
@@ -421,6 +431,7 @@ public class ReplicatorManager : MonoBehaviour
 
         if (simulationPipeline != null)
         {
+            simulationPipeline.SetSimulationStepsPerFrame(runtimeSimulationStepsPerFrame);
             simulationPipeline.enabled = false;
         }
     }
@@ -491,44 +502,22 @@ public class ReplicatorManager : MonoBehaviour
 
     void Update()
     {
-        if (!isInitialized) return;
+        if (!IsInitializedForSimulation) return;
 
-        int stepsPerFrame = Mathf.Max(0, runtimeSimulationStepsPerFrame);
-        for (int i = 0; i < stepsPerFrame; i++)
+        if (simulationPipeline != null)
         {
-            currentStepDeltaTime = Time.deltaTime;
-            simulationTimeSeconds += currentStepDeltaTime;
-            simulationStepCount++;
-
-            if (ShouldProcessPredatorScent())
-            {
-                UpdateScentFields();
-            }
-            else
-            {
-                ResetScentDebugState();
-            }
-
-            UpdateLifecycle();
-            TickMetabolism();
-            RunPredationPass();
-            HandleSpontaneousSpawning();
-            bool populationStatePrimedForLocomotion = PreparePopulationStateForLocomotion();
-            UpdateRunAndTumbleLocomotion(populationStatePrimedForLocomotion);
-            RunMovementJob(populationStatePrimedForLocomotion);
-            ValidateSessileMovement();
+            simulationPipeline.RunFrame();
         }
-
-        if (enableRendering && ShouldRenderThisFrame(stepsPerFrame))
-        {
-            RenderAgents();
-        }
-
-        UpdateMetabolismCounts();
-        LogMetabolismDebugThrottled();
     }
 
-    public bool ShouldProcessPredatorScent()
+    internal void AdvanceSimulationStep(float stepDeltaTime, double currentSimulationTimeSeconds)
+    {
+        currentStepDeltaTime = stepDeltaTime;
+        simulationTimeSeconds = currentSimulationTimeSeconds;
+        simulationStepCount++;
+    }
+
+    internal bool ShouldProcessPredatorScent()
     {
         return useScentPredation
             && planetResourceMap != null
@@ -537,7 +526,7 @@ public class ReplicatorManager : MonoBehaviour
     }
 
 
-    bool ShouldRenderThisFrame(int stepsPerFrame)
+    internal bool ShouldRenderThisFrame(int stepsPerFrame)
     {
         if (!allowRenderFrameSkippingAtHighSpeed || stepsPerFrame < renderSkipMinStepsPerFrame)
         {
@@ -548,7 +537,7 @@ public class ReplicatorManager : MonoBehaviour
         return Time.frameCount % interval == 0;
     }
 
-    void ResetScentDebugState()
+    internal void ResetScentDebugState()
     {
         avgToxicProteolyticWasteDebug = 0f;
         avgDissolvedOrganicLeakDebug = 0f;
@@ -576,7 +565,7 @@ public class ReplicatorManager : MonoBehaviour
     }
 
 
-    void UpdateMetabolismCounts()
+    internal void UpdateMetabolismCounts()
     {
         int chemo = 0;
         int hydrogen = 0;
@@ -635,7 +624,7 @@ public class ReplicatorManager : MonoBehaviour
 
 
 
-    void LogMetabolismDebugThrottled()
+    internal void LogMetabolismDebugThrottled()
     {
         bool didLog = debugTelemetry.LogMetabolismDebugThrottled(BuildTelemetrySnapshot());
         if (!didLog)
@@ -852,13 +841,13 @@ public class ReplicatorManager : MonoBehaviour
         }
     }
 
-    void HandleSpontaneousSpawning()
+    internal void HandleSpontaneousSpawning(float simulationDeltaTime)
     {
         spawnSystem.HandleSpontaneousSpawning(
             enableSpontaneousSpawning,
             guaranteedFirstSpawnWithinSeconds,
             spawnAttemptInterval,
-            currentStepDeltaTime,
+            simulationDeltaTime,
             () => agents.Count,
             disableSpontaneousSpawningAtPopulation,
             reenableSpontaneousSpawningAtPopulation,
@@ -1096,17 +1085,17 @@ public class ReplicatorManager : MonoBehaviour
         return Mathf.Clamp01(1f - (d / tolerance));
     }
 
-    void UpdateScentFields()
+    internal void UpdateScentFields(double currentSimulationTimeSeconds)
     {
         using (PredatorScentUpdateMarker.Auto())
         {
             float interval = Mathf.Max(0.01f, scentEmitInterval);
-            if (simulationTimeSeconds < nextScentUpdateTime)
+            if (currentSimulationTimeSeconds < nextScentUpdateTime)
             {
                 return;
             }
 
-            nextScentUpdateTime = simulationTimeSeconds + interval;
+            nextScentUpdateTime = (float)currentSimulationTimeSeconds + interval;
 
             if (planetResourceMap == null)
             {
@@ -1251,7 +1240,7 @@ public class ReplicatorManager : MonoBehaviour
         return agent.locomotion == LocomotionType.Amoeboid || agent.locomotion == LocomotionType.Flagellum;
     }
 
-    void RunPredationPass()
+    internal void RunPredationPass(float simulationDeltaTime)
     {
         if (planetGenerator == null)
         {
@@ -1280,7 +1269,7 @@ public class ReplicatorManager : MonoBehaviour
             agents,
             populationState,
             settings,
-            currentStepDeltaTime,
+            simulationDeltaTime,
             Mathf.Max(1, planetGenerator.resolution),
             preyAgentsByCell,
             RegisterDeathCause,
@@ -1289,7 +1278,7 @@ public class ReplicatorManager : MonoBehaviour
             ref predationKillsWindow);
     }
 
-    void UpdateRunAndTumbleLocomotion(bool populationStatePrimed)
+    internal void UpdateRunAndTumbleLocomotion(bool populationStatePrimed, float simulationDeltaTime, double currentSimulationTimeSeconds)
     {
         if (!ShouldRecomputeSteeringThisStep())
         {
@@ -1305,8 +1294,8 @@ public class ReplicatorManager : MonoBehaviour
             planetGenerator,
             planetResourceMap,
             CreateSteeringSettings(),
-            currentStepDeltaTime,
-            simulationTimeSeconds,
+            simulationDeltaTime,
+            (float)currentSimulationTimeSeconds,
             populationStatePrimed,
             ref steeringDebugState);
     }
@@ -1338,7 +1327,7 @@ public class ReplicatorManager : MonoBehaviour
         return 1;
     }
 
-    bool PreparePopulationStateForLocomotion()
+    internal bool PreparePopulationStateForLocomotion()
     {
         if (agents.Count == 0)
         {
@@ -1353,7 +1342,7 @@ public class ReplicatorManager : MonoBehaviour
         return true;
     }
 
-    void ValidateSessileMovement()
+    internal void ValidateSessileMovement()
     {
         debugTelemetry.ValidateSessileMovement(
             debugSessileMovement,
@@ -1396,13 +1385,13 @@ public class ReplicatorManager : MonoBehaviour
         };
     }
 
-    void UpdateLifecycle()
+    internal void UpdateLifecycle(float simulationDeltaTime)
     {
         int resolution = planetGenerator != null ? planetGenerator.resolution : 1;
         lifecycleSystem.UpdateLifecycle(
             agents,
             populationState,
-            currentStepDeltaTime,
+            simulationDeltaTime,
             reproductionRate,
             enableCarbonLimitedDivision,
             divisionEnergyCost,
@@ -1421,10 +1410,10 @@ public class ReplicatorManager : MonoBehaviour
     }
 
 
-    void TickMetabolism()
+    internal void TickMetabolism(float simulationDeltaTime)
     {
         float tick = Mathf.Max(0.01f, metabolismTickSeconds);
-        metabolismTickTimer += currentStepDeltaTime;
+        metabolismTickTimer += simulationDeltaTime;
 
         while (metabolismTickTimer >= tick)
         {
@@ -1561,7 +1550,7 @@ public class ReplicatorManager : MonoBehaviour
         }
     }
 
-    void RunMovementJob(bool populationStatePrimed)
+    internal void RunMovementJob(bool populationStatePrimed, float simulationDeltaTime, double currentSimulationTimeSeconds)
     {
         ReplicatorMovementSystem.Settings settings = new ReplicatorMovementSystem.Settings
         {
@@ -1581,8 +1570,8 @@ public class ReplicatorManager : MonoBehaviour
             populationState,
             settings,
             planetGenerator,
-            currentStepDeltaTime,
-            simulationTimeSeconds,
+            simulationDeltaTime,
+            (float)currentSimulationTimeSeconds,
             populationStatePrimed);
     }
 
@@ -2078,7 +2067,7 @@ public class ReplicatorManager : MonoBehaviour
         return finalColor;
     }
 
-    void RenderAgents()
+    internal void RenderAgents()
     {
         renderSystem.RenderAgents(
             agents,

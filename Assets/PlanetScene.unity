@@ -630,15 +630,15 @@ MonoBehaviour:
   hydrogenotrophyEnergyPerTick: 0.5
   hydrogenotrophyStoreFraction: 0.8
   fermentationOrganicCPerTick: 0.02
-  fermentationEnergyPerTick: 1
-  fermentationAssimilationFraction: 0.6
+  fermentationEnergyPerTick: 0.8
+  fermentationAssimilationFraction: 0.5
   methanogenesisH2PerTick: 0.08
   methanogenesisCO2PerTick: 0.04
   methanogenesisEnergyPerTick: 3
   methanogenesisAssimilationFraction: 0.7
   methanotrophyCH4PerTick: 0.06
   methanotrophyO2PerTick: 0.06
-  methanotrophyEnergyPerTick: 4
+  methanotrophyEnergyPerTick: 8
   methanotrophyAssimilationFraction: 0.7
   hydrogenToPhotosynthesisMutationChance: 0.5
   hydrogenToSaprotrophyMutationChance: 0.2
@@ -653,7 +653,7 @@ MonoBehaviour:
   anchoredToAmoeboidMutationChance: 0.01
   allowReverseMetabolismMutation: 0
   photosynthesisCo2PerTickAtFullInsolation: 0.02
-  photosynthesisEnergyPerCo2: 1.7
+  photosynthesisEnergyPerCo2: 1.5
   aerobicO2PerC: 0.02
   aerobicEnergyPerC: 0.05
   photosynthStoreFraction: 0.2
@@ -675,7 +675,7 @@ MonoBehaviour:
   saprotrophyMutationChance: 0.191
   saproCPerTick: 0.02
   saproO2PerC: 0.02
-  saproEnergyPerC: 50
+  saproEnergyPerC: 55
   saproAssimilationFraction: 0.8
   saproRespireStoreCPerTick: 0.01
   enablePredators: 1
@@ -702,7 +702,7 @@ MonoBehaviour:
   saproTempRange: {x: 278.15, y: 308.15}
   predatorTempRange: {x: 283.15, y: 313.15}
   fermentationTempRange: {x: 285.15, y: 330.15}
-  methanogenesisTempRange: {x: 283.15, y: 308.15}
+  methanogenesisTempRange: {x: 273.15, y: 293.15}
   methanotrophyTempRange: {x: 280.15, y: 320.15}
   defaultLethalMargin: 20
   tempMutationChance: 0.02

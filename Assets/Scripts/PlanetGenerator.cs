@@ -3,6 +3,7 @@ using UnityEngine;
 
 public class PlanetGenerator : MonoBehaviour
 {
+    [SerializeField] private ReplicatorManager replicatorManager;
     [Range(3, 240)]
     public int resolution = 10;
     public float radius = 1f;
@@ -287,8 +288,18 @@ public class PlanetGenerator : MonoBehaviour
 
     public bool OceanEnabled => enableOcean;
     public float OceanThresholdNoise => oceanNoiseThreshold;
-    public bool PhotosynthesisUnlocked => Time.timeSinceLevelLoad >= photosynthesisUnlockSeconds;
-    public bool SaprotrophyUnlocked => Time.timeSinceLevelLoad >= saprotrophyUnlockSeconds;
+    public bool PhotosynthesisUnlocked => GetSimulationTimeSeconds() >= photosynthesisUnlockSeconds;
+    public bool SaprotrophyUnlocked => GetSimulationTimeSeconds() >= saprotrophyUnlockSeconds;
+
+    double GetSimulationTimeSeconds()
+    {
+        if (replicatorManager == null)
+        {
+            replicatorManager = FindFirstObjectByType<ReplicatorManager>();
+        }
+
+        return replicatorManager != null ? replicatorManager.SimulationTimeSeconds : Time.timeSinceLevelLoad;
+    }
 
     public float GetOceanRadius()
     {
