@@ -45,7 +45,7 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
         }
     }
 
-    private void Update()
+    public void RunFrame()
     {
         if (replicatorManager == null || !replicatorManager.IsInitializedForSimulation)
         {
@@ -54,10 +54,38 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
 
         for (int i = 0; i < simulationStepsPerFrame; i++)
         {
-            replicatorManager.RunSimulationStep();
+            RunSimulationStep();
         }
 
-        replicatorManager.RenderAgentsIfEnabled();
-        replicatorManager.RunPostStepBookkeeping();
+        if (replicatorManager.enableRendering && replicatorManager.ShouldRenderThisFrame(simulationStepsPerFrame))
+        {
+            replicatorManager.RenderAgents();
+        }
+
+        replicatorManager.UpdateMetabolismCounts();
+        replicatorManager.LogMetabolismDebugThrottled();
+    }
+
+    private void RunSimulationStep()
+    {
+        replicatorManager.AdvanceSimulationStep();
+
+        if (replicatorManager.ShouldProcessPredatorScent())
+        {
+            replicatorManager.UpdateScentFields();
+        }
+        else
+        {
+            replicatorManager.ResetScentDebugState();
+        }
+
+        replicatorManager.UpdateLifecycle();
+        replicatorManager.TickMetabolism();
+        replicatorManager.RunPredationPass();
+        replicatorManager.HandleSpontaneousSpawning();
+        bool populationStatePrimedForLocomotion = replicatorManager.PreparePopulationStateForLocomotion();
+        replicatorManager.UpdateRunAndTumbleLocomotion(populationStatePrimedForLocomotion);
+        replicatorManager.RunMovementJob(populationStatePrimedForLocomotion);
+        replicatorManager.ValidateSessileMovement();
     }
 }

@@ -494,57 +494,20 @@ public class ReplicatorManager : MonoBehaviour
     {
         if (!IsInitializedForSimulation) return;
 
-        int stepsPerFrame = Mathf.Max(0, runtimeSimulationStepsPerFrame);
-        for (int i = 0; i < stepsPerFrame; i++)
+        if (simulationPipeline != null)
         {
-            RunSimulationStep();
+            simulationPipeline.RunFrame();
         }
-
-        RenderAgentsIfEnabled();
-        RunPostStepBookkeeping();
     }
 
-    public void RunSimulationStep()
+    internal void AdvanceSimulationStep()
     {
         currentStepDeltaTime = Time.deltaTime;
         simulationTimeSeconds += currentStepDeltaTime;
         simulationStepCount++;
-
-        if (ShouldProcessPredatorScent())
-        {
-            UpdateScentFields();
-        }
-        else
-        {
-            ResetScentDebugState();
-        }
-
-        UpdateLifecycle();
-        TickMetabolism();
-        RunPredationPass();
-        HandleSpontaneousSpawning();
-        bool populationStatePrimedForLocomotion = PreparePopulationStateForLocomotion();
-        UpdateRunAndTumbleLocomotion(populationStatePrimedForLocomotion);
-        RunMovementJob(populationStatePrimedForLocomotion);
-        ValidateSessileMovement();
     }
 
-    public void RunPostStepBookkeeping()
-    {
-        UpdateMetabolismCounts();
-        LogMetabolismDebugThrottled();
-    }
-
-    public void RenderAgentsIfEnabled()
-    {
-        int stepsPerFrame = Mathf.Max(0, runtimeSimulationStepsPerFrame);
-        if (enableRendering && ShouldRenderThisFrame(stepsPerFrame))
-        {
-            RenderAgents();
-        }
-    }
-
-    public bool ShouldProcessPredatorScent()
+    internal bool ShouldProcessPredatorScent()
     {
         return useScentPredation
             && planetResourceMap != null
@@ -553,7 +516,7 @@ public class ReplicatorManager : MonoBehaviour
     }
 
 
-    bool ShouldRenderThisFrame(int stepsPerFrame)
+    internal bool ShouldRenderThisFrame(int stepsPerFrame)
     {
         if (!allowRenderFrameSkippingAtHighSpeed || stepsPerFrame < renderSkipMinStepsPerFrame)
         {
@@ -564,7 +527,7 @@ public class ReplicatorManager : MonoBehaviour
         return Time.frameCount % interval == 0;
     }
 
-    void ResetScentDebugState()
+    internal void ResetScentDebugState()
     {
         avgToxicProteolyticWasteDebug = 0f;
         avgDissolvedOrganicLeakDebug = 0f;
@@ -592,7 +555,7 @@ public class ReplicatorManager : MonoBehaviour
     }
 
 
-    void UpdateMetabolismCounts()
+    internal void UpdateMetabolismCounts()
     {
         int chemo = 0;
         int hydrogen = 0;
@@ -651,7 +614,7 @@ public class ReplicatorManager : MonoBehaviour
 
 
 
-    void LogMetabolismDebugThrottled()
+    internal void LogMetabolismDebugThrottled()
     {
         bool didLog = debugTelemetry.LogMetabolismDebugThrottled(BuildTelemetrySnapshot());
         if (!didLog)
@@ -868,7 +831,7 @@ public class ReplicatorManager : MonoBehaviour
         }
     }
 
-    void HandleSpontaneousSpawning()
+    internal void HandleSpontaneousSpawning()
     {
         spawnSystem.HandleSpontaneousSpawning(
             enableSpontaneousSpawning,
@@ -1112,7 +1075,7 @@ public class ReplicatorManager : MonoBehaviour
         return Mathf.Clamp01(1f - (d / tolerance));
     }
 
-    void UpdateScentFields()
+    internal void UpdateScentFields()
     {
         using (PredatorScentUpdateMarker.Auto())
         {
@@ -1267,7 +1230,7 @@ public class ReplicatorManager : MonoBehaviour
         return agent.locomotion == LocomotionType.Amoeboid || agent.locomotion == LocomotionType.Flagellum;
     }
 
-    void RunPredationPass()
+    internal void RunPredationPass()
     {
         if (planetGenerator == null)
         {
@@ -1305,7 +1268,7 @@ public class ReplicatorManager : MonoBehaviour
             ref predationKillsWindow);
     }
 
-    void UpdateRunAndTumbleLocomotion(bool populationStatePrimed)
+    internal void UpdateRunAndTumbleLocomotion(bool populationStatePrimed)
     {
         if (!ShouldRecomputeSteeringThisStep())
         {
@@ -1354,7 +1317,7 @@ public class ReplicatorManager : MonoBehaviour
         return 1;
     }
 
-    bool PreparePopulationStateForLocomotion()
+    internal bool PreparePopulationStateForLocomotion()
     {
         if (agents.Count == 0)
         {
@@ -1369,7 +1332,7 @@ public class ReplicatorManager : MonoBehaviour
         return true;
     }
 
-    void ValidateSessileMovement()
+    internal void ValidateSessileMovement()
     {
         debugTelemetry.ValidateSessileMovement(
             debugSessileMovement,
@@ -1412,7 +1375,7 @@ public class ReplicatorManager : MonoBehaviour
         };
     }
 
-    void UpdateLifecycle()
+    internal void UpdateLifecycle()
     {
         int resolution = planetGenerator != null ? planetGenerator.resolution : 1;
         lifecycleSystem.UpdateLifecycle(
@@ -1437,7 +1400,7 @@ public class ReplicatorManager : MonoBehaviour
     }
 
 
-    void TickMetabolism()
+    internal void TickMetabolism()
     {
         float tick = Mathf.Max(0.01f, metabolismTickSeconds);
         metabolismTickTimer += currentStepDeltaTime;
@@ -1577,7 +1540,7 @@ public class ReplicatorManager : MonoBehaviour
         }
     }
 
-    void RunMovementJob(bool populationStatePrimed)
+    internal void RunMovementJob(bool populationStatePrimed)
     {
         ReplicatorMovementSystem.Settings settings = new ReplicatorMovementSystem.Settings
         {
@@ -2094,7 +2057,7 @@ public class ReplicatorManager : MonoBehaviour
         return finalColor;
     }
 
-    void RenderAgents()
+    internal void RenderAgents()
     {
         renderSystem.RenderAgents(
             agents,
