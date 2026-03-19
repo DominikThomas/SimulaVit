@@ -326,6 +326,7 @@ public class ReplicatorManager : MonoBehaviour
     public int TotalPopulation => agents.Count;
     public int PredatorCount => predatorAgentCount;
     public double SimulationTimeSeconds => simulationTimeSeconds;
+    public bool IsInitializedForSimulation => isInitialized;
 
     public void SetSimulationTiming(int stepsPerFrame)
     {
@@ -491,41 +492,56 @@ public class ReplicatorManager : MonoBehaviour
 
     void Update()
     {
-        if (!isInitialized) return;
+        if (!IsInitializedForSimulation) return;
 
         int stepsPerFrame = Mathf.Max(0, runtimeSimulationStepsPerFrame);
         for (int i = 0; i < stepsPerFrame; i++)
         {
-            currentStepDeltaTime = Time.deltaTime;
-            simulationTimeSeconds += currentStepDeltaTime;
-            simulationStepCount++;
-
-            if (ShouldProcessPredatorScent())
-            {
-                UpdateScentFields();
-            }
-            else
-            {
-                ResetScentDebugState();
-            }
-
-            UpdateLifecycle();
-            TickMetabolism();
-            RunPredationPass();
-            HandleSpontaneousSpawning();
-            bool populationStatePrimedForLocomotion = PreparePopulationStateForLocomotion();
-            UpdateRunAndTumbleLocomotion(populationStatePrimedForLocomotion);
-            RunMovementJob(populationStatePrimedForLocomotion);
-            ValidateSessileMovement();
+            RunSimulationStep();
         }
 
+        RenderAgentsIfEnabled();
+        RunPostStepBookkeeping();
+    }
+
+    public void RunSimulationStep()
+    {
+        currentStepDeltaTime = Time.deltaTime;
+        simulationTimeSeconds += currentStepDeltaTime;
+        simulationStepCount++;
+
+        if (ShouldProcessPredatorScent())
+        {
+            UpdateScentFields();
+        }
+        else
+        {
+            ResetScentDebugState();
+        }
+
+        UpdateLifecycle();
+        TickMetabolism();
+        RunPredationPass();
+        HandleSpontaneousSpawning();
+        bool populationStatePrimedForLocomotion = PreparePopulationStateForLocomotion();
+        UpdateRunAndTumbleLocomotion(populationStatePrimedForLocomotion);
+        RunMovementJob(populationStatePrimedForLocomotion);
+        ValidateSessileMovement();
+    }
+
+    public void RunPostStepBookkeeping()
+    {
+        UpdateMetabolismCounts();
+        LogMetabolismDebugThrottled();
+    }
+
+    public void RenderAgentsIfEnabled()
+    {
+        int stepsPerFrame = Mathf.Max(0, runtimeSimulationStepsPerFrame);
         if (enableRendering && ShouldRenderThisFrame(stepsPerFrame))
         {
             RenderAgents();
         }
-
-        UpdateMetabolismCounts();
-        LogMetabolismDebugThrottled();
     }
 
     public bool ShouldProcessPredatorScent()
