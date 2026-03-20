@@ -70,16 +70,6 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
 #endif
     }
 
-    private void OnApplicationPause(bool isPaused)
-    {
-        pauseDetected = isPaused || IsEditorPaused();
-        discardNextFrameDelta = true;
-        if (pauseDetected)
-        {
-            ResetFrameTiming();
-        }
-    }
-
     private void OnApplicationFocus(bool hasFocus)
     {
         if (!hasFocus)
@@ -174,22 +164,19 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
         frameSimulationDeltaTime = 0f;
     }
 
-    private bool IsApplicationPauseDetected()
-    {
-        if (Application.isPaused)
-        {
-            return true;
-        }
+    private bool _runtimePaused;
 
-        return IsEditorPaused();
+    private void OnApplicationPause(bool paused)
+    {
+        _runtimePaused = paused;
     }
 
-    private static bool IsEditorPaused()
+    private bool IsApplicationPauseDetected()
     {
 #if UNITY_EDITOR
         return EditorApplication.isPaused;
 #else
-        return false;
+    return _runtimePaused;
 #endif
     }
 
