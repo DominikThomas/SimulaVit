@@ -187,7 +187,7 @@ public class ReplicatorSteeringSystem
         {
             using (SteeringSyncFromPopulationStateMarker.Auto())
             {
-                populationState.SyncSteeringFieldsFromAgents(agents);
+                populationState.EnsureMatchesAgentCount(agents);
             }
         }
 
@@ -265,7 +265,16 @@ public class ReplicatorSteeringSystem
 
         using (SteeringSyncToAgentsMarker.Auto())
         {
-            populationState.SyncSteeringFieldsToAgents(agents);
+            int count = Mathf.Min(populationState.Count, agents.Count);
+            for (int i = 0; i < count; i++)
+            {
+                Replicator agent = agents[i];
+                agent.moveDirection = populationState.MoveDirection[i];
+                agent.desiredMoveDir = populationState.DesiredMoveDirection[i];
+                agent.lastHabitatValue = populationState.LastHabitatValue[i];
+                agent.tumbleProbability = populationState.TumbleProbability[i];
+                agent.nextSenseTime = populationState.NextSenseTime[i];
+            }
         }
 
         if (settings.EnableRunAndTumbleDebug && debugState.RunAndTumbleDebugTimer >= Mathf.Max(0.2f, settings.RunAndTumbleDebugWindowSeconds))

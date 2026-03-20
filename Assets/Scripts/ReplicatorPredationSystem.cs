@@ -38,7 +38,7 @@ public class ReplicatorPredationSystem
             return;
         }
 
-        populationState.SyncPredationFieldsFromAgents(agents);
+        populationState.EnsureMatchesAgentCount(agents);
 
         float biteOrganicC = Mathf.Max(0f, settings.PredatorBiteOrganicC);
         float biteEnergy = Mathf.Max(0f, settings.PredatorBiteEnergy);
@@ -86,6 +86,7 @@ public class ReplicatorPredationSystem
             float leakedOrganicC = ApplyPredationBite(populationState, i, preyIndex, biteOrganicC, biteEnergy, assimilation, maxStore);
             if (leakedOrganicC > 0f)
             {
+                populationState.CopyToDebugState(preyIndex, preyVictim);
                 depositPredationOrganicC?.Invoke(preyVictim, leakedOrganicC);
             }
 
@@ -95,7 +96,7 @@ public class ReplicatorPredationSystem
             {
                 registerDeathCause(populationState.Metabolism[preyIndex], DeathCause.Predation);
 
-                populationState.CopyPredationEntryToAgent(preyIndex, preyVictim);
+                populationState.CopyToDebugState(preyIndex, preyVictim);
                 depositDeathOrganicC(preyVictim);
 
                 pendingPredationRemovals.Add(preyIndex);
@@ -103,8 +104,7 @@ public class ReplicatorPredationSystem
             }
         }
 
-        populationState.SyncPredationFieldsToAgents(agents);
-        RemovePredationVictims(agents, pendingPredationRemovals, predationRemovalBuffer);
+        RemovePredationVictims(agents, populationState, pendingPredationRemovals, predationRemovalBuffer);
     }
 
     private bool TryBuildPredationCandidates(
@@ -159,6 +159,7 @@ public class ReplicatorPredationSystem
 
     private void RemovePredationVictims(
         List<Replicator> agents,
+        ReplicatorPopulationState populationState,
         HashSet<int> pendingPredationRemovals,
         List<int> predationRemovalBuffer)
     {
@@ -179,7 +180,7 @@ public class ReplicatorPredationSystem
             int index = predationRemovalBuffer[i];
             if (index >= 0 && index < agents.Count)
             {
-                agents.RemoveAt(index);
+                populationState.RemoveAgentAtSwapBack(agents, index);
             }
         }
     }
