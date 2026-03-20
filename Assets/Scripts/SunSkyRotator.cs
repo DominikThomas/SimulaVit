@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Rendering;
 
 [RequireComponent(typeof(Light))]
 public class SunSkyRotator : MonoBehaviour
@@ -6,24 +7,29 @@ public class SunSkyRotator : MonoBehaviour
     [Header("Orbit")]
     public float orbitDegreesPerSecond = 0.75f;
     public Vector3 orbitAxis = Vector3.up;
-    [Tooltip("Keeps the sun path on the great-circle plane perpendicular to the orbit axis (equator-like path).")]
     public bool keepOrbitOnEquator = true;
 
     [Header("Sun Visual")]
     public float sunDistance = 250f;
     public float sunScale = 8f;
     public Color sunColor = new Color(1f, 0.9f, 0.6f, 1f);
-    [Range(0f, 1f)] public float sunSurfaceSmoothness = 0.95f;
-    [Range(0f, 1f)] public float sunMetallic = 0.1f;
-    [Min(0f)] public float sunEmissionIntensity = 12f;
+    [Min(0f)] public float sunEmissionIntensity = 4f;
+
+    [Header("Sun Disc Shape")]
+    [Range(0.01f, 1f)] public float coreRadius = 0.16f;
+    [Range(0.01f, 2f)] public float glowRadius = 0.9f;
+    [Range(0.5f, 16f)] public float glowFalloff = 3.5f;
+    [Range(64, 512)] public int generatedTextureSize = 256;
+
+    [Header("Material Template")]
+    [Tooltip("Assign a Material asset using URP/Unlit, Surface Type Transparent.")]
+    public Material sunMaterialTemplate;
 
     [Header("Camera-Relative Color Shift")]
     public Transform planetCenter;
     public Transform viewer;
     [Min(0.001f)] public float planetRadius = 8f;
-    [Tooltip("Adjust sunrise/sunset trigger around the planet limb. + values trigger earlier, - values later.")]
     public float horizonTriggerOffsetDegrees = 0f;
-    [Tooltip("Angular width of the warm sunrise/sunset band around horizon.")]
     [Range(0.1f, 25f)] public float horizonTransitionDegrees = 6f;
     public Color horizonColor = new Color(1f, 0.45f, 0.2f, 1f);
     public Color dayColor = new Color(1f, 0.95f, 0.75f, 1f);
@@ -36,14 +42,11 @@ public class SunSkyRotator : MonoBehaviour
 
     [Header("Skybox")]
     public bool rotateSkybox = true;
-    [Tooltip("Use -1 to match the light orbit direction for this skybox shader.")]
     public float skyboxRotationMultiplier = -1f;
     public Material skyboxOverride;
 
     [Header("Simulation Speed Coupling")]
-    [Tooltip("If enabled, sun/skybox rotation speed scales with ReplicatorManager simulation steps per frame.")]
     public bool scaleRotationWithSimulationSpeed = true;
-    [Tooltip("Optional explicit reference; if empty, the first ReplicatorManager in scene is used.")]
     public ReplicatorManager replicatorManager;
 
     private Quaternion initialRotation;
@@ -55,6 +58,9 @@ public class SunSkyRotator : MonoBehaviour
 
     private GameObject generatedSunObject;
     private Material runtimeSunMaterial;
+    private Texture2D runtimeSunTexture;
+    private MeshFilter sunMeshFilter;
+    private MeshRenderer sunMeshRenderer;
 
     void Start()
     {
@@ -97,6 +103,11 @@ public class SunSkyRotator : MonoBehaviour
         UpdateSunVisualAppearance();
     }
 
+    void LateUpdate()
+    {
+        BillboardSunVisual();
+    }
+
     void CacheInitialOrbitForward()
     {
         Vector3 axis = GetOrbitAxis();
@@ -133,6 +144,7 @@ public class SunSkyRotator : MonoBehaviour
 
         DestroyRuntimeObject(generatedSunObject);
         DestroyRuntimeObject(runtimeSunMaterial);
+        DestroyRuntimeObject(runtimeSunTexture);
         DestroyRuntimeObject(runtimeSkybox);
     }
 
@@ -191,22 +203,131 @@ public class SunSkyRotator : MonoBehaviour
 
     void CreateSunVisual()
     {
-        generatedSunObject = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-        generatedSunObject.name = "Sun Visual";
-        generatedSunObject.transform.localScale = Vector3.one * sunScale;
-        RemoveCollider(generatedSunObject);
+        generatedSunObject = new GameObject("Sun Visual");
+        sunMeshFilter = generatedSunObject.AddComponent<MeshFilter>();
+        sunMeshRenderer = generatedSunObject.AddComponent<MeshRenderer>();
 
-        Renderer sunRenderer = generatedSunObject.GetComponent<Renderer>();
-        if (sunRenderer != null)
+        sunMeshFilter.sharedMesh = BuildQuadMesh();
+        runtimeSunTexture = BuildSunTexture();
+        runtimeSunMaterial = BuildSunMaterial();
+
+        if (runtimeSunMaterial != null)
         {
-            runtimeSunMaterial = BuildSunMaterial();
-            if (runtimeSunMaterial != null)
+            sunMeshRenderer.sharedMaterial = runtimeSunMaterial;
+        }
+
+        sunMeshRenderer.shadowCastingMode = ShadowCastingMode.Off;
+        sunMeshRenderer.receiveShadows = false;
+        sunMeshRenderer.lightProbeUsage = LightProbeUsage.Off;
+        sunMeshRenderer.reflectionProbeUsage = ReflectionProbeUsage.Off;
+        sunMeshRenderer.motionVectorGenerationMode = MotionVectorGenerationMode.ForceNoMotion;
+
+        generatedSunObject.transform.localScale = Vector3.one * sunScale;
+        BillboardSunVisual();
+    }
+
+    Mesh BuildQuadMesh()
+    {
+        Mesh mesh = new Mesh();
+        mesh.name = "SunQuad";
+
+        mesh.vertices = new[]
+        {
+            new Vector3(-0.5f, -0.5f, 0f),
+            new Vector3( 0.5f, -0.5f, 0f),
+            new Vector3(-0.5f,  0.5f, 0f),
+            new Vector3( 0.5f,  0.5f, 0f)
+        };
+
+        mesh.uv = new[]
+        {
+            new Vector2(0f, 0f),
+            new Vector2(1f, 0f),
+            new Vector2(0f, 1f),
+            new Vector2(1f, 1f)
+        };
+
+        mesh.triangles = new[] { 0, 2, 1, 2, 3, 1 };
+        mesh.RecalculateNormals();
+        mesh.RecalculateBounds();
+        return mesh;
+    }
+
+    Texture2D BuildSunTexture()
+    {
+        int size = Mathf.Clamp(generatedTextureSize, 64, 512);
+        Texture2D texture = new Texture2D(size, size, TextureFormat.RGBA32, false, false);
+        texture.name = "RuntimeSunDisc";
+        texture.wrapMode = TextureWrapMode.Clamp;
+        texture.filterMode = FilterMode.Bilinear;
+
+        float inner = Mathf.Clamp01(coreRadius);
+        float outer = Mathf.Max(inner + 0.001f, glowRadius);
+
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
             {
-                sunRenderer.sharedMaterial = runtimeSunMaterial;
-                sunRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-                sunRenderer.receiveShadows = false;
+                float u = (x + 0.5f) / size * 2f - 1f;
+                float v = (y + 0.5f) / size * 2f - 1f;
+                float r = Mathf.Sqrt(u * u + v * v);
+
+                float alpha;
+                if (r <= inner)
+                {
+                    alpha = 1f;
+                }
+                else if (r >= outer)
+                {
+                    alpha = 0f;
+                }
+                else
+                {
+                    float t = 1f - Mathf.InverseLerp(inner, outer, r);
+                    alpha = Mathf.Pow(t, glowFalloff);
+                }
+
+                texture.SetPixel(x, y, new Color(1f, 1f, 1f, alpha));
             }
         }
+
+        texture.Apply(false, false);
+        return texture;
+    }
+
+    Material BuildSunMaterial()
+    {
+        if (sunMaterialTemplate == null)
+        {
+            Debug.LogError("SunSkyRotator: sunMaterialTemplate is not assigned.");
+            return null;
+        }
+
+        Material material = new Material(sunMaterialTemplate);
+        material.name = "Runtime Sun Material";
+
+        if (material.HasProperty("_BaseMap") && runtimeSunTexture != null)
+        {
+            material.SetTexture("_BaseMap", runtimeSunTexture);
+        }
+
+        if (material.HasProperty("_MainTex") && runtimeSunTexture != null)
+        {
+            material.SetTexture("_MainTex", runtimeSunTexture);
+        }
+
+        if (material.HasProperty("_Cull"))
+        {
+            material.SetFloat("_Cull", (float)CullMode.Off);
+        }
+
+        if (material.HasProperty("_ZWrite"))
+        {
+            material.SetFloat("_ZWrite", 0f);
+        }
+
+        material.renderQueue = (int)RenderQueue.Transparent;
+        return material;
     }
 
     void UpdateSunVisualPosition()
@@ -216,6 +337,20 @@ public class SunSkyRotator : MonoBehaviour
         Vector3 center = planetCenter != null ? planetCenter.position : Vector3.zero;
         generatedSunObject.transform.position = center - transform.forward * sunDistance;
         generatedSunObject.transform.localScale = Vector3.one * sunScale;
+        BillboardSunVisual();
+    }
+
+    void BillboardSunVisual()
+    {
+        if (generatedSunObject == null) return;
+
+        SetupViewerReference();
+        if (viewer == null) return;
+
+        Vector3 toCamera = viewer.position - generatedSunObject.transform.position;
+        if (toCamera.sqrMagnitude < 0.000001f) return;
+
+        generatedSunObject.transform.rotation = Quaternion.LookRotation(toCamera.normalized, viewer.up);
     }
 
     void UpdateSunVisualAppearance()
@@ -224,17 +359,17 @@ public class SunSkyRotator : MonoBehaviour
 
         EvaluateSunAppearance(out Color shiftedColor, out float emissionMultiplier);
 
+        Color finalColor = shiftedColor * Mathf.Max(0f, sunEmissionIntensity * emissionMultiplier);
+        finalColor.a = 1f;
+
         if (runtimeSunMaterial.HasProperty("_BaseColor"))
         {
-            runtimeSunMaterial.SetColor("_BaseColor", shiftedColor);
+            runtimeSunMaterial.SetColor("_BaseColor", finalColor);
         }
+
         if (runtimeSunMaterial.HasProperty("_Color"))
         {
-            runtimeSunMaterial.SetColor("_Color", shiftedColor);
-        }
-        if (runtimeSunMaterial.HasProperty("_EmissionColor"))
-        {
-            runtimeSunMaterial.SetColor("_EmissionColor", shiftedColor * sunEmissionIntensity * emissionMultiplier);
+            runtimeSunMaterial.SetColor("_Color", finalColor);
         }
     }
 
@@ -258,7 +393,7 @@ public class SunSkyRotator : MonoBehaviour
         Vector3 sunPosition = center - transform.forward * sunDistance;
         Vector3 sunDir = (sunPosition - cameraPos).normalized;
 
-        float angleToSunFromCenterDir = Vector3.Angle(centerDir, sunDir); // degrees
+        float angleToSunFromCenterDir = Vector3.Angle(centerDir, sunDir);
         float planetAngularRadius = Mathf.Asin(Mathf.Clamp01(planetRadius / Mathf.Max(distanceToCenter, planetRadius + 0.001f))) * Mathf.Rad2Deg;
         float horizonAngle = planetAngularRadius + horizonTriggerOffsetDegrees;
         float deltaFromHorizon = angleToSunFromCenterDir - horizonAngle;
@@ -266,10 +401,7 @@ public class SunSkyRotator : MonoBehaviour
         bool behindPlanet = deltaFromHorizon < 0f;
         float transition = Mathf.Max(0.1f, horizonTransitionDegrees);
 
-        // Warm tint strongest right around horizon crossing.
         float horizonFactor = 1f - Mathf.Clamp01(Mathf.Abs(deltaFromHorizon) / transition);
-
-        // Day factor rises as sun moves above horizon line.
         float dayAmount = Mathf.Clamp01(deltaFromHorizon / transition);
 
         Color visibleColor = Color.Lerp(dayColor, horizonColor, horizonFactor);
@@ -277,40 +409,11 @@ public class SunSkyRotator : MonoBehaviour
 
         shiftedColor = Color.Lerp(sunColor, finalColor * sunColor, colorShiftStrength);
 
-        emissionMultiplier = behindPlanet ? behindPlanetEmissionMultiplier : Mathf.Lerp(behindPlanetEmissionMultiplier, dayEmissionMultiplier, dayAmount);
+        emissionMultiplier = behindPlanet
+            ? behindPlanetEmissionMultiplier
+            : Mathf.Lerp(behindPlanetEmissionMultiplier, dayEmissionMultiplier, dayAmount);
+
         emissionMultiplier += horizonFactor * horizonEmissionBoost;
-    }
-
-    Material BuildSunMaterial()
-    {
-        Shader litShader = Shader.Find("Universal Render Pipeline/Lit");
-        if (litShader != null)
-        {
-            Material material = new Material(litShader);
-            material.SetFloat("_Metallic", sunMetallic);
-            material.SetFloat("_Smoothness", sunSurfaceSmoothness);
-            material.EnableKeyword("_EMISSION");
-            return material;
-        }
-
-        Shader unlitShader = Shader.Find("Universal Render Pipeline/Unlit");
-        if (unlitShader == null)
-        {
-            unlitShader = Shader.Find("Unlit/Color");
-        }
-
-        if (unlitShader == null) return null;
-
-        Material fallback = new Material(unlitShader);
-        fallback.EnableKeyword("_EMISSION");
-        return fallback;
-    }
-
-    void RemoveCollider(GameObject target)
-    {
-        SphereCollider collider = target.GetComponent<SphereCollider>();
-        if (collider == null) return;
-        DestroyRuntimeObject(collider);
     }
 
     void DestroyRuntimeObject(Object obj)

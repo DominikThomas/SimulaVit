@@ -16,10 +16,22 @@ public class ReplicatorHudPresenter
 
     private GUIStyle hudStyle;
     private GUIStyle hudBackgroundStyle;
+    private GUIStyle buttonStyle;
+
     private float hudMeanTempKelvin;
     private float hudMinTempKelvin;
     private float hudMaxTempKelvin;
     private float nextHudTempSampleTime;
+
+    private bool showMenu;
+    private bool initialized;
+
+    private float guiScale = 1f;
+    private float masterVolume = 1f;
+
+    private const float ReferenceHeight = 1080f;
+    private const float MinGuiScale = 1f;
+    private const float MaxGuiScale = 2.5f;
 
     public void Draw(
         List<Replicator> agents,
@@ -34,9 +46,22 @@ public class ReplicatorHudPresenter
         int methanotrophAgentCount,
         ref TemperatureDisplayUnit temperatureDisplayUnit)
     {
+        EnsureInitialized();
+
+        if (Event.current.type == EventType.KeyDown && Event.current.keyCode == KeyCode.Escape)
+        {
+            showMenu = !showMenu;
+            SetPauseState(showMenu);
+        }
+
+        UpdateGuiScale();
         EnsureHudStyles();
 
+        hudStyle.fontSize = Mathf.RoundToInt(14f * guiScale);
+        buttonStyle.fontSize = Mathf.RoundToInt(13f * guiScale);
+
         int totalAgents = agents.Count;
+
         Array.Clear(totalByLocomotion, 0, totalByLocomotion.Length);
         Array.Clear(chemosynthByLocomotion, 0, chemosynthByLocomotion.Length);
         Array.Clear(hydrogenByLocomotion, 0, hydrogenByLocomotion.Length);
@@ -89,6 +114,7 @@ public class ReplicatorHudPresenter
         float globalCo2 = planetResourceMap != null ? planetResourceMap.debugGlobalCO2 : 0f;
         float globalO2 = planetResourceMap != null ? planetResourceMap.debugGlobalO2 : 0f;
         float globalCH4 = planetResourceMap != null ? planetResourceMap.debugGlobalCH4 : 0f;
+
         float atmosphereTotal = Mathf.Max(0.0001f, globalCo2 + globalO2 + globalCH4);
         float co2Pct = (globalCo2 / atmosphereTotal) * 100f;
         float o2Pct = (globalO2 / atmosphereTotal) * 100f;
@@ -120,52 +146,107 @@ public class ReplicatorHudPresenter
         {
             replicatorsText += $"\n<color=#FFD54A>Sulfur:</color> {FormatLocomotionCounts(chemosynthByLocomotion)} ({(100f * chemosynthAgentCount / safeTotal):0.0}%)";
         }
+
         if (photosynthAgentCount > 0)
         {
             replicatorsText += $"\n<color=#79E07E>Photo:</color> {FormatLocomotionCounts(photosynthByLocomotion)} ({(100f * photosynthAgentCount / safeTotal):0.0}%)";
         }
+
         if (saprotrophAgentCount > 0)
         {
             replicatorsText += $"\n<color=#62B0FF>Sapro:</color> {FormatLocomotionCounts(saprotrophByLocomotion)} ({(100f * saprotrophAgentCount / safeTotal):0.0}%)";
         }
+
         if (predatorAgentCount > 0)
         {
             replicatorsText += $"\n<color=#FF5A5A>Predator:</color> {FormatLocomotionCounts(predatorByLocomotion)} ({(100f * predatorAgentCount / safeTotal):0.0}%)";
         }
+
         if (fermenterAgentCount > 0)
         {
             replicatorsText += $"\n<color=#FF8C1A>Ferment:</color> {FormatLocomotionCounts(fermentByLocomotion)} ({(100f * fermenterAgentCount / safeTotal):0.0}%)";
         }
+
         if (methanogenAgentCount > 0)
         {
             replicatorsText += $"\n<color=#9955E6>Methanogen:</color> {FormatLocomotionCounts(methanogenByLocomotion)} ({(100f * methanogenAgentCount / safeTotal):0.0}%)";
         }
+
         if (methanotrophAgentCount > 0)
         {
             replicatorsText += $"\n<color=#FF73BF>Methanotroph:</color> {FormatLocomotionCounts(methanotrophByLocomotion)} ({(100f * methanotrophAgentCount / safeTotal):0.0}%)";
         }
 
-        const float panelWidth = 250f;
-        const float padding = 8f;
-        const float lineHeight = 20f;
-        float rightX = Screen.width - panelWidth - padding;
+        Matrix4x4 oldMatrix = GUI.matrix;
+        GUI.matrix = Matrix4x4.Scale(new Vector3(guiScale, guiScale, 1f));
 
-        float atmosphereHeight = (atmosphereText.Split('\n').Length * lineHeight) + (padding * 2f) - 35;
-        float replicatorHeight = (replicatorsText.Split('\n').Length * lineHeight) + (padding * 2f);
+        float scaledScreenWidth = Screen.width / guiScale;
+        float scaledScreenHeight = Screen.height / guiScale;
 
-        Rect atmosphereRect = new Rect(rightX, padding, panelWidth, atmosphereHeight);
+        float panelWidth = Mathf.Clamp(scaledScreenWidth * 0.22f, 360f, 700f);
+        const float padding = 14f;
+        const float lineHeight = 24f;
+        const float edgeMargin = 24f;
+
+        float rightX = scaledScreenWidth - panelWidth - edgeMargin;
+
+        float contentWidth = panelWidth - 2f * padding;
+
+        float atmosphereTextHeight = hudStyle.CalcHeight(new GUIContent(atmosphereText), contentWidth);
+        float replicatorTextHeight = hudStyle.CalcHeight(new GUIContent(replicatorsText), contentWidth);
+
+        float atmosphereHeight = atmosphereTextHeight + (padding * 2f);
+        float replicatorHeight = replicatorTextHeight + (padding * 2f);
+
+        Rect atmosphereRect = new Rect(rightX, edgeMargin, panelWidth, atmosphereHeight);
         GUI.Box(atmosphereRect, GUIContent.none, hudBackgroundStyle);
-        GUI.Label(new Rect(atmosphereRect.x + padding, atmosphereRect.y + padding, panelWidth - 2f * padding, atmosphereHeight - 2f * padding), atmosphereText, hudStyle);
+        GUI.Label(
+            new Rect(
+                atmosphereRect.x + padding,
+                atmosphereRect.y + padding,
+                panelWidth - 2f * padding,
+                atmosphereHeight - 2f * padding),
+            atmosphereText,
+            hudStyle);
 
-        Rect tempUnitButtonRect = new Rect(rightX, atmosphereRect.yMax + 4f, panelWidth, lineHeight);
-        if (GUI.Button(tempUnitButtonRect, $"Temp Unit: {GetTemperatureUnitLabel(temperatureDisplayUnit)}"))
+        Rect tempUnitButtonRect = new Rect(rightX, atmosphereRect.yMax + 6f, panelWidth, lineHeight);
+        if (GUI.Button(tempUnitButtonRect, $"Temp Unit: {GetTemperatureUnitLabel(temperatureDisplayUnit)}", buttonStyle))
         {
-            temperatureDisplayUnit = (TemperatureDisplayUnit)(((int)temperatureDisplayUnit + 1) % Enum.GetValues(typeof(TemperatureDisplayUnit)).Length);
+            temperatureDisplayUnit =
+                (TemperatureDisplayUnit)(((int)temperatureDisplayUnit + 1) % Enum.GetValues(typeof(TemperatureDisplayUnit)).Length);
         }
 
-        Rect replicatorRect = new Rect(rightX, Screen.height - replicatorHeight - padding, panelWidth, replicatorHeight);
+        Rect replicatorRect = new Rect(
+            rightX,
+            scaledScreenHeight - replicatorHeight - edgeMargin,
+            panelWidth,
+            replicatorHeight);
+
         GUI.Box(replicatorRect, GUIContent.none, hudBackgroundStyle);
-        GUI.Label(new Rect(replicatorRect.x + padding, replicatorRect.y + padding, panelWidth - 2f * padding, replicatorHeight - 2f * padding), replicatorsText, hudStyle);
+        GUI.Label(
+            new Rect(
+                replicatorRect.x + padding,
+                replicatorRect.y + padding,
+                panelWidth - 2f * padding,
+                replicatorHeight - 2f * padding),
+            replicatorsText,
+            hudStyle);
+
+        DrawMenu(scaledScreenWidth, scaledScreenHeight);
+
+        GUI.matrix = oldMatrix;
+    }
+
+    private void EnsureInitialized()
+    {
+        if (initialized)
+        {
+            return;
+        }
+
+        initialized = true;
+        masterVolume = PlayerPrefs.GetFloat("MasterVolume", 1f);
+        AudioListener.volume = masterVolume;
     }
 
     private void SampleHudTemperatureStats(PlanetResourceMap planetResourceMap)
@@ -178,12 +259,12 @@ public class ReplicatorHudPresenter
             return;
         }
 
-        if (Time.timeSinceLevelLoad < nextHudTempSampleTime)
+        if (Time.unscaledTime < nextHudTempSampleTime)
         {
             return;
         }
 
-        nextHudTempSampleTime = Time.timeSinceLevelLoad + 0.5f;
+        nextHudTempSampleTime = Time.unscaledTime + 0.5f;
         planetResourceMap.GetTemperatureStats(out hudMeanTempKelvin, out hudMinTempKelvin, out hudMaxTempKelvin);
     }
 
@@ -191,45 +272,123 @@ public class ReplicatorHudPresenter
     {
         switch (unit)
         {
-            case TemperatureDisplayUnit.Kelvin: return "K";
-            case TemperatureDisplayUnit.Fahrenheit: return "°F";
-            default: return "°C";
+            case TemperatureDisplayUnit.Kelvin:
+                return "K";
+            case TemperatureDisplayUnit.Fahrenheit:
+                return "°F";
+            default:
+                return "°C";
         }
     }
 
     private void EnsureHudStyles()
     {
-        if (hudStyle != null && hudBackgroundStyle != null)
+        if (hudStyle != null && hudBackgroundStyle != null && buttonStyle != null)
         {
             return;
         }
 
         hudStyle = new GUIStyle(GUI.skin.label)
         {
-            fontSize = 12,
+            fontSize = Mathf.RoundToInt(14f * guiScale),
             richText = true,
-            alignment = TextAnchor.UpperLeft,
-            normal =
-            {
-                textColor = Color.white
-            }
+            alignment = TextAnchor.UpperLeft
         };
+        hudStyle.normal.textColor = Color.white;
+        hudStyle.wordWrap = true;
 
         Texture2D backgroundTexture = new Texture2D(1, 1);
         backgroundTexture.SetPixel(0, 0, new Color(0f, 0f, 0f, 0.55f));
         backgroundTexture.Apply();
 
-        hudBackgroundStyle = new GUIStyle(GUI.skin.box)
+        hudBackgroundStyle = new GUIStyle(GUI.skin.box);
+        hudBackgroundStyle.normal.background = backgroundTexture;
+        hudBackgroundStyle.padding = new RectOffset(8, 8, 8, 8);
+
+        buttonStyle = new GUIStyle(GUI.skin.button)
         {
-            normal =
-            {
-                background = backgroundTexture
-            }
+            fontSize = Mathf.RoundToInt(13f * guiScale),
+            alignment = TextAnchor.MiddleCenter
         };
     }
 
     private static string FormatLocomotionCounts(int[] counts)
     {
         return $"{counts[0]}/{counts[1]}/{counts[2]}/{counts[3]}";
+    }
+
+    private void UpdateGuiScale()
+    {
+        float scaleFromHeight = Screen.height / ReferenceHeight;
+        guiScale = Mathf.Clamp(scaleFromHeight, MinGuiScale, MaxGuiScale);
+    }
+
+    private void DrawMenu(float scaledScreenWidth, float scaledScreenHeight)
+    {
+        if (!showMenu)
+        {
+            return;
+        }
+
+        float width = 360f;
+        float height = 240f;
+
+        Rect rect = new Rect(
+            (scaledScreenWidth - width) * 0.5f,
+            (scaledScreenHeight - height) * 0.5f,
+            width,
+            height);
+
+        GUI.Box(rect, "Menu", hudBackgroundStyle);
+
+        float x = rect.x + 16f;
+        float y = rect.y + 40f;
+        float contentWidth = rect.width - 32f;
+
+        GUI.Label(
+            new Rect(x, y, contentWidth, 28f),
+            $"Master Volume: {Mathf.RoundToInt(masterVolume * 100f)}%",
+            hudStyle);
+
+        y += 30f;
+
+        float newVolume = GUI.HorizontalSlider(new Rect(x, y, contentWidth, 24f), masterVolume, 0f, 1f);
+        if (!Mathf.Approximately(newVolume, masterVolume))
+        {
+            masterVolume = newVolume;
+            AudioListener.volume = masterVolume;
+            PlayerPrefs.SetFloat("MasterVolume", masterVolume);
+            PlayerPrefs.Save();
+        }
+
+        y += 44f;
+
+        if (GUI.Button(new Rect(x, y, contentWidth, 36f), "Resume", buttonStyle))
+        {
+            showMenu = false;
+            SetPauseState(false);
+        }
+
+        y += 46f;
+
+        if (GUI.Button(new Rect(x, y, contentWidth, 36f), "Exit Application", buttonStyle))
+        {
+            SetPauseState(false);
+            QuitGame();
+        }
+    }
+
+    private static void SetPauseState(bool paused)
+    {
+        Time.timeScale = paused ? 0f : 1f;
+    }
+
+    private static void QuitGame()
+    {
+#if UNITY_EDITOR
+        UnityEditor.EditorApplication.isPlaying = false;
+#else
+        Application.Quit();
+#endif
     }
 }
