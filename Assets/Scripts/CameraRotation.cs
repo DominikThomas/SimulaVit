@@ -15,6 +15,12 @@ public class CameraRotation : MonoBehaviour
     [SerializeField] private float zoomSpeed = 8.0f;
     [SerializeField] private float pinchZoomSpeed = 0.02f;
 
+    [Header("Close-up Tilt")]
+    [SerializeField] private float tiltTransitionStartDistance = 18.0f;
+    [SerializeField] private float maxTiltAngle = 65.0f;
+    [SerializeField] private float underwaterAllowance = 1.5f;
+    [SerializeField] private float smoothingSpeed = 8.0f;
+
     [Header("Input")]
     [SerializeField] private InputActionAsset controls;
 
@@ -22,6 +28,7 @@ public class CameraRotation : MonoBehaviour
     private InputAction orbitActivateAction;
     private InputActionMap cameraActionMap;
 
+    private PlanetGenerator planetGenerator;
     private float orbitDistance;
     private float planetRadius;
     private float currentX;
@@ -81,10 +88,92 @@ public class CameraRotation : MonoBehaviour
         }
 
         Quaternion orbitRotation = Quaternion.Euler(currentX, currentY, 0f);
-        Vector3 position = TargetPosition + orbitRotation * new Vector3(0f, 0f, -orbitDistance);
+        Vector3 radialDirection = (orbitRotation * Vector3.back).normalized;
 
-        transform.position = position;
-        transform.LookAt(TargetPosition, Vector3.up);
+        float surfaceRadius = planetGenerator != null ? planetGenerator.GetSurfaceRadius(radialDirection) : planetRadius;
+        float seaRadius = planetGenerator != null && planetGenerator.OceanEnabled ? planetGenerator.GetOceanRadius() : surfaceRadius;
+
+        bool overOcean = planetGenerator != null && planetGenerator.OceanEnabled && surfaceRadius < seaRadius - 0.001f;
+        float terrainClearance = GetTerrainClearance();
+        float minAllowedDistance = overOcean
+            ? Mathf.Max(surfaceRadius + terrainClearance, seaRadius - underwaterAllowance)
+            : surfaceRadius + terrainClearance;
+        float desiredDistance = Mathf.Max(orbitDistance, minAllowedDistance);
+
+        Vector3 desiredPosition = TargetPosition + radialDirection * desiredDistance;
+        Vector3 lookTarget = GetBlendedLookTarget(orbitRotation, radialDirection, surfaceRadius, seaRadius, overOcean, desiredDistance);
+        Quaternion desiredRotation = Quaternion.LookRotation((lookTarget - desiredPosition).normalized, radialDirection);
+
+        float smoothing = 1f - Mathf.Exp(-Mathf.Max(0.01f, smoothingSpeed) * Time.deltaTime);
+        transform.position = Vector3.Lerp(transform.position, desiredPosition, smoothing);
+        transform.rotation = Quaternion.Slerp(transform.rotation, desiredRotation, smoothing);
+    }
+
+    private Vector3 GetBlendedLookTarget(
+        Quaternion orbitRotation,
+        Vector3 radialDirection,
+        float surfaceRadius,
+        float seaRadius,
+        bool overOcean,
+        float desiredDistance)
+    {
+        float tiltBlend = GetTiltBlend(orbitDistance);
+        float tiltAngle = maxTiltAngle * tiltBlend;
+        Vector3 surfacePoint = TargetPosition + radialDirection * surfaceRadius;
+
+        Vector3 tangentForward = Vector3.ProjectOnPlane(orbitRotation * Vector3.up, radialDirection).normalized;
+        if (tangentForward.sqrMagnitude < 0.0001f)
+        {
+            tangentForward = Vector3.ProjectOnPlane(orbitRotation * Vector3.right, radialDirection).normalized;
+        }
+
+        float closeRange = Mathf.Max(0.01f, tiltTransitionStartDistance - minZoomDistance);
+        float lookAheadDistance = Mathf.Lerp(0f, closeRange * 1.5f, tiltBlend);
+        float verticalBias = overOcean
+            ? Mathf.Lerp(0f, -underwaterAllowance * 0.5f, tiltBlend)
+            : Mathf.Lerp(0f, surfaceRadius * 0.05f, tiltBlend);
+
+        Vector3 nearLookTarget = surfacePoint + tangentForward * lookAheadDistance + radialDirection * verticalBias;
+        Vector3 farLookTarget = TargetPosition;
+
+        Vector3 blendedTarget = Vector3.Lerp(farLookTarget, nearLookTarget, tiltBlend);
+        if (tiltAngle > 0f)
+        {
+            Vector3 desiredForward = (blendedTarget - (TargetPosition + radialDirection * desiredDistance)).normalized;
+            Vector3 rightAxis = Vector3.Cross(radialDirection, desiredForward).normalized;
+            if (rightAxis.sqrMagnitude > 0.0001f)
+            {
+                Quaternion tiltRotation = Quaternion.AngleAxis(tiltAngle * 0.15f, rightAxis);
+                desiredForward = tiltRotation * desiredForward;
+                blendedTarget = TargetPosition + radialDirection * desiredDistance + desiredForward * Mathf.Max(1f, desiredDistance);
+            }
+        }
+
+        if (overOcean && desiredDistance < seaRadius)
+        {
+            float belowSurfaceDepth = seaRadius - desiredDistance;
+            blendedTarget -= radialDirection * Mathf.Min(belowSurfaceDepth, underwaterAllowance);
+        }
+
+        return blendedTarget;
+    }
+
+    private float GetTiltBlend(float distance)
+    {
+        if (tiltTransitionStartDistance <= minZoomDistance)
+        {
+            return distance <= minZoomDistance ? 1f : 0f;
+        }
+
+        float normalized = Mathf.InverseLerp(tiltTransitionStartDistance, minZoomDistance, distance);
+        return normalized * normalized * (3f - 2f * normalized);
+    }
+
+    private float GetTerrainClearance()
+    {
+        Camera attachedCamera = GetComponent<Camera>();
+        float nearClip = attachedCamera != null ? attachedCamera.nearClipPlane : 0.3f;
+        return Mathf.Max(nearClip * 1.5f, planetRadius * 0.01f);
     }
 
     private void HandleZoomInput()
@@ -149,18 +238,18 @@ public class CameraRotation : MonoBehaviour
             targetTransform = planetObject.transform;
         }
 
-        PlanetGenerator generator = planetObject.GetComponent<PlanetGenerator>();
-        if (generator == null)
+        planetGenerator = planetObject.GetComponent<PlanetGenerator>();
+        if (planetGenerator == null)
         {
             orbitDistance = 10.0f;
             Debug.LogError("PlanetGenerator script not found on GameObject tagged 'Planet'. Defaulting to 10.0f.");
             return;
         }
 
-        planetRadius = generator.radius;
-        orbitDistance = generator.radius + distanceBuffer;
-        minZoomDistance = Mathf.Max(planetRadius + 0.5f, minZoomDistance);
+        planetRadius = planetGenerator.radius;
+        orbitDistance = planetGenerator.radius + distanceBuffer;
         maxZoomDistance = Mathf.Max(minZoomDistance, maxZoomDistance);
+        tiltTransitionStartDistance = Mathf.Clamp(tiltTransitionStartDistance, minZoomDistance, maxZoomDistance);
     }
 
     private void InitializeInput()
