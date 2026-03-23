@@ -498,6 +498,11 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   rotationSpeed: 5
   distanceBuffer: 15
+  targetTransform: {fileID: 382753103}
+  minZoomDistance: 16.5
+  maxZoomDistance: 60
+  zoomSpeed: 8
+  pinchZoomSpeed: 0.02
   controls: {fileID: -944628639613478452, guid: 540a5b05cf9aabf44a0760b486b09de8, type: 3}
 --- !u!1 &382753101
 GameObject:
