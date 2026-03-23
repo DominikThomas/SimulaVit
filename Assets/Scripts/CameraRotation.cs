@@ -1,56 +1,170 @@
 using UnityEngine;
-using UnityEngine.InputSystem; // NEW: Crucial namespace for the Input System
+using UnityEngine.InputSystem;
+using UnityEngine.InputSystem.Controls;
 
 public class CameraRotation : MonoBehaviour
 {
-    // Public variables to control rotation speed and distance
-    public float rotationSpeed = 1.0f; // Adjusted for New Input System delta
-    public float distanceBuffer = 6.0f;
-    private float orbitDistance; // The calculated final distance
+    [Header("Orbit")]
+    [SerializeField] private float rotationSpeed = 1.0f;
+    [SerializeField] private float distanceBuffer = 6.0f;
 
-    // NEW: Reference to the Input Actions Asset
-    public InputActionAsset controls;
+    [Header("Zoom")]
+    [SerializeField] private Transform targetTransform;
+    [SerializeField] private float minZoomDistance = 8.0f;
+    [SerializeField] private float maxZoomDistance = 40.0f;
+    [SerializeField] private float zoomSpeed = 8.0f;
+    [SerializeField] private float pinchZoomSpeed = 0.02f;
 
-    // Private variables to hold the specific actions
+    [Header("Input")]
+    [SerializeField] private InputActionAsset controls;
+
     private InputAction lookDeltaAction;
     private InputAction orbitActivateAction;
     private InputActionMap cameraActionMap;
 
-    private float currentX = 0.0f;
-    private float currentY = 0.0f;
+    private float orbitDistance;
+    private float planetRadius;
+    private float currentX;
+    private float currentY;
     private Vector2 lookInput;
-    private bool isOrbiting = false;
+    private bool isOrbiting;
 
-    // The point we are orbiting around (Planet Center)
-    private readonly Vector3 target = Vector3.zero;
+    private Vector3 TargetPosition => targetTransform != null ? targetTransform.position : Vector3.zero;
 
-    void Awake()
+    private void Awake()
     {
-        // 1. Find the PlanetGenerator script (assuming it's on the parent 'Planet System')
-        GameObject planetObject = GameObject.FindWithTag("Planet");
+        InitializeTargetAndDistance();
+        InitializeInput();
+        orbitDistance = Mathf.Clamp(orbitDistance, minZoomDistance, maxZoomDistance);
+    }
 
-        if (planetObject != null)
+    private void OnEnable()
+    {
+        if (cameraActionMap != null)
         {
-            PlanetGenerator generator = planetObject.GetComponent<PlanetGenerator>();
+            cameraActionMap.Enable();
+        }
+    }
 
-            if (generator != null)
+    private void OnDisable()
+    {
+        if (cameraActionMap != null)
+        {
+            cameraActionMap.Disable();
+        }
+    }
+
+    private void Update()
+    {
+        lookInput = lookDeltaAction != null ? lookDeltaAction.ReadValue<Vector2>() : Vector2.zero;
+        HandleZoomInput();
+    }
+
+    private void OnDestroy()
+    {
+        if (orbitActivateAction == null)
+        {
+            return;
+        }
+
+        orbitActivateAction.performed -= OnOrbitActivatePerformed;
+        orbitActivateAction.canceled -= OnOrbitActivateCanceled;
+    }
+
+    private void LateUpdate()
+    {
+        if (isOrbiting)
+        {
+            currentY += lookInput.x * rotationSpeed;
+            currentX -= lookInput.y * rotationSpeed;
+            currentX = Mathf.Clamp(currentX, -80f, 80f);
+        }
+
+        Quaternion orbitRotation = Quaternion.Euler(currentX, currentY, 0f);
+        Vector3 position = TargetPosition + orbitRotation * new Vector3(0f, 0f, -orbitDistance);
+
+        transform.position = position;
+        transform.LookAt(TargetPosition, Vector3.up);
+    }
+
+    private void HandleZoomInput()
+    {
+        float zoomDelta = 0f;
+
+        if (Mouse.current != null)
+        {
+            zoomDelta -= Mouse.current.scroll.ReadValue().y * zoomSpeed * 0.01f;
+        }
+
+        if (Touchscreen.current != null)
+        {
+            TouchControl primaryTouch = Touchscreen.current.primaryTouch;
+            TouchControl secondaryTouch = GetSecondaryTouch(primaryTouch.touchId.ReadValue());
+            if (primaryTouch.press.isPressed && secondaryTouch != null)
             {
-                // 2. Calculate the orbit distance: Planet Radius + Buffer
-                orbitDistance = generator.radius + distanceBuffer;
-            }
-            else
-            {
-                // Fallback for safety if tag exists but script does not
-                orbitDistance = 10.0f;
-                Debug.LogError("PlanetGenerator script not found on GameObject tagged 'Planet'. Defaulting to 10.0f.");
+                Vector2 primaryPosition = primaryTouch.position.ReadValue();
+                Vector2 secondaryPosition = secondaryTouch.position.ReadValue();
+                Vector2 previousPrimaryPosition = primaryPosition - primaryTouch.delta.ReadValue();
+                Vector2 previousSecondaryPosition = secondaryPosition - secondaryTouch.delta.ReadValue();
+
+                float previousDistance = Vector2.Distance(previousPrimaryPosition, previousSecondaryPosition);
+                float currentDistance = Vector2.Distance(primaryPosition, secondaryPosition);
+                zoomDelta -= (currentDistance - previousDistance) * pinchZoomSpeed;
             }
         }
-        else
+
+        if (Mathf.Abs(zoomDelta) > Mathf.Epsilon)
         {
-            // Fallback if no object is found with the correct tag
+            orbitDistance = Mathf.Clamp(orbitDistance + zoomDelta, minZoomDistance, maxZoomDistance);
+        }
+    }
+
+    private TouchControl GetSecondaryTouch(int primaryTouchId)
+    {
+        foreach (TouchControl touch in Touchscreen.current.touches)
+        {
+            if (!touch.press.isPressed || touch.touchId.ReadValue() == primaryTouchId)
+            {
+                continue;
+            }
+
+            return touch;
+        }
+
+        return null;
+    }
+
+    private void InitializeTargetAndDistance()
+    {
+        GameObject planetObject = GameObject.FindWithTag("Planet");
+        if (planetObject == null)
+        {
             orbitDistance = 10.0f;
             Debug.LogError("GameObject with tag 'Planet' not found. Defaulting camera orbit distance to 10.0f.");
+            return;
         }
+
+        if (targetTransform == null)
+        {
+            targetTransform = planetObject.transform;
+        }
+
+        PlanetGenerator generator = planetObject.GetComponent<PlanetGenerator>();
+        if (generator == null)
+        {
+            orbitDistance = 10.0f;
+            Debug.LogError("PlanetGenerator script not found on GameObject tagged 'Planet'. Defaulting to 10.0f.");
+            return;
+        }
+
+        planetRadius = generator.radius;
+        orbitDistance = generator.radius + distanceBuffer;
+        minZoomDistance = Mathf.Max(planetRadius + 0.5f, minZoomDistance);
+        maxZoomDistance = Mathf.Max(minZoomDistance, maxZoomDistance);
+    }
+
+    private void InitializeInput()
+    {
         if (controls == null)
         {
             Debug.LogError("CameraRotation is missing InputActionAsset reference.");
@@ -66,7 +180,6 @@ public class CameraRotation : MonoBehaviour
             return;
         }
 
-        // Find the actions defined in the asset
         lookDeltaAction = cameraActionMap.FindAction("LookDelta", true);
         orbitActivateAction = cameraActionMap.FindAction("OrbitActivate", true);
 
@@ -77,57 +190,17 @@ public class CameraRotation : MonoBehaviour
             return;
         }
 
-        // Subscribe to the OrbitActivate action press and release events
-        orbitActivateAction.performed += ctx => isOrbiting = true;
-        orbitActivateAction.canceled += ctx => isOrbiting = false;
+        orbitActivateAction.performed += OnOrbitActivatePerformed;
+        orbitActivateAction.canceled += OnOrbitActivateCanceled;
     }
 
-    void OnEnable()
+    private void OnOrbitActivatePerformed(InputAction.CallbackContext context)
     {
-        // Enable all actions when the script becomes active
-        if (cameraActionMap != null)
-        {
-            cameraActionMap.Enable();
-        }
+        isOrbiting = true;
     }
 
-    void OnDisable()
+    private void OnOrbitActivateCanceled(InputAction.CallbackContext context)
     {
-        // Disable all actions when the script is deactivated
-        if (cameraActionMap != null)
-        {
-            cameraActionMap.Disable();
-        }
-    }
-
-    void Update()
-    {
-        // Read the mouse delta value every frame
-        lookInput = lookDeltaAction.ReadValue<Vector2>();
-    }
-
-    void LateUpdate()
-    {
-        // 1. Check if Orbit is active (Left Mouse Button held down)
-        if (isOrbiting)
-        {
-            // Horizontal movement (Mouse X) changes the Y rotation (around the planet)
-            currentY += lookInput.x * rotationSpeed;
-
-            // Vertical movement (Mouse Y) changes the X rotation (up and down)
-            currentX -= lookInput.y * rotationSpeed;
-
-            // Limit vertical rotation to prevent the camera from going upside down
-            currentX = Mathf.Clamp(currentX, -80f, 80f);
-        }
-
-        // 2. Calculate and apply new position and rotation
-        Quaternion rotation = Quaternion.Euler(currentX, currentY, 0);
-
-        // CRUCIAL CHANGE: Use orbitDistance instead of the hardcoded 'distance'
-        Vector3 position = rotation * new Vector3(0.0f, 0.0f, -orbitDistance);
-
-        transform.rotation = rotation;
-        transform.position = target + position;
+        isOrbiting = false;
     }
 }

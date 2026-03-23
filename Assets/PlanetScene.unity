@@ -498,6 +498,11 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   rotationSpeed: 5
   distanceBuffer: 15
+  targetTransform: {fileID: 0}
+  minZoomDistance: 8
+  maxZoomDistance: 40
+  zoomSpeed: 20
+  pinchZoomSpeed: 0.02
   controls: {fileID: -944628639613478452, guid: 540a5b05cf9aabf44a0760b486b09de8, type: 3}
 --- !u!1 &382753101
 GameObject:
@@ -821,7 +826,6 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 1222684995}
-  - component: {fileID: 1222684994}
   - component: {fileID: 1222684993}
   m_Layer: 0
   m_Name: PlanetResourceMap
@@ -49555,42 +49559,6 @@ MonoBehaviour:
   - 0
   toxicProteolyticWaste: []
   dissolvedOrganicLeak: []
---- !u!114 &1222684994
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1222684992}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: eee7f655e5979404cabff8cefd535095, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::PlanetGenerator
-  replicatorManager: {fileID: 0}
-  resolution: 10
-  radius: 1
-  planetMaterial: {fileID: 0}
-  noiseMagnitude: 0.1
-  noiseRoughness: 1
-  numLayers: 4
-  persistence: 0.5
-  noiseOffset: {x: 1, y: 1, z: 1}
-  enableOcean: 1
-  oceanCoveragePercent: 45
-  oceanDepth: 0.35
-  oceanMaterial: {fileID: 0}
-  enableAtmosphere: 1
-  atmosphereRadiusMultiplier: 1.04
-  atmosphereMaterial: {fileID: 0}
-  randomizeOnStart: 0
-  useRandomSeed: 1
-  randomSeed: 12345
-  noiseMagnitudeRange: {x: 0.05, y: 0.2}
-  noiseRoughnessRange: {x: 1.5, y: 6}
-  oceanCoverageRange: {x: 25, y: 60}
-  photosynthesisUnlockSeconds: 0
-  saprotrophyUnlockSeconds: 0
 --- !u!4 &1222684995
 Transform:
   m_ObjectHideFlags: 0

@@ -16,7 +16,6 @@ public class PlanetResourceMapMathTests
         generator.radius = 1f;
 
         resourceMap = testRoot.AddComponent<PlanetResourceMap>();
-        resourceMap.planetGenerator = generator;
 
         InvokePrivate(resourceMap, "InitializeIfNeeded");
     }
