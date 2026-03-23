@@ -23,11 +23,10 @@ public enum ResourceType
 }
 
 [DisallowMultipleComponent]
-[RequireComponent(typeof(PlanetGenerator))]
 public class PlanetResourceMap : MonoBehaviour
 {
+    [SerializeField] private PlanetGenerator planetGenerator;
     [Header("References")]
-    public PlanetGenerator planetGenerator;
     [Tooltip("Optional directional light. If empty, will try SunSkyRotator's Light, then RenderSettings.sun.")]
     public Light sunLight;
     public SunSkyRotator sunSkyRotator;
