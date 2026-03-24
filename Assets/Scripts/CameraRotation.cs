@@ -4,8 +4,9 @@ using UnityEngine.InputSystem.Controls;
 
 public class CameraRotation : MonoBehaviour
 {
-    private const float MinOrbitPitch = 5f;
+    private const float MinOrbitPitch = 10f;
     private const float MaxOrbitPitch = 85f;
+    private const float DefaultFarOrbitPitch = 70f;
     private const string RigRootName = "CameraRigRoot";
     private const string PitchPivotName = "CameraPitchPivot";
 
@@ -92,7 +93,7 @@ public class CameraRotation : MonoBehaviour
 
         float tiltBlend = GetTiltBlend(targetDistance);
         float nearSurfacePitch = Mathf.Clamp(90f - maxTiltAngle, MinOrbitPitch, MaxOrbitPitch);
-        float effectivePitchTarget = Mathf.Lerp(targetOrbitPitch, Mathf.Min(targetOrbitPitch, nearSurfacePitch), tiltBlend);
+        float effectivePitchTarget = Mathf.Lerp(targetOrbitPitch, nearSurfacePitch, tiltBlend);
 
         Vector3 radialDirection = GetOrbitDirection(targetYaw, effectivePitchTarget);
         float surfaceRadius = planetGenerator != null ? planetGenerator.GetSurfaceRadius(radialDirection) : planetRadius;
@@ -164,6 +165,7 @@ public class CameraRotation : MonoBehaviour
 
         targetYaw = Mathf.Atan2(offset.x, -offset.z) * Mathf.Rad2Deg;
         targetOrbitPitch = Mathf.Clamp(Mathf.Atan2(offset.y, Mathf.Max(0.0001f, horizontalDistance)) * Mathf.Rad2Deg, MinOrbitPitch, MaxOrbitPitch);
+        targetOrbitPitch = Mathf.Max(targetOrbitPitch, DefaultFarOrbitPitch);
         targetDistance = initialDistance;
 
         smoothedYaw = targetYaw;
@@ -183,14 +185,14 @@ public class CameraRotation : MonoBehaviour
         rigRoot.position = TargetPosition;
         rigRoot.rotation = Quaternion.AngleAxis(yaw, Vector3.up);
         pitchPivot.localPosition = Vector3.zero;
-        pitchPivot.localRotation = Quaternion.Euler(pitch, 0f, 0f);
+        pitchPivot.localRotation = Quaternion.Euler(-pitch, 0f, 0f);
         transform.localPosition = new Vector3(0f, 0f, -distance);
         transform.localRotation = Quaternion.identity;
     }
 
     private Vector3 GetOrbitDirection(float yaw, float pitch)
     {
-        Quaternion orbitRotation = Quaternion.AngleAxis(yaw, Vector3.up) * Quaternion.Euler(pitch, 0f, 0f);
+        Quaternion orbitRotation = Quaternion.AngleAxis(yaw, Vector3.up) * Quaternion.Euler(-pitch, 0f, 0f);
         return (orbitRotation * Vector3.back).normalized;
     }
 
