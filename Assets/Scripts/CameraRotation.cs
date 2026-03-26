@@ -15,6 +15,11 @@ public class CameraRotation : MonoBehaviour
     [SerializeField] private float zoomSpeed = 8.0f;
     [SerializeField] private float pinchZoomSpeed = 0.02f;
 
+    [Header("Close-Range Tilt")]
+    [SerializeField] private float tiltStartDistance = 14.0f;
+    [SerializeField] private float maxTiltAngle = 25.0f;
+    [SerializeField] private float tiltSmoothing = 8.0f;
+
     [Header("Input")]
     [SerializeField] private InputActionAsset controls;
 
@@ -28,14 +33,23 @@ public class CameraRotation : MonoBehaviour
     private float currentY;
     private Vector2 lookInput;
     private bool isOrbiting;
+    private float currentTiltAngle;
+    private float tiltVelocity;
 
     private Vector3 TargetPosition => targetTransform != null ? targetTransform.position : Vector3.zero;
 
     private void Awake()
     {
         InitializeTargetAndDistance();
+        ValidateTiltSettings();
         InitializeInput();
         orbitDistance = Mathf.Clamp(orbitDistance, minZoomDistance, maxZoomDistance);
+    }
+
+    private void OnValidate()
+    {
+        maxTiltAngle = Mathf.Clamp(maxTiltAngle, 0f, 89f);
+        tiltSmoothing = Mathf.Max(0f, tiltSmoothing);
     }
 
     private void OnEnable()
@@ -82,9 +96,21 @@ public class CameraRotation : MonoBehaviour
 
         Quaternion orbitRotation = Quaternion.Euler(currentX, currentY, 0f);
         Vector3 position = TargetPosition + orbitRotation * new Vector3(0f, 0f, -orbitDistance);
+        Quaternion lookRotation = Quaternion.LookRotation(TargetPosition - position, Vector3.up);
+
+        float targetTiltAngle = GetTargetTiltAngle();
+        if (tiltSmoothing <= 0f)
+        {
+            currentTiltAngle = targetTiltAngle;
+        }
+        else
+        {
+            float smoothTime = 1f / tiltSmoothing;
+            currentTiltAngle = Mathf.SmoothDampAngle(currentTiltAngle, targetTiltAngle, ref tiltVelocity, smoothTime);
+        }
 
         transform.position = position;
-        transform.LookAt(TargetPosition, Vector3.up);
+        transform.rotation = lookRotation * Quaternion.Euler(-currentTiltAngle, 0f, 0f);
     }
 
     private void HandleZoomInput()
@@ -161,6 +187,19 @@ public class CameraRotation : MonoBehaviour
         orbitDistance = generator.radius + distanceBuffer;
         minZoomDistance = Mathf.Max(planetRadius + 0.5f, minZoomDistance);
         maxZoomDistance = Mathf.Max(minZoomDistance, maxZoomDistance);
+    }
+
+    private void ValidateTiltSettings()
+    {
+        maxTiltAngle = Mathf.Clamp(maxTiltAngle, 0f, 89f);
+        tiltSmoothing = Mathf.Max(0f, tiltSmoothing);
+        tiltStartDistance = Mathf.Clamp(tiltStartDistance, minZoomDistance, maxZoomDistance);
+    }
+
+    private float GetTargetTiltAngle()
+    {
+        float closeRangeProgress = Mathf.InverseLerp(tiltStartDistance, minZoomDistance, orbitDistance);
+        return closeRangeProgress * maxTiltAngle;
     }
 
     private void InitializeInput()
