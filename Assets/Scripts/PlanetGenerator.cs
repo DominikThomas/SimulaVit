@@ -23,6 +23,32 @@ public class PlanetGenerator : MonoBehaviour
     [Range(0f, 1f)] public float oceanDepth = 0.35f;
     public Material oceanMaterial;
 
+    [Header("Ocean Bathymetry")]
+    [Tooltip("Enable shoreline-distance bathymetry shaping for ocean-floor visuals and depth data.")]
+    public bool enableBathymetry = true;
+    [Tooltip("Approximate continental shelf width in cell-to-cell graph steps.")]
+    [Min(1f)] public float shelfDistance = 8f;
+    [Tooltip("Target depth at the end of the continental shelf (planet radius units).")]
+    [Min(0f)] public float shelfDepth = 0.06f;
+    [Tooltip("How aggressively depth ramps toward deep basin after shelf edge.")]
+    [Min(0f)] public float slopeStrength = 1.15f;
+    [Tooltip("Maximum local ocean depth below sea level (planet radius units).")]
+    [Min(0f)] public float maxOceanDepth = 0.22f;
+    [Tooltip("Low-frequency basin-shape noise scale sampled on unit sphere.")]
+    [Min(0.001f)] public float basinNoiseScale = 1.35f;
+    [Tooltip("How strongly basin noise modulates offshore depth.")]
+    [Range(0f, 1f)] public float basinNoiseStrength = 0.25f;
+    [Tooltip("Optional deterministic offset to decorrelate basin noise from terrain noise.")]
+    public Vector3 basinNoiseOffset = new Vector3(23.17f, -11.03f, 7.41f);
+    [Tooltip("How many shoreline-distance smoothing passes to apply before depth shaping.")]
+    [Range(0, 8)] public int bathymetrySmoothPasses = 2;
+    [Tooltip("Per-pass smoothing blend for shoreline-distance field.")]
+    [Range(0f, 1f)] public float bathymetrySmoothStrength = 0.45f;
+    [Tooltip("Keep coast geometry mostly unchanged within this many cells from shore.")]
+    [Min(0f)] public float shorelinePreservationDistance = 3f;
+    [Tooltip("Global strength for visible offshore bathymetry deformation.")]
+    [Range(0f, 1f)] public float bathymetryVisualStrength = 0.35f;
+
     [Header("Atmosphere")]
     public bool enableAtmosphere = true;
     [Tooltip("Atmosphere shell radius multiplier relative to planet radius.")]
@@ -55,8 +81,13 @@ public class PlanetGenerator : MonoBehaviour
     private Mesh atmosphereMesh;
 
     private float oceanNoiseThreshold;
+    private float[] generatedSurfaceRadiusByCell;
+    private float[] localOceanDepthByCell;
+    private float[] oceanDistanceToShoreByCell;
+    private byte[] oceanMaskByCell;
 
     public MeshRenderer OceanRenderer => oceanMeshRenderer;
+    public IReadOnlyList<float> LocalOceanDepths => localOceanDepthByCell;
 
     void Awake()
     {
@@ -194,20 +225,24 @@ public class PlanetGenerator : MonoBehaviour
         }
 
         oceanNoiseThreshold = CalculateNoiseThreshold(noiseSamples, oceanCoveragePercent);
+        float seaRadius = GetOceanRadius();
+        int cellCount = unitVertices.Count;
 
-        Vector3[] terrainVertices = new Vector3[unitVertices.Count];
-        Vector3[] oceanVertices = new Vector3[unitVertices.Count];
-        Vector3[] atmosphereVertices = new Vector3[unitVertices.Count];
+        Vector3[] terrainVertices = new Vector3[cellCount];
+        Vector3[] oceanVertices = new Vector3[cellCount];
+        Vector3[] atmosphereVertices = new Vector3[cellCount];
+        float[] finalTerrainRadii = new float[cellCount];
 
-        for (int i = 0; i < unitVertices.Count; i++)
+        int[] neighbors = BuildCellNeighborLookup(unitVertices, allTriangles);
+        BuildOceanBathymetry(unitVertices, noiseSamples, finalTerrainRadii, seaRadius, neighbors);
+
+        for (int i = 0; i < cellCount; i++)
         {
             Vector3 dir = unitVertices[i];
-            float terrainRadius = GetSurfaceRadiusFromNoise(noiseSamples[i]);
-            float seaRadius = GetOceanRadius();
             float shellBaseRadius = enableOcean ? seaRadius : radius;
             float atmosphereRadius = shellBaseRadius * atmosphereRadiusMultiplier;
 
-            terrainVertices[i] = dir * terrainRadius;
+            terrainVertices[i] = dir * finalTerrainRadii[i];
             oceanVertices[i] = dir * seaRadius;
             atmosphereVertices[i] = dir * atmosphereRadius;
         }
@@ -313,6 +348,15 @@ public class PlanetGenerator : MonoBehaviour
 
     public float GetSurfaceRadius(Vector3 pointOnSphere)
     {
+        if (generatedSurfaceRadiusByCell != null && generatedSurfaceRadiusByCell.Length > 0)
+        {
+            int cellIndex = PlanetGridIndexing.DirectionToCellIndex(pointOnSphere.normalized, resolution);
+            if (cellIndex >= 0 && cellIndex < generatedSurfaceRadiusByCell.Length)
+            {
+                return generatedSurfaceRadiusByCell[cellIndex];
+            }
+        }
+
         float noise = CalculateNoise(pointOnSphere.normalized);
         return GetSurfaceRadiusFromNoise(noise);
     }
@@ -330,6 +374,329 @@ public class PlanetGenerator : MonoBehaviour
         }
 
         return radius * (1f + finalNoise * noiseMagnitude);
+    }
+
+    public float GetLocalOceanDepth(Vector3 pointOnSphere)
+    {
+        int cellIndex = PlanetGridIndexing.DirectionToCellIndex(pointOnSphere.normalized, resolution);
+        return GetLocalOceanDepth(cellIndex);
+    }
+
+    public float GetLocalOceanDepth(int cellIndex)
+    {
+        if (localOceanDepthByCell == null || cellIndex < 0 || cellIndex >= localOceanDepthByCell.Length)
+        {
+            return 0f;
+        }
+
+        return localOceanDepthByCell[cellIndex];
+    }
+
+    public bool IsOceanCell(int cellIndex)
+    {
+        if (oceanMaskByCell == null || cellIndex < 0 || cellIndex >= oceanMaskByCell.Length)
+        {
+            return false;
+        }
+
+        return oceanMaskByCell[cellIndex] != 0;
+    }
+
+    void BuildOceanBathymetry(
+        List<Vector3> unitVertices,
+        List<float> noiseSamples,
+        float[] finalTerrainRadii,
+        float seaRadius,
+        int[] neighbors)
+    {
+        int cellCount = unitVertices.Count;
+        if (finalTerrainRadii == null || finalTerrainRadii.Length != cellCount)
+        {
+            return;
+        }
+
+        generatedSurfaceRadiusByCell = new float[cellCount];
+        localOceanDepthByCell = new float[cellCount];
+        oceanDistanceToShoreByCell = new float[cellCount];
+        oceanMaskByCell = new byte[cellCount];
+
+        for (int cell = 0; cell < cellCount; cell++)
+        {
+            float baseRadius = GetSurfaceRadiusFromNoise(noiseSamples[cell]);
+            finalTerrainRadii[cell] = baseRadius;
+            oceanDistanceToShoreByCell[cell] = -1f;
+
+            bool isOcean = enableOcean && baseRadius < seaRadius;
+            oceanMaskByCell[cell] = isOcean ? (byte)1 : (byte)0;
+            localOceanDepthByCell[cell] = isOcean ? Mathf.Max(0f, seaRadius - baseRadius) : 0f;
+        }
+
+        if (!enableOcean || !enableBathymetry || neighbors == null || neighbors.Length != cellCount * 6)
+        {
+            System.Array.Copy(finalTerrainRadii, generatedSurfaceRadiusByCell, cellCount);
+            return;
+        }
+
+        Queue<int> bfsQueue = new Queue<int>(cellCount);
+        float maxDistance = 0f;
+
+        for (int cell = 0; cell < cellCount; cell++)
+        {
+            if (oceanMaskByCell[cell] == 0)
+            {
+                continue;
+            }
+
+            bool isShore = false;
+            int baseIndex = cell * 6;
+            for (int n = 0; n < 6; n++)
+            {
+                int neighbor = neighbors[baseIndex + n];
+                if (neighbor < 0 || neighbor >= cellCount || oceanMaskByCell[neighbor] == 0)
+                {
+                    isShore = true;
+                    break;
+                }
+            }
+
+            if (isShore)
+            {
+                oceanDistanceToShoreByCell[cell] = 0f;
+                bfsQueue.Enqueue(cell);
+            }
+        }
+
+        while (bfsQueue.Count > 0)
+        {
+            int current = bfsQueue.Dequeue();
+            float currentDistance = oceanDistanceToShoreByCell[current];
+            int baseIndex = current * 6;
+
+            for (int n = 0; n < 6; n++)
+            {
+                int neighbor = neighbors[baseIndex + n];
+                if (neighbor < 0 || neighbor >= cellCount || oceanMaskByCell[neighbor] == 0 || oceanDistanceToShoreByCell[neighbor] >= 0f)
+                {
+                    continue;
+                }
+
+                float nextDistance = currentDistance + 1f;
+                oceanDistanceToShoreByCell[neighbor] = nextDistance;
+                maxDistance = Mathf.Max(maxDistance, nextDistance);
+                bfsQueue.Enqueue(neighbor);
+            }
+        }
+
+        SmoothOceanDistanceField(neighbors, oceanDistanceToShoreByCell, oceanMaskByCell, Mathf.Clamp(bathymetrySmoothPasses, 0, 8), Mathf.Clamp01(bathymetrySmoothStrength));
+        maxDistance = 0f;
+        for (int cell = 0; cell < cellCount; cell++)
+        {
+            if (oceanMaskByCell[cell] == 0 || oceanDistanceToShoreByCell[cell] < 0f)
+            {
+                continue;
+            }
+
+            maxDistance = Mathf.Max(maxDistance, oceanDistanceToShoreByCell[cell]);
+        }
+
+        float shelfDistanceSafe = Mathf.Max(1f, shelfDistance);
+        float shelfDepthSafe = Mathf.Clamp(shelfDepth, 0f, Mathf.Max(0f, maxOceanDepth));
+        float maxDepthSafe = Mathf.Max(shelfDepthSafe, maxOceanDepth);
+        float slopeStrengthSafe = Mathf.Max(0f, slopeStrength);
+        float basinScale = Mathf.Max(0.001f, basinNoiseScale);
+        float basinStrength = Mathf.Clamp01(basinNoiseStrength);
+        float falloffRange = Mathf.Max(1f, maxDistance - shelfDistanceSafe);
+        float shorelinePreserve = Mathf.Max(0f, shorelinePreservationDistance);
+        float visualStrength = Mathf.Clamp01(bathymetryVisualStrength);
+
+        for (int cell = 0; cell < cellCount; cell++)
+        {
+            if (oceanMaskByCell[cell] == 0)
+            {
+                generatedSurfaceRadiusByCell[cell] = finalTerrainRadii[cell];
+                localOceanDepthByCell[cell] = 0f;
+                continue;
+            }
+
+            float shoreDistance = oceanDistanceToShoreByCell[cell];
+            if (shoreDistance < 0f)
+            {
+                shoreDistance = shelfDistanceSafe + falloffRange;
+            }
+
+            float shelfT = Mathf.Clamp01(shoreDistance / shelfDistanceSafe);
+            float shelfDepthTarget = shelfDepthSafe * Mathf.SmoothStep(0f, 1f, shelfT);
+
+            float offshoreDistance = Mathf.Max(0f, shoreDistance - shelfDistanceSafe);
+            float offshoreT = Mathf.Clamp01(offshoreDistance / falloffRange);
+            float slopeT = Mathf.Clamp01(Mathf.Pow(offshoreT, 0.75f) * slopeStrengthSafe);
+            float basinDepthTarget = Mathf.Lerp(shelfDepthSafe, maxDepthSafe, slopeT);
+
+            float basinNoise = SimpleNoise.Evaluate(unitVertices[cell] * basinScale + basinNoiseOffset);
+            float basinNoise01 = (basinNoise + 1f) * 0.5f;
+            float basinModulation = 1f + (basinNoise01 - 0.5f) * 2f * basinStrength;
+
+            float depthTarget = Mathf.Lerp(shelfDepthTarget, basinDepthTarget, shelfT) * basinModulation;
+            depthTarget = Mathf.Clamp(depthTarget, 0f, maxDepthSafe);
+
+            float baseDepth = Mathf.Max(0f, seaRadius - finalTerrainRadii[cell]);
+            float additionalDepth = Mathf.Max(0f, depthTarget - baseDepth);
+            float offshoreBlend = Mathf.SmoothStep(
+                0f,
+                1f,
+                Mathf.Clamp01((shoreDistance - shorelinePreserve) / Mathf.Max(1f, shelfDistanceSafe)));
+            float appliedAdditionalDepth = additionalDepth * offshoreBlend * visualStrength;
+            float finalDepth = Mathf.Clamp(baseDepth + appliedAdditionalDepth, 0f, maxDepthSafe);
+
+            localOceanDepthByCell[cell] = finalDepth;
+            float oceanFloorRadius = Mathf.Max(0.01f, seaRadius - finalDepth);
+            finalTerrainRadii[cell] = Mathf.Min(seaRadius, oceanFloorRadius);
+            generatedSurfaceRadiusByCell[cell] = finalTerrainRadii[cell];
+        }
+    }
+
+    static void SmoothOceanDistanceField(int[] neighbors, float[] distances, byte[] oceanMask, int passes, float strength)
+    {
+        if (neighbors == null || distances == null || oceanMask == null || passes <= 0 || strength <= 0f)
+        {
+            return;
+        }
+
+        int cellCount = distances.Length;
+        float[] temp = new float[cellCount];
+        for (int pass = 0; pass < passes; pass++)
+        {
+            for (int cell = 0; cell < cellCount; cell++)
+            {
+                if (oceanMask[cell] == 0 || distances[cell] < 0f)
+                {
+                    temp[cell] = distances[cell];
+                    continue;
+                }
+
+                int baseIndex = cell * 6;
+                float sum = distances[cell];
+                int count = 1;
+                for (int n = 0; n < 6; n++)
+                {
+                    int neighbor = neighbors[baseIndex + n];
+                    if (neighbor < 0 || neighbor >= cellCount || oceanMask[neighbor] == 0 || distances[neighbor] < 0f)
+                    {
+                        continue;
+                    }
+
+                    sum += distances[neighbor];
+                    count++;
+                }
+
+                float average = count > 0 ? sum / count : distances[cell];
+                temp[cell] = Mathf.Lerp(distances[cell], average, strength);
+            }
+
+            for (int i = 0; i < cellCount; i++)
+            {
+                distances[i] = temp[i];
+            }
+        }
+    }
+
+    static int[] BuildCellNeighborLookup(List<Vector3> unitVertices, List<int> triangles)
+    {
+        int cellCount = unitVertices != null ? unitVertices.Count : 0;
+        if (cellCount <= 0)
+        {
+            return System.Array.Empty<int>();
+        }
+
+        const int maxNeighbors = 6;
+        int[] neighbors = new int[cellCount * maxNeighbors];
+        for (int i = 0; i < neighbors.Length; i++)
+        {
+            neighbors[i] = -1;
+        }
+
+        if (triangles == null)
+        {
+            return neighbors;
+        }
+
+        for (int tri = 0; tri + 2 < triangles.Count; tri += 3)
+        {
+            int a = triangles[tri];
+            int b = triangles[tri + 1];
+            int c = triangles[tri + 2];
+            AddNeighborPair(neighbors, a, b, maxNeighbors);
+            AddNeighborPair(neighbors, b, c, maxNeighbors);
+            AddNeighborPair(neighbors, c, a, maxNeighbors);
+        }
+
+        Dictionary<Vector3Int, List<int>> seamBuckets = new Dictionary<Vector3Int, List<int>>(cellCount);
+        const float quantizeScale = 100000f;
+        for (int i = 0; i < cellCount; i++)
+        {
+            Vector3 dir = unitVertices[i];
+            Vector3Int key = new Vector3Int(
+                Mathf.RoundToInt(dir.x * quantizeScale),
+                Mathf.RoundToInt(dir.y * quantizeScale),
+                Mathf.RoundToInt(dir.z * quantizeScale));
+
+            if (!seamBuckets.TryGetValue(key, out List<int> bucket))
+            {
+                bucket = new List<int>(3);
+                seamBuckets[key] = bucket;
+            }
+
+            bucket.Add(i);
+        }
+
+        foreach (List<int> bucket in seamBuckets.Values)
+        {
+            if (bucket.Count < 2)
+            {
+                continue;
+            }
+
+            for (int a = 0; a < bucket.Count; a++)
+            {
+                for (int b = a + 1; b < bucket.Count; b++)
+                {
+                    AddNeighborPair(neighbors, bucket[a], bucket[b], maxNeighbors);
+                }
+            }
+        }
+
+        return neighbors;
+    }
+
+    static void AddNeighborPair(int[] neighbors, int a, int b, int maxNeighbors)
+    {
+        AddNeighbor(neighbors, a, b, maxNeighbors);
+        AddNeighbor(neighbors, b, a, maxNeighbors);
+    }
+
+    static void AddNeighbor(int[] neighbors, int source, int neighbor, int maxNeighbors)
+    {
+        if (source < 0 || neighbor < 0)
+        {
+            return;
+        }
+
+        int start = source * maxNeighbors;
+        for (int i = 0; i < maxNeighbors; i++)
+        {
+            int idx = start + i;
+            int current = neighbors[idx];
+            if (current == neighbor)
+            {
+                return;
+            }
+
+            if (current == -1)
+            {
+                neighbors[idx] = neighbor;
+                return;
+            }
+        }
     }
 
 
