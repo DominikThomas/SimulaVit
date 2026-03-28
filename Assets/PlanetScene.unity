@@ -507,6 +507,7 @@ MonoBehaviour:
   maxTiltAngle: 65
   tiltSmoothing: 8
   controls: {fileID: -944628639613478452, guid: 540a5b05cf9aabf44a0760b486b09de8, type: 3}
+  touchLookScale: {x: 0.05, y: 0.01}
 --- !u!1 &382753101
 GameObject:
   m_ObjectHideFlags: 0

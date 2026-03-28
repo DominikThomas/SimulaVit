@@ -24,6 +24,7 @@ public class ReplicatorHudPresenter
     private float nextHudTempSampleTime;
 
     private bool showMenu;
+    private bool portraitShowReplicators;
     private bool initialized;
 
     private float guiScale = 1f;
@@ -182,8 +183,11 @@ public class ReplicatorHudPresenter
 
         float scaledScreenWidth = Screen.width / guiScale;
         float scaledScreenHeight = Screen.height / guiScale;
+        bool isPortrait = Screen.height > Screen.width;
 
-        float panelWidth = Mathf.Clamp(scaledScreenWidth * 0.22f, 360f, 700f);
+        float panelWidth = isPortrait
+            ? Mathf.Clamp(scaledScreenWidth * 0.92f, 300f, 520f)
+            : Mathf.Clamp(scaledScreenWidth * 0.22f, 360f, 700f);
         const float padding = 14f;
         const float lineHeight = 24f;
         const float edgeMargin = 24f;
@@ -198,39 +202,56 @@ public class ReplicatorHudPresenter
         float atmosphereHeight = atmosphereTextHeight + (padding * 2f);
         float replicatorHeight = replicatorTextHeight + (padding * 2f);
 
-        Rect atmosphereRect = new Rect(rightX, edgeMargin, panelWidth, atmosphereHeight);
-        GUI.Box(atmosphereRect, GUIContent.none, hudBackgroundStyle);
-        GUI.Label(
-            new Rect(
-                atmosphereRect.x + padding,
-                atmosphereRect.y + padding,
-                panelWidth - 2f * padding,
-                atmosphereHeight - 2f * padding),
-            atmosphereText,
-            hudStyle);
-
-        Rect tempUnitButtonRect = new Rect(rightX, atmosphereRect.yMax + 6f, panelWidth, lineHeight);
-        if (GUI.Button(tempUnitButtonRect, $"Temp Unit: {GetTemperatureUnitLabel(temperatureDisplayUnit)}", buttonStyle))
+        if (isPortrait)
         {
-            temperatureDisplayUnit =
-                (TemperatureDisplayUnit)(((int)temperatureDisplayUnit + 1) % Enum.GetValues(typeof(TemperatureDisplayUnit)).Length);
+            DrawPortraitHud(
+                rightX,
+                edgeMargin,
+                panelWidth,
+                padding,
+                lineHeight,
+                atmosphereText,
+                replicatorsText,
+                atmosphereHeight,
+                replicatorHeight,
+                ref temperatureDisplayUnit);
         }
+        else
+        {
+            Rect atmosphereRect = new Rect(rightX, edgeMargin, panelWidth, atmosphereHeight);
+            GUI.Box(atmosphereRect, GUIContent.none, hudBackgroundStyle);
+            GUI.Label(
+                new Rect(
+                    atmosphereRect.x + padding,
+                    atmosphereRect.y + padding,
+                    panelWidth - 2f * padding,
+                    atmosphereHeight - 2f * padding),
+                atmosphereText,
+                hudStyle);
 
-        Rect replicatorRect = new Rect(
-            rightX,
-            scaledScreenHeight - replicatorHeight - edgeMargin,
-            panelWidth,
-            replicatorHeight);
+            Rect tempUnitButtonRect = new Rect(rightX, atmosphereRect.yMax + 6f, panelWidth, lineHeight);
+            if (GUI.Button(tempUnitButtonRect, $"Temp Unit: {GetTemperatureUnitLabel(temperatureDisplayUnit)}", buttonStyle))
+            {
+                temperatureDisplayUnit =
+                    (TemperatureDisplayUnit)(((int)temperatureDisplayUnit + 1) % Enum.GetValues(typeof(TemperatureDisplayUnit)).Length);
+            }
 
-        GUI.Box(replicatorRect, GUIContent.none, hudBackgroundStyle);
-        GUI.Label(
-            new Rect(
-                replicatorRect.x + padding,
-                replicatorRect.y + padding,
-                panelWidth - 2f * padding,
-                replicatorHeight - 2f * padding),
-            replicatorsText,
-            hudStyle);
+            Rect replicatorRect = new Rect(
+                rightX,
+                scaledScreenHeight - replicatorHeight - edgeMargin,
+                panelWidth,
+                replicatorHeight);
+
+            GUI.Box(replicatorRect, GUIContent.none, hudBackgroundStyle);
+            GUI.Label(
+                new Rect(
+                    replicatorRect.x + padding,
+                    replicatorRect.y + padding,
+                    panelWidth - 2f * padding,
+                    replicatorHeight - 2f * padding),
+                replicatorsText,
+                hudStyle);
+        }
 
         DrawMenu(scaledScreenWidth, scaledScreenHeight);
 
@@ -375,6 +396,55 @@ public class ReplicatorHudPresenter
         {
             SetPauseState(false);
             QuitGame();
+        }
+    }
+
+    private void DrawPortraitHud(
+        float panelX,
+        float panelY,
+        float panelWidth,
+        float padding,
+        float lineHeight,
+        string atmosphereText,
+        string replicatorsText,
+        float atmosphereHeight,
+        float replicatorHeight,
+        ref TemperatureDisplayUnit temperatureDisplayUnit)
+    {
+        float compactPanelHeight = Mathf.Min(
+            Mathf.Max(atmosphereHeight, replicatorHeight),
+            (Screen.height / guiScale) * 0.55f);
+        string selectedText = portraitShowReplicators ? replicatorsText : atmosphereText;
+        float contentHeight = hudStyle.CalcHeight(new GUIContent(selectedText), panelWidth - 2f * padding);
+        float panelHeight = Mathf.Max(compactPanelHeight, contentHeight + (padding * 2f));
+
+        Rect panelRect = new Rect(panelX, panelY, panelWidth, panelHeight);
+        GUI.Box(panelRect, GUIContent.none, hudBackgroundStyle);
+        GUI.Label(
+            new Rect(
+                panelRect.x + padding,
+                panelRect.y + padding,
+                panelWidth - 2f * padding,
+                panelHeight - 2f * padding),
+            selectedText,
+            hudStyle);
+
+        float controlsY = panelRect.yMax + 6f;
+        float thirdWidth = (panelWidth - 12f) / 3f;
+        if (GUI.Button(new Rect(panelX, controlsY, thirdWidth, lineHeight), "Atmosphere", buttonStyle))
+        {
+            portraitShowReplicators = false;
+        }
+
+        if (GUI.Button(new Rect(panelX + thirdWidth + 6f, controlsY, thirdWidth, lineHeight), "Replicators", buttonStyle))
+        {
+            portraitShowReplicators = true;
+        }
+
+        if (GUI.Button(new Rect(panelX + (thirdWidth + 6f) * 2f, controlsY, thirdWidth, lineHeight), $"Temp: {GetTemperatureUnitLabel(temperatureDisplayUnit)}", buttonStyle))
+        {
+            temperatureDisplayUnit =
+                (TemperatureDisplayUnit)(((int)temperatureDisplayUnit + 1) % Enum.GetValues(typeof(TemperatureDisplayUnit)).Length);
         }
     }
 
