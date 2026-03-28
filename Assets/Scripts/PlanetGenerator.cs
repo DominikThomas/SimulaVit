@@ -40,6 +40,14 @@ public class PlanetGenerator : MonoBehaviour
     [Range(0f, 1f)] public float basinNoiseStrength = 0.25f;
     [Tooltip("Optional deterministic offset to decorrelate basin noise from terrain noise.")]
     public Vector3 basinNoiseOffset = new Vector3(23.17f, -11.03f, 7.41f);
+    [Tooltip("How many shoreline-distance smoothing passes to apply before depth shaping.")]
+    [Range(0, 8)] public int bathymetrySmoothPasses = 2;
+    [Tooltip("Per-pass smoothing blend for shoreline-distance field.")]
+    [Range(0f, 1f)] public float bathymetrySmoothStrength = 0.45f;
+    [Tooltip("Keep coast geometry mostly unchanged within this many cells from shore.")]
+    [Min(0f)] public float shorelinePreservationDistance = 3f;
+    [Tooltip("Global strength for visible offshore bathymetry deformation.")]
+    [Range(0f, 1f)] public float bathymetryVisualStrength = 0.35f;
 
     [Header("Atmosphere")]
     public bool enableAtmosphere = true;
@@ -225,7 +233,7 @@ public class PlanetGenerator : MonoBehaviour
         Vector3[] atmosphereVertices = new Vector3[cellCount];
         float[] finalTerrainRadii = new float[cellCount];
 
-        int[] neighbors = BuildCellNeighborLookup(cellCount, allTriangles);
+        int[] neighbors = BuildCellNeighborLookup(unitVertices, allTriangles);
         BuildOceanBathymetry(unitVertices, noiseSamples, finalTerrainRadii, seaRadius, neighbors);
 
         for (int i = 0; i < cellCount; i++)
@@ -479,6 +487,18 @@ public class PlanetGenerator : MonoBehaviour
             }
         }
 
+        SmoothOceanDistanceField(neighbors, oceanDistanceToShoreByCell, oceanMaskByCell, Mathf.Clamp(bathymetrySmoothPasses, 0, 8), Mathf.Clamp01(bathymetrySmoothStrength));
+        maxDistance = 0f;
+        for (int cell = 0; cell < cellCount; cell++)
+        {
+            if (oceanMaskByCell[cell] == 0 || oceanDistanceToShoreByCell[cell] < 0f)
+            {
+                continue;
+            }
+
+            maxDistance = Mathf.Max(maxDistance, oceanDistanceToShoreByCell[cell]);
+        }
+
         float shelfDistanceSafe = Mathf.Max(1f, shelfDistance);
         float shelfDepthSafe = Mathf.Clamp(shelfDepth, 0f, Mathf.Max(0f, maxOceanDepth));
         float maxDepthSafe = Mathf.Max(shelfDepthSafe, maxOceanDepth);
@@ -486,6 +506,8 @@ public class PlanetGenerator : MonoBehaviour
         float basinScale = Mathf.Max(0.001f, basinNoiseScale);
         float basinStrength = Mathf.Clamp01(basinNoiseStrength);
         float falloffRange = Mathf.Max(1f, maxDistance - shelfDistanceSafe);
+        float shorelinePreserve = Mathf.Max(0f, shorelinePreservationDistance);
+        float visualStrength = Mathf.Clamp01(bathymetryVisualStrength);
 
         for (int cell = 0; cell < cellCount; cell++)
         {
@@ -517,15 +539,70 @@ public class PlanetGenerator : MonoBehaviour
             float depthTarget = Mathf.Lerp(shelfDepthTarget, basinDepthTarget, shelfT) * basinModulation;
             depthTarget = Mathf.Clamp(depthTarget, 0f, maxDepthSafe);
 
-            localOceanDepthByCell[cell] = depthTarget;
-            float oceanFloorRadius = Mathf.Max(0.01f, seaRadius - depthTarget);
+            float baseDepth = Mathf.Max(0f, seaRadius - finalTerrainRadii[cell]);
+            float additionalDepth = Mathf.Max(0f, depthTarget - baseDepth);
+            float offshoreBlend = Mathf.SmoothStep(
+                0f,
+                1f,
+                Mathf.Clamp01((shoreDistance - shorelinePreserve) / Mathf.Max(1f, shelfDistanceSafe)));
+            float appliedAdditionalDepth = additionalDepth * offshoreBlend * visualStrength;
+            float finalDepth = Mathf.Clamp(baseDepth + appliedAdditionalDepth, 0f, maxDepthSafe);
+
+            localOceanDepthByCell[cell] = finalDepth;
+            float oceanFloorRadius = Mathf.Max(0.01f, seaRadius - finalDepth);
             finalTerrainRadii[cell] = Mathf.Min(seaRadius, oceanFloorRadius);
             generatedSurfaceRadiusByCell[cell] = finalTerrainRadii[cell];
         }
     }
 
-    static int[] BuildCellNeighborLookup(int cellCount, List<int> triangles)
+    static void SmoothOceanDistanceField(int[] neighbors, float[] distances, byte[] oceanMask, int passes, float strength)
     {
+        if (neighbors == null || distances == null || oceanMask == null || passes <= 0 || strength <= 0f)
+        {
+            return;
+        }
+
+        int cellCount = distances.Length;
+        float[] temp = new float[cellCount];
+        for (int pass = 0; pass < passes; pass++)
+        {
+            for (int cell = 0; cell < cellCount; cell++)
+            {
+                if (oceanMask[cell] == 0 || distances[cell] < 0f)
+                {
+                    temp[cell] = distances[cell];
+                    continue;
+                }
+
+                int baseIndex = cell * 6;
+                float sum = distances[cell];
+                int count = 1;
+                for (int n = 0; n < 6; n++)
+                {
+                    int neighbor = neighbors[baseIndex + n];
+                    if (neighbor < 0 || neighbor >= cellCount || oceanMask[neighbor] == 0 || distances[neighbor] < 0f)
+                    {
+                        continue;
+                    }
+
+                    sum += distances[neighbor];
+                    count++;
+                }
+
+                float average = count > 0 ? sum / count : distances[cell];
+                temp[cell] = Mathf.Lerp(distances[cell], average, strength);
+            }
+
+            for (int i = 0; i < cellCount; i++)
+            {
+                distances[i] = temp[i];
+            }
+        }
+    }
+
+    static int[] BuildCellNeighborLookup(List<Vector3> unitVertices, List<int> triangles)
+    {
+        int cellCount = unitVertices != null ? unitVertices.Count : 0;
         if (cellCount <= 0)
         {
             return System.Array.Empty<int>();
@@ -551,6 +628,41 @@ public class PlanetGenerator : MonoBehaviour
             AddNeighborPair(neighbors, a, b, maxNeighbors);
             AddNeighborPair(neighbors, b, c, maxNeighbors);
             AddNeighborPair(neighbors, c, a, maxNeighbors);
+        }
+
+        Dictionary<Vector3Int, List<int>> seamBuckets = new Dictionary<Vector3Int, List<int>>(cellCount);
+        const float quantizeScale = 100000f;
+        for (int i = 0; i < cellCount; i++)
+        {
+            Vector3 dir = unitVertices[i];
+            Vector3Int key = new Vector3Int(
+                Mathf.RoundToInt(dir.x * quantizeScale),
+                Mathf.RoundToInt(dir.y * quantizeScale),
+                Mathf.RoundToInt(dir.z * quantizeScale));
+
+            if (!seamBuckets.TryGetValue(key, out List<int> bucket))
+            {
+                bucket = new List<int>(3);
+                seamBuckets[key] = bucket;
+            }
+
+            bucket.Add(i);
+        }
+
+        foreach (List<int> bucket in seamBuckets.Values)
+        {
+            if (bucket.Count < 2)
+            {
+                continue;
+            }
+
+            for (int a = 0; a < bucket.Count; a++)
+            {
+                for (int b = a + 1; b < bucket.Count; b++)
+                {
+                    AddNeighborPair(neighbors, bucket[a], bucket[b], maxNeighbors);
+                }
+            }
         }
 
         return neighbors;
