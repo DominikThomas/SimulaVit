@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.Controls;
 
@@ -22,6 +23,7 @@ public class CameraRotation : MonoBehaviour
 
     [Header("Input")]
     [SerializeField] private InputActionAsset controls;
+    [SerializeField] private Vector2 touchLookScale = new Vector2(0.05f, 0.01f);
 
     private InputAction lookDeltaAction;
     private InputAction orbitActivateAction;
@@ -35,6 +37,8 @@ public class CameraRotation : MonoBehaviour
     private bool isOrbiting;
     private float currentTiltAngle;
     private float tiltVelocity;
+    private int activeOrbitTouchId = -1;
+    private int blockedOrbitTouchId = -1;
 
     private Vector3 TargetPosition => targetTransform != null ? targetTransform.position : Vector3.zero;
 
@@ -71,6 +75,12 @@ public class CameraRotation : MonoBehaviour
     private void Update()
     {
         lookInput = lookDeltaAction != null ? lookDeltaAction.ReadValue<Vector2>() : Vector2.zero;
+        bool touchOrbiting = HandleTouchOrbitInput(out Vector2 touchLookInput);
+        if (touchOrbiting)
+        {
+            lookInput += touchLookInput;
+        }
+
         HandleZoomInput();
     }
 
@@ -143,6 +153,90 @@ public class CameraRotation : MonoBehaviour
         {
             orbitDistance = Mathf.Clamp(orbitDistance + zoomDelta, minZoomDistance, maxZoomDistance);
         }
+    }
+
+    private bool HandleTouchOrbitInput(out Vector2 touchDelta)
+    {
+        touchDelta = Vector2.zero;
+        if (Touchscreen.current == null)
+        {
+            activeOrbitTouchId = -1;
+            blockedOrbitTouchId = -1;
+            return false;
+        }
+
+        int pressedTouchCount = 0;
+        TouchControl firstPressedTouch = null;
+        bool activeTouchStillPressed = false;
+        bool blockedTouchStillPressed = false;
+
+        foreach (TouchControl touch in Touchscreen.current.touches)
+        {
+            if (!touch.press.isPressed)
+            {
+                continue;
+            }
+
+            pressedTouchCount++;
+            if (firstPressedTouch == null)
+            {
+                firstPressedTouch = touch;
+            }
+
+            int touchId = touch.touchId.ReadValue();
+            if (touchId == activeOrbitTouchId)
+            {
+                activeTouchStillPressed = true;
+            }
+
+            if (touchId == blockedOrbitTouchId)
+            {
+                blockedTouchStillPressed = true;
+            }
+        }
+
+        if (!activeTouchStillPressed)
+        {
+            activeOrbitTouchId = -1;
+        }
+
+        if (!blockedTouchStillPressed)
+        {
+            blockedOrbitTouchId = -1;
+        }
+
+        if (pressedTouchCount != 1 || firstPressedTouch == null)
+        {
+            activeOrbitTouchId = -1;
+            return false;
+        }
+
+        int firstTouchId = firstPressedTouch.touchId.ReadValue();
+        if (blockedOrbitTouchId == firstTouchId)
+        {
+            return false;
+        }
+
+        UnityEngine.InputSystem.TouchPhase touchPhase = firstPressedTouch.phase.ReadValue();
+        if (activeOrbitTouchId < 0 && touchPhase == UnityEngine.InputSystem.TouchPhase.Began)
+        {
+            if (IsPointerOverUi(firstTouchId))
+            {
+                blockedOrbitTouchId = firstTouchId;
+                return false;
+            }
+
+            activeOrbitTouchId = firstTouchId;
+        }
+
+        if (activeOrbitTouchId != firstTouchId)
+        {
+            return false;
+        }
+
+        Vector2 rawTouchDelta = firstPressedTouch.delta.ReadValue();
+        touchDelta = new Vector2(rawTouchDelta.x * touchLookScale.x, rawTouchDelta.y * touchLookScale.y);
+        return touchPhase == UnityEngine.InputSystem.TouchPhase.Moved || touchPhase == UnityEngine.InputSystem.TouchPhase.Stationary;
     }
 
     private TouchControl GetSecondaryTouch(int primaryTouchId)
@@ -235,11 +329,29 @@ public class CameraRotation : MonoBehaviour
 
     private void OnOrbitActivatePerformed(InputAction.CallbackContext context)
     {
+        if (IsPointerOverUi())
+        {
+            isOrbiting = false;
+            return;
+        }
+
         isOrbiting = true;
     }
 
     private void OnOrbitActivateCanceled(InputAction.CallbackContext context)
     {
         isOrbiting = false;
+    }
+
+    private static bool IsPointerOverUi(int pointerId = -1)
+    {
+        if (EventSystem.current == null)
+        {
+            return false;
+        }
+
+        return pointerId >= 0
+            ? EventSystem.current.IsPointerOverGameObject(pointerId)
+            : EventSystem.current.IsPointerOverGameObject();
     }
 }
