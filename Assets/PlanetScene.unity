@@ -499,10 +499,13 @@ MonoBehaviour:
   rotationSpeed: 5
   distanceBuffer: 15
   targetTransform: {fileID: 0}
-  minZoomDistance: 8
+  minZoomDistance: 10
   maxZoomDistance: 40
   zoomSpeed: 20
   pinchZoomSpeed: 0.02
+  tiltStartDistance: 14
+  maxTiltAngle: 65
+  tiltSmoothing: 8
   controls: {fileID: -944628639613478452, guid: 540a5b05cf9aabf44a0760b486b09de8, type: 3}
 --- !u!1 &382753101
 GameObject:
