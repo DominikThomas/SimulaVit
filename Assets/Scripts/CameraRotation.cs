@@ -35,6 +35,7 @@ public class CameraRotation : MonoBehaviour
     private float currentY;
     private Vector2 lookInput;
     private bool isOrbiting;
+    private bool isTouchOrbiting;
     private float currentTiltAngle;
     private float tiltVelocity;
     private int activeOrbitTouchId = -1;
@@ -75,8 +76,9 @@ public class CameraRotation : MonoBehaviour
     private void Update()
     {
         lookInput = lookDeltaAction != null ? lookDeltaAction.ReadValue<Vector2>() : Vector2.zero;
-        bool touchOrbiting = HandleTouchOrbitInput(out Vector2 touchLookInput);
-        if (touchOrbiting)
+
+        isTouchOrbiting = HandleTouchOrbitInput(out Vector2 touchLookInput);
+        if (isTouchOrbiting)
         {
             lookInput += touchLookInput;
         }
@@ -97,7 +99,7 @@ public class CameraRotation : MonoBehaviour
 
     private void LateUpdate()
     {
-        if (isOrbiting)
+        if (isOrbiting || isTouchOrbiting)
         {
             currentY += lookInput.x * rotationSpeed;
             currentX -= lookInput.y * rotationSpeed;
@@ -236,7 +238,7 @@ public class CameraRotation : MonoBehaviour
 
         Vector2 rawTouchDelta = firstPressedTouch.delta.ReadValue();
         touchDelta = new Vector2(rawTouchDelta.x * touchLookScale.x, rawTouchDelta.y * touchLookScale.y);
-        return touchPhase == UnityEngine.InputSystem.TouchPhase.Moved || touchPhase == UnityEngine.InputSystem.TouchPhase.Stationary;
+        return touchPhase == UnityEngine.InputSystem.TouchPhase.Moved;
     }
 
     private TouchControl GetSecondaryTouch(int primaryTouchId)
