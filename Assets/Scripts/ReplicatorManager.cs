@@ -576,33 +576,35 @@ public class ReplicatorManager : MonoBehaviour
         int methanogen = 0;
         int methanotroph = 0;
 
-        for (int i = 0; i < agents.Count; i++)
+        populationState.EnsureMatchesAgentCount(agents);
+
+        for (int i = 0; i < populationState.Count; i++)
         {
-            if (agents[i].metabolism == MetabolismType.Hydrogenotrophy)
+            if (populationState.Metabolism[i] == MetabolismType.Hydrogenotrophy)
             {
                 hydrogen++;
             }
-            else if (agents[i].metabolism == MetabolismType.Photosynthesis)
+            else if (populationState.Metabolism[i] == MetabolismType.Photosynthesis)
             {
                 photo++;
             }
-            else if (agents[i].metabolism == MetabolismType.SulfurChemosynthesis)
+            else if (populationState.Metabolism[i] == MetabolismType.SulfurChemosynthesis)
             {
                 chemo++;
             }
-            else if (agents[i].metabolism == MetabolismType.Predation)
+            else if (populationState.Metabolism[i] == MetabolismType.Predation)
             {
                 predator++;
             }
-            else if (agents[i].metabolism == MetabolismType.Fermentation)
+            else if (populationState.Metabolism[i] == MetabolismType.Fermentation)
             {
                 ferment++;
             }
-            else if (agents[i].metabolism == MetabolismType.Methanogenesis)
+            else if (populationState.Metabolism[i] == MetabolismType.Methanogenesis)
             {
                 methanogen++;
             }
-            else if (agents[i].metabolism == MetabolismType.Methanotrophy)
+            else if (populationState.Metabolism[i] == MetabolismType.Methanotrophy)
             {
                 methanotroph++;
             }
@@ -1105,18 +1107,17 @@ public class ReplicatorManager : MonoBehaviour
             int resolution = Mathf.Max(1, planetGenerator.resolution);
             int cellCount = PlanetGridIndexing.GetCellCount(resolution);
             planetResourceMap.EnsureScentArrays(cellCount);
-            populationState.SyncPredationFieldsFromAgents(agents);
+            populationState.EnsureMatchesAgentCount(agents);
             RebuildPreyCellBins(resolution, populationState);
 
             float leakEmit = Mathf.Max(0f, dissolvedOrganicLeakEmitPerSecond) * interval;
             float wasteEmit = Mathf.Max(0f, toxicProteolyticWasteEmitPerSecond) * interval;
             bool hasPredator = false;
 
-            for (int i = 0; i < agents.Count; i++)
+            for (int i = 0; i < populationState.Count; i++)
             {
-                Replicator agent = agents[i];
-                int cellIndex = PlanetGridIndexing.DirectionToCellIndex(agent.position.normalized, resolution);
-                if (IsPredator(agent))
+                int cellIndex = PlanetGridIndexing.DirectionToCellIndex(populationState.Position[i].normalized, resolution);
+                if (populationState.Metabolism[i] == MetabolismType.Predation)
                 {
                     hasPredator = true;
                     planetResourceMap.AddScent(ResourceType.ToxicProteolyticWaste, cellIndex, wasteEmit);
@@ -1336,10 +1337,10 @@ public class ReplicatorManager : MonoBehaviour
 
         using (PopulationStateSyncForLocomotionMarker.Auto())
         {
-            populationState.SyncFromAgents(agents);
+            populationState.EnsureMatchesAgentCount(agents);
         }
 
-        return true;
+        return populationState.Count > 0;
     }
 
     internal void ValidateSessileMovement()
@@ -1871,6 +1872,7 @@ public class ReplicatorManager : MonoBehaviour
         }
 
         agents.Add(newAgent);
+        populationState.AddAgentFromReplicatorData(newAgent);
         spawnedAgent = newAgent;
         return true;
     }

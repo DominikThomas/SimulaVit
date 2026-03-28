@@ -7,7 +7,6 @@ public class ReplicatorMetabolismSystem
 {
     private static readonly ProfilerMarker SyncFromAgentsMarker = new ProfilerMarker("ReplicatorPopulationState.SyncFromAgents");
     private static readonly ProfilerMarker MetabolismHotLoopMarker = new ProfilerMarker("ReplicatorMetabolismSystem.HotLoop");
-    private static readonly ProfilerMarker SyncToAgentsMarker = new ProfilerMarker("ReplicatorPopulationState.SyncToAgents");
     private static readonly ProfilerMarker RemoveDeadAgentsMarker = new ProfilerMarker("ReplicatorMetabolismSystem.RemoveDeadAgents");
 
     public struct Settings
@@ -108,7 +107,7 @@ public class ReplicatorMetabolismSystem
 
         using (SyncFromAgentsMarker.Auto())
         {
-            populationState.SyncFromAgents(agents);
+            populationState.EnsureMatchesAgentCount(agents);
         }
 
         using (MetabolismHotLoopMarker.Auto())
@@ -586,11 +585,6 @@ public class ReplicatorMetabolismSystem
             }
         }
 
-        using (SyncToAgentsMarker.Auto())
-        {
-            populationState.SyncToAgents(agents);
-        }
-
         using (RemoveDeadAgentsMarker.Auto())
         {
             for (int dead = 0; dead < deadIndices.Count; dead++)
@@ -603,14 +597,15 @@ public class ReplicatorMetabolismSystem
 
                 Replicator agent = agents[index];
                 DeathCause cause = deadCauses[dead];
+                populationState.CopyToDebugState(index, agent);
                 if (cause == DeathCause.EnergyDepletion)
                 {
                     cause = resolveEnergyDeathCause(agent);
                 }
 
-                registerDeathCause(agent.metabolism, cause);
+                registerDeathCause(populationState.Metabolism[index], cause);
                 depositDeathOrganicC(agent);
-                agents.RemoveAt(index);
+                populationState.RemoveAgentAtSwapBack(agents, index);
             }
         }
     }

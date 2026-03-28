@@ -51,7 +51,7 @@ public class ReplicatorMovementSystem
 
         if (!populationStatePrimed)
         {
-            populationState.SyncMovementFieldsFromAgents(agents);
+            populationState.EnsureMatchesAgentCount(agents);
         }
 
         using (MovementSyncFromPopulationStateMarker.Auto())
@@ -60,7 +60,7 @@ public class ReplicatorMovementSystem
             {
                 Replicator agent = agents[i];
                 jobPositions[i] = populationState.Position[i];
-                jobRotations[i] = agent.rotation;
+                jobRotations[i] = populationState.Rotation[i];
                 jobMoveOnlyInSea[i] = agent.traits.moveOnlyInSea;
                 jobSurfaceMoveSpeedMultipliers[i] = Mathf.Max(0.01f, agent.traits.surfaceMoveSpeedMultiplier);
                 jobMovementSeeds[i] = populationState.MovementSeed[i];
@@ -114,8 +114,7 @@ public class ReplicatorMovementSystem
                 populationState.Position[i] = newPosition;
                 populationState.Rotation[i] = jobRotations[i];
                 populationState.CurrentDirection[i] = newDirection;
-                agent.position = newPosition;
-                agent.rotation = jobRotations[i];
+                populationState.CopyToRenderState(i, agent);
                 agent.currentDirection = newDirection;
             }
         }

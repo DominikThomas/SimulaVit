@@ -30,41 +30,39 @@ public class ReplicatorLifecycleSystem
         float organicCSum = 0f;
         int eligibleForDivisionCount = 0;
 
-        // Transitional migration step: mirror lifecycle age into PopulationState
-        // while keeping List<Replicator> as the authoritative source of truth.
-        populationState.SyncLifecycleFieldsFromAgents(agents);
+        populationState.EnsureMatchesAgentCount(agents);
 
         for (int i = agents.Count - 1; i >= 0; i--)
         {
             Replicator agent = agents[i];
-            float updatedAge = agent.age + deltaTime;
-            agent.age = updatedAge;
+            float updatedAge = populationState.Age[i] + deltaTime;
             populationState.Age[i] = updatedAge;
 
-            if (agent.age > agent.maxLifespan)
+            if (updatedAge > agent.maxLifespan)
             {
-                registerDeathCause(agent.metabolism, DeathCause.OldAge);
+                registerDeathCause(populationState.Metabolism[i], DeathCause.OldAge);
+                populationState.CopyToDebugState(i, agent);
                 depositDeathOrganicC(agent);
-                agents.RemoveAt(i);
+                populationState.RemoveAgentAtSwapBack(agents, i);
                 continue;
             }
 
-            float lifeRemaining = agent.maxLifespan - agent.age;
-            agent.color = calculateAgentColor(agent.age, lifeRemaining, agent.energy, agent.metabolism);
+            float lifeRemaining = agent.maxLifespan - updatedAge;
+            populationState.Color[i] = calculateAgentColor(updatedAge, lifeRemaining, populationState.Energy[i], populationState.Metabolism[i]);
 
-            organicCSum += Mathf.Max(0f, agent.organicCStore);
+            organicCSum += Mathf.Max(0f, populationState.OrganicCStore[i]);
 
-            bool canReplicate = agent.canReplicate;
+            bool canReplicate = populationState.CanReplicate[i];
             bool hasEnergyForDivision = canReplicate && (enableCarbonLimitedDivision
-                ? agent.energy >= Mathf.Max(0f, divisionEnergyCost)
-                : agent.energy >= replicationEnergyCost);
+                ? populationState.Energy[i] >= Mathf.Max(0f, divisionEnergyCost)
+                : populationState.Energy[i] >= replicationEnergyCost);
 
             bool hasCarbonForDivision = true;
             if (enableCarbonLimitedDivision)
             {
                 float target = Mathf.Max(0.0001f, agent.biomassTarget);
                 float divisionThreshold = Mathf.Max(1f, divisionBiomassMultiple) * target;
-                hasCarbonForDivision = agent.organicCStore >= divisionThreshold;
+                hasCarbonForDivision = populationState.OrganicCStore[i] >= divisionThreshold;
                 if (hasCarbonForDivision)
                 {
                     eligibleForDivisionCount++;
@@ -74,29 +72,38 @@ public class ReplicatorLifecycleSystem
             if (UnityEngine.Random.value < reproductionChance && hasEnergyForDivision && hasCarbonForDivision)
             {
                 int safeResolution = Mathf.Max(1, resolution);
-                Vector3 dir = agent.position.normalized;
+                Vector3 dir = populationState.Position[i].normalized;
                 int cellIndex = PlanetGridIndexing.DirectionToCellIndex(dir, safeResolution);
                 float temp = getTemperatureAtCell(dir, cellIndex);
 
-                float min = agent.optimalTempMin;
-                float max = agent.optimalTempMax;
+                float min = populationState.OptimalTempMin[i];
+                float max = populationState.OptimalTempMax[i];
 
                 bool insideOptimalBand = (temp >= min && temp <= max);
 
-                if (insideOptimalBand && trySpawnChild(agent, out Replicator childAgent))
+                if (insideOptimalBand)
                 {
-                    if (enableCarbonLimitedDivision)
+                    populationState.CopyToDebugState(i, agent);
+                    if (trySpawnChild(agent, out Replicator childAgent))
                     {
-                        agent.energy = Mathf.Max(0f, agent.energy - Mathf.Max(0f, divisionEnergyCost));
+                        if (enableCarbonLimitedDivision)
+                        {
+                            populationState.Energy[i] = Mathf.Max(0f, populationState.Energy[i] - Mathf.Max(0f, divisionEnergyCost));
 
-                        float totalC = Mathf.Max(0f, agent.organicCStore);
-                        float toChild = totalC * Mathf.Clamp01(divisionCarbonSplitToChild);
-                        childAgent.organicCStore = Mathf.Clamp(toChild, 0f, maxOrganicCStore);
-                        agent.organicCStore = Mathf.Max(0f, totalC - toChild);
-                    }
-                    else
-                    {
-                        agent.energy = Mathf.Max(0f, agent.energy - replicationEnergyCost);
+                            float totalC = Mathf.Max(0f, populationState.OrganicCStore[i]);
+                            float toChild = totalC * Mathf.Clamp01(divisionCarbonSplitToChild);
+                            childAgent.organicCStore = Mathf.Clamp(toChild, 0f, maxOrganicCStore);
+                            populationState.OrganicCStore[i] = Mathf.Max(0f, totalC - toChild);
+                            int childIndex = populationState.Count - 1;
+                            if (childIndex >= 0)
+                            {
+                                populationState.OrganicCStore[childIndex] = childAgent.organicCStore;
+                            }
+                        }
+                        else
+                        {
+                            populationState.Energy[i] = Mathf.Max(0f, populationState.Energy[i] - replicationEnergyCost);
+                        }
                     }
                 }
             }

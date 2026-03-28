@@ -2,9 +2,9 @@ using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// Transitional struct-of-arrays runtime state for hot per-agent simulation data.
-/// In migration step 1, Replicator objects remain the authoritative source of truth.
-/// This state is rebuilt from Replicator objects per simulation tick and synced back after updates.
+/// Packed struct-of-arrays runtime state for hot per-agent simulation data.
+/// This state is the authoritative source for hot-path simulation fields while
+/// List&lt;Replicator&gt; remains a companion object list for references, debug, and bridging.
 /// </summary>
 public class ReplicatorPopulationState
 {
@@ -51,162 +51,47 @@ public class ReplicatorPopulationState
     public float[] Size = new float[0];
     public Color[] Color = new Color[0];
 
-    public void SyncMovementFieldsFromAgents(List<Replicator> agents)
+    public int AddAgentFromReplicatorData(Replicator agent)
     {
-        Count = agents.Count;
+        int index = Count;
+        Count++;
         EnsureCapacity(Count);
-
-        for (int i = 0; i < Count; i++)
-        {
-            Replicator a = agents[i];
-            Position[i] = a.position;
-            SpeedFactor[i] = a.speedFactor;
-            Locomotion[i] = a.locomotion;
-        }
+        CopyAgentToEntry(index, agent);
+        return index;
     }
 
-    public void SyncFromAgents(List<Replicator> agents)
+    public void RemoveAgentAtSwapBack(List<Replicator> agents, int index)
     {
-        Count = agents.Count;
-        EnsureCapacity(Count);
-
-        for (int i = 0; i < Count; i++)
+        int lastIndex = Count - 1;
+        if (index < 0 || index > lastIndex || agents == null || agents.Count != Count)
         {
-            Replicator a = agents[i];
-            Position[i] = a.position;
-            Rotation[i] = a.rotation;
-            CurrentDirection[i] = a.currentDirection;
-            MoveDirection[i] = a.moveDirection;
-            DesiredMoveDirection[i] = a.desiredMoveDir;
-            Velocity[i] = a.velocity;
-            Energy[i] = a.energy;
-            Age[i] = a.age;
-            OrganicCStore[i] = a.organicCStore;
-            SpeedFactor[i] = a.speedFactor;
-            AttackCooldown[i] = a.attackCooldown;
-            FearCooldown[i] = a.fearCooldown;
-            Metabolism[i] = a.metabolism;
-            Locomotion[i] = a.locomotion;
-            Alive[i] = true;
-            OptimalTempMin[i] = a.optimalTempMin;
-            OptimalTempMax[i] = a.optimalTempMax;
-            LethalTempMargin[i] = a.lethalTempMargin;
-            StarveCo2Seconds[i] = a.starveCo2Seconds;
-            StarveH2sSeconds[i] = a.starveH2sSeconds;
-            StarveH2Seconds[i] = a.starveH2Seconds;
-            StarveLightSeconds[i] = a.starveLightSeconds;
-            StarveOrganicCFoodSeconds[i] = a.starveOrganicCFoodSeconds;
-            StarveO2Seconds[i] = a.starveO2Seconds;
-            StarveCh4Seconds[i] = a.starveCh4Seconds;
-            StarveStoredCSeconds[i] = a.starveStoredCSeconds;
-            O2ToxicSeconds[i] = a.o2ToxicSeconds;
-            O2ComfortMax[i] = a.o2ComfortMax;
-            O2StressMax[i] = a.o2StressMax;
-            CanReplicate[i] = a.canReplicate;
-            LastHabitatValue[i] = a.lastHabitatValue;
-            TumbleProbability[i] = a.tumbleProbability;
-            NextSenseTime[i] = a.nextSenseTime;
-            MovementSeed[i] = a.movementSeed;
-            Size[i] = a.size;
-            Color[i] = a.color;
+            return;
         }
-    }
 
-    public void SyncSteeringFieldsFromAgents(List<Replicator> agents)
-    {
-        Count = agents.Count;
-        EnsureCapacity(Count);
-
-        for (int i = 0; i < Count; i++)
+        if (index != lastIndex)
         {
-            Replicator a = agents[i];
-            Position[i] = a.position;
-            CurrentDirection[i] = a.currentDirection;
-            MoveDirection[i] = a.moveDirection;
-            DesiredMoveDirection[i] = a.desiredMoveDir;
-            SpeedFactor[i] = a.speedFactor;
-            Locomotion[i] = a.locomotion;
-            Metabolism[i] = a.metabolism;
-            OptimalTempMin[i] = a.optimalTempMin;
-            OptimalTempMax[i] = a.optimalTempMax;
-            LethalTempMargin[i] = a.lethalTempMargin;
-            LastHabitatValue[i] = a.lastHabitatValue;
-            TumbleProbability[i] = a.tumbleProbability;
-            NextSenseTime[i] = a.nextSenseTime;
-            MovementSeed[i] = a.movementSeed;
+            MoveEntry(lastIndex, index);
+            Replicator swappedAgent = agents[lastIndex];
+            agents[index] = swappedAgent;
+            CopyToDebugState(index, swappedAgent);
         }
+
+        agents.RemoveAt(lastIndex);
+        Count = lastIndex;
     }
 
-    public void SyncLifecycleFieldsFromAgents(List<Replicator> agents)
-    {
-        Count = agents.Count;
-        EnsureCapacity(Count);
-
-        for (int i = 0; i < Count; i++)
-        {
-            Replicator a = agents[i];
-            Age[i] = a.age;
-        }
-    }
-
-    public void SyncSteeringFieldsToAgents(List<Replicator> agents)
-    {
-        int count = Mathf.Min(Count, agents.Count);
-        for (int i = 0; i < count; i++)
-        {
-            Replicator agent = agents[i];
-            agent.moveDirection = MoveDirection[i];
-            agent.desiredMoveDir = DesiredMoveDirection[i];
-            agent.lastHabitatValue = LastHabitatValue[i];
-            agent.tumbleProbability = TumbleProbability[i];
-            agent.nextSenseTime = NextSenseTime[i];
-        }
-    }
-
-    public void SyncToAgents(List<Replicator> agents)
-    {
-        int count = Mathf.Min(Count, agents.Count);
-        for (int i = 0; i < count; i++)
-        {
-            CopyEntryToAgent(i, agents[i]);
-        }
-    }
-
-    public void SyncPredationFieldsFromAgents(List<Replicator> agents)
-    {
-        Count = agents.Count;
-        EnsureCapacity(Count);
-
-        for (int i = 0; i < Count; i++)
-        {
-            Replicator a = agents[i];
-            Position[i] = a.position;
-            Metabolism[i] = a.metabolism;
-            Energy[i] = a.energy;
-            OrganicCStore[i] = a.organicCStore;
-            AttackCooldown[i] = a.attackCooldown;
-        }
-    }
-
-    public void SyncPredationFieldsToAgents(List<Replicator> agents)
-    {
-        int count = Mathf.Min(Count, agents.Count);
-        for (int i = 0; i < count; i++)
-        {
-            CopyPredationEntryToAgent(i, agents[i]);
-        }
-    }
-
-    public void CopyPredationEntryToAgent(int index, Replicator agent)
-    {
-        agent.energy = Energy[index];
-        agent.organicCStore = OrganicCStore[index];
-        agent.attackCooldown = AttackCooldown[index];
-    }
-
-    public void CopyEntryToAgent(int index, Replicator agent)
+    public void CopyToRenderState(int index, Replicator agent)
     {
         agent.position = Position[index];
+        agent.rotation = Rotation[index];
+        agent.size = Size[index];
+        agent.color = Color[index];
+    }
+
+    public void CopyToDebugState(int index, Replicator agent)
+    {
+        agent.position = Position[index];
+        agent.rotation = Rotation[index];
         agent.currentDirection = CurrentDirection[index];
         agent.moveDirection = MoveDirection[index];
         agent.desiredMoveDir = DesiredMoveDirection[index];
@@ -217,6 +102,11 @@ public class ReplicatorPopulationState
         agent.speedFactor = SpeedFactor[index];
         agent.attackCooldown = AttackCooldown[index];
         agent.fearCooldown = FearCooldown[index];
+        agent.metabolism = Metabolism[index];
+        agent.locomotion = Locomotion[index];
+        agent.optimalTempMin = OptimalTempMin[index];
+        agent.optimalTempMax = OptimalTempMax[index];
+        agent.lethalTempMargin = LethalTempMargin[index];
         agent.starveCo2Seconds = StarveCo2Seconds[index];
         agent.starveH2sSeconds = StarveH2sSeconds[index];
         agent.starveH2Seconds = StarveH2Seconds[index];
@@ -232,9 +122,113 @@ public class ReplicatorPopulationState
         agent.lastHabitatValue = LastHabitatValue[index];
         agent.tumbleProbability = TumbleProbability[index];
         agent.nextSenseTime = NextSenseTime[index];
+        agent.movementSeed = MovementSeed[index];
+        agent.size = Size[index];
+        agent.color = Color[index];
     }
 
-    void EnsureCapacity(int required)
+    public void EnsureMatchesAgentCount(List<Replicator> agents)
+    {
+        if (agents == null)
+        {
+            Count = 0;
+            return;
+        }
+
+        if (Count == agents.Count)
+        {
+            return;
+        }
+
+        Count = 0;
+        EnsureCapacity(agents.Count);
+        for (int i = 0; i < agents.Count; i++)
+        {
+            AddAgentFromReplicatorData(agents[i]);
+        }
+    }
+
+    private void CopyAgentToEntry(int index, Replicator a)
+    {
+        Position[index] = a.position;
+        Rotation[index] = a.rotation;
+        CurrentDirection[index] = a.currentDirection;
+        MoveDirection[index] = a.moveDirection;
+        DesiredMoveDirection[index] = a.desiredMoveDir;
+        Velocity[index] = a.velocity;
+        Energy[index] = a.energy;
+        Age[index] = a.age;
+        OrganicCStore[index] = a.organicCStore;
+        SpeedFactor[index] = a.speedFactor;
+        AttackCooldown[index] = a.attackCooldown;
+        FearCooldown[index] = a.fearCooldown;
+        Alive[index] = true;
+        Metabolism[index] = a.metabolism;
+        Locomotion[index] = a.locomotion;
+        OptimalTempMin[index] = a.optimalTempMin;
+        OptimalTempMax[index] = a.optimalTempMax;
+        LethalTempMargin[index] = a.lethalTempMargin;
+        StarveCo2Seconds[index] = a.starveCo2Seconds;
+        StarveH2sSeconds[index] = a.starveH2sSeconds;
+        StarveH2Seconds[index] = a.starveH2Seconds;
+        StarveLightSeconds[index] = a.starveLightSeconds;
+        StarveOrganicCFoodSeconds[index] = a.starveOrganicCFoodSeconds;
+        StarveO2Seconds[index] = a.starveO2Seconds;
+        StarveCh4Seconds[index] = a.starveCh4Seconds;
+        StarveStoredCSeconds[index] = a.starveStoredCSeconds;
+        O2ToxicSeconds[index] = a.o2ToxicSeconds;
+        O2ComfortMax[index] = a.o2ComfortMax;
+        O2StressMax[index] = a.o2StressMax;
+        CanReplicate[index] = a.canReplicate;
+        LastHabitatValue[index] = a.lastHabitatValue;
+        TumbleProbability[index] = a.tumbleProbability;
+        NextSenseTime[index] = a.nextSenseTime;
+        MovementSeed[index] = a.movementSeed;
+        Size[index] = a.size;
+        Color[index] = a.color;
+    }
+
+    private void MoveEntry(int src, int dst)
+    {
+        Position[dst] = Position[src];
+        Rotation[dst] = Rotation[src];
+        CurrentDirection[dst] = CurrentDirection[src];
+        MoveDirection[dst] = MoveDirection[src];
+        DesiredMoveDirection[dst] = DesiredMoveDirection[src];
+        Velocity[dst] = Velocity[src];
+        Energy[dst] = Energy[src];
+        Age[dst] = Age[src];
+        OrganicCStore[dst] = OrganicCStore[src];
+        SpeedFactor[dst] = SpeedFactor[src];
+        AttackCooldown[dst] = AttackCooldown[src];
+        FearCooldown[dst] = FearCooldown[src];
+        Alive[dst] = Alive[src];
+        Metabolism[dst] = Metabolism[src];
+        Locomotion[dst] = Locomotion[src];
+        OptimalTempMin[dst] = OptimalTempMin[src];
+        OptimalTempMax[dst] = OptimalTempMax[src];
+        LethalTempMargin[dst] = LethalTempMargin[src];
+        StarveCo2Seconds[dst] = StarveCo2Seconds[src];
+        StarveH2sSeconds[dst] = StarveH2sSeconds[src];
+        StarveH2Seconds[dst] = StarveH2Seconds[src];
+        StarveLightSeconds[dst] = StarveLightSeconds[src];
+        StarveOrganicCFoodSeconds[dst] = StarveOrganicCFoodSeconds[src];
+        StarveO2Seconds[dst] = StarveO2Seconds[src];
+        StarveCh4Seconds[dst] = StarveCh4Seconds[src];
+        StarveStoredCSeconds[dst] = StarveStoredCSeconds[src];
+        O2ToxicSeconds[dst] = O2ToxicSeconds[src];
+        O2ComfortMax[dst] = O2ComfortMax[src];
+        O2StressMax[dst] = O2StressMax[src];
+        CanReplicate[dst] = CanReplicate[src];
+        LastHabitatValue[dst] = LastHabitatValue[src];
+        TumbleProbability[dst] = TumbleProbability[src];
+        NextSenseTime[dst] = NextSenseTime[src];
+        MovementSeed[dst] = MovementSeed[src];
+        Size[dst] = Size[src];
+        Color[dst] = Color[src];
+    }
+
+    private void EnsureCapacity(int required)
     {
         if (Position.Length >= required)
         {
@@ -242,41 +236,41 @@ public class ReplicatorPopulationState
         }
 
         int newCapacity = Mathf.NextPowerOfTwo(Mathf.Max(4, required));
-        Position = new Vector3[newCapacity];
-        Rotation = new Quaternion[newCapacity];
-        CurrentDirection = new Vector3[newCapacity];
-        MoveDirection = new Vector3[newCapacity];
-        DesiredMoveDirection = new Vector3[newCapacity];
-        Velocity = new Vector3[newCapacity];
-        Energy = new float[newCapacity];
-        Age = new float[newCapacity];
-        OrganicCStore = new float[newCapacity];
-        SpeedFactor = new float[newCapacity];
-        AttackCooldown = new float[newCapacity];
-        FearCooldown = new float[newCapacity];
-        Alive = new bool[newCapacity];
-        Metabolism = new MetabolismType[newCapacity];
-        Locomotion = new LocomotionType[newCapacity];
-        OptimalTempMin = new float[newCapacity];
-        OptimalTempMax = new float[newCapacity];
-        LethalTempMargin = new float[newCapacity];
-        StarveCo2Seconds = new float[newCapacity];
-        StarveH2sSeconds = new float[newCapacity];
-        StarveH2Seconds = new float[newCapacity];
-        StarveLightSeconds = new float[newCapacity];
-        StarveOrganicCFoodSeconds = new float[newCapacity];
-        StarveO2Seconds = new float[newCapacity];
-        StarveCh4Seconds = new float[newCapacity];
-        StarveStoredCSeconds = new float[newCapacity];
-        O2ToxicSeconds = new float[newCapacity];
-        O2ComfortMax = new float[newCapacity];
-        O2StressMax = new float[newCapacity];
-        CanReplicate = new bool[newCapacity];
-        LastHabitatValue = new float[newCapacity];
-        TumbleProbability = new float[newCapacity];
-        NextSenseTime = new float[newCapacity];
-        MovementSeed = new float[newCapacity];
-        Size = new float[newCapacity];
-        Color = new Color[newCapacity];
+        System.Array.Resize(ref Position, newCapacity);
+        System.Array.Resize(ref Rotation, newCapacity);
+        System.Array.Resize(ref CurrentDirection, newCapacity);
+        System.Array.Resize(ref MoveDirection, newCapacity);
+        System.Array.Resize(ref DesiredMoveDirection, newCapacity);
+        System.Array.Resize(ref Velocity, newCapacity);
+        System.Array.Resize(ref Energy, newCapacity);
+        System.Array.Resize(ref Age, newCapacity);
+        System.Array.Resize(ref OrganicCStore, newCapacity);
+        System.Array.Resize(ref SpeedFactor, newCapacity);
+        System.Array.Resize(ref AttackCooldown, newCapacity);
+        System.Array.Resize(ref FearCooldown, newCapacity);
+        System.Array.Resize(ref Alive, newCapacity);
+        System.Array.Resize(ref Metabolism, newCapacity);
+        System.Array.Resize(ref Locomotion, newCapacity);
+        System.Array.Resize(ref OptimalTempMin, newCapacity);
+        System.Array.Resize(ref OptimalTempMax, newCapacity);
+        System.Array.Resize(ref LethalTempMargin, newCapacity);
+        System.Array.Resize(ref StarveCo2Seconds, newCapacity);
+        System.Array.Resize(ref StarveH2sSeconds, newCapacity);
+        System.Array.Resize(ref StarveH2Seconds, newCapacity);
+        System.Array.Resize(ref StarveLightSeconds, newCapacity);
+        System.Array.Resize(ref StarveOrganicCFoodSeconds, newCapacity);
+        System.Array.Resize(ref StarveO2Seconds, newCapacity);
+        System.Array.Resize(ref StarveCh4Seconds, newCapacity);
+        System.Array.Resize(ref StarveStoredCSeconds, newCapacity);
+        System.Array.Resize(ref O2ToxicSeconds, newCapacity);
+        System.Array.Resize(ref O2ComfortMax, newCapacity);
+        System.Array.Resize(ref O2StressMax, newCapacity);
+        System.Array.Resize(ref CanReplicate, newCapacity);
+        System.Array.Resize(ref LastHabitatValue, newCapacity);
+        System.Array.Resize(ref TumbleProbability, newCapacity);
+        System.Array.Resize(ref NextSenseTime, newCapacity);
+        System.Array.Resize(ref MovementSeed, newCapacity);
+        System.Array.Resize(ref Size, newCapacity);
+        System.Array.Resize(ref Color, newCapacity);
     }
 }
