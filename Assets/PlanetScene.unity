@@ -358,6 +358,7 @@ GameObject:
   - component: {fileID: 370080325}
   - component: {fileID: 370080328}
   - component: {fileID: 370080329}
+  - component: {fileID: 370080330}
   m_Layer: 0
   m_Name: Main Camera
   m_TagString: MainCamera
@@ -508,6 +509,26 @@ MonoBehaviour:
   tiltSmoothing: 8
   controls: {fileID: -944628639613478452, guid: 540a5b05cf9aabf44a0760b486b09de8, type: 3}
   touchLookScale: {x: 0.05, y: 0.01}
+--- !u!114 &370080330
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 370080324}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ca6123974b9240ad99f94ab68781d3c0, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: SimulaVit::UnderwaterVolumeController
+  planet: {fileID: 382753102}
+  cameraTransform: {fileID: 370080327}
+  underwaterVolume: {fileID: 1930038372}
+  seaLevelEnterThreshold: 0.05
+  fullEffectDepth: 1.5
+  blendInSpeed: 2.5
+  blendOutSpeed: 3
+  useUnscaledTime: 0
 --- !u!1 &382753101
 GameObject:
   m_ObjectHideFlags: 0
@@ -49791,6 +49812,55 @@ MonoBehaviour:
   blendDistance: 0
   weight: 1
   sharedProfile: {fileID: 11400000, guid: 14401e8478ae17448bada39af863d24d, type: 2}
+--- !u!1 &1930038371
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1930038373}
+  - component: {fileID: 1930038372}
+  m_Layer: 0
+  m_Name: Underwater Volume
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1930038372
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1930038371}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 172515602e62fb746b5d573b38a5fe58, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Unity.RenderPipelines.Core.Runtime::UnityEngine.Rendering.Volume
+  m_IsGlobal: 1
+  priority: 0
+  blendDistance: 0
+  weight: 0
+  sharedProfile: {fileID: 11400000, guid: 30f06be35870439438899474daee310e, type: 2}
+--- !u!4 &1930038373
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1930038371}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 6.38824, y: 2.55317, z: -2.2903}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
@@ -49800,3 +49870,4 @@ SceneRoots:
   - {fileID: 382753103}
   - {fileID: 1064713444}
   - {fileID: 1816713262}
+  - {fileID: 1930038373}
