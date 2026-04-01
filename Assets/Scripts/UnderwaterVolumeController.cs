@@ -30,6 +30,34 @@ public class UnderwaterVolumeController : MonoBehaviour
     [Tooltip("Use unscaled delta time so blending is unaffected by timescale changes.")]
     [SerializeField] private bool useUnscaledTime;
 
+    [Header("Underwater Fog")]
+    [SerializeField] private bool controlGlobalFog = true;
+
+    [SerializeField] private Color underwaterFogColor = new Color(0.12f, 0.32f, 0.38f, 1f);
+
+    [Tooltip("Fog density when fully underwater, if using exponential fog.")]
+    [Min(0f)]
+    [SerializeField] private float underwaterFogDensity = 0.08f;
+
+    [Tooltip("Start distance for linear fog when fully underwater.")]
+    [Min(0f)]
+    [SerializeField] private float underwaterFogStartDistance = 0f;
+
+    [Tooltip("End distance for linear fog when fully underwater.")]
+    [Min(0f)]
+    [SerializeField] private float underwaterFogEndDistance = 12f;
+
+    [Tooltip("If true, fog gets stronger the deeper you go below sea level.")]
+    [SerializeField] private bool scaleFogByDepth = true;
+
+    private bool originalFogEnabled;
+    private FogMode originalFogMode;
+    private Color originalFogColor;
+    private float originalFogDensity;
+    private float originalFogStartDistance;
+    private float originalFogEndDistance;
+    private bool fogStateCaptured;
+
     private float currentWeight;
 
     private void Reset()
@@ -79,6 +107,7 @@ public class UnderwaterVolumeController : MonoBehaviour
         }
 
         underwaterVolume.weight = currentWeight;
+        ApplyFog(100f*currentWeight);
     }
 
     private bool ResolveReferences()
@@ -122,5 +151,92 @@ public class UnderwaterVolumeController : MonoBehaviour
             Mathf.Abs(planet.transform.lossyScale.z));
 
         return planet.GetOceanRadius() * lossyScaleMax;
+    }
+
+    private void CaptureOriginalFogSettings()
+    {
+        if (fogStateCaptured)
+        {
+            return;
+        }
+
+        originalFogEnabled = RenderSettings.fog;
+        originalFogMode = RenderSettings.fogMode;
+        originalFogColor = RenderSettings.fogColor;
+        originalFogDensity = RenderSettings.fogDensity;
+        originalFogStartDistance = RenderSettings.fogStartDistance;
+        originalFogEndDistance = RenderSettings.fogEndDistance;
+        fogStateCaptured = true;
+    }
+
+    private void ApplyFog(float underwaterWeight)
+    {
+        if (!controlGlobalFog)
+        {
+            return;
+        }
+
+        CaptureOriginalFogSettings();
+
+        if (underwaterWeight <= 0.0001f)
+        {
+            RenderSettings.fog = originalFogEnabled;
+            RenderSettings.fogMode = originalFogMode;
+            RenderSettings.fogColor = originalFogColor;
+            RenderSettings.fogDensity = originalFogDensity;
+            RenderSettings.fogStartDistance = originalFogStartDistance;
+            RenderSettings.fogEndDistance = originalFogEndDistance;
+            return;
+        }
+
+        RenderSettings.fog = true;
+
+        // Keep the current project fog mode if it already existed,
+        // otherwise use Linear as a predictable default.
+        FogMode targetFogMode = originalFogEnabled ? originalFogMode : FogMode.Linear;
+        RenderSettings.fogMode = targetFogMode;
+
+        float fogStrength = underwaterWeight;
+
+        if (scaleFogByDepth)
+        {
+            fogStrength *= underwaterWeight;
+        }
+
+        RenderSettings.fogColor = Color.Lerp(originalFogColor, underwaterFogColor, underwaterWeight);
+
+        if (targetFogMode == FogMode.Linear)
+        {
+            float start = Mathf.Lerp(originalFogStartDistance, underwaterFogStartDistance, fogStrength);
+            float end = Mathf.Lerp(originalFogEndDistance > 0f ? originalFogEndDistance : 200f, underwaterFogEndDistance, fogStrength);
+
+            if (end < start + 0.01f)
+            {
+                end = start + 0.01f;
+            }
+
+            RenderSettings.fogStartDistance = start;
+            RenderSettings.fogEndDistance = end;
+        }
+        else
+        {
+            float density = Mathf.Lerp(originalFogDensity, underwaterFogDensity, fogStrength);
+            RenderSettings.fogDensity = density;
+        }
+    }
+
+    private void OnDisable()
+    {
+        if (!fogStateCaptured)
+        {
+            return;
+        }
+
+        RenderSettings.fog = originalFogEnabled;
+        RenderSettings.fogMode = originalFogMode;
+        RenderSettings.fogColor = originalFogColor;
+        RenderSettings.fogDensity = originalFogDensity;
+        RenderSettings.fogStartDistance = originalFogStartDistance;
+        RenderSettings.fogEndDistance = originalFogEndDistance;
     }
 }

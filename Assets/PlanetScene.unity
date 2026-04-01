@@ -529,6 +529,12 @@ MonoBehaviour:
   blendInSpeed: 2.5
   blendOutSpeed: 3
   useUnscaledTime: 0
+  controlGlobalFog: 1
+  underwaterFogColor: {r: 0.12, g: 0.32, b: 0.38, a: 1}
+  underwaterFogDensity: 0.08
+  underwaterFogStartDistance: 0
+  underwaterFogEndDistance: 3
+  scaleFogByDepth: 1
 --- !u!1 &382753101
 GameObject:
   m_ObjectHideFlags: 0
