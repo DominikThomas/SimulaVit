@@ -15,6 +15,11 @@ public class CameraRotation : MonoBehaviour
     [SerializeField] private float maxZoomDistance = 40.0f;
     [SerializeField] private float zoomSpeed = 8.0f;
     [SerializeField] private float pinchZoomSpeed = 0.02f;
+    [SerializeField] private bool useDynamicMinZoom = true;
+    [SerializeField] private float terrainClearance = 0.5f;
+    [SerializeField] private bool allowUnderwaterZoom = false;
+    [SerializeField] private float maxUnderwaterDepth = 0.0f;
+    [SerializeField] private float oceanSurfaceClearance = 0.0f;
 
     [Header("Close-Range Tilt")]
     [SerializeField] private float tiltStartDistance = 14.0f;
@@ -31,6 +36,7 @@ public class CameraRotation : MonoBehaviour
 
     private float orbitDistance;
     private float planetRadius;
+    private PlanetGenerator planetGenerator;
     private float currentX;
     private float currentY;
     private Vector2 lookInput;
@@ -55,6 +61,8 @@ public class CameraRotation : MonoBehaviour
     {
         maxTiltAngle = Mathf.Clamp(maxTiltAngle, 0f, 89f);
         tiltSmoothing = Mathf.Max(0f, tiltSmoothing);
+        terrainClearance = Mathf.Max(0f, terrainClearance);
+        maxUnderwaterDepth = Mathf.Max(0f, maxUnderwaterDepth);
     }
 
     private void OnEnable()
@@ -107,6 +115,9 @@ public class CameraRotation : MonoBehaviour
         }
 
         Quaternion orbitRotation = Quaternion.Euler(currentX, currentY, 0f);
+        Vector3 orbitDirection = orbitRotation * Vector3.back;
+        float localMinZoomDistance = GetMinZoomDistanceForDirection(orbitDirection);
+        orbitDistance = Mathf.Clamp(orbitDistance, localMinZoomDistance, maxZoomDistance);
         Vector3 position = TargetPosition + orbitRotation * new Vector3(0f, 0f, -orbitDistance);
         Quaternion lookRotation = Quaternion.LookRotation(TargetPosition - position, Vector3.up);
 
@@ -153,7 +164,9 @@ public class CameraRotation : MonoBehaviour
 
         if (Mathf.Abs(zoomDelta) > Mathf.Epsilon)
         {
-            orbitDistance = Mathf.Clamp(orbitDistance + zoomDelta, minZoomDistance, maxZoomDistance);
+            Vector3 zoomDirection = GetCurrentOrbitDirection();
+            float localMinZoomDistance = GetMinZoomDistanceForDirection(zoomDirection);
+            orbitDistance = Mathf.Clamp(orbitDistance + zoomDelta, localMinZoomDistance, maxZoomDistance);
         }
     }
 
@@ -279,6 +292,7 @@ public class CameraRotation : MonoBehaviour
             return;
         }
 
+        planetGenerator = generator;
         planetRadius = generator.radius;
         orbitDistance = generator.radius + distanceBuffer;
         minZoomDistance = Mathf.Max(planetRadius + 0.5f, minZoomDistance);
@@ -355,5 +369,47 @@ public class CameraRotation : MonoBehaviour
         return pointerId >= 0
             ? EventSystem.current.IsPointerOverGameObject(pointerId)
             : EventSystem.current.IsPointerOverGameObject();
+    }
+
+    private Vector3 GetCurrentOrbitDirection()
+    {
+        Vector3 fromTarget = transform.position - TargetPosition;
+        if (fromTarget.sqrMagnitude > Mathf.Epsilon)
+        {
+            return fromTarget.normalized;
+        }
+
+        return Quaternion.Euler(currentX, currentY, 0f) * Vector3.back;
+    }
+
+    private float GetMinZoomDistanceForDirection(Vector3 directionFromCenter)
+    {
+        float fixedMinZoomDistance = minZoomDistance;
+        if (!useDynamicMinZoom || planetGenerator == null || directionFromCenter.sqrMagnitude <= Mathf.Epsilon)
+        {
+            return fixedMinZoomDistance;
+        }
+
+        Vector3 normalizedDirection = directionFromCenter.normalized;
+        float terrainSurfaceRadius = planetGenerator.GetSurfaceRadius(normalizedDirection);
+        float landMinDistance = terrainSurfaceRadius + terrainClearance;
+        float localMinDistance = landMinDistance;
+
+        int cellIndex = PlanetGridIndexing.DirectionToCellIndex(normalizedDirection, planetGenerator.resolution);
+        bool isOceanCell = planetGenerator.OceanEnabled && planetGenerator.IsOceanCell(cellIndex);
+        if (isOceanCell)
+        {
+            float oceanSurfaceRadius = planetGenerator.GetOceanRadius();
+            float oceanMinDistance = oceanSurfaceRadius + oceanSurfaceClearance;
+
+            if (allowUnderwaterZoom)
+            {
+                oceanMinDistance = oceanSurfaceRadius + oceanSurfaceClearance - Mathf.Max(0f, maxUnderwaterDepth);
+            }
+
+            localMinDistance = Mathf.Max(landMinDistance, oceanMinDistance);
+        }
+
+        return Mathf.Clamp(localMinDistance, 0f, maxZoomDistance);
     }
 }
