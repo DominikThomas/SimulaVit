@@ -504,6 +504,11 @@ MonoBehaviour:
   maxZoomDistance: 40
   zoomSpeed: 20
   pinchZoomSpeed: 0.02
+  useDynamicMinZoom: 1
+  terrainClearance: 0.5
+  allowUnderwaterZoom: 0
+  maxUnderwaterDepth: 0
+  oceanSurfaceClearance: 0
   tiltStartDistance: 14
   maxTiltAngle: 65
   tiltSmoothing: 8
@@ -524,7 +529,7 @@ MonoBehaviour:
   planet: {fileID: 382753102}
   cameraTransform: {fileID: 370080327}
   underwaterVolume: {fileID: 1930038372}
-  seaLevelEnterThreshold: 0.05
+  seaLevelEnterThreshold: 0.3
   fullEffectDepth: 1.5
   blendInSpeed: 2.5
   blendOutSpeed: 3
