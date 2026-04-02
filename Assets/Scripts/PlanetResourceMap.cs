@@ -25,6 +25,20 @@ public enum ResourceType
 [DisallowMultipleComponent]
 public class PlanetResourceMap : MonoBehaviour
 {
+    private const int MaxOceanLayers = 5;
+
+    public struct LegacyEnvironmentSnapshot
+    {
+        public float O2;
+        public float OrganicC;
+        public float H2;
+        public float H2S;
+        public float CH4;
+        public float DissolvedFe2Plus;
+        public float TemperatureKelvin;
+        public float LightFactor;
+    }
+
     [SerializeField] private PlanetGenerator planetGenerator;
     [Header("References")]
     [Tooltip("Optional directional light. If empty, will try SunSkyRotator's Light, then RenderSettings.sun.")]
@@ -140,6 +154,40 @@ public class PlanetResourceMap : MonoBehaviour
     [Tooltip("Global physical minimum temperature clamp in Kelvin.")]
     public float minTempKelvin = 150f;
 
+    [Header("Layered Ocean Foundation")]
+    [Tooltip("Enables per-cell vertical ocean layers while keeping legacy resource access behavior.")]
+    public bool enableLayeredOcean = true;
+    [Tooltip("Fraction of local max ocean depth needed to activate a second layer.")]
+    [Range(0f, 1f)] public float depth01ForLayer2 = 0.12f;
+    [Tooltip("Fraction of local max ocean depth needed to activate a third layer.")]
+    [Range(0f, 1f)] public float depth01ForLayer3 = 0.32f;
+    [Tooltip("Fraction of local max ocean depth needed to activate a fourth layer.")]
+    [Range(0f, 1f)] public float depth01ForLayer4 = 0.58f;
+    [Tooltip("Fraction of local max ocean depth needed to activate all five layers.")]
+    [Range(0f, 1f)] public float depth01ForLayer5 = 0.82f;
+    [Tooltip("Light attenuation per vertical layer. Higher values darken deep layers faster.")]
+    [Range(0f, 8f)] public float layeredLightAttenuation = 1.15f;
+    [Tooltip("Simple conservative adjacent-layer diffusion rate applied each atmosphere tick.")]
+    [Range(0f, 1f)] public float layeredVerticalMixRate = 0.02f;
+    [Tooltip("Slow oxygenation source that pushes atmospheric O2 into ocean surface layers.")]
+    [Range(0f, 1f)] public float layeredSurfaceOxygenationRate = 0.02f;
+    [Tooltip("Downward sinking flux of organic material (marine snow) per atmosphere tick.")]
+    [Range(0f, 1f)] public float layeredMarineSnowRate = 0.015f;
+    [Tooltip("Simple temperature decrease per layer away from the surface (Kelvin).")]
+    [Min(0f)] public float layeredTempDropPerLayer = 2f;
+    [Tooltip("Vent heating contribution per layer toward bottom (Kelvin at full vent strength).")]
+    [Min(0f)] public float layeredBottomVentTempGain = 25f;
+
+    [Header("Layered Ocean Debug")]
+    [Tooltip("Inspector sample cell for quick per-cell layered debug values.")]
+    public int debugLayeredCellIndex = 0;
+    [Range(1, MaxOceanLayers)] public int debugLayeredSampleLayer = 1;
+    public int debugLayeredActiveCount;
+    public float debugLayeredTopLight;
+    public float debugLayeredBottomLight;
+    public float debugLayeredEffectiveO2;
+    public float debugLayeredEffectiveOrganicC;
+
     [Header("Scent Fields")]
     [Tooltip("Enable diffuse chemical cue fields used for scent-based predation/fear steering.")]
     public bool enableScentFields = true;
@@ -182,6 +230,7 @@ public class PlanetResourceMap : MonoBehaviour
     private float[] si;
     private float[] ca;
     private readonly Dictionary<ResourceType, float[]> oceanDissolvedResources = new Dictionary<ResourceType, float[]>();
+    private readonly Dictionary<ResourceType, float[]> layeredOceanResources = new Dictionary<ResourceType, float[]>();
     private float initialDissolvedFe2PlusTotal;
 
     private bool isInitialized;
@@ -199,6 +248,9 @@ public class PlanetResourceMap : MonoBehaviour
     private byte[] ventMask;
     private int[] ventCells;
     private byte[] oceanMask;
+    private byte[] oceanActiveLayerCounts;
+    private float[] oceanLayerLightFactors;
+    private float[] oceanLayerTemperatureOffsets;
     private float ventTimer;
     private float atmosphereTimer;
 
@@ -259,6 +311,7 @@ public class PlanetResourceMap : MonoBehaviour
                 TransferAtmosphericO2ToOceanFe2Demand(atmosphereTick);
                 ApplyDissolvedFe2PlusOxidation(atmosphereTick);
                 ApplyLocalResourceMixing(atmosphereTick);
+                ApplyVerticalLayeredOceanProcesses(atmosphereTick);
                 UpdateAtmosphereDebugMeans();
                 UpdateOceanChemistryDebugStats();
             }
@@ -274,6 +327,11 @@ public class PlanetResourceMap : MonoBehaviour
             return 0f;
         }
 
+        if (ShouldUseLayeredOceanForResource(t, cell))
+        {
+            return GetEffectiveLayeredResource(t, cell);
+        }
+
         return GetArray(t)[cell];
     }
 
@@ -281,6 +339,13 @@ public class PlanetResourceMap : MonoBehaviour
     {
         if (!isInitialized || !IsCellValid(cell) || Mathf.Approximately(delta, 0f))
         {
+            return;
+        }
+
+        if (ShouldUseLayeredOceanForResource(t, cell))
+        {
+            AddLayeredResourceDelta(t, cell, delta);
+            SyncLegacyOceanResourceFromLayers(t, cell);
             return;
         }
 
@@ -316,6 +381,82 @@ public class PlanetResourceMap : MonoBehaviour
         }
 
         return oceanMask[cell] != 0;
+    }
+
+    public int GetOceanActiveLayerCount(int cell)
+    {
+        if (!isInitialized || !IsOceanCell(cell))
+        {
+            return 0;
+        }
+
+        if (!enableLayeredOcean || oceanActiveLayerCounts == null || cell >= oceanActiveLayerCounts.Length)
+        {
+            return 1;
+        }
+
+        return Mathf.Clamp(oceanActiveLayerCounts[cell], 1, MaxOceanLayers);
+    }
+
+    public int GetOceanTopLayerIndex(int cell)
+    {
+        return GetOceanActiveLayerCount(cell) > 0 ? 0 : -1;
+    }
+
+    public int GetOceanBottomLayerIndex(int cell)
+    {
+        int count = GetOceanActiveLayerCount(cell);
+        return count > 0 ? count - 1 : -1;
+    }
+
+    public float GetLayerLightFactor(int cell, int layerIndex)
+    {
+        if (!IsLayerAccessValid(cell, layerIndex))
+        {
+            return 0f;
+        }
+
+        return oceanLayerLightFactors[GetLayeredArrayIndex(cell, layerIndex)];
+    }
+
+    public float GetLayerTemperatureOffset(int cell, int layerIndex)
+    {
+        if (!IsLayerAccessValid(cell, layerIndex))
+        {
+            return 0f;
+        }
+
+        return oceanLayerTemperatureOffsets[GetLayeredArrayIndex(cell, layerIndex)];
+    }
+
+    public float GetLayerResource(ResourceType resourceType, int cell, int layerIndex)
+    {
+        if (!IsLayerAccessValid(cell, layerIndex))
+        {
+            return 0f;
+        }
+
+        float[] layeredArray = GetLayeredOceanArray(resourceType);
+        if (layeredArray == null)
+        {
+            return Get(resourceType, cell);
+        }
+
+        return layeredArray[GetLayeredArrayIndex(cell, layerIndex)];
+    }
+
+    public LegacyEnvironmentSnapshot GetEffectiveLegacyEnvironment(int cell, Vector3 worldPosOrDir)
+    {
+        LegacyEnvironmentSnapshot snapshot = default;
+        snapshot.O2 = Get(ResourceType.O2, cell);
+        snapshot.OrganicC = Get(ResourceType.OrganicC, cell);
+        snapshot.H2 = Get(ResourceType.H2, cell);
+        snapshot.H2S = Get(ResourceType.H2S, cell);
+        snapshot.CH4 = Get(ResourceType.CH4, cell);
+        snapshot.DissolvedFe2Plus = Get(ResourceType.DissolvedFe2Plus, cell);
+        snapshot.TemperatureKelvin = GetTemperature(worldPosOrDir, cell);
+        snapshot.LightFactor = GetEffectiveLayeredLight(cell);
+        return snapshot;
     }
 
     /// <summary>
@@ -355,6 +496,20 @@ public class PlanetResourceMap : MonoBehaviour
         }
 
         float tempKelvin = baseTempKelvin + insolationTerm + ventTerm;
+        if (underwater && enableLayeredOcean)
+        {
+            int active = GetOceanActiveLayerCount(cellIndex);
+            if (active > 0)
+            {
+                float layerOffset = 0f;
+                for (int layer = 0; layer < active; layer++)
+                {
+                    layerOffset += GetLayerTemperatureOffset(cellIndex, layer);
+                }
+
+                tempKelvin += layerOffset / active;
+            }
+        }
         float tempMax = underwater ? Mathf.Max(minTempKelvin + 1f, maxOceanTempKelvin) : Mathf.Max(minTempKelvin + 1f, maxLandTempKelvin);
         return Mathf.Clamp(tempKelvin, minTempKelvin, tempMax);
     }
@@ -433,7 +588,11 @@ public class PlanetResourceMap : MonoBehaviour
         o2TransferDemandTmp = new float[cellCount];
         ventHeatNeighbors = new int[cellCount * NeighborCount];
         oceanMask = new byte[cellCount];
+        oceanActiveLayerCounts = new byte[cellCount];
+        oceanLayerLightFactors = new float[cellCount * MaxOceanLayers];
+        oceanLayerTemperatureOffsets = new float[cellCount * MaxOceanLayers];
         ConfigureOceanDissolvedSpecies(cellCount);
+        ConfigureLayeredOceanResources(cellCount);
         EnsureScentArrays(cellCount);
 
         int ventCount = 0;
@@ -493,6 +652,7 @@ public class PlanetResourceMap : MonoBehaviour
 
         BuildVentHeatNeighbors();
         RebuildVentHeatField();
+        InitializeLayeredOceanState();
 
         int total = cellCount;
         Debug.Log($"Vents: {ventCount}/{total} = {(100f * ventCount / total):F1}%");
@@ -522,6 +682,27 @@ public class PlanetResourceMap : MonoBehaviour
         RegisterOceanDissolvedSpecies(ResourceType.DissolvedFe2Plus, cellCount);
         // Future dissolved ocean species (for example DissolvedCa / DissolvedSi)
         // can be registered here without changing the rest of the resource map flow.
+    }
+
+    private void ConfigureLayeredOceanResources(int cellCount)
+    {
+        layeredOceanResources.Clear();
+        if (cellCount <= 0)
+        {
+            return;
+        }
+
+        RegisterLayeredOceanResource(ResourceType.O2, cellCount);
+        RegisterLayeredOceanResource(ResourceType.OrganicC, cellCount);
+        RegisterLayeredOceanResource(ResourceType.H2, cellCount);
+        RegisterLayeredOceanResource(ResourceType.H2S, cellCount);
+        RegisterLayeredOceanResource(ResourceType.CH4, cellCount);
+        RegisterLayeredOceanResource(ResourceType.DissolvedFe2Plus, cellCount);
+    }
+
+    private void RegisterLayeredOceanResource(ResourceType resourceType, int cellCount)
+    {
+        layeredOceanResources[resourceType] = new float[cellCount * MaxOceanLayers];
     }
 
     private void RegisterOceanDissolvedSpecies(ResourceType resourceType, int cellCount)
@@ -930,6 +1111,156 @@ public class PlanetResourceMap : MonoBehaviour
         ApplyVentChemicalDecay(dt);
     }
 
+    private void InitializeLayeredOceanState()
+    {
+        if (!enableLayeredOcean || !isInitialized || oceanActiveLayerCounts == null)
+        {
+            return;
+        }
+
+        for (int cell = 0; cell < oceanActiveLayerCounts.Length; cell++)
+        {
+            if (!IsOceanCell(cell))
+            {
+                oceanActiveLayerCounts[cell] = 0;
+                continue;
+            }
+
+            float localDepth = planetGenerator != null ? planetGenerator.GetLocalOceanDepth(cell) : 0f;
+            oceanActiveLayerCounts[cell] = (byte)DetermineActiveLayerCount(localDepth);
+        }
+
+        SyncLayeredOceanFromLegacyArrays();
+        UpdateLayerLightAndTemperatureProfiles();
+        SyncLegacyOceanFromLayeredArrays();
+        UpdateLayeredDebugSample();
+    }
+
+    private void ApplyVerticalLayeredOceanProcesses(float dt)
+    {
+        if (!enableLayeredOcean || !isInitialized)
+        {
+            return;
+        }
+
+        SyncLayeredOceanFromLegacyArrays();
+        UpdateLayerLightAndTemperatureProfiles();
+        ApplySurfaceOxygenationToLayers(dt);
+        ApplyVerticalDiffusion(dt);
+        ApplyMarineSnowSinking(dt);
+        SyncLegacyOceanFromLayeredArrays();
+        UpdateLayeredDebugSample();
+    }
+
+    private void ApplySurfaceOxygenationToLayers(float dt)
+    {
+        float oxygenationRate = Mathf.Clamp01(layeredSurfaceOxygenationRate) * Mathf.Max(0f, dt);
+        if (oxygenationRate <= 0f)
+        {
+            return;
+        }
+
+        float targetSurfaceO2 = Mathf.Max(0f, debugGlobalO2);
+        float[] o2Layers = GetLayeredOceanArray(ResourceType.O2);
+        if (o2Layers == null)
+        {
+            return;
+        }
+
+        for (int cell = 0; cell < oceanMask.Length; cell++)
+        {
+            if (!IsOceanCell(cell))
+            {
+                continue;
+            }
+
+            int top = GetOceanTopLayerIndex(cell);
+            int idx = GetLayeredArrayIndex(cell, top);
+            o2Layers[idx] = Mathf.Max(0f, Mathf.Lerp(o2Layers[idx], targetSurfaceO2, oxygenationRate));
+        }
+    }
+
+    private void ApplyVerticalDiffusion(float dt)
+    {
+        float transferRate = Mathf.Clamp01(layeredVerticalMixRate) * Mathf.Max(0f, dt);
+        if (transferRate <= 0f)
+        {
+            return;
+        }
+
+        ApplyVerticalDiffusionForResource(ResourceType.O2, transferRate);
+        ApplyVerticalDiffusionForResource(ResourceType.OrganicC, transferRate);
+        ApplyVerticalDiffusionForResource(ResourceType.H2, transferRate);
+        ApplyVerticalDiffusionForResource(ResourceType.H2S, transferRate);
+        ApplyVerticalDiffusionForResource(ResourceType.CH4, transferRate);
+        ApplyVerticalDiffusionForResource(ResourceType.DissolvedFe2Plus, transferRate);
+    }
+
+    private void ApplyVerticalDiffusionForResource(ResourceType resourceType, float transferRate)
+    {
+        float[] layeredArray = GetLayeredOceanArray(resourceType);
+        if (layeredArray == null)
+        {
+            return;
+        }
+
+        for (int cell = 0; cell < oceanMask.Length; cell++)
+        {
+            int activeCount = GetOceanActiveLayerCount(cell);
+            if (activeCount <= 1)
+            {
+                continue;
+            }
+
+            for (int layer = 0; layer < activeCount - 1; layer++)
+            {
+                int a = GetLayeredArrayIndex(cell, layer);
+                int b = GetLayeredArrayIndex(cell, layer + 1);
+                float delta = (layeredArray[a] - layeredArray[b]) * transferRate;
+                layeredArray[a] = Mathf.Max(0f, layeredArray[a] - delta);
+                layeredArray[b] = Mathf.Max(0f, layeredArray[b] + delta);
+            }
+        }
+    }
+
+    private void ApplyMarineSnowSinking(float dt)
+    {
+        float sinkRate = Mathf.Clamp01(layeredMarineSnowRate) * Mathf.Max(0f, dt);
+        if (sinkRate <= 0f)
+        {
+            return;
+        }
+
+        float[] organicLayers = GetLayeredOceanArray(ResourceType.OrganicC);
+        if (organicLayers == null)
+        {
+            return;
+        }
+
+        for (int cell = 0; cell < oceanMask.Length; cell++)
+        {
+            int activeCount = GetOceanActiveLayerCount(cell);
+            if (activeCount <= 1)
+            {
+                continue;
+            }
+
+            for (int layer = 0; layer < activeCount - 1; layer++)
+            {
+                int upper = GetLayeredArrayIndex(cell, layer);
+                int lower = GetLayeredArrayIndex(cell, layer + 1);
+                float flux = organicLayers[upper] * sinkRate;
+                if (flux <= 0f)
+                {
+                    continue;
+                }
+
+                organicLayers[upper] = Mathf.Max(0f, organicLayers[upper] - flux);
+                organicLayers[lower] = Mathf.Max(0f, organicLayers[lower] + flux);
+            }
+        }
+    }
+
     private void ApplyVentChemicalDecay(float dt)
     {
         float decayRate = Mathf.Max(0f, ventResourceDecayPerSecond);
@@ -1105,10 +1436,20 @@ public class PlanetResourceMap : MonoBehaviour
                 continue;
             }
 
-            Add(ResourceType.H2S, cell, h2sPerTick * cellVentStrength);
-            Add(ResourceType.H2, cell, h2PerTick * cellVentStrength);
+            if (enableLayeredOcean && IsOceanCell(cell))
+            {
+                InjectVentProductToBottomLayer(ResourceType.H2S, cell, h2sPerTick * cellVentStrength);
+                InjectVentProductToBottomLayer(ResourceType.H2, cell, h2PerTick * cellVentStrength);
+                InjectVentProductToBottomLayer(ResourceType.DissolvedFe2Plus, cell, dissolvedFe2PlusPerTick * cellVentStrength);
+            }
+            else
+            {
+                Add(ResourceType.H2S, cell, h2sPerTick * cellVentStrength);
+                Add(ResourceType.H2, cell, h2PerTick * cellVentStrength);
+                Add(ResourceType.DissolvedFe2Plus, cell, dissolvedFe2PlusPerTick * cellVentStrength);
+            }
+
             Add(ResourceType.CO2, cell, Mathf.Max(0f, ventCO2PerTick) * cellVentStrength);
-            Add(ResourceType.DissolvedFe2Plus, cell, dissolvedFe2PlusPerTick * cellVentStrength);
             if (applyH2SCap)
             {
                 h2s[cell] = Mathf.Min(h2s[cell], ventH2SMax);
@@ -1120,6 +1461,7 @@ public class PlanetResourceMap : MonoBehaviour
             }
         }
 
+        SyncLegacyOceanFromLayeredArrays();
         UpdateOceanChemistryDebugStats();
     }
 
@@ -1516,6 +1858,262 @@ public class PlanetResourceMap : MonoBehaviour
         }
     }
 
+    private bool ShouldUseLayeredOceanForResource(ResourceType resourceType, int cell)
+    {
+        return enableLayeredOcean && IsOceanCell(cell) && GetLayeredOceanArray(resourceType) != null;
+    }
+
+    private float[] GetLayeredOceanArray(ResourceType resourceType)
+    {
+        return layeredOceanResources.TryGetValue(resourceType, out float[] array) ? array : null;
+    }
+
+    private int GetLayeredArrayIndex(int cell, int layerIndex)
+    {
+        return (cell * MaxOceanLayers) + layerIndex;
+    }
+
+    private bool IsLayerAccessValid(int cell, int layerIndex)
+    {
+        int active = GetOceanActiveLayerCount(cell);
+        return active > 0 && layerIndex >= 0 && layerIndex < active && oceanLayerLightFactors != null;
+    }
+
+    private int DetermineActiveLayerCount(float localDepth)
+    {
+        float maxDepth = planetGenerator != null ? Mathf.Max(0.0001f, planetGenerator.maxOceanDepth) : 0.0001f;
+        float depth01 = Mathf.Clamp01(localDepth / maxDepth);
+        int count = 1;
+        if (depth01 >= depth01ForLayer2) count = 2;
+        if (depth01 >= depth01ForLayer3) count = 3;
+        if (depth01 >= depth01ForLayer4) count = 4;
+        if (depth01 >= depth01ForLayer5) count = 5;
+        return Mathf.Clamp(count, 1, MaxOceanLayers);
+    }
+
+    private void UpdateLayerLightAndTemperatureProfiles()
+    {
+        if (oceanLayerLightFactors == null || oceanLayerTemperatureOffsets == null)
+        {
+            return;
+        }
+
+        float attenuation = Mathf.Max(0f, layeredLightAttenuation);
+        float tempDrop = Mathf.Max(0f, layeredTempDropPerLayer);
+        float ventTempGain = Mathf.Max(0f, layeredBottomVentTempGain);
+        for (int cell = 0; cell < oceanMask.Length; cell++)
+        {
+            int active = GetOceanActiveLayerCount(cell);
+            if (active <= 0)
+            {
+                continue;
+            }
+
+            float ventStrengthFactor = ventStrength != null && cell < ventStrength.Length ? Mathf.Max(0f, ventStrength[cell]) : 0f;
+            for (int layer = 0; layer < MaxOceanLayers; layer++)
+            {
+                int idx = GetLayeredArrayIndex(cell, layer);
+                if (layer >= active)
+                {
+                    oceanLayerLightFactors[idx] = 0f;
+                    oceanLayerTemperatureOffsets[idx] = 0f;
+                    continue;
+                }
+
+                float depthT = active <= 1 ? 0f : layer / (float)(active - 1);
+                oceanLayerLightFactors[idx] = Mathf.Exp(-attenuation * depthT);
+                float ventBias = Mathf.SmoothStep(0f, 1f, depthT) * ventStrengthFactor;
+                oceanLayerTemperatureOffsets[idx] = (-tempDrop * layer) + (ventBias * ventTempGain);
+            }
+        }
+    }
+
+    private void SyncLayeredOceanFromLegacyArrays()
+    {
+        SyncResourceLegacyToLayered(ResourceType.O2);
+        SyncResourceLegacyToLayered(ResourceType.OrganicC);
+        SyncResourceLegacyToLayered(ResourceType.H2);
+        SyncResourceLegacyToLayered(ResourceType.H2S);
+        SyncResourceLegacyToLayered(ResourceType.CH4);
+        SyncResourceLegacyToLayered(ResourceType.DissolvedFe2Plus);
+    }
+
+    private void SyncResourceLegacyToLayered(ResourceType resourceType)
+    {
+        float[] legacy = GetArray(resourceType);
+        float[] layered = GetLayeredOceanArray(resourceType);
+        if (legacy == null || layered == null)
+        {
+            return;
+        }
+
+        for (int cell = 0; cell < legacy.Length; cell++)
+        {
+            int active = GetOceanActiveLayerCount(cell);
+            if (active <= 0)
+            {
+                continue;
+            }
+
+            float value = Mathf.Max(0f, legacy[cell]);
+            for (int layer = 0; layer < active; layer++)
+            {
+                layered[GetLayeredArrayIndex(cell, layer)] = value;
+            }
+        }
+    }
+
+    private void SyncLegacyOceanFromLayeredArrays()
+    {
+        SyncLegacyOceanResourceFromLayers(ResourceType.O2);
+        SyncLegacyOceanResourceFromLayers(ResourceType.OrganicC);
+        SyncLegacyOceanResourceFromLayers(ResourceType.H2);
+        SyncLegacyOceanResourceFromLayers(ResourceType.H2S);
+        SyncLegacyOceanResourceFromLayers(ResourceType.CH4);
+        SyncLegacyOceanResourceFromLayers(ResourceType.DissolvedFe2Plus);
+    }
+
+    private void SyncLegacyOceanResourceFromLayers(ResourceType resourceType, int specificCell = -1)
+    {
+        float[] legacy = GetArray(resourceType);
+        float[] layered = GetLayeredOceanArray(resourceType);
+        if (legacy == null || layered == null)
+        {
+            return;
+        }
+
+        int start = specificCell >= 0 ? specificCell : 0;
+        int end = specificCell >= 0 ? specificCell + 1 : legacy.Length;
+        for (int cell = start; cell < end; cell++)
+        {
+            int active = GetOceanActiveLayerCount(cell);
+            if (active <= 0)
+            {
+                continue;
+            }
+
+            legacy[cell] = GetEffectiveLayeredResource(resourceType, cell);
+        }
+    }
+
+    private float GetEffectiveLayeredResource(ResourceType resourceType, int cell)
+    {
+        float[] layered = GetLayeredOceanArray(resourceType);
+        if (layered == null)
+        {
+            return GetArray(resourceType)[cell];
+        }
+
+        int active = GetOceanActiveLayerCount(cell);
+        if (active <= 0)
+        {
+            return 0f;
+        }
+
+        float sum = 0f;
+        for (int layer = 0; layer < active; layer++)
+        {
+            sum += layered[GetLayeredArrayIndex(cell, layer)];
+        }
+
+        return Mathf.Max(0f, sum / active);
+    }
+
+    private float GetEffectiveLayeredLight(int cell)
+    {
+        int active = GetOceanActiveLayerCount(cell);
+        if (active <= 0)
+        {
+            return 0f;
+        }
+
+        float sum = 0f;
+        for (int layer = 0; layer < active; layer++)
+        {
+            sum += GetLayerLightFactor(cell, layer);
+        }
+
+        return Mathf.Clamp01(sum / active);
+    }
+
+    private void AddLayeredResourceDelta(ResourceType resourceType, int cell, float delta)
+    {
+        float[] layered = GetLayeredOceanArray(resourceType);
+        if (layered == null)
+        {
+            return;
+        }
+
+        int active = GetOceanActiveLayerCount(cell);
+        if (active <= 0)
+        {
+            return;
+        }
+
+        float perLayerDelta = delta / active;
+        for (int layer = 0; layer < active; layer++)
+        {
+            int idx = GetLayeredArrayIndex(cell, layer);
+            layered[idx] = Mathf.Max(0f, layered[idx] + perLayerDelta);
+        }
+    }
+
+    private void InjectVentProductToBottomLayer(ResourceType resourceType, int cell, float amount)
+    {
+        if (amount <= 0f)
+        {
+            return;
+        }
+
+        float[] layered = GetLayeredOceanArray(resourceType);
+        if (layered == null)
+        {
+            Add(resourceType, cell, amount);
+            return;
+        }
+
+        int bottom = GetOceanBottomLayerIndex(cell);
+        if (bottom < 0)
+        {
+            return;
+        }
+
+        int idx = GetLayeredArrayIndex(cell, bottom);
+        layered[idx] = Mathf.Max(0f, layered[idx] + amount);
+    }
+
+    private void UpdateLayeredDebugSample()
+    {
+        if (!isInitialized || oceanMask == null || oceanMask.Length == 0)
+        {
+            debugLayeredActiveCount = 0;
+            debugLayeredTopLight = 0f;
+            debugLayeredBottomLight = 0f;
+            debugLayeredEffectiveO2 = 0f;
+            debugLayeredEffectiveOrganicC = 0f;
+            return;
+        }
+
+        int cell = Mathf.Clamp(debugLayeredCellIndex, 0, oceanMask.Length - 1);
+        debugLayeredActiveCount = GetOceanActiveLayerCount(cell);
+        if (debugLayeredActiveCount > 0)
+        {
+            int top = GetOceanTopLayerIndex(cell);
+            int bottom = GetOceanBottomLayerIndex(cell);
+            debugLayeredTopLight = GetLayerLightFactor(cell, top);
+            debugLayeredBottomLight = GetLayerLightFactor(cell, bottom);
+            debugLayeredEffectiveO2 = GetEffectiveLayeredResource(ResourceType.O2, cell);
+            debugLayeredEffectiveOrganicC = GetEffectiveLayeredResource(ResourceType.OrganicC, cell);
+        }
+        else
+        {
+            debugLayeredTopLight = 0f;
+            debugLayeredBottomLight = 0f;
+            debugLayeredEffectiveO2 = 0f;
+            debugLayeredEffectiveOrganicC = 0f;
+        }
+    }
+
     private bool IsCellValid(int cell)
     {
         return co2 != null && cell >= 0 && cell < co2.Length;
@@ -1603,6 +2201,16 @@ public class PlanetResourceMap : MonoBehaviour
         scentDiffuseStrength = Mathf.Clamp01(scentDiffuseStrength);
         scentMaxPerCell = Mathf.Max(0f, scentMaxPerCell);
         scentUpdateInterval = Mathf.Max(0.01f, scentUpdateInterval);
+        depth01ForLayer2 = Mathf.Clamp01(depth01ForLayer2);
+        depth01ForLayer3 = Mathf.Clamp01(Mathf.Max(depth01ForLayer2, depth01ForLayer3));
+        depth01ForLayer4 = Mathf.Clamp01(Mathf.Max(depth01ForLayer3, depth01ForLayer4));
+        depth01ForLayer5 = Mathf.Clamp01(Mathf.Max(depth01ForLayer4, depth01ForLayer5));
+        layeredLightAttenuation = Mathf.Max(0f, layeredLightAttenuation);
+        layeredVerticalMixRate = Mathf.Clamp01(layeredVerticalMixRate);
+        layeredSurfaceOxygenationRate = Mathf.Clamp01(layeredSurfaceOxygenationRate);
+        layeredMarineSnowRate = Mathf.Clamp01(layeredMarineSnowRate);
+        layeredTempDropPerLayer = Mathf.Max(0f, layeredTempDropPerLayer);
+        layeredBottomVentTempGain = Mathf.Max(0f, layeredBottomVentTempGain);
     }
 
 
