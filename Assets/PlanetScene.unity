@@ -586,7 +586,7 @@ MonoBehaviour:
   shelfDistance: 2
   shelfDepth: 0.06
   slopeStrength: 1.15
-  maxOceanDepth: 1
+  maxOceanDepth: 2
   basinNoiseScale: 1.35
   basinNoiseStrength: 0.25
   basinNoiseOffset: {x: 23.17, y: -11.03, z: 7.41}
