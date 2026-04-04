@@ -395,12 +395,19 @@ public class PlanetResourceMap : MonoBehaviour
             return 1;
         }
 
-        return Mathf.Clamp(oceanActiveLayerCounts[cell], 1, MaxOceanLayers);
+        int count = oceanActiveLayerCounts[cell];
+        if (count <= 0)
+        {
+            return 0;
+        }
+
+        return Mathf.Clamp(count, 1, MaxOceanLayers);
     }
 
     public int GetOceanTopLayerIndex(int cell)
     {
-        return GetOceanActiveLayerCount(cell) > 0 ? 0 : -1;
+        int count = GetOceanActiveLayerCount(cell);
+        return count >= 1 ? 0 : -1;
     }
 
     public int GetOceanBottomLayerIndex(int cell)
@@ -649,7 +656,7 @@ public class PlanetResourceMap : MonoBehaviour
                 ventCount++;
             }
         }
-
+        isInitialized = true;
         BuildVentHeatNeighbors();
         RebuildVentHeatField();
         InitializeLayeredOceanState();
@@ -670,7 +677,6 @@ public class PlanetResourceMap : MonoBehaviour
         ventTimer = 0f;
         atmosphereTimer = 0f;
         initialDissolvedFe2PlusTotal = 0f;
-        isInitialized = true;
         UpdateAtmosphereDebugMeans();
         UpdateOceanChemistryDebugStats();
         Debug.Log($"Initialized {VentCount} vents", this);
@@ -1113,22 +1119,23 @@ public class PlanetResourceMap : MonoBehaviour
 
     private void InitializeLayeredOceanState()
     {
-        if (!enableLayeredOcean || !isInitialized || oceanActiveLayerCounts == null)
+        if (!enableLayeredOcean || oceanActiveLayerCounts == null || oceanMask == null)
         {
             return;
         }
 
         for (int cell = 0; cell < oceanActiveLayerCounts.Length; cell++)
         {
-            if (!IsOceanCell(cell))
+            if (oceanMask[cell] == 0)
             {
                 oceanActiveLayerCounts[cell] = 0;
                 continue;
             }
 
             float localDepth = planetGenerator != null ? planetGenerator.GetLocalOceanDepth(cell) : 0f;
-            oceanActiveLayerCounts[cell] = (byte)DetermineActiveLayerCount(localDepth);
+            oceanActiveLayerCounts[cell] = (byte)Mathf.Clamp(DetermineActiveLayerCount(localDepth), 1, MaxOceanLayers);
         }
+
 
         SyncLayeredOceanFromLegacyArrays();
         UpdateLayerLightAndTemperatureProfiles();
@@ -1162,7 +1169,7 @@ public class PlanetResourceMap : MonoBehaviour
 
         float targetSurfaceO2 = Mathf.Max(0f, debugGlobalO2);
         float[] o2Layers = GetLayeredOceanArray(ResourceType.O2);
-        if (o2Layers == null)
+        if (o2Layers == null || oceanMask == null)
         {
             return;
         }
@@ -1175,7 +1182,17 @@ public class PlanetResourceMap : MonoBehaviour
             }
 
             int top = GetOceanTopLayerIndex(cell);
+            if (top < 0)
+            {
+                continue;
+            }
+
             int idx = GetLayeredArrayIndex(cell, top);
+            if (idx < 0 || idx >= o2Layers.Length)
+            {
+                continue;
+            }
+
             o2Layers[idx] = Mathf.Max(0f, Mathf.Lerp(o2Layers[idx], targetSurfaceO2, oxygenationRate));
         }
     }
@@ -1996,27 +2013,51 @@ public class PlanetResourceMap : MonoBehaviour
         }
     }
 
-    private float GetEffectiveLayeredResource(ResourceType resourceType, int cell)
+    private float GetEffectiveLayeredResource(ResourceType t, int cell)
     {
-        float[] layered = GetLayeredOceanArray(resourceType);
-        if (layered == null)
-        {
-            return GetArray(resourceType)[cell];
-        }
-
-        int active = GetOceanActiveLayerCount(cell);
-        if (active <= 0)
-        {
+        int layerCount = GetOceanActiveLayerCount(cell);
+        if (layerCount <= 0)
             return 0f;
-        }
 
-        float sum = 0f;
-        for (int layer = 0; layer < active; layer++)
+        float[] arr = GetLayeredOceanArray(t);
+        if (arr == null)
+            return 0f;
+
+        switch (t)
         {
-            sum += layered[GetLayeredArrayIndex(cell, layer)];
-        }
+            // Surface-driven
+            case ResourceType.O2:
+                return GetLayerValue(arr, cell, 0);
 
-        return Mathf.Max(0f, sum / active);
+            // Deep / vent-driven
+            case ResourceType.H2:
+            case ResourceType.H2S:
+            case ResourceType.DissolvedFe2Plus:
+                return GetLayerValue(arr, cell, layerCount - 1);
+
+            // Mixed → average
+            default:
+                {
+                    float sum = 0f;
+                    for (int l = 0; l < layerCount; l++)
+                        sum += GetLayerValue(arr, cell, l);
+
+                    return sum / layerCount;
+                }
+        }
+    }
+
+    private float GetLayerValue(float[] arr, int cell, int layer)
+    {
+        if (arr == null)
+            return 0f;
+
+        int idx = GetLayeredArrayIndex(cell, layer);
+
+        if (idx < 0 || idx >= arr.Length)
+            return 0f;
+
+        return arr[idx];
     }
 
     private float GetEffectiveLayeredLight(int cell)
