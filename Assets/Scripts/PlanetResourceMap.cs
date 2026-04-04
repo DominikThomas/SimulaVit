@@ -1150,7 +1150,6 @@ public class PlanetResourceMap : MonoBehaviour
             return;
         }
 
-        SyncLayeredOceanFromLegacyArrays();
         UpdateLayerLightAndTemperatureProfiles();
         ApplySurfaceOxygenationToLayers(dt);
         ApplyVerticalDiffusion(dt);
@@ -1484,15 +1483,11 @@ public class PlanetResourceMap : MonoBehaviour
 
     private void ApplyDissolvedFe2PlusOxidation(float dt)
     {
-        float[] dissolvedFe2Plus = GetOceanDissolvedArray(ResourceType.DissolvedFe2Plus);
-        if (!isInitialized || dissolvedFe2Plus == null || o2 == null || fe == null || oceanMask == null)
+        if (!isInitialized || oceanMask == null || fe == null)
         {
             return;
         }
 
-        // Simplified redox sink:
-        // Fe2+(dissolved, ocean) + O2 -> oxidized Fe sediment (locked).
-        // Uses the existing local O2 field; oxidized sediment is intentionally non-recycled.
         float rate = Mathf.Max(0f, fe2PlusOxidationRatePerSecond);
         float o2PerFe2 = Mathf.Max(0f, o2ConsumptionPerFe2PlusOxidized);
         if (rate <= 0f || o2PerFe2 <= 0f)
@@ -1500,31 +1495,116 @@ public class PlanetResourceMap : MonoBehaviour
             return;
         }
 
-        for (int cell = 0; cell < dissolvedFe2Plus.Length; cell++)
+        // Legacy single-layer path
+        if (!enableLayeredOcean)
+        {
+            float[] dissolvedFe2PlusLegacy = GetOceanDissolvedArray(ResourceType.DissolvedFe2Plus);
+            if (dissolvedFe2PlusLegacy == null || o2 == null)
+            {
+                return;
+            }
+
+            for (int cell = 0; cell < dissolvedFe2PlusLegacy.Length; cell++)
+            {
+                if (oceanMask[cell] == 0)
+                {
+                    continue;
+                }
+
+                float availableFe2 = dissolvedFe2PlusLegacy[cell];
+                float availableO2 = o2[cell];
+                if (availableFe2 <= 0f || availableO2 <= 0f)
+                {
+                    continue;
+                }
+
+                float desiredOxidation = availableFe2 * rate * Mathf.Max(0f, dt);
+                float maxByO2 = availableO2 / o2PerFe2;
+                float oxidizedFe2 = Mathf.Min(availableFe2, desiredOxidation, maxByO2);
+                if (oxidizedFe2 <= 0f)
+                {
+                    continue;
+                }
+
+                dissolvedFe2PlusLegacy[cell] = availableFe2 - oxidizedFe2;
+                o2[cell] = Mathf.Max(0f, availableO2 - (oxidizedFe2 * o2PerFe2));
+                fe[cell] += oxidizedFe2;
+            }
+
+            return;
+        }
+
+        // Layered-ocean path
+        float[] dissolvedFe2PlusLayers = GetLayeredOceanArray(ResourceType.DissolvedFe2Plus);
+        float[] o2Layers = GetLayeredOceanArray(ResourceType.O2);
+        float[] dissolvedFe2PlusLegacyForSync = GetOceanDissolvedArray(ResourceType.DissolvedFe2Plus);
+
+        if (dissolvedFe2PlusLayers == null || o2Layers == null)
+        {
+            return;
+        }
+
+        for (int cell = 0; cell < oceanMask.Length; cell++)
         {
             if (oceanMask[cell] == 0)
             {
                 continue;
             }
 
-            float availableFe2 = dissolvedFe2Plus[cell];
-            float availableO2 = o2[cell];
-            if (availableFe2 <= 0f || availableO2 <= 0f)
+            int activeCount = GetOceanActiveLayerCount(cell);
+            if (activeCount <= 0)
             {
                 continue;
             }
 
-            float desiredOxidation = availableFe2 * rate * Mathf.Max(0f, dt);
-            float maxByO2 = availableO2 / o2PerFe2;
-            float oxidizedFe2 = Mathf.Min(availableFe2, desiredOxidation, maxByO2);
-            if (oxidizedFe2 <= 0f)
+            // Simple first-pass rule:
+            // oxidize Fe2+ in each active layer using O2 available in that same layer.
+            // This keeps chemistry consistent with the layered state and avoids legacy overwrite issues.
+            float oxidizedTotalThisCell = 0f;
+
+            for (int layer = 0; layer < activeCount; layer++)
             {
-                continue;
+                int idx = GetLayeredArrayIndex(cell, layer);
+                if (idx < 0 || idx >= dissolvedFe2PlusLayers.Length || idx >= o2Layers.Length)
+                {
+                    continue;
+                }
+
+                float availableFe2 = dissolvedFe2PlusLayers[idx];
+                float availableO2 = o2Layers[idx];
+                if (availableFe2 <= 0f || availableO2 <= 0f)
+                {
+                    continue;
+                }
+
+                float desiredOxidation = availableFe2 * rate * Mathf.Max(0f, dt);
+                float maxByO2 = availableO2 / o2PerFe2;
+                float oxidizedFe2 = Mathf.Min(availableFe2, desiredOxidation, maxByO2);
+                if (oxidizedFe2 <= 0f)
+                {
+                    continue;
+                }
+
+                dissolvedFe2PlusLayers[idx] = availableFe2 - oxidizedFe2;
+                o2Layers[idx] = Mathf.Max(0f, availableO2 - (oxidizedFe2 * o2PerFe2));
+                oxidizedTotalThisCell += oxidizedFe2;
             }
 
-            dissolvedFe2Plus[cell] = availableFe2 - oxidizedFe2;
-            o2[cell] = Mathf.Max(0f, availableO2 - (oxidizedFe2 * o2PerFe2));
-            fe[cell] += oxidizedFe2;
+            if (oxidizedTotalThisCell > 0f)
+            {
+                fe[cell] += oxidizedTotalThisCell;
+            }
+
+            // Keep legacy compatibility arrays in sync for systems that still read them.
+            if (dissolvedFe2PlusLegacyForSync != null && cell < dissolvedFe2PlusLegacyForSync.Length)
+            {
+                dissolvedFe2PlusLegacyForSync[cell] = GetEffectiveLayeredResource(ResourceType.DissolvedFe2Plus, cell);
+            }
+
+            if (o2 != null && cell < o2.Length)
+            {
+                o2[cell] = GetEffectiveLayeredResource(ResourceType.O2, cell);
+            }
         }
     }
 
