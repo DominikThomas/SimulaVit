@@ -27,6 +27,41 @@ public class PlanetResourceMap : MonoBehaviour
 {
     private const int MaxOceanLayers = 5;
 
+    public struct OceanLayerSnapshot
+    {
+        public int LayerIndex;
+        public float O2;
+        public float DissolvedFe2Plus;
+        public float CO2;
+        public float CH4;
+        public float OrganicC;
+        public float H2;
+        public float H2S;
+        public float LightFactor;
+        public float TemperatureOffset;
+        public float TemperatureKelvinEstimate;
+    }
+
+    public struct CellInspectionSnapshot
+    {
+        public bool IsValid;
+        public int CellIndex;
+        public bool IsOcean;
+        public int ActiveLayerCount;
+        public float Insolation;
+        public float VentStrength;
+        public float EffectiveTemperatureKelvin;
+        public LegacyEnvironmentSnapshot EffectiveLegacy;
+        public float EffectiveCO2;
+        public float EffectiveO2;
+        public float EffectiveCH4;
+        public float EffectiveOrganicC;
+        public float EffectiveH2;
+        public float EffectiveH2S;
+        public float EffectiveDissolvedFe2Plus;
+        public OceanLayerSnapshot[] OceanLayers;
+    }
+
     public struct LegacyEnvironmentSnapshot
     {
         public float O2;
@@ -464,6 +499,81 @@ public class PlanetResourceMap : MonoBehaviour
         snapshot.TemperatureKelvin = GetTemperature(worldPosOrDir, cell);
         snapshot.LightFactor = GetEffectiveLayeredLight(cell);
         return snapshot;
+    }
+
+    /// <summary>
+    /// Read-only inspection snapshot for debug UI.
+    /// Notes:
+    /// - CO2 is currently represented as a per-cell atmospheric value and is repeated per ocean layer.
+    /// - Layer temperature is estimated from the current cell effective temperature plus that layer's offset.
+    /// </summary>
+    public bool TryGetCellInspectionSnapshot(int cell, Vector3 worldPosOrDir, out CellInspectionSnapshot snapshot)
+    {
+        snapshot = default;
+        if (!isInitialized || !IsCellValid(cell))
+        {
+            return false;
+        }
+
+        Vector3 dir = ResolveSurfaceDirection(worldPosOrDir);
+        bool isOcean = IsOceanCell(cell);
+        int activeLayerCount = isOcean ? GetOceanActiveLayerCount(cell) : 0;
+
+        snapshot.IsValid = true;
+        snapshot.CellIndex = cell;
+        snapshot.IsOcean = isOcean;
+        snapshot.ActiveLayerCount = activeLayerCount;
+        snapshot.Insolation = GetInsolation(dir);
+        snapshot.VentStrength = ventStrength != null && cell < ventStrength.Length ? Mathf.Max(0f, ventStrength[cell]) : 0f;
+        snapshot.EffectiveLegacy = GetEffectiveLegacyEnvironment(cell, dir);
+        snapshot.EffectiveTemperatureKelvin = snapshot.EffectiveLegacy.TemperatureKelvin;
+        snapshot.EffectiveCO2 = Get(ResourceType.CO2, cell);
+        snapshot.EffectiveO2 = Get(ResourceType.O2, cell);
+        snapshot.EffectiveCH4 = Get(ResourceType.CH4, cell);
+        snapshot.EffectiveOrganicC = Get(ResourceType.OrganicC, cell);
+        snapshot.EffectiveH2 = Get(ResourceType.H2, cell);
+        snapshot.EffectiveH2S = Get(ResourceType.H2S, cell);
+        snapshot.EffectiveDissolvedFe2Plus = Get(ResourceType.DissolvedFe2Plus, cell);
+
+        if (!isOcean || activeLayerCount <= 0)
+        {
+            snapshot.OceanLayers = null;
+            return true;
+        }
+
+        OceanLayerSnapshot[] layers = new OceanLayerSnapshot[activeLayerCount];
+        for (int layer = 0; layer < activeLayerCount; layer++)
+        {
+            OceanLayerSnapshot layerSnapshot = default;
+            layerSnapshot.LayerIndex = layer;
+            layerSnapshot.O2 = GetLayerResource(ResourceType.O2, cell, layer);
+            layerSnapshot.DissolvedFe2Plus = GetLayerResource(ResourceType.DissolvedFe2Plus, cell, layer);
+            layerSnapshot.CO2 = Get(ResourceType.CO2, cell);
+            layerSnapshot.CH4 = GetLayerResource(ResourceType.CH4, cell, layer);
+            layerSnapshot.OrganicC = GetLayerResource(ResourceType.OrganicC, cell, layer);
+            layerSnapshot.H2 = GetLayerResource(ResourceType.H2, cell, layer);
+            layerSnapshot.H2S = GetLayerResource(ResourceType.H2S, cell, layer);
+            layerSnapshot.LightFactor = GetLayerLightFactor(cell, layer);
+            layerSnapshot.TemperatureOffset = GetLayerTemperatureOffset(cell, layer);
+            layerSnapshot.TemperatureKelvinEstimate = Mathf.Max(minTempKelvin, snapshot.EffectiveTemperatureKelvin + layerSnapshot.TemperatureOffset);
+            layers[layer] = layerSnapshot;
+        }
+
+        snapshot.OceanLayers = layers;
+        return true;
+    }
+
+    public bool TryGetCellInspectionSnapshotByDirection(Vector3 worldPosOrDir, out CellInspectionSnapshot snapshot)
+    {
+        snapshot = default;
+        if (!isInitialized || resolution <= 0)
+        {
+            return false;
+        }
+
+        Vector3 dir = ResolveSurfaceDirection(worldPosOrDir);
+        int cell = PlanetGridIndexing.DirectionToCellIndex(dir, resolution);
+        return TryGetCellInspectionSnapshot(cell, dir, out snapshot);
     }
 
     /// <summary>
