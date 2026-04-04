@@ -929,7 +929,7 @@ MonoBehaviour:
   naturalOxidationFractionPerTick: 0.0005
   naturalOxidationO2HalfSaturation: 0.02
   enableAtmosphereMixing: 1
-  atmosphereTickSeconds: 0.5
+  atmosphereTickSeconds: 2
   landExchangeRate: 0.25
   oceanExchangeRate: 0.05
   atmosphereToOceanO2TransferFractionPerTick: 1
@@ -958,6 +958,24 @@ MonoBehaviour:
   maxOceanTempKelvin: 500
   maxLandTempKelvin: 500
   minTempKelvin: 150
+  enableLayeredOcean: 1
+  depth01ForLayer2: 0.12
+  depth01ForLayer3: 0.32
+  depth01ForLayer4: 0.58
+  depth01ForLayer5: 0.82
+  layeredLightAttenuation: 1.15
+  layeredVerticalMixRate: 0.02
+  layeredSurfaceOxygenationRate: 0.02
+  layeredMarineSnowRate: 0.015
+  layeredTempDropPerLayer: 2
+  layeredBottomVentTempGain: 25
+  debugLayeredCellIndex: 0
+  debugLayeredSampleLayer: 1
+  debugLayeredActiveCount: 0
+  debugLayeredTopLight: 0
+  debugLayeredBottomLight: 0
+  debugLayeredEffectiveO2: 0
+  debugLayeredEffectiveOrganicC: 0
   enableScentFields: 1
   dissolvedOrganicLeakDecayPerSecond: 0.6
   toxicProteolyticWasteDecayPerSecond: 0.8
@@ -49653,7 +49671,7 @@ AudioSource:
   m_audioClip: {fileID: 0}
   m_Resource: {fileID: 0}
   m_PlayOnAwake: 0
-  m_Volume: 0.5
+  m_Volume: 0.2
   m_Pitch: 1
   Loop: 0
   Mute: 0
