@@ -13,10 +13,12 @@ public class PlanetCellInspectorPanel : MonoBehaviour
     [SerializeField] private TMP_Text titleText;
     [SerializeField] private TMP_Text summaryText;
     [SerializeField] private TMP_Text layersText;
+    [SerializeField] private ScrollRect layersScrollRect;
     [SerializeField] private Button closeButton;
 
     [Header("Formatting")]
     [SerializeField] private string titlePrefix = "Cell Inspector";
+    [SerializeField] private ReplicatorManager replicatorManager;
 
     private readonly StringBuilder summaryBuilder = new StringBuilder(1024);
     private readonly StringBuilder layersBuilder = new StringBuilder(2048);
@@ -33,6 +35,11 @@ public class PlanetCellInspectorPanel : MonoBehaviour
             panelRoot = gameObject;
         }
 
+        if (replicatorManager == null)
+        {
+            replicatorManager = FindFirstObjectByType<ReplicatorManager>();
+        }
+
         Hide();
     }
 
@@ -46,6 +53,8 @@ public class PlanetCellInspectorPanel : MonoBehaviour
 
     public void ShowSnapshot(PlanetResourceMap.CellInspectionSnapshot snapshot)
     {
+        bool wasVisible = IsVisible();
+
         if (panelRoot != null)
         {
             panelRoot.SetActive(true);
@@ -58,14 +67,21 @@ public class PlanetCellInspectorPanel : MonoBehaviour
 
         if (summaryText != null)
         {
-            BuildSummary(snapshot, summaryBuilder);
+            BuildSummary(snapshot, summaryBuilder, GetTemperatureDisplayUnit());
             summaryText.text = summaryBuilder.ToString();
         }
 
         if (layersText != null)
         {
-            BuildLayers(snapshot, layersBuilder);
+            BuildLayers(snapshot, layersBuilder, GetTemperatureDisplayUnit());
             layersText.text = layersBuilder.ToString();
+
+            Canvas.ForceUpdateCanvases();
+            LayoutRebuilder.ForceRebuildLayoutImmediate(layersText.rectTransform);
+            if (!wasVisible)
+            {
+                ScrollLayersToTop();
+            }
         }
     }
 
@@ -82,14 +98,34 @@ public class PlanetCellInspectorPanel : MonoBehaviour
         return panelRoot != null && panelRoot.activeSelf;
     }
 
-    private static void BuildSummary(PlanetResourceMap.CellInspectionSnapshot snapshot, StringBuilder sb)
+    private TemperatureDisplayUnit GetTemperatureDisplayUnit()
+    {
+        if (replicatorManager == null)
+        {
+            replicatorManager = FindFirstObjectByType<ReplicatorManager>();
+        }
+
+        return replicatorManager != null
+            ? replicatorManager.temperatureDisplayUnit
+            : TemperatureDisplayUnit.Celsius;
+    }
+
+    private void ScrollLayersToTop()
+    {
+        if (layersScrollRect != null)
+        {
+            layersScrollRect.verticalNormalizedPosition = 1f;
+        }
+    }
+
+    private static void BuildSummary(PlanetResourceMap.CellInspectionSnapshot snapshot, StringBuilder sb, TemperatureDisplayUnit temperatureDisplayUnit)
     {
         sb.Clear();
         sb.AppendLine(snapshot.IsOcean ? "Type: Ocean" : "Type: Land");
         sb.AppendLine($"Active Layers: {snapshot.ActiveLayerCount}");
         sb.AppendLine($"Insolation: {snapshot.Insolation:0.###}");
         sb.AppendLine($"Vent Strength: {snapshot.VentStrength:0.###}");
-        sb.AppendLine($"Temp (K): {snapshot.EffectiveTemperatureKelvin:0.##}");
+        sb.AppendLine($"Temp: {ReplicatorManager.FormatTemperature(snapshot.EffectiveTemperatureKelvin, temperatureDisplayUnit)}");
         sb.AppendLine();
         sb.AppendLine("Effective / Legacy Summary");
         sb.AppendLine($"CO2: {snapshot.EffectiveCO2:0.####}");
@@ -102,7 +138,7 @@ public class PlanetCellInspectorPanel : MonoBehaviour
         sb.AppendLine($"Light Factor: {snapshot.EffectiveLegacy.LightFactor:0.####}");
     }
 
-    private static void BuildLayers(PlanetResourceMap.CellInspectionSnapshot snapshot, StringBuilder sb)
+    private static void BuildLayers(PlanetResourceMap.CellInspectionSnapshot snapshot, StringBuilder sb, TemperatureDisplayUnit temperatureDisplayUnit)
     {
         sb.Clear();
 
@@ -133,7 +169,7 @@ public class PlanetCellInspectorPanel : MonoBehaviour
             sb.AppendLine($"  H2S: {layer.H2S:0.####}");
             sb.AppendLine($"  Light: {layer.LightFactor:0.####}");
             sb.AppendLine($"  Temp Offset (K): {layer.TemperatureOffset:0.###}");
-            sb.AppendLine($"  Temp Estimate (K): {layer.TemperatureKelvinEstimate:0.##}");
+            sb.AppendLine($"  Temp Estimate: {ReplicatorManager.FormatTemperature(layer.TemperatureKelvinEstimate, temperatureDisplayUnit)}");
         }
     }
 }
