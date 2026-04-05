@@ -1,6 +1,7 @@
 using System.Text;
 using UnityEngine;
 using UnityEngine.UI;
+using TMPro;
 
 [DisallowMultipleComponent]
 public class PlanetCellInspectorPanel : MonoBehaviour
@@ -9,9 +10,9 @@ public class PlanetCellInspectorPanel : MonoBehaviour
     [SerializeField] private GameObject panelRoot;
 
     [Header("UI References")]
-    [SerializeField] private Text titleText;
-    [SerializeField] private Text summaryText;
-    [SerializeField] private Text layersText;
+    [SerializeField] private TMP_Text titleText;
+    [SerializeField] private TMP_Text summaryText;
+    [SerializeField] private TMP_Text layersText;
     [SerializeField] private Button closeButton;
 
     [Header("Formatting")]

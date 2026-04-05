@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.EventSystems;
+using UnityEngine.InputSystem;
 
 [DisallowMultipleComponent]
 public class PlanetCellInspectorController : MonoBehaviour
@@ -99,27 +100,48 @@ public class PlanetCellInspectorController : MonoBehaviour
 
     private static bool TryGetPointerScreenPosition(out Vector2 screenPos)
     {
-        if (Input.touchCount > 0)
+        if (Touchscreen.current != null)
         {
-            screenPos = Input.GetTouch(0).position;
+            foreach (var touch in Touchscreen.current.touches)
+            {
+                if (touch.press.isPressed || touch.press.wasPressedThisFrame)
+                {
+                    screenPos = touch.position.ReadValue();
+                    return true;
+                }
+            }
+        }
+
+        if (Mouse.current != null)
+        {
+            screenPos = Mouse.current.position.ReadValue();
             return true;
         }
 
-        screenPos = Input.mousePosition;
-        return true;
+        screenPos = default;
+        return false;
     }
 
     private static bool WasPrimaryPointerPressedThisFrame()
     {
-        if (Input.touchCount > 0)
+        if (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame)
         {
-            Touch touch = Input.GetTouch(0);
-            return touch.phase == TouchPhase.Began;
+            return true;
         }
 
-        return Input.GetMouseButtonDown(0);
-    }
+        if (Touchscreen.current != null)
+        {
+            foreach (var touch in Touchscreen.current.touches)
+            {
+                if (touch.press.wasPressedThisFrame)
+                {
+                    return true;
+                }
+            }
+        }
 
+        return false;
+    }
     private static bool IsPointerOverUi()
     {
         if (EventSystem.current == null)
