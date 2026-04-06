@@ -46,6 +46,7 @@ public class CameraRotation : MonoBehaviour
     private float tiltVelocity;
     private int activeOrbitTouchId = -1;
     private int blockedOrbitTouchId = -1;
+    private bool orbitActivateRequested;
 
     private Vector3 TargetPosition => targetTransform != null ? targetTransform.position : Vector3.zero;
 
@@ -83,6 +84,19 @@ public class CameraRotation : MonoBehaviour
 
     private void Update()
     {
+        if (orbitActivateRequested)
+        {
+            orbitActivateRequested = false;
+
+            if (IsPointerOverUi())
+            {
+                isOrbiting = false;
+            }
+            else
+            {
+                isOrbiting = true;
+            }
+        }
         lookInput = lookDeltaAction != null ? lookDeltaAction.ReadValue<Vector2>() : Vector2.zero;
 
         isTouchOrbiting = HandleTouchOrbitInput(out Vector2 touchLookInput);
@@ -345,13 +359,7 @@ public class CameraRotation : MonoBehaviour
 
     private void OnOrbitActivatePerformed(InputAction.CallbackContext context)
     {
-        if (IsPointerOverUi())
-        {
-            isOrbiting = false;
-            return;
-        }
-
-        isOrbiting = true;
+        orbitActivateRequested = true;
     }
 
     private void OnOrbitActivateCanceled(InputAction.CallbackContext context)

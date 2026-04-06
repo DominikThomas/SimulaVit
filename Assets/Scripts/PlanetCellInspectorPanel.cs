@@ -17,7 +17,6 @@ public class PlanetCellInspectorPanel : MonoBehaviour
     [SerializeField] private Button closeButton;
 
     [Header("Formatting")]
-    [SerializeField] private string titlePrefix = "Cell Inspector";
     [SerializeField] private ReplicatorManager replicatorManager;
 
     private readonly StringBuilder summaryBuilder = new StringBuilder(1024);
@@ -62,7 +61,7 @@ public class PlanetCellInspectorPanel : MonoBehaviour
 
         if (titleText != null)
         {
-            titleText.text = $"{titlePrefix} • Cell {snapshot.CellIndex}";
+            titleText.text = $"Cell {snapshot.CellIndex}";
         }
 
         if (summaryText != null)
@@ -78,10 +77,6 @@ public class PlanetCellInspectorPanel : MonoBehaviour
 
             Canvas.ForceUpdateCanvases();
             LayoutRebuilder.ForceRebuildLayoutImmediate(layersText.rectTransform);
-            if (!wasVisible)
-            {
-                ScrollLayersToTop();
-            }
         }
     }
 
@@ -110,14 +105,6 @@ public class PlanetCellInspectorPanel : MonoBehaviour
             : TemperatureDisplayUnit.Celsius;
     }
 
-    private void ScrollLayersToTop()
-    {
-        if (layersScrollRect != null)
-        {
-            layersScrollRect.verticalNormalizedPosition = 1f;
-        }
-    }
-
     private static void BuildSummary(PlanetResourceMap.CellInspectionSnapshot snapshot, StringBuilder sb, TemperatureDisplayUnit temperatureDisplayUnit)
     {
         sb.Clear();
@@ -127,7 +114,7 @@ public class PlanetCellInspectorPanel : MonoBehaviour
         sb.AppendLine($"Vent Strength: {snapshot.VentStrength:0.###}");
         sb.AppendLine($"Temp: {ReplicatorManager.FormatTemperature(snapshot.EffectiveTemperatureKelvin, temperatureDisplayUnit)}");
         sb.AppendLine();
-        sb.AppendLine("Effective / Legacy Summary");
+        sb.AppendLine("Effective Summary");
         sb.AppendLine($"CO2: {snapshot.EffectiveCO2:0.####}");
         sb.AppendLine($"O2: {snapshot.EffectiveO2:0.####}");
         sb.AppendLine($"CH4: {snapshot.EffectiveCH4:0.####}");
@@ -154,22 +141,26 @@ public class PlanetCellInspectorPanel : MonoBehaviour
             return;
         }
 
-        sb.AppendLine("Ocean Layers (top -> bottom)");
         for (int i = 0; i < snapshot.OceanLayers.Length; i++)
         {
             PlanetResourceMap.OceanLayerSnapshot layer = snapshot.OceanLayers[i];
-            sb.AppendLine();
-            sb.AppendLine($"Layer {layer.LayerIndex + 1}");
-            sb.AppendLine($"  O2: {layer.O2:0.####}");
-            sb.AppendLine($"  DissolvedFe2+: {layer.DissolvedFe2Plus:0.####}");
-            sb.AppendLine($"  CO2 (cell-level): {layer.CO2:0.####}");
-            sb.AppendLine($"  CH4: {layer.CH4:0.####}");
-            sb.AppendLine($"  OrganicC: {layer.OrganicC:0.####}");
-            sb.AppendLine($"  H2: {layer.H2:0.####}");
-            sb.AppendLine($"  H2S: {layer.H2S:0.####}");
-            sb.AppendLine($"  Light: {layer.LightFactor:0.####}");
-            sb.AppendLine($"  Temp Offset (K): {layer.TemperatureOffset:0.###}");
+            if (layer.LayerIndex == 0)
+            {
+                sb.AppendLine($"Surface layer");
+            }
+            else if (layer.LayerIndex == snapshot.OceanLayers.Length - 1) {
+                sb.AppendLine($"Bottom layer");
+            }
+            else
+            {
+                sb.AppendLine($"Layer {layer.LayerIndex}");
+            }
+            sb.AppendLine($"  O2: {layer.O2:0.###}, CO2: {layer.CO2:0.###}");
+            sb.AppendLine($"  DissolvedFe2+: {layer.DissolvedFe2Plus:0.###}");
+            sb.AppendLine($"  CH4: {layer.CH4:0.###}, H2: {layer.H2:0.###}, H2S: {layer.H2S:0.###}");
+            sb.AppendLine($"  Light: {layer.LightFactor:0.###}, OrganicC: {layer.OrganicC:0.###}");
             sb.AppendLine($"  Temp Estimate: {ReplicatorManager.FormatTemperature(layer.TemperatureKelvinEstimate, temperatureDisplayUnit)}");
+            sb.AppendLine();
         }
     }
 }

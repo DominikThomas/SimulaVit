@@ -189,9 +189,15 @@ public class PlanetCellInspectorController : MonoBehaviour
             return false;
         }
 
-        if (Input.touchCount > 0)
+        if (Touchscreen.current != null)
         {
-            return EventSystem.current.IsPointerOverGameObject(Input.GetTouch(0).fingerId);
+            foreach (var touch in Touchscreen.current.touches)
+            {
+                if (touch.press.isPressed || touch.press.wasPressedThisFrame)
+                {
+                    return EventSystem.current.IsPointerOverGameObject(touch.touchId.ReadValue());
+                }
+            }
         }
 
         return EventSystem.current.IsPointerOverGameObject();
