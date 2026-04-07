@@ -1458,7 +1458,7 @@ MonoBehaviour:
   ironRichOceanColor: {r: 0.22, g: 0.55, b: 0.38, a: 1}
   oxygenatedOceanColor: {r: 0.18, g: 0.4, b: 0.75, a: 1}
   oceanColorLerpSpeed: 2
-  baseTempKelvin: 273.15
+  baseTempKelvin: 279.15
   insolationTempGain: 35
   ventTempGain: 120
   oceanTempDamping: 0.5
