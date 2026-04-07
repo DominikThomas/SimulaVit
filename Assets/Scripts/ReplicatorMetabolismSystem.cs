@@ -118,6 +118,7 @@ public class ReplicatorMetabolismSystem
             LocomotionType locomotion = populationState.Locomotion[i];
             Vector3 dir = populationState.Position[i].normalized;
             int cellIndex = PlanetGridIndexing.DirectionToCellIndex(dir, resolution);
+            ResolveAndUpdateOceanLayer(populationState, i, cellIndex, planetResourceMap);
 
             float temp = planetResourceMap.GetTemperature(dir, cellIndex);
 
@@ -199,7 +200,7 @@ public class ReplicatorMetabolismSystem
             }
             else if (metabolism == MetabolismType.Saprotrophy)
             {
-                float envC = planetResourceMap.Get(ResourceType.OrganicC, cellIndex);
+                float envC = GetAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.OrganicC, cellIndex);
                 float intakeCap = Mathf.Max(0f, settings.SaproCPerTick);
                 float desiredIntake = Mathf.Min(envC, intakeCap);
 
@@ -219,7 +220,7 @@ public class ReplicatorMetabolismSystem
                     float actualRespire = 0f;
                     if (desiredRespire > 0f && o2PerC > 0f && energyPerC > 0f)
                     {
-                        float o2Available = planetResourceMap.Get(ResourceType.O2, cellIndex);
+                        float o2Available = GetAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.O2, cellIndex);
                         float maxRespireByO2 = o2Available / o2PerC;
                         actualRespire = Mathf.Clamp(desiredRespire, 0f, maxRespireByO2);
                         lackO2 = desiredRespire > 0f && actualRespire <= Mathf.Epsilon;
@@ -247,7 +248,7 @@ public class ReplicatorMetabolismSystem
                 else
                 {
                     float desiredResp = Mathf.Max(0f, settings.SaproRespireStoreCPerTick);
-                    float o2Available = planetResourceMap.Get(ResourceType.O2, cellIndex);
+                    float o2Available = GetAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.O2, cellIndex);
                     bool hasStore = populationState.OrganicCStore[i] > 0f;
                     lackStoredC = !hasStore && desiredResp > 0f;
                     lackO2 = hasStore && desiredResp > 0f && o2Available <= Mathf.Epsilon;
@@ -276,7 +277,7 @@ public class ReplicatorMetabolismSystem
                 bool lackFood = true;
                 float desiredResp = Mathf.Max(0f, settings.SaproRespireStoreCPerTick);
                 bool hasStore = populationState.OrganicCStore[i] > 0f;
-                float o2Available = planetResourceMap.Get(ResourceType.O2, cellIndex);
+                float o2Available = GetAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.O2, cellIndex);
                 bool lackStoredC = !hasStore && desiredResp > 0f;
                 bool lackO2 = hasStore && desiredResp > 0f && o2Available <= Mathf.Epsilon;
 
@@ -304,8 +305,8 @@ public class ReplicatorMetabolismSystem
                 float co2Need = Mathf.Max(0f, settings.HydrogenotrophyCO2PerTick);
                 float h2Need = Mathf.Max(0f, settings.HydrogenotrophyH2PerTick);
 
-                float co2Available = planetResourceMap.Get(ResourceType.CO2, cellIndex);
-                float h2Available = planetResourceMap.Get(ResourceType.H2, cellIndex);
+                float co2Available = GetAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.CO2, cellIndex);
+                float h2Available = GetAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.H2, cellIndex);
                 float co2Ratio = co2Need <= Mathf.Epsilon ? 1f : co2Available / co2Need;
                 float h2Ratio = h2Need <= Mathf.Epsilon ? 1f : h2Available / h2Need;
                 float pulledRatio = Mathf.Clamp01(Mathf.Min(co2Ratio, h2Ratio));
@@ -350,7 +351,7 @@ public class ReplicatorMetabolismSystem
             else if (metabolism == MetabolismType.Fermentation)
             {
                 float cNeed = Mathf.Max(0f, settings.FermentationOrganicCPerTick);
-                float organicCAvailable = planetResourceMap.Get(ResourceType.OrganicC, cellIndex);
+                float organicCAvailable = GetAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.OrganicC, cellIndex);
                 float pulled = Mathf.Min(cNeed, organicCAvailable);
                 bool lackOrganicC = cNeed > 0f && pulled <= Mathf.Epsilon;
                 bool lackStoredC = false;
@@ -394,8 +395,8 @@ public class ReplicatorMetabolismSystem
             {
                 float co2Need = Mathf.Max(0f, settings.MethanogenesisCO2PerTick);
                 float h2Need = Mathf.Max(0f, settings.MethanogenesisH2PerTick);
-                float co2Available = planetResourceMap.Get(ResourceType.CO2, cellIndex);
-                float h2Available = planetResourceMap.Get(ResourceType.H2, cellIndex);
+                float co2Available = GetAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.CO2, cellIndex);
+                float h2Available = GetAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.H2, cellIndex);
                 float pulledRatio = Mathf.Clamp01(Mathf.Min(co2Need <= Mathf.Epsilon ? 1f : co2Available / co2Need, h2Need <= Mathf.Epsilon ? 1f : h2Available / h2Need));
                 bool lackCo2 = false;
                 bool lackH2 = false;
@@ -444,8 +445,8 @@ public class ReplicatorMetabolismSystem
             {
                 float ch4Need = Mathf.Max(0f, settings.MethanotrophyCH4PerTick);
                 float o2Need = Mathf.Max(0f, settings.MethanotrophyO2PerTick);
-                float ch4Available = planetResourceMap.Get(ResourceType.CH4, cellIndex);
-                float o2Available = planetResourceMap.Get(ResourceType.O2, cellIndex);
+                float ch4Available = GetAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.CH4, cellIndex);
+                float o2Available = GetAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.O2, cellIndex);
                 float pulledRatio = Mathf.Clamp01(Mathf.Min(ch4Need <= Mathf.Epsilon ? 1f : ch4Available / ch4Need, o2Need <= Mathf.Epsilon ? 1f : o2Available / o2Need));
                 bool lackCh4 = false;
                 bool lackO2 = false;
@@ -503,8 +504,8 @@ public class ReplicatorMetabolismSystem
                 float co2Need = Mathf.Max(0f, settings.ChemosynthesisCo2NeedPerTick);
                 float h2sNeed = Mathf.Max(0f, settings.ChemosynthesisH2sNeedPerTick);
 
-                float co2Available = planetResourceMap.Get(ResourceType.CO2, cellIndex);
-                float h2sAvailable = planetResourceMap.Get(ResourceType.H2S, cellIndex);
+                float co2Available = GetAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.CO2, cellIndex);
+                float h2sAvailable = GetAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.H2S, cellIndex);
                 float co2Ratio = co2Need <= Mathf.Epsilon ? 1f : co2Available / co2Need;
                 float h2sRatio = h2sNeed <= Mathf.Epsilon ? 1f : h2sAvailable / h2sNeed;
                 float pulledRatio = Mathf.Clamp01(Mathf.Min(co2Ratio, h2sRatio));
@@ -538,7 +539,7 @@ public class ReplicatorMetabolismSystem
 
                     float desiredResp = Mathf.Max(0f, settings.ChemoRespirationCPerTick);
                     bool hasStore = populationState.OrganicCStore[i] > 0f;
-                    float o2Available = planetResourceMap.Get(ResourceType.O2, cellIndex);
+                    float o2Available = GetAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.O2, cellIndex);
                     lackStoredC = !hasStore && desiredResp > 0f;
                     lackO2 = hasStore && desiredResp > 0f && o2Available <= Mathf.Epsilon;
                 }
@@ -647,7 +648,7 @@ public class ReplicatorMetabolismSystem
             if (insolation > 0f)
             {
                 float co2Need = Mathf.Max(0f, settings.PhotosynthesisCo2PerTickAtFullInsolation) * insolation;
-                float co2Available = planetResourceMap.Get(ResourceType.CO2, cellIndex);
+                float co2Available = GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, ResourceType.CO2, cellIndex);
                 lackCo2 = co2Need > 0f && co2Available <= Mathf.Epsilon;
             }
 
@@ -701,7 +702,7 @@ public class ReplicatorMetabolismSystem
                 lackStoredC = true;
             }
 
-            if (planetResourceMap.Get(ResourceType.O2, cellIndex) <= Mathf.Epsilon)
+            if (GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, ResourceType.O2, cellIndex) <= Mathf.Epsilon)
             {
                 bool fallbackPossible = settings.PhotosynthDarkAnoxicEnabled && populationState.OrganicCStore[index] > Mathf.Epsilon;
                 lackO2 = !fallbackPossible;
@@ -732,7 +733,7 @@ public class ReplicatorMetabolismSystem
         }
 
         float co2Need = Mathf.Max(0f, settings.PhotosynthesisCo2PerTickAtFullInsolation) * insolation;
-        float co2Available = planetResourceMap.Get(ResourceType.CO2, cellIndex);
+        float co2Available = GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, ResourceType.CO2, cellIndex);
         float co2Consumed = Mathf.Min(co2Need, co2Available);
         if (co2Consumed <= 0f)
         {
@@ -767,7 +768,7 @@ public class ReplicatorMetabolismSystem
         out bool lackO2)
     {
         float desiredResp = Mathf.Max(0f, settings.NightRespirationCPerTick);
-        float o2Available = planetResourceMap.Get(ResourceType.O2, cellIndex);
+        float o2Available = GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, ResourceType.O2, cellIndex);
         bool hasStore = populationState.OrganicCStore[index] > 0f;
         lackStoredC = !hasStore && desiredResp > 0f;
         lackO2 = hasStore && desiredResp > 0f && o2Available <= Mathf.Epsilon;
@@ -806,7 +807,7 @@ public class ReplicatorMetabolismSystem
             return false;
         }
 
-        if (planetResourceMap.Get(ResourceType.O2, cellIndex) > Mathf.Epsilon)
+        if (GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, ResourceType.O2, cellIndex) > Mathf.Epsilon)
         {
             return false;
         }
@@ -862,6 +863,50 @@ public class ReplicatorMetabolismSystem
     private static float UpdateStarveTimer(float current, bool deprived, float dt)
     {
         return deprived ? (current + dt) : 0f;
+    }
+
+    private static int ResolveAndUpdateOceanLayer(ReplicatorPopulationState populationState, int index, int cellIndex, PlanetResourceMap planetResourceMap)
+    {
+        if (!planetResourceMap.IsOceanCell(cellIndex))
+        {
+            populationState.CurrentOceanLayerIndex[index] = -1;
+            populationState.PreferredOceanLayerIndex[index] = -1;
+            return -1;
+        }
+
+        int preferred = populationState.PreferredOceanLayerIndex[index];
+        int current = populationState.CurrentOceanLayerIndex[index];
+        int clampedPreferred = planetResourceMap.ClampOceanLayerIndex(cellIndex, preferred >= 0 ? preferred : current);
+        int clampedCurrent = planetResourceMap.ClampOceanLayerIndex(cellIndex, current);
+
+        if (clampedCurrent < 0)
+        {
+            clampedCurrent = clampedPreferred;
+        }
+
+        if (clampedCurrent < clampedPreferred)
+        {
+            clampedCurrent++;
+        }
+        else if (clampedCurrent > clampedPreferred)
+        {
+            clampedCurrent--;
+        }
+
+        populationState.PreferredOceanLayerIndex[index] = clampedPreferred;
+        populationState.CurrentOceanLayerIndex[index] = clampedCurrent;
+        return clampedCurrent;
+    }
+
+    private static float GetAgentResourceAtCurrentLayer(ReplicatorPopulationState populationState, int index, PlanetResourceMap planetResourceMap, ResourceType resourceType, int cellIndex)
+    {
+        int layer = populationState.CurrentOceanLayerIndex[index];
+        if (layer >= 0 && planetResourceMap.IsOceanCell(cellIndex))
+        {
+            return planetResourceMap.GetResourceForCellLayer(resourceType, cellIndex, layer);
+        }
+
+        return planetResourceMap.GetCompatibilityResourceValue(resourceType, cellIndex);
     }
 
     private static float AerobicRespireFromStore(
