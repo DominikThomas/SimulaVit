@@ -54,9 +54,10 @@ public class ReplicatorSteeringSystem
         }
 
         Vector3 normalizedDir = dir.sqrMagnitude > 0f ? dir.normalized : Vector3.up;
+        int layerIndex = ResolveCurrentLayer(populationState, index, cellIndex, planetResourceMap);
         float temperature = planetResourceMap.GetTemperature(normalizedDir, cellIndex);
         float tempFitness = ComputeTemperatureFitness(populationState, index, temperature);
-        float foodFitness = ComputeFoodFitness(populationState, index, normalizedDir, cellIndex, planetResourceMap, settings);
+        float foodFitness = ComputeFoodFitness(populationState, index, normalizedDir, cellIndex, layerIndex, planetResourceMap, settings);
 
         float score = Mathf.Max(0f, settings.SteerTempWeight) * tempFitness
                     + Mathf.Max(0f, settings.SteerFoodWeight) * foodFitness;
@@ -103,37 +104,37 @@ public class ReplicatorSteeringSystem
         float safeBand = tempTolerance + lethalMargin;
         float tempFitness = distFromOptimal <= tempTolerance ? 1f : Mathf.Clamp01(1f - ((distFromOptimal - tempTolerance) / safeBand));
 
-        float co2 = NormalizeResource(planetResourceMap, ResourceType.CO2, cellIndex, settings.SteerGoodCO2);
+        float co2 = NormalizeResource(planetResourceMap, ResourceType.CO2, cellIndex, -1, settings.SteerGoodCO2);
         float foodFitness;
         switch (agent.metabolism)
         {
             case MetabolismType.SulfurChemosynthesis:
-                foodFitness = Mathf.Min(NormalizeResource(planetResourceMap, ResourceType.H2S, cellIndex, settings.SteerGoodH2S), co2);
+                foodFitness = Mathf.Min(NormalizeResource(planetResourceMap, ResourceType.H2S, cellIndex, agent.currentOceanLayerIndex, settings.SteerGoodH2S), co2);
                 break;
             case MetabolismType.Hydrogenotrophy:
-                foodFitness = Mathf.Min(NormalizeResource(planetResourceMap, ResourceType.H2, cellIndex, settings.SteerGoodH2), co2);
+                foodFitness = Mathf.Min(NormalizeResource(planetResourceMap, ResourceType.H2, cellIndex, agent.currentOceanLayerIndex, settings.SteerGoodH2), co2);
                 break;
             case MetabolismType.Photosynthesis:
                 foodFitness = Mathf.Min(Mathf.Clamp01(planetResourceMap.GetInsolation(normalizedDir)), co2);
                 break;
             case MetabolismType.Saprotrophy:
                 foodFitness = Mathf.Min(
-                    NormalizeResource(planetResourceMap, ResourceType.OrganicC, cellIndex, settings.SteerGoodOrganicC),
-                    NormalizeResource(planetResourceMap, ResourceType.O2, cellIndex, settings.SteerGoodO2));
+                    NormalizeResource(planetResourceMap, ResourceType.OrganicC, cellIndex, agent.currentOceanLayerIndex, settings.SteerGoodOrganicC),
+                    NormalizeResource(planetResourceMap, ResourceType.O2, cellIndex, agent.currentOceanLayerIndex, settings.SteerGoodO2));
                 break;
             case MetabolismType.Predation:
                 foodFitness = Mathf.Min(
-                    NormalizeResource(planetResourceMap, ResourceType.O2, cellIndex, settings.SteerGoodO2),
+                    NormalizeResource(planetResourceMap, ResourceType.O2, cellIndex, agent.currentOceanLayerIndex, settings.SteerGoodO2),
                     NormalizeScent(planetResourceMap.Get(ResourceType.DissolvedOrganicLeak, cellIndex), settings.ScentScoreSaturation));
                 break;
             case MetabolismType.Fermentation:
-                foodFitness = NormalizeResource(planetResourceMap, ResourceType.OrganicC, cellIndex, settings.SteerGoodOrganicC);
+                foodFitness = NormalizeResource(planetResourceMap, ResourceType.OrganicC, cellIndex, agent.currentOceanLayerIndex, settings.SteerGoodOrganicC);
                 break;
             case MetabolismType.Methanogenesis:
-                foodFitness = Mathf.Min(NormalizeResource(planetResourceMap, ResourceType.H2, cellIndex, settings.SteerGoodH2), co2);
+                foodFitness = Mathf.Min(NormalizeResource(planetResourceMap, ResourceType.H2, cellIndex, agent.currentOceanLayerIndex, settings.SteerGoodH2), co2);
                 break;
             case MetabolismType.Methanotrophy:
-                foodFitness = Mathf.Min(NormalizeResource(planetResourceMap, ResourceType.CH4, cellIndex, settings.SteerGoodH2), NormalizeResource(planetResourceMap, ResourceType.O2, cellIndex, settings.SteerGoodO2));
+                foodFitness = Mathf.Min(NormalizeResource(planetResourceMap, ResourceType.CH4, cellIndex, agent.currentOceanLayerIndex, settings.SteerGoodH2), NormalizeResource(planetResourceMap, ResourceType.O2, cellIndex, agent.currentOceanLayerIndex, settings.SteerGoodO2));
                 break;
             default:
                 foodFitness = 0f;
@@ -302,20 +303,20 @@ public class ReplicatorSteeringSystem
         return Mathf.Clamp01(fitness);
     }
 
-    float ComputeFoodFitness(ReplicatorPopulationState populationState, int index, Vector3 normalizedDir, int cellIndex, PlanetResourceMap planetResourceMap, in Settings settings)
+    float ComputeFoodFitness(ReplicatorPopulationState populationState, int index, Vector3 normalizedDir, int cellIndex, int layerIndex, PlanetResourceMap planetResourceMap, in Settings settings)
     {
-        float co2 = NormalizeResource(planetResourceMap, ResourceType.CO2, cellIndex, settings.SteerGoodCO2);
+        float co2 = NormalizeResource(planetResourceMap, ResourceType.CO2, cellIndex, -1, settings.SteerGoodCO2);
 
         switch (populationState.Metabolism[index])
         {
             case MetabolismType.SulfurChemosynthesis:
             {
-                float h2s = NormalizeResource(planetResourceMap, ResourceType.H2S, cellIndex, settings.SteerGoodH2S);
+                float h2s = NormalizeResource(planetResourceMap, ResourceType.H2S, cellIndex, layerIndex, settings.SteerGoodH2S);
                 return Mathf.Min(h2s, co2);
             }
             case MetabolismType.Hydrogenotrophy:
             {
-                float h2 = NormalizeResource(planetResourceMap, ResourceType.H2, cellIndex, settings.SteerGoodH2);
+                float h2 = NormalizeResource(planetResourceMap, ResourceType.H2, cellIndex, layerIndex, settings.SteerGoodH2);
                 return Mathf.Min(h2, co2);
             }
             case MetabolismType.Photosynthesis:
@@ -325,29 +326,29 @@ public class ReplicatorSteeringSystem
             }
             case MetabolismType.Saprotrophy:
             {
-                float organicC = NormalizeResource(planetResourceMap, ResourceType.OrganicC, cellIndex, settings.SteerGoodOrganicC);
-                float o2 = NormalizeResource(planetResourceMap, ResourceType.O2, cellIndex, settings.SteerGoodO2);
+                float organicC = NormalizeResource(planetResourceMap, ResourceType.OrganicC, cellIndex, layerIndex, settings.SteerGoodOrganicC);
+                float o2 = NormalizeResource(planetResourceMap, ResourceType.O2, cellIndex, layerIndex, settings.SteerGoodO2);
                 return Mathf.Min(organicC, o2);
             }
             case MetabolismType.Predation:
             {
-                float o2 = NormalizeResource(planetResourceMap, ResourceType.O2, cellIndex, settings.SteerGoodO2);
+                float o2 = NormalizeResource(planetResourceMap, ResourceType.O2, cellIndex, layerIndex, settings.SteerGoodO2);
                 float dissolvedOrganicLeak = NormalizeScent(planetResourceMap.Get(ResourceType.DissolvedOrganicLeak, cellIndex), settings.ScentScoreSaturation);
                 return Mathf.Min(o2, dissolvedOrganicLeak);
             }
             case MetabolismType.Fermentation:
             {
-                return NormalizeResource(planetResourceMap, ResourceType.OrganicC, cellIndex, settings.SteerGoodOrganicC);
+                return NormalizeResource(planetResourceMap, ResourceType.OrganicC, cellIndex, layerIndex, settings.SteerGoodOrganicC);
             }
             case MetabolismType.Methanogenesis:
             {
-                float h2 = NormalizeResource(planetResourceMap, ResourceType.H2, cellIndex, settings.SteerGoodH2);
+                float h2 = NormalizeResource(planetResourceMap, ResourceType.H2, cellIndex, layerIndex, settings.SteerGoodH2);
                 return Mathf.Min(h2, co2);
             }
             case MetabolismType.Methanotrophy:
             {
-                float ch4 = NormalizeResource(planetResourceMap, ResourceType.CH4, cellIndex, settings.SteerGoodH2);
-                float o2 = NormalizeResource(planetResourceMap, ResourceType.O2, cellIndex, settings.SteerGoodO2);
+                float ch4 = NormalizeResource(planetResourceMap, ResourceType.CH4, cellIndex, layerIndex, settings.SteerGoodH2);
+                float o2 = NormalizeResource(planetResourceMap, ResourceType.O2, cellIndex, layerIndex, settings.SteerGoodO2);
                 return Mathf.Min(ch4, o2);
             }
             default:
@@ -355,12 +356,38 @@ public class ReplicatorSteeringSystem
         }
     }
 
-    float NormalizeResource(PlanetResourceMap planetResourceMap, ResourceType resourceType, int cellIndex, float goodEnoughScale)
+    float NormalizeResource(PlanetResourceMap planetResourceMap, ResourceType resourceType, int cellIndex, int layerIndex, float goodEnoughScale)
     {
         float scale = Mathf.Max(0.0001f, goodEnoughScale);
-        float value = planetResourceMap.Get(resourceType, cellIndex);
+        float value = layerIndex >= 0
+            ? planetResourceMap.GetResourceForCellLayer(resourceType, cellIndex, layerIndex)
+            : planetResourceMap.GetCompatibilityResourceValue(resourceType, cellIndex);
         float normalized = Mathf.Clamp01(value / scale);
         return float.IsNaN(normalized) || float.IsInfinity(normalized) ? 0f : normalized;
+    }
+
+    int ResolveCurrentLayer(ReplicatorPopulationState populationState, int index, int cellIndex, PlanetResourceMap planetResourceMap)
+    {
+        if (!planetResourceMap.IsOceanCell(cellIndex))
+        {
+            populationState.CurrentOceanLayerIndex[index] = -1;
+            populationState.PreferredOceanLayerIndex[index] = -1;
+            return -1;
+        }
+
+        int preferred = planetResourceMap.ClampOceanLayerIndex(cellIndex, populationState.PreferredOceanLayerIndex[index]);
+        int current = planetResourceMap.ClampOceanLayerIndex(cellIndex, populationState.CurrentOceanLayerIndex[index]);
+        if (current < 0)
+        {
+            current = preferred;
+        }
+
+        if (current < preferred) current++;
+        else if (current > preferred) current--;
+
+        populationState.PreferredOceanLayerIndex[index] = preferred;
+        populationState.CurrentOceanLayerIndex[index] = current;
+        return current;
     }
 
     float NormalizeScent(float scentValue, float scentScoreSaturation)

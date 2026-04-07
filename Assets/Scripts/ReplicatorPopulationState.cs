@@ -50,6 +50,8 @@ public class ReplicatorPopulationState
     public float[] MovementSeed = new float[0];
     public float[] Size = new float[0];
     public Color[] Color = new Color[0];
+    public int[] CurrentOceanLayerIndex = new int[0];
+    public int[] PreferredOceanLayerIndex = new int[0];
 
     public void SyncMovementFieldsFromAgents(List<Replicator> agents)
     {
@@ -62,6 +64,8 @@ public class ReplicatorPopulationState
             Position[i] = a.position;
             SpeedFactor[i] = a.speedFactor;
             Locomotion[i] = a.locomotion;
+            CurrentOceanLayerIndex[i] = a.currentOceanLayerIndex;
+            PreferredOceanLayerIndex[i] = a.preferredOceanLayerIndex;
         }
     }
 
@@ -109,6 +113,8 @@ public class ReplicatorPopulationState
             MovementSeed[i] = a.movementSeed;
             Size[i] = a.size;
             Color[i] = a.color;
+            CurrentOceanLayerIndex[i] = a.currentOceanLayerIndex;
+            PreferredOceanLayerIndex[i] = a.preferredOceanLayerIndex;
         }
     }
 
@@ -134,6 +140,8 @@ public class ReplicatorPopulationState
             TumbleProbability[i] = a.tumbleProbability;
             NextSenseTime[i] = a.nextSenseTime;
             MovementSeed[i] = a.movementSeed;
+            CurrentOceanLayerIndex[i] = a.currentOceanLayerIndex;
+            PreferredOceanLayerIndex[i] = a.preferredOceanLayerIndex;
         }
     }
 
@@ -160,6 +168,8 @@ public class ReplicatorPopulationState
             agent.lastHabitatValue = LastHabitatValue[i];
             agent.tumbleProbability = TumbleProbability[i];
             agent.nextSenseTime = NextSenseTime[i];
+            agent.currentOceanLayerIndex = CurrentOceanLayerIndex[i];
+            agent.preferredOceanLayerIndex = PreferredOceanLayerIndex[i];
         }
     }
 
@@ -232,6 +242,8 @@ public class ReplicatorPopulationState
         agent.lastHabitatValue = LastHabitatValue[index];
         agent.tumbleProbability = TumbleProbability[index];
         agent.nextSenseTime = NextSenseTime[index];
+        agent.currentOceanLayerIndex = CurrentOceanLayerIndex[index];
+        agent.preferredOceanLayerIndex = PreferredOceanLayerIndex[index];
     }
 
     void EnsureCapacity(int required)
@@ -278,5 +290,7 @@ public class ReplicatorPopulationState
         MovementSeed = new float[newCapacity];
         Size = new float[newCapacity];
         Color = new Color[newCapacity];
+        CurrentOceanLayerIndex = new int[newCapacity];
+        PreferredOceanLayerIndex = new int[newCapacity];
     }
 }

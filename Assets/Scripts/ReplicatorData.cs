@@ -101,6 +101,10 @@ public class Replicator
     public float tumbleProbability;
     public float nextSenseTime;
     public float movementSeed;
+    [Tooltip("Current logical ocean layer index used for layered chemistry queries. World-space movement remains surface-constrained for now.")]
+    public int currentOceanLayerIndex;
+    [Tooltip("Preferred logical ocean layer index for gradual layer-settling. World-space movement remains surface-constrained for now.")]
+    public int preferredOceanLayerIndex;
 
     // Constructor
     public Replicator(Vector3 pos, Quaternion rot, float lifespan, Color col, Traits traits, float movementSeed, MetabolismType metabolism, LocomotionType locomotion = LocomotionType.PassiveDrift, float locomotionSkill = 0f)
@@ -128,6 +132,8 @@ public class Replicator
         lastHabitatValue = 0f;
         tumbleProbability = 0f;
         nextSenseTime = 0f;
+        preferredOceanLayerIndex = GetDefaultPreferredOceanLayerIndex(metabolism, locomotion);
+        currentOceanLayerIndex = preferredOceanLayerIndex;
         starveCo2Seconds = 0f;
         starveH2sSeconds = 0f;
         starveH2Seconds = 0f;
@@ -141,5 +147,30 @@ public class Replicator
         o2StressMax = 1f;
         canReplicate = true;
         lastDeathCauseCandidate = DeathCause.Unknown;
+    }
+
+    private static int GetDefaultPreferredOceanLayerIndex(MetabolismType metabolism, LocomotionType locomotion)
+    {
+        if (locomotion == LocomotionType.Anchored)
+        {
+            return 4;
+        }
+
+        switch (metabolism)
+        {
+            case MetabolismType.Photosynthesis:
+                return 0;
+            case MetabolismType.SulfurChemosynthesis:
+            case MetabolismType.Hydrogenotrophy:
+                return 4;
+            case MetabolismType.Saprotrophy:
+            case MetabolismType.Methanotrophy:
+                return 2;
+            case MetabolismType.Methanogenesis:
+            case MetabolismType.Fermentation:
+                return 3;
+            default:
+                return 1;
+        }
     }
 }

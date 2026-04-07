@@ -327,6 +327,11 @@ public class PlanetResourceMap : MonoBehaviour
             return;
         }
 
+        if (replicatorManager == null)
+        {
+            replicatorManager = FindFirstObjectByType<ReplicatorManager>();
+        }
+
         if (replicatorManager != null && !replicatorManager.ShouldAdvanceSimulation)
         {
             return;
@@ -456,6 +461,22 @@ public class PlanetResourceMap : MonoBehaviour
         return Mathf.Clamp(count, 1, MaxOceanLayers);
     }
 
+    public int GetValidActiveOceanLayerCount(int cell)
+    {
+        return GetOceanActiveLayerCount(cell);
+    }
+
+    public int ClampOceanLayerIndex(int cell, int requestedLayerIndex)
+    {
+        int activeCount = GetOceanActiveLayerCount(cell);
+        if (activeCount <= 0)
+        {
+            return -1;
+        }
+
+        return Mathf.Clamp(requestedLayerIndex, 0, activeCount - 1);
+    }
+
     public int GetOceanTopLayerIndex(int cell)
     {
         int count = GetOceanActiveLayerCount(cell);
@@ -502,6 +523,32 @@ public class PlanetResourceMap : MonoBehaviour
         }
 
         return layeredArray[GetLayeredArrayIndex(cell, layerIndex)];
+    }
+
+    public float GetResourceForCellLayer(ResourceType resourceType, int cell, int requestedLayerIndex)
+    {
+        if (!isInitialized || !IsCellValid(cell))
+        {
+            return 0f;
+        }
+
+        if (!ShouldUseLayeredOceanForResource(resourceType, cell))
+        {
+            return Get(resourceType, cell);
+        }
+
+        int clampedLayer = ClampOceanLayerIndex(cell, requestedLayerIndex);
+        if (clampedLayer < 0)
+        {
+            return Get(resourceType, cell);
+        }
+
+        return GetLayerResource(resourceType, cell, clampedLayer);
+    }
+
+    public float GetCompatibilityResourceValue(ResourceType resourceType, int cell)
+    {
+        return Get(resourceType, cell);
     }
 
     public LegacyEnvironmentSnapshot GetEffectiveLegacyEnvironment(int cell, Vector3 worldPosOrDir)
@@ -2189,11 +2236,8 @@ public class PlanetResourceMap : MonoBehaviour
 
     private void SyncLegacyOceanFromLayeredArrays()
     {
-        SyncLegacyOceanResourceFromLayers(ResourceType.O2);
-        SyncLegacyOceanResourceFromLayers(ResourceType.OrganicC);
-        SyncLegacyOceanResourceFromLayers(ResourceType.H2);
-        SyncLegacyOceanResourceFromLayers(ResourceType.H2S);
-        SyncLegacyOceanResourceFromLayers(ResourceType.CH4);
+        // Compatibility sync is intentionally minimal while layered arrays remain authoritative.
+        // Most gameplay reads should use Get()/GetResourceForCellLayer() which already resolve layered values.
         SyncLegacyOceanResourceFromLayers(ResourceType.DissolvedFe2Plus);
     }
 
