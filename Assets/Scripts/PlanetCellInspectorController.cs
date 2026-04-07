@@ -15,6 +15,12 @@ public class PlanetCellInspectorController : MonoBehaviour
     [Header("Picking")]
     [SerializeField] private LayerMask raycastMask = ~0;
     [SerializeField] private bool ignoreClicksOverUi = true;
+    [SerializeField, Min(0.01f)] private float refreshIntervalSeconds = 0.2f;
+
+    private bool hasSelection;
+    private int selectedCellIndex = -1;
+    private Vector3 selectedDirection;
+    private float refreshTimer;
 
     private void Awake()
     {
@@ -42,6 +48,8 @@ public class PlanetCellInspectorController : MonoBehaviour
         {
             return;
         }
+
+        RefreshSelectedSnapshot();
 
         if (!WasPrimaryPointerPressedThisFrame())
         {
@@ -77,6 +85,38 @@ public class PlanetCellInspectorController : MonoBehaviour
             return;
         }
 
+        hasSelection = true;
+        selectedCellIndex = cellIndex;
+        selectedDirection = directionFromCenter;
+        refreshTimer = 0f;
+
+        PresentSnapshot(snapshot, directionFromCenter);
+    }
+
+    private void RefreshSelectedSnapshot()
+    {
+        if (!hasSelection || inspectorPanel == null || !inspectorPanel.IsVisible())
+        {
+            return;
+        }
+
+        refreshTimer -= Time.unscaledDeltaTime;
+        if (refreshTimer > 0f)
+        {
+            return;
+        }
+
+        refreshTimer = refreshIntervalSeconds;
+        if (!planetResourceMap.TryGetCellInspectionSnapshot(selectedCellIndex, selectedDirection, out PlanetResourceMap.CellInspectionSnapshot snapshot))
+        {
+            return;
+        }
+
+        PresentSnapshot(snapshot, selectedDirection);
+    }
+
+    private void PresentSnapshot(PlanetResourceMap.CellInspectionSnapshot snapshot, Vector3 direction)
+    {
         if (inspectorPanel != null)
         {
             inspectorPanel.ShowSnapshot(snapshot);
@@ -84,7 +124,7 @@ public class PlanetCellInspectorController : MonoBehaviour
 
         if (selectionMarker != null)
         {
-            selectionMarker.ShowSelection(snapshot.CellIndex, directionFromCenter, snapshot.IsOcean);
+            selectionMarker.ShowSelection(snapshot.CellIndex, direction, snapshot.IsOcean);
         }
     }
 
@@ -149,9 +189,15 @@ public class PlanetCellInspectorController : MonoBehaviour
             return false;
         }
 
-        if (Input.touchCount > 0)
+        if (Touchscreen.current != null)
         {
-            return EventSystem.current.IsPointerOverGameObject(Input.GetTouch(0).fingerId);
+            foreach (var touch in Touchscreen.current.touches)
+            {
+                if (touch.press.isPressed || touch.press.wasPressedThisFrame)
+                {
+                    return EventSystem.current.IsPointerOverGameObject(touch.touchId.ReadValue());
+                }
+            }
         }
 
         return EventSystem.current.IsPointerOverGameObject();
