@@ -75,6 +75,7 @@ public class PlanetResourceMap : MonoBehaviour
     }
 
     [SerializeField] private PlanetGenerator planetGenerator;
+    [SerializeField] private ReplicatorManager replicatorManager;
     [Header("References")]
     [Tooltip("Optional directional light. If empty, will try SunSkyRotator's Light, then RenderSettings.sun.")]
     public Light sunLight;
@@ -303,6 +304,11 @@ public class PlanetResourceMap : MonoBehaviour
             planetGenerator = GetComponent<PlanetGenerator>();
         }
 
+        if (replicatorManager == null)
+        {
+            replicatorManager = FindFirstObjectByType<ReplicatorManager>();
+        }
+
         ResolveSunReferences();
 
         EnsureDebugGradient();
@@ -321,10 +327,21 @@ public class PlanetResourceMap : MonoBehaviour
             return;
         }
 
+        if (replicatorManager != null && !replicatorManager.ShouldAdvanceSimulation)
+        {
+            return;
+        }
+
+        float simulationDeltaTime = Time.deltaTime;
+        if (replicatorManager != null)
+        {
+            simulationDeltaTime *= Mathf.Max(0f, replicatorManager.SimulationSpeedMultiplier);
+        }
+
         if (enableVentReplenishment)
         {
             float ventTick = Mathf.Max(0.0001f, ventTickSeconds);
-            ventTimer += Time.deltaTime;
+            ventTimer += simulationDeltaTime;
 
             while (ventTimer >= ventTick)
             {
@@ -336,7 +353,7 @@ public class PlanetResourceMap : MonoBehaviour
         if (enableAtmosphereMixing)
         {
             float atmosphereTick = Mathf.Max(0.0001f, atmosphereTickSeconds);
-            atmosphereTimer += Time.deltaTime;
+            atmosphereTimer += simulationDeltaTime;
 
             while (atmosphereTimer >= atmosphereTick)
             {
