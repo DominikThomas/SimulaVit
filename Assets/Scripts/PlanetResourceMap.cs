@@ -1109,7 +1109,7 @@ public class PlanetResourceMap : MonoBehaviour
         }
 
         float transferFraction = Mathf.Clamp01(atmosphereToOceanO2TransferFractionPerTick);
-        float rate = Mathf.Max(0f, dissolvedFe2PlusOxidationRate);
+        float rate = Mathf.Max(0f, fe2PlusOxidationRatePerSecond);
         float o2PerFe2 = Mathf.Max(0f, o2ConsumptionPerFe2PlusOxidized);
         if (transferFraction <= 0f || rate <= 0f || o2PerFe2 <= 0f)
         {
