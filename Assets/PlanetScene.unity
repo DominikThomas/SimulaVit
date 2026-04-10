@@ -1405,11 +1405,12 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PlanetResourceMap
   planetGenerator: {fileID: 382753102}
+  replicatorManager: {fileID: 0}
   sunLight: {fileID: 0}
   sunSkyRotator: {fileID: 0}
   baselineCO2: 8
   baselineO2: 0
-  baselineCH4: 0.01
+  baselineCH4: 2
   baselineS0: 0.05
   baselineSi: 0.35
   baselineCa: 0.25
