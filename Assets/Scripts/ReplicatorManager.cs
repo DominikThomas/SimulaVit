@@ -59,6 +59,11 @@ public class ReplicatorManager : MonoBehaviour
     public float biomassMutationChance = 0.02f;
     public float biomassMutationScale = 0.1f;
 
+    [Header("Local O2 Allowing Mutation")]
+    public float minGlobalO2 = 0.01f;
+    public float minLocalO2 = 0.1f;
+    public float minLocalOrganicC = 0.001f;
+
     [Header("Energy -> Speed")]
     public float energyForFullSpeed = 0.5f;
     public float minSpeedFactor = 0.15f;
@@ -1636,18 +1641,20 @@ public class ReplicatorManager : MonoBehaviour
             }
         }
 
+        bool methanotrophyUnlockedByLocalOxygen = false;
         if (childMetabolism != MetabolismType.Methanotrophy
             && parent.metabolism == MetabolismType.Hydrogenotrophy
             && UnityEngine.Random.value < Mathf.Clamp01(hydrogenToMethanotrophyMutationChance)
-            && CanMutateToMethanotrophy())
+            && CanMutateToMethanotrophy(parent, out methanotrophyUnlockedByLocalOxygen))
         {
             childMetabolism = MetabolismType.Methanotrophy;
         }
 
+        bool saprotrophyUnlockedByLocalOxygen = false;
         if (childMetabolism != MetabolismType.Saprotrophy
             && childMetabolism != MetabolismType.Predation
             && UnityEngine.Random.value < Mathf.Clamp01(parent.metabolism == MetabolismType.Hydrogenotrophy ? hydrogenToSaprotrophyMutationChance : saprotrophyMutationChance)
-            && CanMutateToSaprotrophy())
+            && CanMutateToSaprotrophy(parent, out saprotrophyUnlockedByLocalOxygen))
         {
             childMetabolism = MetabolismType.Saprotrophy;
         }
@@ -1667,7 +1674,28 @@ public class ReplicatorManager : MonoBehaviour
         // Reproduction should happen at/near the parent's current habitat.
         // `spawnOnlyInSea` is intended for initial/spontaneous seeding, while
         // `replicateOnlyInSea` controls whether a parent is allowed to divide on land.
-        return SpawnAgentAtDirection(randomDir, parent.traits, parent, childMetabolism, childLocomotion, childLocomotionSkill, out childAgent, enforceSpawnOnlyInSeaTrait: false);
+        bool spawned = SpawnAgentAtDirection(randomDir, parent.traits, parent, childMetabolism, childLocomotion, childLocomotionSkill, out childAgent, enforceSpawnOnlyInSeaTrait: false);
+        if (!spawned || !debugVentPlumeDiagnostics)
+        {
+            return spawned;
+        }
+
+        float globalO2 = planetResourceMap != null ? Mathf.Max(0f, planetResourceMap.debugGlobalO2) : 0f;
+        if (globalO2 >= minGlobalO2)
+        {
+            return true;
+        }
+
+        if (childMetabolism == MetabolismType.Saprotrophy && saprotrophyUnlockedByLocalOxygen)
+        {
+            Debug.Log($"[LocalO2Spawn] Saprotrophy spawn allowed by local O2 at cell-layer habitat despite low global O2 ({globalO2:0.0000} < {minGlobalO2:0.0000}).");
+        }
+        else if (childMetabolism == MetabolismType.Methanotrophy && methanotrophyUnlockedByLocalOxygen)
+        {
+            Debug.Log($"[LocalO2Spawn] Methanotrophy spawn allowed by local O2 at cell-layer habitat despite low global O2 ({globalO2:0.0000} < {minGlobalO2:0.0000}).");
+        }
+
+        return true;
     }
 
     bool IsSaprotrophyUnlocked()
@@ -1752,31 +1780,80 @@ public class ReplicatorManager : MonoBehaviour
         return planetResourceMap.GetInsolation(direction.normalized) > 0f;
     }
 
-    bool CanMutateToSaprotrophy()
+    bool CanMutateToSaprotrophy(Replicator parent, out bool unlockedByLocalOxygen)
     {
-        if (!IsSaprotrophyUnlocked() || planetResourceMap == null)
+        unlockedByLocalOxygen = false;
+        if (!IsSaprotrophyUnlocked() || planetResourceMap == null || parent == null)
         {
             return false;
         }
 
-        const float minGlobalO2 = 0.01f;
-        const float minGlobalOrganicC = 0.001f;
-
         float globalO2 = planetResourceMap.debugGlobalO2;
-        float globalOrganicC = EstimateGlobalOrganicC();
+        bool hasLocalO2 = IsOxygenLocallyAvailable(parent.currentDirection, parent.currentOceanLayerIndex, minLocalO2);
+        bool hasLocalOrganicC = IsOrganicCLocallyAvailable(parent.currentDirection, parent.currentOceanLayerIndex, minLocalOrganicC);
+        unlockedByLocalOxygen = globalO2 <= minGlobalO2 && hasLocalO2;
 
-        return globalO2 > minGlobalO2 && globalOrganicC > minGlobalOrganicC;
+        if (unlockedByLocalOxygen)
+        {
+            Debug.Log($"[LocalO2Mutation] Saprotrophy mutation became eligible due to local O2 (global O2 {globalO2:0.0000} <= {minGlobalO2:0.0000}). Local O2: " + GetLocalHabitatResource(ResourceType.O2, parent.currentDirection, parent.currentOceanLayerIndex));
+        }
+
+        return hasLocalO2 && hasLocalOrganicC;
     }
 
-    bool CanMutateToMethanotrophy()
+    bool CanMutateToMethanotrophy(Replicator parent, out bool unlockedByLocalOxygen)
     {
-        const float minGlobalO2 = 0.01f;
+        unlockedByLocalOxygen = false;
+        if (planetResourceMap == null || parent == null)
+        {
+            return false;
+        }
+
         const float minGlobalMethane = 0.01f;
 
         float globalO2 = planetResourceMap.debugGlobalO2;
         float globalMethane = planetResourceMap.debugGlobalCH4;
+        bool hasLocalO2 = IsOxygenLocallyAvailable(parent.currentDirection, parent.currentOceanLayerIndex, minLocalO2);
+        unlockedByLocalOxygen = globalO2 <= minGlobalO2 && hasLocalO2;
 
-        return globalO2 > minGlobalO2 && globalMethane > minGlobalMethane;
+        if (unlockedByLocalOxygen)
+        {
+            Debug.Log($"[LocalO2Mutation] Methanotrophy mutation became eligible due to local O2 (global O2 {globalO2:0.0000} <= {minGlobalO2:0.0000}). Local O2: " + GetLocalHabitatResource(ResourceType.O2, parent.currentDirection, parent.currentOceanLayerIndex));
+        }
+
+        return hasLocalO2 && globalMethane > minGlobalMethane;
+    }
+
+    bool IsOxygenLocallyAvailable(Vector3 habitatDirection, int habitatOceanLayerIndex, float minimumAmount)
+    {
+        bool isOxygenGloballyAvailable = planetResourceMap.debugGlobalO2 > minGlobalO2;
+        bool isLocalOxygenAboveThreshold = GetLocalHabitatResource(ResourceType.O2, habitatDirection, habitatOceanLayerIndex) > Mathf.Max(0f, minimumAmount);
+        return isOxygenGloballyAvailable || isLocalOxygenAboveThreshold;
+    }
+
+    bool IsOrganicCLocallyAvailable(Vector3 habitatDirection, int habitatOceanLayerIndex, float minimumAmount)
+    {
+        return GetLocalHabitatResource(ResourceType.OrganicC, habitatDirection, habitatOceanLayerIndex) > Mathf.Max(0f, minimumAmount);
+    }
+
+    float GetLocalHabitatResource(ResourceType resourceType, Vector3 habitatDirection, int habitatOceanLayerIndex)
+    {
+        if (planetResourceMap == null || planetGenerator == null)
+        {
+            return 0f;
+        }
+
+        int resolution = Mathf.Max(1, planetGenerator.resolution);
+        Vector3 normalizedDir = habitatDirection.normalized;
+        int cellIndex = PlanetGridIndexing.DirectionToCellIndex(normalizedDir, resolution);
+        if (cellIndex < 0)
+        {
+            return 0f;
+        }
+
+        return IsSeaLocation(normalizedDir)
+            ? planetResourceMap.GetResourceForCellLayer(resourceType, cellIndex, habitatOceanLayerIndex)
+            : planetResourceMap.Get(resourceType, cellIndex);
     }
 
     float EstimateGlobalOrganicC()
