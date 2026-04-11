@@ -59,6 +59,11 @@ public class ReplicatorManager : MonoBehaviour
     public float biomassMutationChance = 0.02f;
     public float biomassMutationScale = 0.1f;
 
+    [Header("Local O2 Allowing Mutation")]
+    public float minGlobalO2 = 0.01f;
+    public float minLocalO2 = 0.1f;
+    public float minLocalOrganicC = 0.001f;
+
     [Header("Energy -> Speed")]
     public float energyForFullSpeed = 0.5f;
     public float minSpeedFactor = 0.15f;
@@ -1676,7 +1681,6 @@ public class ReplicatorManager : MonoBehaviour
         }
 
         float globalO2 = planetResourceMap != null ? Mathf.Max(0f, planetResourceMap.debugGlobalO2) : 0f;
-        const float minGlobalO2 = 0.01f;
         if (globalO2 >= minGlobalO2)
         {
             return true;
@@ -1784,17 +1788,14 @@ public class ReplicatorManager : MonoBehaviour
             return false;
         }
 
-        const float minGlobalO2 = 0.01f;
-        const float minLocalOrganicC = 0.001f;
-
         float globalO2 = planetResourceMap.debugGlobalO2;
-        bool hasLocalO2 = IsOxygenLocallyAvailable(parent.currentDirection, parent.currentOceanLayerIndex);
+        bool hasLocalO2 = IsOxygenLocallyAvailable(parent.currentDirection, parent.currentOceanLayerIndex, minLocalO2);
         bool hasLocalOrganicC = IsOrganicCLocallyAvailable(parent.currentDirection, parent.currentOceanLayerIndex, minLocalOrganicC);
         unlockedByLocalOxygen = globalO2 <= minGlobalO2 && hasLocalO2;
 
-        if (unlockedByLocalOxygen && debugVentPlumeDiagnostics)
+        if (unlockedByLocalOxygen)
         {
-            Debug.Log($"[LocalO2Mutation] Saprotrophy mutation became eligible due to local O2 (global O2 {globalO2:0.0000} <= {minGlobalO2:0.0000}).");
+            Debug.Log($"[LocalO2Mutation] Saprotrophy mutation became eligible due to local O2 (global O2 {globalO2:0.0000} <= {minGlobalO2:0.0000}). Local O2: " + GetLocalHabitatResource(ResourceType.O2, parent.currentDirection, parent.currentOceanLayerIndex));
         }
 
         return hasLocalO2 && hasLocalOrganicC;
@@ -1808,25 +1809,26 @@ public class ReplicatorManager : MonoBehaviour
             return false;
         }
 
-        const float minGlobalO2 = 0.01f;
         const float minGlobalMethane = 0.01f;
 
         float globalO2 = planetResourceMap.debugGlobalO2;
         float globalMethane = planetResourceMap.debugGlobalCH4;
-        bool hasLocalO2 = IsOxygenLocallyAvailable(parent.currentDirection, parent.currentOceanLayerIndex);
+        bool hasLocalO2 = IsOxygenLocallyAvailable(parent.currentDirection, parent.currentOceanLayerIndex, minLocalO2);
         unlockedByLocalOxygen = globalO2 <= minGlobalO2 && hasLocalO2;
 
-        if (unlockedByLocalOxygen && debugVentPlumeDiagnostics)
+        if (unlockedByLocalOxygen)
         {
-            Debug.Log($"[LocalO2Mutation] Methanotrophy mutation became eligible due to local O2 (global O2 {globalO2:0.0000} <= {minGlobalO2:0.0000}).");
+            Debug.Log($"[LocalO2Mutation] Methanotrophy mutation became eligible due to local O2 (global O2 {globalO2:0.0000} <= {minGlobalO2:0.0000}). Local O2: " + GetLocalHabitatResource(ResourceType.O2, parent.currentDirection, parent.currentOceanLayerIndex));
         }
 
         return hasLocalO2 && globalMethane > minGlobalMethane;
     }
 
-    bool IsOxygenLocallyAvailable(Vector3 habitatDirection, int habitatOceanLayerIndex)
+    bool IsOxygenLocallyAvailable(Vector3 habitatDirection, int habitatOceanLayerIndex, float minimumAmount)
     {
-        return GetLocalHabitatResource(ResourceType.O2, habitatDirection, habitatOceanLayerIndex) > Mathf.Epsilon;
+        bool isOxygenGloballyAvailable = planetResourceMap.debugGlobalO2 > minGlobalO2;
+        bool isLocalOxygenAboveThreshold = GetLocalHabitatResource(ResourceType.O2, habitatDirection, habitatOceanLayerIndex) > Mathf.Max(0f, minimumAmount);
+        return isOxygenGloballyAvailable || isLocalOxygenAboveThreshold;
     }
 
     bool IsOrganicCLocallyAvailable(Vector3 habitatDirection, int habitatOceanLayerIndex, float minimumAmount)
