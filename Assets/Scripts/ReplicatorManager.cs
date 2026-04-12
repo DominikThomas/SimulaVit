@@ -413,6 +413,12 @@ public class ReplicatorManager : MonoBehaviour
     private int steeringRecomputeCounter;
     private int predatorPresenceCacheStep = -1;
     private bool predatorPresenceCached;
+    private int activeSteeringPresenceCacheStep = -1;
+    private bool activeSteeringPresenceCached;
+    [SerializeField] private int debugCurrentSteeringRecomputeInterval = 1;
+    [SerializeField] private bool debugPredatorsForceFullRateSteering;
+    [SerializeField] private bool debugActiveSteeringForceFullRate;
+    [SerializeField] private bool debugScentPredationActiveForSteering;
     private static bool hasConfiguredTelemetryLogStackTraces;
 
 
@@ -1172,6 +1178,31 @@ public class ReplicatorManager : MonoBehaviour
         return predatorPresenceCached;
     }
 
+    bool HasAnyActiveSteeringAgents()
+    {
+        for (int i = 0; i < agents.Count; i++)
+        {
+            if (IsMotile(agents[i]))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    bool HasActiveSteeringAgentsThisStep()
+    {
+        if (activeSteeringPresenceCacheStep == simulationStepCount)
+        {
+            return activeSteeringPresenceCached;
+        }
+
+        activeSteeringPresenceCacheStep = simulationStepCount;
+        activeSteeringPresenceCached = HasAnyActiveSteeringAgents();
+        return activeSteeringPresenceCached;
+    }
+
     void RebuildPreyCellBins(int resolution, ReplicatorPopulationState state)
     {
         preyAgentsByCell.Clear();
@@ -1307,13 +1338,26 @@ public class ReplicatorManager : MonoBehaviour
 
     bool ShouldRecomputeSteeringThisStep()
     {
-        int interval = GetSteeringRecomputeInterval(Mathf.Max(1, runtimeSimulationStepsPerFrame));
+        bool scentPredationActive = useScentPredation && planetResourceMap != null && planetResourceMap.enableScentFields;
+        bool predatorsForceFullRateSteering = enablePredators && HasPredatorsThisStep() && (scentPredationActive || enableFear);
+        bool activeSteeringForceFullRate = HasActiveSteeringAgentsThisStep();
+        bool forceFullRateSteering = predatorsForceFullRateSteering || activeSteeringForceFullRate;
+        int interval = GetSteeringRecomputeInterval(Mathf.Max(1, runtimeSimulationStepsPerFrame), forceFullRateSteering);
+        debugCurrentSteeringRecomputeInterval = interval;
+        debugPredatorsForceFullRateSteering = predatorsForceFullRateSteering;
+        debugActiveSteeringForceFullRate = activeSteeringForceFullRate;
+        debugScentPredationActiveForSteering = scentPredationActive;
         int phase = steeringRecomputeCounter++;
         return interval <= 1 || (phase % interval) == 0;
     }
 
-    static int GetSteeringRecomputeInterval(int stepsPerFrame)
+    static int GetSteeringRecomputeInterval(int stepsPerFrame, bool forceFullRateSteering)
     {
+        if (forceFullRateSteering)
+        {
+            return 1;
+        }
+
         if (stepsPerFrame >= 50)
         {
             return 8;
