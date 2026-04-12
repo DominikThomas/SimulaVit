@@ -9,6 +9,16 @@ public class PlanetGenerator : MonoBehaviour
     public float radius = 1f;
     public Material planetMaterial;
 
+    [Header("Surface Rock Shading")]
+    public Color darkRockColor = new Color(0.13f, 0.14f, 0.16f, 1f);
+    public Color midRockColor = new Color(0.34f, 0.37f, 0.41f, 1f);
+    public Color lightRockColor = new Color(0.60f, 0.62f, 0.65f, 1f);
+    [Min(0.01f)] public float largeNoiseScale = 1.6f;
+    [Min(0.01f)] public float mediumNoiseScale = 4.8f;
+    [Min(0.01f)] public float detailNoiseScale = 15f;
+    [Range(0.25f, 4f)] public float contrast = 1.35f;
+    [Range(0f, 1f)] public float crackDarkening = 0.32f;
+
     [Header("Terrain Generation")]
     public float noiseMagnitude = 0.1f;
     public float noiseRoughness = 1.0f;
@@ -70,7 +80,10 @@ public class PlanetGenerator : MonoBehaviour
     public float saprotrophyUnlockSeconds = 60f;
 
     private MeshFilter meshFilter;
+    private MeshRenderer meshRenderer;
     private Mesh mesh;
+    private Material runtimePlanetMaterial;
+    private Texture2D runtimeSurfaceTexture;
 
     private MeshFilter oceanMeshFilter;
     private MeshRenderer oceanMeshRenderer;
@@ -92,13 +105,10 @@ public class PlanetGenerator : MonoBehaviour
     void Awake()
     {
         meshFilter = GetOrAddComponent<MeshFilter>(gameObject);
-        MeshRenderer meshRenderer = GetOrAddComponent<MeshRenderer>(gameObject);
+        meshRenderer = GetOrAddComponent<MeshRenderer>(gameObject);
         MeshCollider meshCollider = GetOrAddComponent<MeshCollider>(gameObject);
 
-        if (planetMaterial != null)
-        {
-            meshRenderer.sharedMaterial = planetMaterial;
-        }
+        SetupPlanetMaterial();
 
         mesh = new Mesh { name = "Planet Terrain" };
         meshFilter.sharedMesh = mesh;
@@ -249,9 +259,12 @@ public class PlanetGenerator : MonoBehaviour
 
         mesh.Clear();
         mesh.vertices = terrainVertices;
+        mesh.uv = BuildSphereUvs(unitVertices);
         mesh.triangles = allTriangles.ToArray();
         mesh.RecalculateBounds();
         mesh.RecalculateNormals();
+
+        UpdateSurfaceMaterialProperties();
 
         MeshCollider meshCollider = GetComponent<MeshCollider>();
         if (meshCollider != null)
@@ -303,6 +316,158 @@ public class PlanetGenerator : MonoBehaviour
             {
                 atmosphereMeshRenderer.sharedMaterial = atmosphereMaterial;
             }
+        }
+    }
+
+    void SetupPlanetMaterial()
+    {
+        if (meshRenderer == null)
+        {
+            return;
+        }
+
+        if (planetMaterial != null)
+        {
+            runtimePlanetMaterial = new Material(planetMaterial);
+            runtimePlanetMaterial.name = $"{planetMaterial.name} (Runtime Planet Surface)";
+            meshRenderer.sharedMaterial = runtimePlanetMaterial;
+        }
+        else
+        {
+            runtimePlanetMaterial = meshRenderer.sharedMaterial;
+        }
+
+        UpdateSurfaceMaterialProperties();
+    }
+
+    void UpdateSurfaceMaterialProperties()
+    {
+        if (runtimePlanetMaterial == null)
+        {
+            return;
+        }
+
+        Texture2D texture = BuildSurfaceColorTexture();
+        if (texture == null)
+        {
+            return;
+        }
+
+        runtimePlanetMaterial.SetTexture("_BaseMap", texture);
+        runtimePlanetMaterial.SetColor("_BaseColor", Color.white);
+
+        if (runtimePlanetMaterial.HasProperty("_Metallic"))
+        {
+            runtimePlanetMaterial.SetFloat("_Metallic", 0f);
+        }
+
+        if (runtimePlanetMaterial.HasProperty("_Smoothness"))
+        {
+            runtimePlanetMaterial.SetFloat("_Smoothness", 0.12f);
+        }
+    }
+
+    Texture2D BuildSurfaceColorTexture()
+    {
+        const int textureWidth = 256;
+        const int textureHeight = 128;
+        int pixelCount = textureWidth * textureHeight;
+
+        if (runtimeSurfaceTexture == null || runtimeSurfaceTexture.width != textureWidth || runtimeSurfaceTexture.height != textureHeight)
+        {
+            runtimeSurfaceTexture = new Texture2D(textureWidth, textureHeight, TextureFormat.RGBA32, false, true)
+            {
+                name = "Planet Surface Rock Colors",
+                wrapMode = TextureWrapMode.Repeat,
+                filterMode = FilterMode.Bilinear
+            };
+        }
+
+        Color[] pixels = new Color[pixelCount];
+
+        float largeScale = Mathf.Max(0.01f, largeNoiseScale);
+        float mediumScale = Mathf.Max(0.01f, mediumNoiseScale);
+        float detailScale = Mathf.Max(0.01f, detailNoiseScale);
+        float contrastSafe = Mathf.Max(0.01f, contrast);
+        float crackDarkeningSafe = Mathf.Clamp01(crackDarkening);
+
+        for (int y = 0; y < textureHeight; y++)
+        {
+            float v = y / (textureHeight - 1f);
+            float phi = v * Mathf.PI;
+            float sinPhi = Mathf.Sin(phi);
+            float cosPhi = Mathf.Cos(phi);
+
+            for (int x = 0; x < textureWidth; x++)
+            {
+                float u = x / (textureWidth - 1f);
+                float theta = u * Mathf.PI * 2f;
+                Vector3 sampleDir = new Vector3(
+                    sinPhi * Mathf.Cos(theta),
+                    cosPhi,
+                    sinPhi * Mathf.Sin(theta));
+
+                float large = 0.5f * (SimpleNoise.Evaluate(sampleDir * largeScale + noiseOffset * 0.15f) + 1f);
+                float medium = 0.5f * (SimpleNoise.Evaluate(sampleDir * mediumScale + noiseOffset * 0.45f) + 1f);
+                float detail = 0.5f * (SimpleNoise.Evaluate(sampleDir * detailScale + noiseOffset) + 1f);
+
+                float rockyBlend = large * 0.6f + medium * 0.3f + detail * 0.1f;
+                rockyBlend = Mathf.Clamp01(Mathf.Pow(rockyBlend, contrastSafe));
+
+                float crackMask = Mathf.Clamp01(1f - medium * 0.75f - detail * 0.25f);
+                Color rockColor = BlendRockPalette(rockyBlend);
+                rockColor *= 1f - crackMask * crackDarkeningSafe;
+                rockColor.a = 1f;
+                pixels[(y * textureWidth) + x] = rockColor;
+            }
+        }
+
+        runtimeSurfaceTexture.SetPixels(pixels);
+        runtimeSurfaceTexture.Apply(false, false);
+        return runtimeSurfaceTexture;
+    }
+
+    Color BlendRockPalette(float blend)
+    {
+        if (blend < 0.5f)
+        {
+            return Color.Lerp(darkRockColor, midRockColor, blend * 2f);
+        }
+
+        return Color.Lerp(midRockColor, lightRockColor, (blend - 0.5f) * 2f);
+    }
+
+    Vector2[] BuildSphereUvs(List<Vector3> unitVertices)
+    {
+        if (unitVertices == null || unitVertices.Count == 0)
+        {
+            return System.Array.Empty<Vector2>();
+        }
+
+        Vector2[] uvs = new Vector2[unitVertices.Count];
+        for (int i = 0; i < unitVertices.Count; i++)
+        {
+            Vector3 dir = unitVertices[i].normalized;
+            float u = Mathf.Atan2(dir.z, dir.x) / (2f * Mathf.PI) + 0.5f;
+            float v = Mathf.Asin(Mathf.Clamp(dir.y, -1f, 1f)) / Mathf.PI + 0.5f;
+            uvs[i] = new Vector2(u, v);
+        }
+
+        return uvs;
+    }
+
+    void OnDestroy()
+    {
+        if (runtimePlanetMaterial != null)
+        {
+            Destroy(runtimePlanetMaterial);
+            runtimePlanetMaterial = null;
+        }
+
+        if (runtimeSurfaceTexture != null)
+        {
+            Destroy(runtimeSurfaceTexture);
+            runtimeSurfaceTexture = null;
         }
     }
 
