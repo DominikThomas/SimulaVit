@@ -19,6 +19,23 @@ public class PlanetGenerator : MonoBehaviour
     [Range(0.25f, 4f)] public float contrast = 1.35f;
     [Range(0f, 1f)] public float crackDarkening = 0.32f;
 
+    [Header("Close-Up Land Detail")]
+    public Texture2D detailAlbedoTexture;
+    public Texture2D detailNormalTexture;
+    [Tooltip("Optional grayscale height map used for subtle close-up relief enhancement.")]
+    public Texture2D detailHeightTexture;
+    [Min(0.01f)] public float detailTiling = 28f;
+    [Range(0f, 2f)] public float detailStrength = 0.5f;
+    [Range(0f, 2f)] public float detailNormalStrength = 0.9f;
+    [Range(0f, 0.2f)] public float detailHeightStrength = 0.02f;
+    public bool applyDetailToLandOnly = true;
+    [Min(0f)] public float detailFadeStartDistance = 18f;
+    [Min(0f)] public float detailFadeEndDistance = 120f;
+    [Tooltip("Uses a subtle view-dependent world-space sample offset rather than full UV parallax to avoid seams.")]
+    public bool useParallaxMapping = false;
+    [Min(0f)] public float parallaxMinDistance = 4f;
+    [Min(0f)] public float parallaxMaxDistance = 32f;
+
     [Header("Terrain Generation")]
     public float noiseMagnitude = 0.1f;
     public float noiseRoughness = 1.0f;
@@ -326,7 +343,16 @@ public class PlanetGenerator : MonoBehaviour
             return;
         }
 
-        if (planetMaterial != null)
+        Shader triplanarShader = Shader.Find("Custom/PlanetRockTriplanarURP");
+        if (triplanarShader != null)
+        {
+            runtimePlanetMaterial = new Material(triplanarShader)
+            {
+                name = "Planet Rock Triplanar (Runtime)"
+            };
+            meshRenderer.sharedMaterial = runtimePlanetMaterial;
+        }
+        else if (planetMaterial != null)
         {
             runtimePlanetMaterial = new Material(planetMaterial);
             runtimePlanetMaterial.name = $"{planetMaterial.name} (Runtime Planet Surface)";
@@ -355,6 +381,30 @@ public class PlanetGenerator : MonoBehaviour
 
         runtimePlanetMaterial.SetTexture("_BaseMap", texture);
         runtimePlanetMaterial.SetColor("_BaseColor", Color.white);
+        if (detailAlbedoTexture != null)
+        {
+            runtimePlanetMaterial.SetTexture("_DetailAlbedoMap", detailAlbedoTexture);
+        }
+
+        if (detailNormalTexture != null)
+        {
+            runtimePlanetMaterial.SetTexture("_DetailNormalMap", detailNormalTexture);
+        }
+
+        if (detailHeightTexture != null)
+        {
+            runtimePlanetMaterial.SetTexture("_DetailHeightMap", detailHeightTexture);
+        }
+        runtimePlanetMaterial.SetFloat("_DetailTiling", Mathf.Max(0.01f, detailTiling));
+        runtimePlanetMaterial.SetFloat("_DetailStrength", Mathf.Max(0f, detailStrength));
+        runtimePlanetMaterial.SetFloat("_DetailNormalStrength", Mathf.Max(0f, detailNormalStrength));
+        runtimePlanetMaterial.SetFloat("_DetailHeightStrength", Mathf.Max(0f, detailHeightStrength));
+        runtimePlanetMaterial.SetFloat("_ApplyDetailToLandOnly", applyDetailToLandOnly ? 1f : 0f);
+        runtimePlanetMaterial.SetFloat("_DetailFadeStartDistance", Mathf.Max(0f, detailFadeStartDistance));
+        runtimePlanetMaterial.SetFloat("_DetailFadeEndDistance", Mathf.Max(detailFadeStartDistance + 0.01f, detailFadeEndDistance));
+        runtimePlanetMaterial.SetFloat("_UseParallaxMapping", useParallaxMapping ? 1f : 0f);
+        runtimePlanetMaterial.SetFloat("_ParallaxMinDistance", Mathf.Max(0f, parallaxMinDistance));
+        runtimePlanetMaterial.SetFloat("_ParallaxMaxDistance", Mathf.Max(parallaxMinDistance + 0.01f, parallaxMaxDistance));
 
         if (runtimePlanetMaterial.HasProperty("_Metallic"))
         {
@@ -417,7 +467,9 @@ public class PlanetGenerator : MonoBehaviour
                 float crackMask = Mathf.Clamp01(1f - medium * 0.75f - detail * 0.25f);
                 Color rockColor = BlendRockPalette(rockyBlend);
                 rockColor *= 1f - crackMask * crackDarkeningSafe;
-                rockColor.a = 1f;
+                bool isLand = !enableOcean || CalculateNoise(sampleDir) >= oceanNoiseThreshold;
+                float landMask = isLand ? 1f : 0f;
+                rockColor.a = landMask;
                 pixels[(y * textureWidth) + x] = rockColor;
             }
         }
