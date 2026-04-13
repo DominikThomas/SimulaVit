@@ -369,8 +369,8 @@ public class PlanetGenerator : MonoBehaviour
 
     Texture2D BuildSurfaceColorTexture()
     {
-        const int textureWidth = 256;
-        const int textureHeight = 128;
+        const int textureWidth = 4096;
+        const int textureHeight = 2048;
         int pixelCount = textureWidth * textureHeight;
 
         if (runtimeSurfaceTexture == null || runtimeSurfaceTexture.width != textureWidth || runtimeSurfaceTexture.height != textureHeight)
