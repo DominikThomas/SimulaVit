@@ -18,6 +18,24 @@ public class PlanetGenerator : MonoBehaviour
     [Min(0.01f)] public float detailNoiseScale = 15f;
     [Range(0.25f, 4f)] public float contrast = 1.35f;
     [Range(0f, 1f)] public float crackDarkening = 0.32f;
+    [Header("Terrain-Aware Land Zoning")]
+    public Color lowlandColor = new Color(0.30f, 0.31f, 0.33f, 1f);
+    public Color uplandColor = new Color(0.38f, 0.39f, 0.41f, 1f);
+    public Color mountainColor = new Color(0.54f, 0.56f, 0.60f, 1f);
+    public Color cliffColor = new Color(0.19f, 0.20f, 0.22f, 1f);
+    public Color beachColor = new Color(0.43f, 0.39f, 0.34f, 1f);
+    [Range(0f, 1f)] public float mountainStartHeight = 0.62f;
+    [Range(0f, 1f)] public float cliffSlopeThreshold = 0.58f;
+    [Range(0.002f, 0.3f)] public float beachWidth = 0.055f;
+    [Range(0.01f, 0.35f)] public float terrainBlendSoftness = 0.08f;
+    [Range(0f, 0.35f)] public float terrainWarpStrength = 0.075f;
+    [Range(0f, 1f)] public float detailStrength = 0.42f;
+    [Min(0.1f)] public float detailTiling = 42f;
+    [Range(0.001f, 0.05f)] public float slopeSampleStep = 0.012f;
+    [Range(0.005f, 0.08f)] public float shorelineProbeStep = 0.016f;
+    [Range(2, 12)] public int shorelineProbeSteps = 7;
+    public bool generateDetailNormalMap = true;
+    [Range(0f, 1.5f)] public float detailNormalStrength = 0.35f;
 
     [Header("Terrain Generation")]
     public float noiseMagnitude = 0.1f;
@@ -92,6 +110,7 @@ public class PlanetGenerator : MonoBehaviour
     private MeshFilter atmosphereMeshFilter;
     private MeshRenderer atmosphereMeshRenderer;
     private Mesh atmosphereMesh;
+    private Texture2D runtimeDetailNormalTexture;
 
     private float oceanNoiseThreshold;
     private float[] generatedSurfaceRadiusByCell;
@@ -363,7 +382,7 @@ public class PlanetGenerator : MonoBehaviour
 
         if (runtimePlanetMaterial.HasProperty("_Smoothness"))
         {
-            runtimePlanetMaterial.SetFloat("_Smoothness", 0.12f);
+            runtimePlanetMaterial.SetFloat("_Smoothness", 0.06f);
         }
     }
 
@@ -388,8 +407,33 @@ public class PlanetGenerator : MonoBehaviour
         float largeScale = Mathf.Max(0.01f, largeNoiseScale);
         float mediumScale = Mathf.Max(0.01f, mediumNoiseScale);
         float detailScale = Mathf.Max(0.01f, detailNoiseScale);
+        float detailTilingSafe = Mathf.Max(0.1f, detailTiling);
         float contrastSafe = Mathf.Max(0.01f, contrast);
         float crackDarkeningSafe = Mathf.Clamp01(crackDarkening);
+        float softness = Mathf.Max(0.01f, terrainBlendSoftness);
+        float mountainStart = Mathf.Clamp01(mountainStartHeight);
+        float cliffThreshold = Mathf.Clamp01(cliffSlopeThreshold);
+        float beachWidthSafe = Mathf.Max(0.002f, beachWidth);
+        float warpStrength = Mathf.Max(0f, terrainWarpStrength);
+        float seaNoise = oceanNoiseThreshold;
+        float slopeStep = Mathf.Clamp(slopeSampleStep, 0.001f, 0.05f);
+        float shoreProbeStepSafe = Mathf.Clamp(shorelineProbeStep, 0.003f, 0.08f);
+        int shoreProbeCount = Mathf.Clamp(shorelineProbeSteps, 2, 12);
+        float maxLandNoiseRange = Mathf.Max(0.001f, 1f - seaNoise);
+        bool canAssignNormals = generateDetailNormalMap && runtimePlanetMaterial != null && runtimePlanetMaterial.HasProperty("_BumpMap");
+        Color[] normalPixels = canAssignNormals ? new Color[pixelCount] : null;
+        const int metricWidth = 512;
+        const int metricHeight = 256;
+        BuildTerrainMetricMaps(
+            metricWidth,
+            metricHeight,
+            seaNoise,
+            slopeStep,
+            shoreProbeStepSafe,
+            shoreProbeCount,
+            out float[] landHeightMetric,
+            out float[] slopeMetric,
+            out float[] shoreMetric);
 
         for (int y = 0; y < textureHeight; y++)
         {
@@ -407,24 +451,260 @@ public class PlanetGenerator : MonoBehaviour
                     cosPhi,
                     sinPhi * Mathf.Sin(theta));
 
+                float baseNoise = CalculateNoise(sampleDir);
+                bool isLand = !enableOcean || baseNoise >= seaNoise;
+                if (!isLand)
+                {
+                    pixels[(y * textureWidth) + x] = Color.black;
+                    if (normalPixels != null)
+                    {
+                        normalPixels[(y * textureWidth) + x] = new Color(0.5f, 0.5f, 1f, 1f);
+                    }
+                    continue;
+                }
+
                 float large = 0.5f * (SimpleNoise.Evaluate(sampleDir * largeScale + noiseOffset * 0.15f) + 1f);
                 float medium = 0.5f * (SimpleNoise.Evaluate(sampleDir * mediumScale + noiseOffset * 0.45f) + 1f);
                 float detail = 0.5f * (SimpleNoise.Evaluate(sampleDir * detailScale + noiseOffset) + 1f);
+                float detailAlbedoA = 0.5f * (SimpleNoise.Evaluate(sampleDir * detailTilingSafe + noiseOffset * 1.11f) + 1f);
+                float detailAlbedoB = 0.5f * (SimpleNoise.Evaluate(sampleDir * detailTilingSafe * 1.9f + noiseOffset * 0.31f) + 1f);
+                float detailAlbedo = detailAlbedoA * 0.65f + detailAlbedoB * 0.35f;
 
                 float rockyBlend = large * 0.6f + medium * 0.3f + detail * 0.1f;
                 rockyBlend = Mathf.Clamp01(Mathf.Pow(rockyBlend, contrastSafe));
+                float warp = (SimpleNoise.Evaluate(sampleDir * (mediumScale * 0.7f) + noiseOffset * 0.91f) + 1f) * 0.5f;
+                warp = (warp - 0.5f) * 2f * warpStrength;
+
+                float landHeight01 = SampleMetricBilinear(landHeightMetric, metricWidth, metricHeight, u, v);
+                landHeight01 = Mathf.Clamp01(Mathf.Lerp(landHeight01, (baseNoise - seaNoise) / maxLandNoiseRange, 0.35f) + warp * 0.15f);
+                float slope01 = Mathf.Clamp01(SampleMetricBilinear(slopeMetric, metricWidth, metricHeight, u, v) + warp * 0.01f);
+                float shoreDistance01 = SampleMetricBilinear(shoreMetric, metricWidth, metricHeight, u, v);
+
+                float lowlandWeight = 1f - Smooth01(0.22f + warp * 0.2f, 0.55f + warp * 0.2f, landHeight01, softness);
+                float mountainWeight = Smooth01(mountainStart + warp * 0.1f, mountainStart + 0.24f + warp * 0.1f, landHeight01, softness);
+                float uplandWeight = Mathf.Clamp01(1f - lowlandWeight - mountainWeight);
+                float cliffWeight = Smooth01(cliffThreshold + warp * 0.05f, cliffThreshold + 0.22f + warp * 0.05f, slope01, softness * 0.65f);
+                float beachWeight = 1f - Smooth01(beachWidthSafe * 0.45f, beachWidthSafe * 1.8f, shoreDistance01, softness * 0.9f);
+                beachWeight *= 1f - mountainWeight * 0.65f;
+
+                Color zoneColor = lowlandColor * lowlandWeight + uplandColor * uplandWeight + mountainColor * mountainWeight;
+                zoneColor = Color.Lerp(zoneColor, cliffColor, cliffWeight);
+                zoneColor = Color.Lerp(zoneColor, beachColor, Mathf.Clamp01(beachWeight));
 
                 float crackMask = Mathf.Clamp01(1f - medium * 0.75f - detail * 0.25f);
                 Color rockColor = BlendRockPalette(rockyBlend);
-                rockColor *= 1f - crackMask * crackDarkeningSafe;
-                rockColor.a = 1f;
-                pixels[(y * textureWidth) + x] = rockColor;
+                Color terrainColor = Color.Lerp(zoneColor, rockColor, 0.38f);
+                terrainColor *= 1f - crackMask * crackDarkeningSafe * (1f - beachWeight * 0.7f);
+
+                float exposedRock = Mathf.Clamp01(Mathf.Max(cliffWeight, mountainWeight * 0.55f + slope01 * 0.45f));
+                float detailMask = detailStrength * Mathf.Clamp01(0.15f + exposedRock * 0.85f);
+                float detailSigned = (detailAlbedo - 0.5f) * 2f;
+                terrainColor *= 1f + detailSigned * 0.12f * detailMask;
+                terrainColor = Color.Lerp(terrainColor, terrainColor * new Color(0.98f, 0.99f, 1.03f, 1f), mountainWeight * 0.2f);
+                terrainColor.a = 1f;
+                pixels[(y * textureWidth) + x] = terrainColor;
+
+                if (normalPixels != null)
+                {
+                    float detailNx = 0.5f * (SimpleNoise.Evaluate((sampleDir + TangentOffset(sampleDir, slopeStep * 0.75f, 0f)) * detailTilingSafe + noiseOffset * 1.11f) + 1f);
+                    float detailNy = 0.5f * (SimpleNoise.Evaluate((sampleDir + TangentOffset(sampleDir, 0f, slopeStep * 0.75f)) * detailTilingSafe + noiseOffset * 1.11f) + 1f);
+                    float dX = detailNx - detailAlbedoA;
+                    float dY = detailNy - detailAlbedoA;
+                    Vector3 n = new Vector3(-dX, -dY, 1f).normalized;
+                    float normalIntensity = detailNormalStrength * detailMask;
+                    n = Vector3.Lerp(new Vector3(0f, 0f, 1f), n, Mathf.Clamp01(normalIntensity));
+                    normalPixels[(y * textureWidth) + x] = new Color(n.x * 0.5f + 0.5f, n.y * 0.5f + 0.5f, n.z * 0.5f + 0.5f, 1f);
+                }
             }
         }
 
         runtimeSurfaceTexture.SetPixels(pixels);
         runtimeSurfaceTexture.Apply(false, false);
+
+        if (normalPixels != null)
+        {
+            EnsureDetailNormalTexture(textureWidth, textureHeight);
+            runtimeDetailNormalTexture.SetPixels(normalPixels);
+            runtimeDetailNormalTexture.Apply(false, false);
+            runtimePlanetMaterial.SetTexture("_BumpMap", runtimeDetailNormalTexture);
+            runtimePlanetMaterial.EnableKeyword("_NORMALMAP");
+        }
         return runtimeSurfaceTexture;
+    }
+
+    void BuildTerrainMetricMaps(
+        int width,
+        int height,
+        float seaNoise,
+        float slopeStep,
+        float shoreProbeStep,
+        int shoreProbeCount,
+        out float[] landHeightMap,
+        out float[] slopeMap,
+        out float[] shoreMap)
+    {
+        int count = width * height;
+        landHeightMap = new float[count];
+        slopeMap = new float[count];
+        shoreMap = new float[count];
+        float maxLandNoiseRange = Mathf.Max(0.001f, 1f - seaNoise);
+
+        for (int y = 0; y < height; y++)
+        {
+            float v = y / (height - 1f);
+            float phi = v * Mathf.PI;
+            float sinPhi = Mathf.Sin(phi);
+            float cosPhi = Mathf.Cos(phi);
+            int rowOffset = y * width;
+
+            for (int x = 0; x < width; x++)
+            {
+                float u = x / (width - 1f);
+                float theta = u * Mathf.PI * 2f;
+                Vector3 sampleDir = new Vector3(
+                    sinPhi * Mathf.Cos(theta),
+                    cosPhi,
+                    sinPhi * Mathf.Sin(theta));
+                float baseNoise = CalculateNoise(sampleDir);
+                bool isLand = !enableOcean || baseNoise >= seaNoise;
+
+                int idx = rowOffset + x;
+                landHeightMap[idx] = isLand ? Mathf.Clamp01((baseNoise - seaNoise) / maxLandNoiseRange) : 0f;
+                if (!isLand)
+                {
+                    slopeMap[idx] = 0f;
+                    shoreMap[idx] = 0f;
+                    continue;
+                }
+
+                float slope = EstimateSlope(sampleDir, slopeStep);
+                slopeMap[idx] = Mathf.Clamp01(Mathf.InverseLerp(0.001f, 0.04f, slope));
+                shoreMap[idx] = EstimateShoreDistance01(sampleDir, true, seaNoise, shoreProbeStep, shoreProbeCount);
+            }
+        }
+    }
+
+    static float SampleMetricBilinear(float[] metric, int width, int height, float u, float v)
+    {
+        if (metric == null || metric.Length == 0 || width <= 1 || height <= 1)
+        {
+            return 0f;
+        }
+
+        float xf = Mathf.Repeat(u, 1f) * (width - 1f);
+        float yf = Mathf.Clamp01(v) * (height - 1f);
+        int x0 = Mathf.FloorToInt(xf);
+        int y0 = Mathf.FloorToInt(yf);
+        int x1 = (x0 + 1) % width;
+        int y1 = Mathf.Min(y0 + 1, height - 1);
+        float tx = xf - x0;
+        float ty = yf - y0;
+
+        float v00 = metric[y0 * width + x0];
+        float v10 = metric[y0 * width + x1];
+        float v01 = metric[y1 * width + x0];
+        float v11 = metric[y1 * width + x1];
+        float a = Mathf.Lerp(v00, v10, tx);
+        float b = Mathf.Lerp(v01, v11, tx);
+        return Mathf.Lerp(a, b, ty);
+    }
+
+    void EnsureDetailNormalTexture(int width, int height)
+    {
+        if (runtimeDetailNormalTexture != null && runtimeDetailNormalTexture.width == width && runtimeDetailNormalTexture.height == height)
+        {
+            return;
+        }
+
+        if (runtimeDetailNormalTexture != null)
+        {
+            Destroy(runtimeDetailNormalTexture);
+        }
+
+        runtimeDetailNormalTexture = new Texture2D(width, height, TextureFormat.RGBA32, false, true)
+        {
+            name = "Planet Surface Detail Normal",
+            wrapMode = TextureWrapMode.Repeat,
+            filterMode = FilterMode.Bilinear
+        };
+    }
+
+    float EstimateSlope(Vector3 sampleDir, float stepRadians)
+    {
+        BuildTangentBasis(sampleDir, out Vector3 tangent, out Vector3 bitangent);
+        Vector3 sampleXp = (sampleDir + tangent * stepRadians).normalized;
+        Vector3 sampleXm = (sampleDir - tangent * stepRadians).normalized;
+        Vector3 sampleYp = (sampleDir + bitangent * stepRadians).normalized;
+        Vector3 sampleYm = (sampleDir - bitangent * stepRadians).normalized;
+
+        float rxp = GetSurfaceRadiusFromNoise(CalculateNoise(sampleXp));
+        float rxm = GetSurfaceRadiusFromNoise(CalculateNoise(sampleXm));
+        float ryp = GetSurfaceRadiusFromNoise(CalculateNoise(sampleYp));
+        float rym = GetSurfaceRadiusFromNoise(CalculateNoise(sampleYm));
+
+        float dx = Mathf.Abs(rxp - rxm) / Mathf.Max(0.0001f, stepRadians * radius);
+        float dy = Mathf.Abs(ryp - rym) / Mathf.Max(0.0001f, stepRadians * radius);
+        return Mathf.Sqrt(dx * dx + dy * dy);
+    }
+
+    float EstimateShoreDistance01(Vector3 sampleDir, bool isLand, float seaNoise, float probeStepRadians, int probeSteps)
+    {
+        BuildTangentBasis(sampleDir, out Vector3 tangent, out Vector3 bitangent);
+        Vector2[] ringDirs =
+        {
+            new Vector2(1f, 0f),
+            new Vector2(-1f, 0f),
+            new Vector2(0f, 1f),
+            new Vector2(0f, -1f),
+            new Vector2(0.707f, 0.707f),
+            new Vector2(-0.707f, 0.707f),
+            new Vector2(0.707f, -0.707f),
+            new Vector2(-0.707f, -0.707f)
+        };
+
+        float closest = probeStepRadians * probeSteps;
+        for (int d = 0; d < ringDirs.Length; d++)
+        {
+            Vector3 dirStep = tangent * ringDirs[d].x + bitangent * ringDirs[d].y;
+            for (int s = 1; s <= probeSteps; s++)
+            {
+                float distance = s * probeStepRadians;
+                Vector3 probeDir = (sampleDir + dirStep * distance).normalized;
+                float noise = CalculateNoise(probeDir);
+                bool probeLand = !enableOcean || noise >= seaNoise;
+                if (probeLand != isLand)
+                {
+                    closest = Mathf.Min(closest, distance);
+                    break;
+                }
+            }
+        }
+
+        return Mathf.Clamp01(closest / Mathf.Max(0.0001f, probeStepRadians * probeSteps));
+    }
+
+    static void BuildTangentBasis(Vector3 n, out Vector3 tangent, out Vector3 bitangent)
+    {
+        Vector3 up = Mathf.Abs(n.y) < 0.95f ? Vector3.up : Vector3.right;
+        tangent = Vector3.Cross(up, n).normalized;
+        bitangent = Vector3.Cross(n, tangent).normalized;
+    }
+
+    static Vector3 TangentOffset(Vector3 n, float x, float y)
+    {
+        BuildTangentBasis(n, out Vector3 tangent, out Vector3 bitangent);
+        return tangent * x + bitangent * y;
+    }
+
+    static float Smooth01(float min, float max, float value, float softness)
+    {
+        if (max <= min)
+        {
+            return value >= max ? 1f : 0f;
+        }
+
+        float t = Mathf.InverseLerp(min - softness, max + softness, value);
+        return Mathf.SmoothStep(0f, 1f, t);
     }
 
     Color BlendRockPalette(float blend)
@@ -468,6 +748,12 @@ public class PlanetGenerator : MonoBehaviour
         {
             Destroy(runtimeSurfaceTexture);
             runtimeSurfaceTexture = null;
+        }
+
+        if (runtimeDetailNormalTexture != null)
+        {
+            Destroy(runtimeDetailNormalTexture);
+            runtimeDetailNormalTexture = null;
         }
     }
 
