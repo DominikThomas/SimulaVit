@@ -669,12 +669,20 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   replicatorManager: {fileID: 0}
-  resolution: 50
+  resolution: 100
   radius: 8
   planetMaterial: {fileID: 2100000, guid: 6d8bf80d9b47fd04e91f3fd2ba433978, type: 2}
-  noiseMagnitude: 0.5
+  darkRockColor: {r: 0.2924528, g: 0.15304466, b: 0.017933436, a: 1}
+  midRockColor: {r: 0.3529412, g: 0.31122887, b: 0.2901961, a: 1}
+  lightRockColor: {r: 0.59607846, g: 0.57464886, b: 0.5411765, a: 1}
+  largeNoiseScale: 1.6
+  mediumNoiseScale: 4.8
+  detailNoiseScale: 15
+  contrast: 4
+  crackDarkening: 0.6
+  noiseMagnitude: 0.15
   noiseRoughness: 1
-  numLayers: 4
+  numLayers: 16
   persistence: 0.5
   noiseOffset: {x: 1, y: 1, z: 1}
   enableOcean: 1
@@ -1361,6 +1369,10 @@ MonoBehaviour:
   debugPhotosynthDarkAnoxicEnergyGeneratedPerTick: 0
   debugPhotosynthDarkAnoxicCO2ReleasedPerTick: 0
   debugPhotosynthDarkAnoxicH2ReleasedPerTick: 0
+  debugCurrentSteeringRecomputeInterval: 1
+  debugPredatorsForceFullRateSteering: 0
+  debugActiveSteeringForceFullRate: 0
+  debugScentPredationActiveForSteering: 0
   simulationPipeline: {fileID: 0}
   enableRendering: 1
 --- !u!4 &1064713444

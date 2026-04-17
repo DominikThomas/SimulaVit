@@ -881,21 +881,28 @@ public class PlanetGenerator : MonoBehaviour
         float noiseValue = 0;
         float frequency = noiseRoughness;
         float amplitude = 1;
-        float maxPossibleHeight = 0;
+        float weight = 1; // For advanced effects (e.g. ridged noise)
 
         for (int i = 0; i < numLayers; i++)
         {
+            // Sample 3D noise using the current frequency and offset
             Vector3 samplePoint = pointOnSphere * frequency + noiseOffset;
-            float singleLayerNoise = SimpleNoise.Evaluate(samplePoint);
-            singleLayerNoise = (singleLayerNoise + 1) * 0.5f;
+            float v = SimpleNoise.Evaluate(samplePoint);
 
-            noiseValue += singleLayerNoise * amplitude;
-            maxPossibleHeight += amplitude;
+            // Convert noise from range (-1, 1) to (0, 1)
+            //v = (v + 1f) * 0.5f;
+            v = 1.0f - Mathf.Abs(v); // Creates sharp ridges
+            v *= v; // Further accentuates valleys and peaks
 
-            amplitude *= persistence;
-            frequency *= 2;
+            // Add to the total value using the current amplitude
+            noiseValue += v * amplitude;
+
+            // Update parameters for the next layer (octave)
+            amplitude *= persistence; // Each next layer has less influence (e.g. 0.5)
+            frequency *= 2.0f;        // Each next layer has more detail (e.g. 2.0)
         }
 
-        return maxPossibleHeight > 0f ? noiseValue / maxPossibleHeight : 0f;
+        // Return the accumulated value
+        return noiseValue;
     }
 }
