@@ -778,14 +778,12 @@ public class PlanetResourceMap : MonoBehaviour
         EnsureScentArrays(cellCount);
 
         int ventCount = 0;
-        float oceanRadius = planetGenerator.GetOceanRadius();
         for (int cell = 0; cell < cellCount; cell++)
         {
             Vector3 dir = CellIndexToDirection(cell, resolution);
             cellDirections[cell] = dir;
 
-            float surfaceRadius = planetGenerator.GetSurfaceRadius(dir);
-            oceanMask[cell] = surfaceRadius < oceanRadius ? (byte)1 : (byte)0;
+            oceanMask[cell] = planetGenerator.IsOceanCell(cell) ? (byte)1 : (byte)0;
 
             co2[cell] = baselineCO2;
             o2[cell] = baselineO2;
@@ -1699,12 +1697,6 @@ public class PlanetResourceMap : MonoBehaviour
 
         bool applyH2SCap = ventH2SMax > 0f;
         bool applyH2Cap = ventH2Max > 0f;
-        float oceanRadius = 0f;
-        if (ventsOnlyBelowSeaLevel && planetGenerator != null)
-        {
-            oceanRadius = planetGenerator.GetOceanRadius();
-        }
-
         for (int i = 0; i < ventCells.Length; i++)
         {
             int cell = ventCells[i];
@@ -1716,9 +1708,7 @@ public class PlanetResourceMap : MonoBehaviour
                     continue;
                 }
 
-                Vector3 dir = cellDirections[cell];
-                float surfaceRadius = planetGenerator.GetSurfaceRadius(dir);
-                if (surfaceRadius >= oceanRadius)
+                if (!planetGenerator.IsOceanCell(cell))
                 {
                     continue;
                 }
