@@ -1,10 +1,11 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// Transitional struct-of-arrays runtime state for hot per-agent simulation data.
-/// In migration step 1, Replicator objects remain the authoritative source of truth.
-/// This state is rebuilt from Replicator objects per simulation tick and synced back after updates.
+/// ReplicatorPopulationState is authoritative for hot per-agent simulation fields.
+/// Replicator objects are companion/reference objects, not hot-path authorities.
+/// Do not reintroduce broad SyncFromAgents/SyncToAgents in hot paths.
 /// </summary>
 public class ReplicatorPopulationState
 {
@@ -53,170 +54,133 @@ public class ReplicatorPopulationState
     public int[] CurrentOceanLayerIndex = new int[0];
     public int[] PreferredOceanLayerIndex = new int[0];
 
-    public void SyncMovementFieldsFromAgents(List<Replicator> agents)
+    public void EnsureMatchesAgentCount(List<Replicator> agents)
     {
-        Count = agents.Count;
-        EnsureCapacity(Count);
-
-        for (int i = 0; i < Count; i++)
+        if (agents == null)
         {
-            Replicator a = agents[i];
-            Position[i] = a.position;
-            SpeedFactor[i] = a.speedFactor;
-            Locomotion[i] = a.locomotion;
-            CurrentOceanLayerIndex[i] = a.currentOceanLayerIndex;
-            PreferredOceanLayerIndex[i] = a.preferredOceanLayerIndex;
+            Count = 0;
+            return;
         }
+
+        int required = agents.Count;
+        EnsureCapacity(required);
+
+        if (Count < required)
+        {
+            for (int i = Count; i < required; i++)
+            {
+                CopyFromReplicatorData(i, agents[i]);
+            }
+        }
+
+        Count = required;
     }
 
-    public void SyncFromAgents(List<Replicator> agents)
+    public void AddAgentFromReplicatorData(Replicator agent)
     {
-        Count = agents.Count;
-        EnsureCapacity(Count);
-
-        for (int i = 0; i < Count; i++)
-        {
-            Replicator a = agents[i];
-            Position[i] = a.position;
-            Rotation[i] = a.rotation;
-            CurrentDirection[i] = a.currentDirection;
-            MoveDirection[i] = a.moveDirection;
-            DesiredMoveDirection[i] = a.desiredMoveDir;
-            Velocity[i] = a.velocity;
-            Energy[i] = a.energy;
-            Age[i] = a.age;
-            OrganicCStore[i] = a.organicCStore;
-            SpeedFactor[i] = a.speedFactor;
-            AttackCooldown[i] = a.attackCooldown;
-            FearCooldown[i] = a.fearCooldown;
-            Metabolism[i] = a.metabolism;
-            Locomotion[i] = a.locomotion;
-            Alive[i] = true;
-            OptimalTempMin[i] = a.optimalTempMin;
-            OptimalTempMax[i] = a.optimalTempMax;
-            LethalTempMargin[i] = a.lethalTempMargin;
-            StarveCo2Seconds[i] = a.starveCo2Seconds;
-            StarveH2sSeconds[i] = a.starveH2sSeconds;
-            StarveH2Seconds[i] = a.starveH2Seconds;
-            StarveLightSeconds[i] = a.starveLightSeconds;
-            StarveOrganicCFoodSeconds[i] = a.starveOrganicCFoodSeconds;
-            StarveO2Seconds[i] = a.starveO2Seconds;
-            StarveCh4Seconds[i] = a.starveCh4Seconds;
-            StarveStoredCSeconds[i] = a.starveStoredCSeconds;
-            O2ToxicSeconds[i] = a.o2ToxicSeconds;
-            O2ComfortMax[i] = a.o2ComfortMax;
-            O2StressMax[i] = a.o2StressMax;
-            CanReplicate[i] = a.canReplicate;
-            LastHabitatValue[i] = a.lastHabitatValue;
-            TumbleProbability[i] = a.tumbleProbability;
-            NextSenseTime[i] = a.nextSenseTime;
-            MovementSeed[i] = a.movementSeed;
-            Size[i] = a.size;
-            Color[i] = a.color;
-            CurrentOceanLayerIndex[i] = a.currentOceanLayerIndex;
-            PreferredOceanLayerIndex[i] = a.preferredOceanLayerIndex;
-        }
+        EnsureCapacity(Count + 1);
+        CopyFromReplicatorData(Count, agent);
+        Count++;
     }
 
-    public void SyncSteeringFieldsFromAgents(List<Replicator> agents)
+    public void RemoveAgentAtSwapBack(int index)
     {
-        Count = agents.Count;
-        EnsureCapacity(Count);
-
-        for (int i = 0; i < Count; i++)
+        if (index < 0 || index >= Count)
         {
-            Replicator a = agents[i];
-            Position[i] = a.position;
-            CurrentDirection[i] = a.currentDirection;
-            MoveDirection[i] = a.moveDirection;
-            DesiredMoveDirection[i] = a.desiredMoveDir;
-            SpeedFactor[i] = a.speedFactor;
-            Locomotion[i] = a.locomotion;
-            Metabolism[i] = a.metabolism;
-            OptimalTempMin[i] = a.optimalTempMin;
-            OptimalTempMax[i] = a.optimalTempMax;
-            LethalTempMargin[i] = a.lethalTempMargin;
-            LastHabitatValue[i] = a.lastHabitatValue;
-            TumbleProbability[i] = a.tumbleProbability;
-            NextSenseTime[i] = a.nextSenseTime;
-            MovementSeed[i] = a.movementSeed;
-            CurrentOceanLayerIndex[i] = a.currentOceanLayerIndex;
-            PreferredOceanLayerIndex[i] = a.preferredOceanLayerIndex;
+            return;
         }
+
+        int last = Count - 1;
+        if (index != last)
+        {
+            CopyEntry(last, index);
+        }
+
+        ClearEntry(last);
+        Count = last;
     }
 
-    public void SyncLifecycleFieldsFromAgents(List<Replicator> agents)
+    public void CopyToRenderState(int index, Replicator agent)
     {
-        Count = agents.Count;
-        EnsureCapacity(Count);
-
-        for (int i = 0; i < Count; i++)
+        if (agent == null || index < 0 || index >= Count)
         {
-            Replicator a = agents[i];
-            Age[i] = a.age;
+            return;
         }
+
+        agent.position = Position[index];
+        agent.rotation = Rotation[index];
+        agent.currentDirection = CurrentDirection[index];
+        agent.moveDirection = MoveDirection[index];
+        agent.size = Size[index];
+        agent.color = Color[index];
     }
 
-    public void SyncSteeringFieldsToAgents(List<Replicator> agents)
+    public void CopyToDebugState(int index, Replicator agent)
     {
-        int count = Mathf.Min(Count, agents.Count);
-        for (int i = 0; i < count; i++)
+        if (agent == null || index < 0 || index >= Count)
         {
-            Replicator agent = agents[i];
-            agent.moveDirection = MoveDirection[i];
-            agent.desiredMoveDir = DesiredMoveDirection[i];
-            agent.lastHabitatValue = LastHabitatValue[i];
-            agent.tumbleProbability = TumbleProbability[i];
-            agent.nextSenseTime = NextSenseTime[i];
-            agent.currentOceanLayerIndex = CurrentOceanLayerIndex[i];
-            agent.preferredOceanLayerIndex = PreferredOceanLayerIndex[i];
+            return;
         }
-    }
 
-    public void SyncToAgents(List<Replicator> agents)
-    {
-        int count = Mathf.Min(Count, agents.Count);
-        for (int i = 0; i < count; i++)
-        {
-            CopyEntryToAgent(i, agents[i]);
-        }
-    }
-
-    public void SyncPredationFieldsFromAgents(List<Replicator> agents)
-    {
-        Count = agents.Count;
-        EnsureCapacity(Count);
-
-        for (int i = 0; i < Count; i++)
-        {
-            Replicator a = agents[i];
-            Position[i] = a.position;
-            Metabolism[i] = a.metabolism;
-            Energy[i] = a.energy;
-            OrganicCStore[i] = a.organicCStore;
-            AttackCooldown[i] = a.attackCooldown;
-        }
-    }
-
-    public void SyncPredationFieldsToAgents(List<Replicator> agents)
-    {
-        int count = Mathf.Min(Count, agents.Count);
-        for (int i = 0; i < count; i++)
-        {
-            CopyPredationEntryToAgent(i, agents[i]);
-        }
+        agent.position = Position[index];
+        agent.currentDirection = CurrentDirection[index];
+        agent.metabolism = Metabolism[index];
+        agent.locomotion = Locomotion[index];
+        agent.energy = Energy[index];
+        agent.organicCStore = OrganicCStore[index];
+        agent.age = Age[index];
+        agent.attackCooldown = AttackCooldown[index];
+        agent.starveCo2Seconds = StarveCo2Seconds[index];
+        agent.starveH2sSeconds = StarveH2sSeconds[index];
+        agent.starveH2Seconds = StarveH2Seconds[index];
+        agent.starveLightSeconds = StarveLightSeconds[index];
+        agent.starveOrganicCFoodSeconds = StarveOrganicCFoodSeconds[index];
+        agent.starveO2Seconds = StarveO2Seconds[index];
+        agent.starveCh4Seconds = StarveCh4Seconds[index];
+        agent.starveStoredCSeconds = StarveStoredCSeconds[index];
+        agent.o2ToxicSeconds = O2ToxicSeconds[index];
+        agent.currentOceanLayerIndex = CurrentOceanLayerIndex[index];
+        agent.preferredOceanLayerIndex = PreferredOceanLayerIndex[index];
+        agent.color = Color[index];
     }
 
     public void CopyPredationEntryToAgent(int index, Replicator agent)
     {
+        if (agent == null || index < 0 || index >= Count)
+        {
+            return;
+        }
+
         agent.energy = Energy[index];
         agent.organicCStore = OrganicCStore[index];
         agent.attackCooldown = AttackCooldown[index];
     }
 
-    public void CopyEntryToAgent(int index, Replicator agent)
+    public void CopySteeringEntryToAgent(int index, Replicator agent)
     {
+        if (agent == null || index < 0 || index >= Count)
+        {
+            return;
+        }
+
+        agent.moveDirection = MoveDirection[index];
+        agent.desiredMoveDir = DesiredMoveDirection[index];
+        agent.lastHabitatValue = LastHabitatValue[index];
+        agent.tumbleProbability = TumbleProbability[index];
+        agent.nextSenseTime = NextSenseTime[index];
+        agent.currentOceanLayerIndex = CurrentOceanLayerIndex[index];
+        agent.preferredOceanLayerIndex = PreferredOceanLayerIndex[index];
+    }
+
+    public void CopyHotStateToAgent(int index, Replicator agent)
+    {
+        if (agent == null || index < 0 || index >= Count)
+        {
+            return;
+        }
+
         agent.position = Position[index];
+        agent.rotation = Rotation[index];
         agent.currentDirection = CurrentDirection[index];
         agent.moveDirection = MoveDirection[index];
         agent.desiredMoveDir = DesiredMoveDirection[index];
@@ -244,6 +208,131 @@ public class ReplicatorPopulationState
         agent.nextSenseTime = NextSenseTime[index];
         agent.currentOceanLayerIndex = CurrentOceanLayerIndex[index];
         agent.preferredOceanLayerIndex = PreferredOceanLayerIndex[index];
+        agent.color = Color[index];
+        agent.size = Size[index];
+    }
+
+    // Compatibility-only broad mirror. Do not use in hot simulation systems.
+    public void SyncFromAgents(List<Replicator> agents)
+    {
+        EnsureMatchesAgentCount(agents);
+        for (int i = 0; i < Count; i++)
+        {
+            CopyFromReplicatorData(i, agents[i]);
+        }
+    }
+
+    // Compatibility-only broad mirror. Do not use in hot simulation systems.
+    public void SyncToAgents(List<Replicator> agents)
+    {
+        int count = Mathf.Min(Count, agents.Count);
+        for (int i = 0; i < count; i++)
+        {
+            CopyHotStateToAgent(i, agents[i]);
+        }
+    }
+
+    private void CopyFromReplicatorData(int index, Replicator agent)
+    {
+        Position[index] = agent.position;
+        Rotation[index] = agent.rotation;
+        CurrentDirection[index] = agent.currentDirection;
+        MoveDirection[index] = agent.moveDirection;
+        DesiredMoveDirection[index] = agent.desiredMoveDir;
+        Velocity[index] = agent.velocity;
+        Energy[index] = agent.energy;
+        Age[index] = agent.age;
+        OrganicCStore[index] = agent.organicCStore;
+        SpeedFactor[index] = agent.speedFactor;
+        AttackCooldown[index] = agent.attackCooldown;
+        FearCooldown[index] = agent.fearCooldown;
+        Metabolism[index] = agent.metabolism;
+        Locomotion[index] = agent.locomotion;
+        Alive[index] = true;
+        OptimalTempMin[index] = agent.optimalTempMin;
+        OptimalTempMax[index] = agent.optimalTempMax;
+        LethalTempMargin[index] = agent.lethalTempMargin;
+        StarveCo2Seconds[index] = agent.starveCo2Seconds;
+        StarveH2sSeconds[index] = agent.starveH2sSeconds;
+        StarveH2Seconds[index] = agent.starveH2Seconds;
+        StarveLightSeconds[index] = agent.starveLightSeconds;
+        StarveOrganicCFoodSeconds[index] = agent.starveOrganicCFoodSeconds;
+        StarveO2Seconds[index] = agent.starveO2Seconds;
+        StarveCh4Seconds[index] = agent.starveCh4Seconds;
+        StarveStoredCSeconds[index] = agent.starveStoredCSeconds;
+        O2ToxicSeconds[index] = agent.o2ToxicSeconds;
+        O2ComfortMax[index] = agent.o2ComfortMax;
+        O2StressMax[index] = agent.o2StressMax;
+        CanReplicate[index] = agent.canReplicate;
+        LastHabitatValue[index] = agent.lastHabitatValue;
+        TumbleProbability[index] = agent.tumbleProbability;
+        NextSenseTime[index] = agent.nextSenseTime;
+        MovementSeed[index] = agent.movementSeed;
+        Size[index] = agent.size;
+        Color[index] = agent.color;
+        CurrentOceanLayerIndex[index] = agent.currentOceanLayerIndex;
+        PreferredOceanLayerIndex[index] = agent.preferredOceanLayerIndex;
+    }
+
+    private void CopyEntry(int srcIndex, int dstIndex)
+    {
+        Position[dstIndex] = Position[srcIndex];
+        Rotation[dstIndex] = Rotation[srcIndex];
+        CurrentDirection[dstIndex] = CurrentDirection[srcIndex];
+        MoveDirection[dstIndex] = MoveDirection[srcIndex];
+        DesiredMoveDirection[dstIndex] = DesiredMoveDirection[srcIndex];
+        Velocity[dstIndex] = Velocity[srcIndex];
+        Energy[dstIndex] = Energy[srcIndex];
+        Age[dstIndex] = Age[srcIndex];
+        OrganicCStore[dstIndex] = OrganicCStore[srcIndex];
+        SpeedFactor[dstIndex] = SpeedFactor[srcIndex];
+        AttackCooldown[dstIndex] = AttackCooldown[srcIndex];
+        FearCooldown[dstIndex] = FearCooldown[srcIndex];
+        Alive[dstIndex] = Alive[srcIndex];
+        Metabolism[dstIndex] = Metabolism[srcIndex];
+        Locomotion[dstIndex] = Locomotion[srcIndex];
+        OptimalTempMin[dstIndex] = OptimalTempMin[srcIndex];
+        OptimalTempMax[dstIndex] = OptimalTempMax[srcIndex];
+        LethalTempMargin[dstIndex] = LethalTempMargin[srcIndex];
+        StarveCo2Seconds[dstIndex] = StarveCo2Seconds[srcIndex];
+        StarveH2sSeconds[dstIndex] = StarveH2sSeconds[srcIndex];
+        StarveH2Seconds[dstIndex] = StarveH2Seconds[srcIndex];
+        StarveLightSeconds[dstIndex] = StarveLightSeconds[srcIndex];
+        StarveOrganicCFoodSeconds[dstIndex] = StarveOrganicCFoodSeconds[srcIndex];
+        StarveO2Seconds[dstIndex] = StarveO2Seconds[srcIndex];
+        StarveCh4Seconds[dstIndex] = StarveCh4Seconds[srcIndex];
+        StarveStoredCSeconds[dstIndex] = StarveStoredCSeconds[srcIndex];
+        O2ToxicSeconds[dstIndex] = O2ToxicSeconds[srcIndex];
+        O2ComfortMax[dstIndex] = O2ComfortMax[srcIndex];
+        O2StressMax[dstIndex] = O2StressMax[srcIndex];
+        CanReplicate[dstIndex] = CanReplicate[srcIndex];
+        LastHabitatValue[dstIndex] = LastHabitatValue[srcIndex];
+        TumbleProbability[dstIndex] = TumbleProbability[srcIndex];
+        NextSenseTime[dstIndex] = NextSenseTime[srcIndex];
+        MovementSeed[dstIndex] = MovementSeed[srcIndex];
+        Size[dstIndex] = Size[srcIndex];
+        Color[dstIndex] = Color[srcIndex];
+        CurrentOceanLayerIndex[dstIndex] = CurrentOceanLayerIndex[srcIndex];
+        PreferredOceanLayerIndex[dstIndex] = PreferredOceanLayerIndex[srcIndex];
+    }
+
+    private void ClearEntry(int index)
+    {
+        Position[index] = default;
+        Rotation[index] = default;
+        CurrentDirection[index] = default;
+        MoveDirection[index] = default;
+        DesiredMoveDirection[index] = default;
+        Velocity[index] = default;
+        Energy[index] = 0f;
+        Age[index] = 0f;
+        OrganicCStore[index] = 0f;
+        SpeedFactor[index] = 0f;
+        AttackCooldown[index] = 0f;
+        FearCooldown[index] = 0f;
+        Alive[index] = false;
+        Metabolism[index] = default;
+        Locomotion[index] = default;
     }
 
     void EnsureCapacity(int required)
@@ -254,43 +343,43 @@ public class ReplicatorPopulationState
         }
 
         int newCapacity = Mathf.NextPowerOfTwo(Mathf.Max(4, required));
-        Position = new Vector3[newCapacity];
-        Rotation = new Quaternion[newCapacity];
-        CurrentDirection = new Vector3[newCapacity];
-        MoveDirection = new Vector3[newCapacity];
-        DesiredMoveDirection = new Vector3[newCapacity];
-        Velocity = new Vector3[newCapacity];
-        Energy = new float[newCapacity];
-        Age = new float[newCapacity];
-        OrganicCStore = new float[newCapacity];
-        SpeedFactor = new float[newCapacity];
-        AttackCooldown = new float[newCapacity];
-        FearCooldown = new float[newCapacity];
-        Alive = new bool[newCapacity];
-        Metabolism = new MetabolismType[newCapacity];
-        Locomotion = new LocomotionType[newCapacity];
-        OptimalTempMin = new float[newCapacity];
-        OptimalTempMax = new float[newCapacity];
-        LethalTempMargin = new float[newCapacity];
-        StarveCo2Seconds = new float[newCapacity];
-        StarveH2sSeconds = new float[newCapacity];
-        StarveH2Seconds = new float[newCapacity];
-        StarveLightSeconds = new float[newCapacity];
-        StarveOrganicCFoodSeconds = new float[newCapacity];
-        StarveO2Seconds = new float[newCapacity];
-        StarveCh4Seconds = new float[newCapacity];
-        StarveStoredCSeconds = new float[newCapacity];
-        O2ToxicSeconds = new float[newCapacity];
-        O2ComfortMax = new float[newCapacity];
-        O2StressMax = new float[newCapacity];
-        CanReplicate = new bool[newCapacity];
-        LastHabitatValue = new float[newCapacity];
-        TumbleProbability = new float[newCapacity];
-        NextSenseTime = new float[newCapacity];
-        MovementSeed = new float[newCapacity];
-        Size = new float[newCapacity];
-        Color = new Color[newCapacity];
-        CurrentOceanLayerIndex = new int[newCapacity];
-        PreferredOceanLayerIndex = new int[newCapacity];
+        Array.Resize(ref Position, newCapacity);
+        Array.Resize(ref Rotation, newCapacity);
+        Array.Resize(ref CurrentDirection, newCapacity);
+        Array.Resize(ref MoveDirection, newCapacity);
+        Array.Resize(ref DesiredMoveDirection, newCapacity);
+        Array.Resize(ref Velocity, newCapacity);
+        Array.Resize(ref Energy, newCapacity);
+        Array.Resize(ref Age, newCapacity);
+        Array.Resize(ref OrganicCStore, newCapacity);
+        Array.Resize(ref SpeedFactor, newCapacity);
+        Array.Resize(ref AttackCooldown, newCapacity);
+        Array.Resize(ref FearCooldown, newCapacity);
+        Array.Resize(ref Alive, newCapacity);
+        Array.Resize(ref Metabolism, newCapacity);
+        Array.Resize(ref Locomotion, newCapacity);
+        Array.Resize(ref OptimalTempMin, newCapacity);
+        Array.Resize(ref OptimalTempMax, newCapacity);
+        Array.Resize(ref LethalTempMargin, newCapacity);
+        Array.Resize(ref StarveCo2Seconds, newCapacity);
+        Array.Resize(ref StarveH2sSeconds, newCapacity);
+        Array.Resize(ref StarveH2Seconds, newCapacity);
+        Array.Resize(ref StarveLightSeconds, newCapacity);
+        Array.Resize(ref StarveOrganicCFoodSeconds, newCapacity);
+        Array.Resize(ref StarveO2Seconds, newCapacity);
+        Array.Resize(ref StarveCh4Seconds, newCapacity);
+        Array.Resize(ref StarveStoredCSeconds, newCapacity);
+        Array.Resize(ref O2ToxicSeconds, newCapacity);
+        Array.Resize(ref O2ComfortMax, newCapacity);
+        Array.Resize(ref O2StressMax, newCapacity);
+        Array.Resize(ref CanReplicate, newCapacity);
+        Array.Resize(ref LastHabitatValue, newCapacity);
+        Array.Resize(ref TumbleProbability, newCapacity);
+        Array.Resize(ref NextSenseTime, newCapacity);
+        Array.Resize(ref MovementSeed, newCapacity);
+        Array.Resize(ref Size, newCapacity);
+        Array.Resize(ref Color, newCapacity);
+        Array.Resize(ref CurrentOceanLayerIndex, newCapacity);
+        Array.Resize(ref PreferredOceanLayerIndex, newCapacity);
     }
 }

@@ -5,9 +5,7 @@ using Unity.Profiling;
 
 public class ReplicatorMetabolismSystem
 {
-    private static readonly ProfilerMarker SyncFromAgentsMarker = new ProfilerMarker("ReplicatorPopulationState.SyncFromAgents");
     private static readonly ProfilerMarker MetabolismHotLoopMarker = new ProfilerMarker("ReplicatorMetabolismSystem.HotLoop");
-    private static readonly ProfilerMarker SyncToAgentsMarker = new ProfilerMarker("ReplicatorPopulationState.SyncToAgents");
     private static readonly ProfilerMarker RemoveDeadAgentsMarker = new ProfilerMarker("ReplicatorMetabolismSystem.RemoveDeadAgents");
 
     public struct Settings
@@ -88,7 +86,7 @@ public class ReplicatorMetabolismSystem
         PlanetResourceMap planetResourceMap,
         Settings settings,
         float dtTick,
-        Func<Replicator, DeathCause> resolveEnergyDeathCause,
+        Func<int, DeathCause> resolveEnergyDeathCauseAtIndex,
         Action<Replicator> depositDeathOrganicC,
         Action<MetabolismType, DeathCause> registerDeathCause,
         out DebugSnapshot debugSnapshot)
@@ -106,10 +104,7 @@ public class ReplicatorMetabolismSystem
 
         debugSnapshot = default;
 
-        using (SyncFromAgentsMarker.Auto())
-        {
-            populationState.SyncFromAgents(agents);
-        }
+        populationState.EnsureMatchesAgentCount(agents);
 
         using (MetabolismHotLoopMarker.Auto())
         for (int i = populationState.Count - 1; i >= 0; i--)
@@ -587,11 +582,6 @@ public class ReplicatorMetabolismSystem
             }
         }
 
-        using (SyncToAgentsMarker.Auto())
-        {
-            populationState.SyncToAgents(agents);
-        }
-
         using (RemoveDeadAgentsMarker.Auto())
         {
             for (int dead = 0; dead < deadIndices.Count; dead++)
@@ -606,14 +596,32 @@ public class ReplicatorMetabolismSystem
                 DeathCause cause = deadCauses[dead];
                 if (cause == DeathCause.EnergyDepletion)
                 {
-                    cause = resolveEnergyDeathCause(agent);
+                    cause = resolveEnergyDeathCauseAtIndex(index);
                 }
 
-                registerDeathCause(agent.metabolism, cause);
+                populationState.CopyToDebugState(index, agent);
+                registerDeathCause(populationState.Metabolism[index], cause);
                 depositDeathOrganicC(agent);
-                agents.RemoveAt(index);
+                RemoveAgentAtSwapBack(agents, populationState, index);
             }
         }
+    }
+
+    private static void RemoveAgentAtSwapBack(List<Replicator> agents, ReplicatorPopulationState populationState, int index)
+    {
+        int last = agents.Count - 1;
+        if (index < 0 || index > last)
+        {
+            return;
+        }
+
+        if (index != last)
+        {
+            agents[index] = agents[last];
+        }
+
+        agents.RemoveAt(last);
+        populationState.RemoveAgentAtSwapBack(index);
     }
 
     private static void ProcessPhotosynthesisMetabolism(
