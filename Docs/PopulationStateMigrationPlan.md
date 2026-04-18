@@ -129,3 +129,14 @@ Use marker share of the simulation frame (not absolute ms alone) as the decision
 - **HotLoop heavy** -> do **Jobs/Burst**.
 - **Simulation light but frame heavy** -> do **render optimization**.
 - **Spiky remove/spawn costs** -> do **lifecycle ownership cleanup**.
+
+## Layer-awareness extension (new)
+
+With introduction of ocean layers, agent state must include:
+
+- `layerIndex`
+- `preferredLayerIndex`
+
+All systems operating on spatial locality (movement, steering, predation) must consider (cell, layer) instead of cell alone.
+
+This does not change the migration strategy, only extends the SoA schema.
