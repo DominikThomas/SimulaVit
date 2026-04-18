@@ -84,7 +84,6 @@ public class ReplicatorMovementSystem
             DeltaTime = deltaTime,
             MoveSpeed = settings.MoveSpeed,
             TurnSpeed = settings.TurnSpeed,
-            Radius = planetGenerator.radius,
             TimeVal = timeValue,
             AmoebaTurnRate = Mathf.Max(0f, settings.AmoeboidTurnRate),
             AmoebaMoveSpeedMultiplier = Mathf.Max(0f, settings.AmoeboidMoveSpeedMultiplier),
@@ -92,14 +91,7 @@ public class ReplicatorMovementSystem
             FlagellumMoveSpeedMultiplier = Mathf.Max(0f, settings.FlagellumMoveSpeedMultiplier),
             FlagellumDriftSuppression = Mathf.Clamp01(settings.FlagellumDriftSuppression),
             AnchoredDriftMultiplier = settings.AnchoredDriftMultiplier,
-            NoiseMagnitude = planetGenerator.noiseMagnitude,
-            NoiseRoughness = planetGenerator.noiseRoughness,
-            NoiseOffset = planetGenerator.noiseOffset,
-            NumLayers = planetGenerator.numLayers,
-            Persistence = planetGenerator.persistence,
-            OceanThreshold = planetGenerator.OceanThresholdNoise,
-            OceanDepth = planetGenerator.oceanDepth,
-            OceanEnabled = planetGenerator.OceanEnabled
+            SurfaceQueries = planetGenerator.GetSurfaceQueryParameters()
         };
 
         JobHandle handle = job.Schedule(count, 32);
@@ -168,7 +160,6 @@ public class ReplicatorMovementSystem
         public float DeltaTime;
         public float MoveSpeed;
         public float TurnSpeed;
-        public float Radius;
         public float TimeVal;
         public float AmoebaTurnRate;
         public float AmoebaMoveSpeedMultiplier;
@@ -176,14 +167,7 @@ public class ReplicatorMovementSystem
         public float FlagellumMoveSpeedMultiplier;
         public float FlagellumDriftSuppression;
         public float AnchoredDriftMultiplier;
-        public float NoiseMagnitude;
-        public float NoiseRoughness;
-        public Vector3 NoiseOffset;
-        public int NumLayers;
-        public float Persistence;
-        public float OceanThreshold;
-        public float OceanDepth;
-        public bool OceanEnabled;
+        public PlanetGenerator.SurfaceQueryParameters SurfaceQueries;
 
         public void Execute(int index)
         {
@@ -235,7 +219,7 @@ public class ReplicatorMovementSystem
 
             bool moveOnlyInSea = MoveOnlyInSea[index];
             float currentNoise = CalculateNoise(surfaceNormal);
-            bool currentlyInSea = !OceanEnabled || currentNoise < OceanThreshold;
+            bool currentlyInSea = !SurfaceQueries.OceanEnabled || PlanetGenerator.IsOceanNoise(currentNoise, SurfaceQueries);
             float speedMultiplier = currentlyInSea ? 1f : SurfaceMoveSpeedMultipliers[index];
             if (isAmoeboid)
             {
@@ -247,13 +231,13 @@ public class ReplicatorMovementSystem
             }
 
             float speedFactor = SpeedFactors[index];
-            Quaternion travelRot = Quaternion.AngleAxis((MoveSpeed * speedMultiplier * speedFactor) * DeltaTime / Radius, Vector3.Cross(surfaceNormal, forward));
+            Quaternion travelRot = Quaternion.AngleAxis((MoveSpeed * speedMultiplier * speedFactor) * DeltaTime / SurfaceQueries.Radius, Vector3.Cross(surfaceNormal, forward));
             Vector3 newDirection = (travelRot * pos).normalized;
 
-            if (OceanEnabled && moveOnlyInSea)
+            if (SurfaceQueries.OceanEnabled && moveOnlyInSea)
             {
                 float nextNoise = CalculateNoise(newDirection);
-                bool nextInSea = nextNoise < OceanThreshold;
+                bool nextInSea = PlanetGenerator.IsOceanNoise(nextNoise, SurfaceQueries);
                 if (!nextInSea)
                 {
                     newDirection = surfaceNormal;
@@ -274,47 +258,14 @@ public class ReplicatorMovementSystem
 
         private float GetSurfaceRadiusFromNoise(float noise)
         {
-            float finalNoise = noise;
-
-            if (OceanEnabled && noise < OceanThreshold)
-            {
-                float t = OceanThreshold > 0f ? Mathf.Clamp01(noise / OceanThreshold) : 0f;
-                float minNoise = OceanThreshold * (1f - OceanDepth);
-                finalNoise = Mathf.Lerp(minNoise, OceanThreshold, t);
-            }
-
-            return Radius * (1f + finalNoise * NoiseMagnitude);
+            // Forward to PlanetGenerator's authoritative terrain/surface query implementation.
+            return PlanetGenerator.GetSurfaceRadiusFromNoise(noise, SurfaceQueries);
         }
 
         public float CalculateNoise(Vector3 pointOnSphere)
         {
-            Vector3 noiseOffset = Vector3.one;
-            float noiseValue = 0;
-            float frequency = NoiseRoughness;
-            float amplitude = 1;
-            float weight = 1; // For advanced effects (e.g. ridged noise)
-
-            for (int i = 0; i < NumLayers; i++)
-            {
-                // Sample 3D noise using the current frequency and offset
-                Vector3 samplePoint = pointOnSphere * frequency + noiseOffset;
-                float v = SimpleNoise.Evaluate(samplePoint);
-
-                // Convert noise from range (-1, 1) to (0, 1)
-                //v = (v + 1f) * 0.5f;
-                v = 1.0f - Mathf.Abs(v); // Creates sharp ridges
-                v *= v; // Further accentuates valleys and peaks
-
-                // Add to the total value using the current amplitude
-                noiseValue += v * amplitude;
-
-                // Update parameters for the next layer (octave)
-                amplitude *= Persistence; // Each next layer has less influence (e.g. 0.5)
-                frequency *= 2;        // Each next layer has more detail (e.g. 2.0)
-            }
-
-            // Return the accumulated value
-            return noiseValue;
+            // Forward to PlanetGenerator's authoritative terrain/noise implementation to avoid logic drift.
+            return PlanetGenerator.CalculateNoise(pointOnSphere, SurfaceQueries);
         }
     }
 }

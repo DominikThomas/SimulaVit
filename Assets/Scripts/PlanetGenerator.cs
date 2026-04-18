@@ -3,6 +3,23 @@ using UnityEngine;
 
 public class PlanetGenerator : MonoBehaviour
 {
+    /// <summary>
+    /// PlanetGenerator is the authoritative source for terrain surface queries.
+    /// Do not duplicate terrain noise/surface logic in movement or simulation systems.
+    /// </summary>
+    public struct SurfaceQueryParameters
+    {
+        public float Radius;
+        public float NoiseMagnitude;
+        public float NoiseRoughness;
+        public Vector3 NoiseOffset;
+        public int NumLayers;
+        public float Persistence;
+        public float OceanThreshold;
+        public float OceanDepth;
+        public bool OceanEnabled;
+    }
+
     [SerializeField] private ReplicatorManager replicatorManager;
     [Range(3, 240)]
     public int resolution = 10;
@@ -511,6 +528,22 @@ public class PlanetGenerator : MonoBehaviour
         return radius * (1f + oceanNoiseThreshold * noiseMagnitude);
     }
 
+    public SurfaceQueryParameters GetSurfaceQueryParameters()
+    {
+        return new SurfaceQueryParameters
+        {
+            Radius = radius,
+            NoiseMagnitude = noiseMagnitude,
+            NoiseRoughness = noiseRoughness,
+            NoiseOffset = noiseOffset,
+            NumLayers = numLayers,
+            Persistence = persistence,
+            OceanThreshold = oceanNoiseThreshold,
+            OceanDepth = oceanDepth,
+            OceanEnabled = enableOcean
+        };
+    }
+
     public float GetSurfaceRadius(Vector3 pointOnSphere)
     {
         if (generatedSurfaceRadiusByCell != null && generatedSurfaceRadiusByCell.Length > 0)
@@ -528,17 +561,39 @@ public class PlanetGenerator : MonoBehaviour
 
     public float GetSurfaceRadiusFromNoise(float noise)
     {
-        float seaNoise = oceanNoiseThreshold;
+        return GetSurfaceRadiusFromNoise(noise, GetSurfaceQueryParameters());
+    }
+
+    public static float GetSurfaceRadiusFromNoise(float noise, in SurfaceQueryParameters query)
+    {
+        float seaNoise = query.OceanThreshold;
         float finalNoise = noise;
 
-        if (enableOcean && noise < seaNoise)
+        if (query.OceanEnabled && noise < seaNoise)
         {
             float t = seaNoise > 0f ? Mathf.Clamp01(noise / seaNoise) : 0f;
-            float minNoise = seaNoise * (1f - oceanDepth);
+            float minNoise = seaNoise * (1f - query.OceanDepth);
             finalNoise = Mathf.Lerp(minNoise, seaNoise, t);
         }
 
-        return radius * (1f + finalNoise * noiseMagnitude);
+        return query.Radius * (1f + finalNoise * query.NoiseMagnitude);
+    }
+
+    public bool IsOceanAtDirection(Vector3 pointOnSphere)
+    {
+        int cellIndex = PlanetGridIndexing.DirectionToCellIndex(pointOnSphere.normalized, resolution);
+        if (oceanMaskByCell != null && cellIndex >= 0 && cellIndex < oceanMaskByCell.Length)
+        {
+            return oceanMaskByCell[cellIndex] != 0;
+        }
+
+        float noise = CalculateNoise(pointOnSphere.normalized);
+        return IsOceanNoise(noise, GetSurfaceQueryParameters());
+    }
+
+    public static bool IsOceanNoise(float noise, in SurfaceQueryParameters query)
+    {
+        return query.OceanEnabled && noise < query.OceanThreshold;
     }
 
     public float GetLocalOceanDepth(Vector3 pointOnSphere)
@@ -878,15 +933,19 @@ public class PlanetGenerator : MonoBehaviour
 
     public float CalculateNoise(Vector3 pointOnSphere)
     {
-        float noiseValue = 0;
-        float frequency = noiseRoughness;
-        float amplitude = 1;
-        float weight = 1; // For advanced effects (e.g. ridged noise)
+        return CalculateNoise(pointOnSphere, GetSurfaceQueryParameters());
+    }
 
-        for (int i = 0; i < numLayers; i++)
+    public static float CalculateNoise(Vector3 pointOnSphere, in SurfaceQueryParameters query)
+    {
+        float noiseValue = 0;
+        float frequency = query.NoiseRoughness;
+        float amplitude = 1;
+
+        for (int i = 0; i < query.NumLayers; i++)
         {
             // Sample 3D noise using the current frequency and offset
-            Vector3 samplePoint = pointOnSphere * frequency + noiseOffset;
+            Vector3 samplePoint = pointOnSphere * frequency + query.NoiseOffset;
             float v = SimpleNoise.Evaluate(samplePoint);
 
             // Convert noise from range (-1, 1) to (0, 1)
@@ -898,7 +957,7 @@ public class PlanetGenerator : MonoBehaviour
             noiseValue += v * amplitude;
 
             // Update parameters for the next layer (octave)
-            amplitude *= persistence; // Each next layer has less influence (e.g. 0.5)
+            amplitude *= query.Persistence; // Each next layer has less influence (e.g. 0.5)
             frequency *= 2.0f;        // Each next layer has more detail (e.g. 2.0)
         }
 

@@ -1055,13 +1055,7 @@ public class ReplicatorManager : MonoBehaviour
 
     bool IsSeaLocation(Vector3 direction)
     {
-        if (!planetGenerator.OceanEnabled)
-        {
-            return false;
-        }
-
-        float noise = planetGenerator.CalculateNoise(direction.normalized);
-        return noise < planetGenerator.OceanThresholdNoise;
+        return planetGenerator != null && planetGenerator.IsOceanAtDirection(direction.normalized);
     }
 
     float NormalizeResource(ResourceType resourceType, int cellIndex, float goodEnoughScale)
@@ -2141,8 +2135,8 @@ public class ReplicatorManager : MonoBehaviour
 
     float GetSurfaceHeight(Vector3 direction)
     {
-        float displacement = planetGenerator.GetSurfaceRadius(direction);
-        return displacement + 0.05f;
+        // Forwarded intentionally: PlanetGenerator remains authoritative for terrain surface radius.
+        return planetGenerator.GetSurfaceRadius(direction) + 0.05f;
     }
 
 
