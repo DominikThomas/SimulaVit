@@ -26,45 +26,47 @@ public class ReplicatorLifecycleSystem
         out float averageOrganicCStore,
         out int divisionEligibleAgentCount)
     {
+        populationState.EnsureMatchesAgentCount(agents);
         float reproductionChance = reproductionRate * deltaTime;
         float organicCSum = 0f;
         int eligibleForDivisionCount = 0;
 
-        // Transitional migration step: mirror lifecycle age into PopulationState
-        // while keeping List<Replicator> as the authoritative source of truth.
-        populationState.SyncLifecycleFieldsFromAgents(agents);
-
-        for (int i = agents.Count - 1; i >= 0; i--)
+        for (int i = populationState.Count - 1; i >= 0; i--)
         {
             Replicator agent = agents[i];
-            float updatedAge = agent.age + deltaTime;
-            agent.age = updatedAge;
+            float updatedAge = populationState.Age[i] + deltaTime;
             populationState.Age[i] = updatedAge;
+            agent.age = updatedAge;
 
-            if (agent.age > agent.maxLifespan)
+            if (updatedAge > agent.maxLifespan)
             {
-                registerDeathCause(agent.metabolism, DeathCause.OldAge);
+                populationState.CopyToDebugState(i, agent);
+                registerDeathCause(populationState.Metabolism[i], DeathCause.OldAge);
                 depositDeathOrganicC(agent);
-                agents.RemoveAt(i);
+                RemoveAgentAtSwapBack(agents, populationState, i);
                 continue;
             }
 
-            float lifeRemaining = agent.maxLifespan - agent.age;
-            agent.color = calculateAgentColor(agent.age, lifeRemaining, agent.energy, agent.metabolism);
+            float energy = populationState.Energy[i];
+            float organicCStore = Mathf.Max(0f, populationState.OrganicCStore[i]);
+            float lifeRemaining = agent.maxLifespan - updatedAge;
+            Color color = calculateAgentColor(updatedAge, lifeRemaining, energy, populationState.Metabolism[i]);
+            populationState.Color[i] = color;
+            agent.color = color;
 
-            organicCSum += Mathf.Max(0f, agent.organicCStore);
+            organicCSum += organicCStore;
 
-            bool canReplicate = agent.canReplicate;
+            bool canReplicate = populationState.CanReplicate[i];
             bool hasEnergyForDivision = canReplicate && (enableCarbonLimitedDivision
-                ? agent.energy >= Mathf.Max(0f, divisionEnergyCost)
-                : agent.energy >= replicationEnergyCost);
+                ? energy >= Mathf.Max(0f, divisionEnergyCost)
+                : energy >= Mathf.Max(0f, replicationEnergyCost));
 
             bool hasCarbonForDivision = true;
             if (enableCarbonLimitedDivision)
             {
                 float target = Mathf.Max(0.0001f, agent.biomassTarget);
                 float divisionThreshold = Mathf.Max(1f, divisionBiomassMultiple) * target;
-                hasCarbonForDivision = agent.organicCStore >= divisionThreshold;
+                hasCarbonForDivision = organicCStore >= divisionThreshold;
                 if (hasCarbonForDivision)
                 {
                     eligibleForDivisionCount++;
@@ -74,29 +76,41 @@ public class ReplicatorLifecycleSystem
             if (UnityEngine.Random.value < reproductionChance && hasEnergyForDivision && hasCarbonForDivision)
             {
                 int safeResolution = Mathf.Max(1, resolution);
-                Vector3 dir = agent.position.normalized;
+                Vector3 dir = populationState.Position[i].normalized;
                 int cellIndex = PlanetGridIndexing.DirectionToCellIndex(dir, safeResolution);
                 float temp = getTemperatureAtCell(dir, cellIndex);
 
-                float min = agent.optimalTempMin;
-                float max = agent.optimalTempMax;
+                float min = populationState.OptimalTempMin[i];
+                float max = populationState.OptimalTempMax[i];
 
                 bool insideOptimalBand = (temp >= min && temp <= max);
+
+                agent.currentDirection = populationState.CurrentDirection[i];
+                agent.currentOceanLayerIndex = populationState.CurrentOceanLayerIndex[i];
+                agent.preferredOceanLayerIndex = populationState.PreferredOceanLayerIndex[i];
+                agent.metabolism = populationState.Metabolism[i];
+                agent.locomotion = populationState.Locomotion[i];
 
                 if (insideOptimalBand && trySpawnChild(agent, out Replicator childAgent))
                 {
                     if (enableCarbonLimitedDivision)
                     {
-                        agent.energy = Mathf.Max(0f, agent.energy - Mathf.Max(0f, divisionEnergyCost));
+                        energy = Mathf.Max(0f, energy - Mathf.Max(0f, divisionEnergyCost));
+                        populationState.Energy[i] = energy;
+                        agent.energy = energy;
 
-                        float totalC = Mathf.Max(0f, agent.organicCStore);
+                        float totalC = organicCStore;
                         float toChild = totalC * Mathf.Clamp01(divisionCarbonSplitToChild);
                         childAgent.organicCStore = Mathf.Clamp(toChild, 0f, maxOrganicCStore);
-                        agent.organicCStore = Mathf.Max(0f, totalC - toChild);
+                        organicCStore = Mathf.Max(0f, totalC - toChild);
+                        populationState.OrganicCStore[i] = organicCStore;
+                        agent.organicCStore = organicCStore;
                     }
                     else
                     {
-                        agent.energy = Mathf.Max(0f, agent.energy - replicationEnergyCost);
+                        energy = Mathf.Max(0f, energy - Mathf.Max(0f, replicationEnergyCost));
+                        populationState.Energy[i] = energy;
+                        agent.energy = energy;
                     }
                 }
             }
@@ -112,5 +126,22 @@ public class ReplicatorLifecycleSystem
         }
 
         divisionEligibleAgentCount = eligibleForDivisionCount;
+    }
+
+    private static void RemoveAgentAtSwapBack(List<Replicator> agents, ReplicatorPopulationState populationState, int index)
+    {
+        int last = agents.Count - 1;
+        if (index < 0 || index > last)
+        {
+            return;
+        }
+
+        if (index != last)
+        {
+            agents[index] = agents[last];
+        }
+
+        agents.RemoveAt(last);
+        populationState.RemoveAgentAtSwapBack(index);
     }
 }

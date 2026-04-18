@@ -1,4 +1,3 @@
-using Codice.Client.BaseCommands.Changelist;
 using System.Collections.Generic;
 using Unity.Collections;
 using Unity.Jobs;
@@ -8,7 +7,7 @@ using UnityEngine;
 public class ReplicatorMovementSystem
 {
     private static readonly ProfilerMarker MovementSyncFromPopulationStateMarker = new ProfilerMarker("ReplicatorMovementSystem.SyncFromPopulationState");
-    private static readonly ProfilerMarker MovementSyncToAgentsMarker = new ProfilerMarker("ReplicatorMovementSystem.SyncToAgents");
+    private static readonly ProfilerMarker MovementCompanionCopyMarker = new ProfilerMarker("ReplicatorMovementSystem.CopyToCompanionObjects");
 
     public struct Settings
     {
@@ -48,12 +47,8 @@ public class ReplicatorMovementSystem
             return;
         }
 
+        populationState.EnsureMatchesAgentCount(agents);
         EnsureJobBufferCapacity(count);
-
-        if (!populationStatePrimed)
-        {
-            populationState.SyncMovementFieldsFromAgents(agents);
-        }
 
         using (MovementSyncFromPopulationStateMarker.Auto())
         {
@@ -61,7 +56,7 @@ public class ReplicatorMovementSystem
             {
                 Replicator agent = agents[i];
                 jobPositions[i] = populationState.Position[i];
-                jobRotations[i] = agent.rotation;
+                jobRotations[i] = populationState.Rotation[i];
                 jobMoveOnlyInSea[i] = agent.traits.moveOnlyInSea;
                 jobSurfaceMoveSpeedMultipliers[i] = Mathf.Max(0.01f, agent.traits.surfaceMoveSpeedMultiplier);
                 jobMovementSeeds[i] = populationState.MovementSeed[i];
@@ -97,7 +92,7 @@ public class ReplicatorMovementSystem
         JobHandle handle = job.Schedule(count, 32);
         handle.Complete();
 
-        using (MovementSyncToAgentsMarker.Auto())
+        using (MovementCompanionCopyMarker.Auto())
         {
             for (int i = 0; i < count; i++)
             {
@@ -107,9 +102,7 @@ public class ReplicatorMovementSystem
                 populationState.Position[i] = newPosition;
                 populationState.Rotation[i] = jobRotations[i];
                 populationState.CurrentDirection[i] = newDirection;
-                agent.position = newPosition;
-                agent.rotation = jobRotations[i];
-                agent.currentDirection = newDirection;
+                populationState.CopyToRenderState(i, agent);
             }
         }
     }

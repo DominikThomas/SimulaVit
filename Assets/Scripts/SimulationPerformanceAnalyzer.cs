@@ -14,10 +14,9 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
     {
         "ReplicatorSteeringSystem.HotLoop",
         "ReplicatorMetabolismSystem.HotLoop",
-        "ReplicatorPopulationState.SyncFromAgents",
-        "ReplicatorPopulationState.SyncToAgents",
+        "ReplicatorManager.PopulationStatePrepareForLocomotion",
         "ReplicatorMovementSystem.SyncFromPopulationState",
-        "ReplicatorMovementSystem.SyncToAgents",
+        "ReplicatorMovementSystem.CopyToCompanionObjects",
         "JobHandle.Complete"
     };
 

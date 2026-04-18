@@ -16,7 +16,7 @@ public class ReplicatorManager : MonoBehaviour
 {
     private static readonly ProfilerMarker PredatorScentUpdateMarker = new ProfilerMarker("ReplicatorManager.UpdateScentFields");
     private static readonly ProfilerMarker PredatorScentSkipNoPredatorsMarker = new ProfilerMarker("ReplicatorManager.SkipScentFields.NoPredators");
-    private static readonly ProfilerMarker PopulationStateSyncForLocomotionMarker = new ProfilerMarker("ReplicatorManager.PopulationStateSyncForLocomotion");
+    private static readonly ProfilerMarker PopulationStatePrepareForLocomotionMarker = new ProfilerMarker("ReplicatorManager.PopulationStatePrepareForLocomotion");
     private static readonly ProfilerMarker SteeringThrottleSkipMarker = new ProfilerMarker("ReplicatorManager.SteeringThrottleSkip");
 
     [Header("Settings")]
@@ -365,6 +365,7 @@ public class ReplicatorManager : MonoBehaviour
     private readonly ReplicatorSpawnSystem spawnSystem = new ReplicatorSpawnSystem();
     private readonly ReplicatorLifecycleSystem lifecycleSystem = new ReplicatorLifecycleSystem();
     private readonly ReplicatorMetabolismSystem metabolismSystem = new ReplicatorMetabolismSystem();
+    // Authoritative hot-path state. Companion Replicator objects are kept for compatibility/debug/render bridging.
     private readonly ReplicatorPopulationState populationState = new ReplicatorPopulationState();
     private readonly ReplicatorPredationSystem predationSystem = new ReplicatorPredationSystem();
     private readonly ReplicatorSteeringSystem steeringSystem = new ReplicatorSteeringSystem();
@@ -587,33 +588,34 @@ public class ReplicatorManager : MonoBehaviour
         int methanogen = 0;
         int methanotroph = 0;
 
-        for (int i = 0; i < agents.Count; i++)
+        for (int i = 0; i < populationState.Count; i++)
         {
-            if (agents[i].metabolism == MetabolismType.Hydrogenotrophy)
+            MetabolismType metabolism = populationState.Metabolism[i];
+            if (metabolism == MetabolismType.Hydrogenotrophy)
             {
                 hydrogen++;
             }
-            else if (agents[i].metabolism == MetabolismType.Photosynthesis)
+            else if (metabolism == MetabolismType.Photosynthesis)
             {
                 photo++;
             }
-            else if (agents[i].metabolism == MetabolismType.SulfurChemosynthesis)
+            else if (metabolism == MetabolismType.SulfurChemosynthesis)
             {
                 chemo++;
             }
-            else if (agents[i].metabolism == MetabolismType.Predation)
+            else if (metabolism == MetabolismType.Predation)
             {
                 predator++;
             }
-            else if (agents[i].metabolism == MetabolismType.Fermentation)
+            else if (metabolism == MetabolismType.Fermentation)
             {
                 ferment++;
             }
-            else if (agents[i].metabolism == MetabolismType.Methanogenesis)
+            else if (metabolism == MetabolismType.Methanogenesis)
             {
                 methanogen++;
             }
-            else if (agents[i].metabolism == MetabolismType.Methanotrophy)
+            else if (metabolism == MetabolismType.Methanotrophy)
             {
                 methanotroph++;
             }
@@ -768,61 +770,66 @@ public class ReplicatorManager : MonoBehaviour
         counts[causeIndex]++;
     }
 
-    DeathCause ResolveEnergyDeathCause(Replicator agent)
+    DeathCause ResolveEnergyDeathCauseAtIndex(int index)
     {
+        if (index < 0 || index >= populationState.Count)
+        {
+            return DeathCause.EnergyDepletion;
+        }
+
         float threshold = Mathf.Max(0f, starvationAttributionSeconds);
         float best = -1f;
         DeathCause cause = DeathCause.EnergyDepletion;
 
-        if (agent.starveH2sSeconds >= threshold && agent.starveH2sSeconds > best)
+        if (populationState.StarveH2sSeconds[index] >= threshold && populationState.StarveH2sSeconds[index] > best)
         {
-            best = agent.starveH2sSeconds;
+            best = populationState.StarveH2sSeconds[index];
             cause = DeathCause.Lack_H2S;
         }
 
-        if (agent.starveH2Seconds >= threshold && agent.starveH2Seconds > best)
+        if (populationState.StarveH2Seconds[index] >= threshold && populationState.StarveH2Seconds[index] > best)
         {
-            best = agent.starveH2Seconds;
+            best = populationState.StarveH2Seconds[index];
             cause = DeathCause.Lack_H2;
         }
 
-        if (agent.starveCo2Seconds >= threshold && agent.starveCo2Seconds > best)
+        if (populationState.StarveCo2Seconds[index] >= threshold && populationState.StarveCo2Seconds[index] > best)
         {
-            best = agent.starveCo2Seconds;
+            best = populationState.StarveCo2Seconds[index];
             cause = DeathCause.Lack_CO2;
         }
 
-        if (agent.starveLightSeconds >= threshold && agent.starveLightSeconds > best)
+        if (populationState.StarveLightSeconds[index] >= threshold && populationState.StarveLightSeconds[index] > best)
         {
-            best = agent.starveLightSeconds;
+            best = populationState.StarveLightSeconds[index];
             cause = DeathCause.Lack_Light;
         }
 
-        if (agent.starveOrganicCFoodSeconds >= threshold && agent.starveOrganicCFoodSeconds > best)
+        if (populationState.StarveOrganicCFoodSeconds[index] >= threshold && populationState.StarveOrganicCFoodSeconds[index] > best)
         {
-            best = agent.starveOrganicCFoodSeconds;
+            best = populationState.StarveOrganicCFoodSeconds[index];
             cause = DeathCause.Lack_OrganicC_Food;
         }
 
-        if (agent.starveO2Seconds >= threshold && agent.starveO2Seconds > best)
+        if (populationState.StarveO2Seconds[index] >= threshold && populationState.StarveO2Seconds[index] > best)
         {
-            best = agent.starveO2Seconds;
+            best = populationState.StarveO2Seconds[index];
             cause = DeathCause.Lack_O2;
         }
 
-        if (agent.starveCh4Seconds >= threshold && agent.starveCh4Seconds > best)
+        if (populationState.StarveCh4Seconds[index] >= threshold && populationState.StarveCh4Seconds[index] > best)
         {
-            best = agent.starveCh4Seconds;
+            best = populationState.StarveCh4Seconds[index];
             cause = DeathCause.Lack_CH4;
         }
 
-        if (agent.o2ToxicSeconds >= threshold && agent.o2ToxicSeconds > best)
+        if (populationState.O2ToxicSeconds[index] >= threshold && populationState.O2ToxicSeconds[index] > best)
         {
-            best = agent.o2ToxicSeconds;
+            best = populationState.O2ToxicSeconds[index];
             cause = DeathCause.O2_Toxicity;
         }
 
-        if (agent.starveStoredCSeconds >= threshold && agent.starveStoredCSeconds > best)
+        if (populationState.StarveStoredCSeconds[index] >= threshold && populationState.StarveStoredCSeconds[index] > best)
         {
             cause = DeathCause.Lack_StoredC;
         }
@@ -1110,18 +1117,17 @@ public class ReplicatorManager : MonoBehaviour
             int resolution = Mathf.Max(1, planetGenerator.resolution);
             int cellCount = PlanetGridIndexing.GetCellCount(resolution);
             planetResourceMap.EnsureScentArrays(cellCount);
-            populationState.SyncPredationFieldsFromAgents(agents);
+            populationState.EnsureMatchesAgentCount(agents);
             RebuildPreyCellBins(resolution, populationState);
 
             float leakEmit = Mathf.Max(0f, dissolvedOrganicLeakEmitPerSecond) * interval;
             float wasteEmit = Mathf.Max(0f, toxicProteolyticWasteEmitPerSecond) * interval;
             bool hasPredator = false;
 
-            for (int i = 0; i < agents.Count; i++)
+            for (int i = 0; i < populationState.Count; i++)
             {
-                Replicator agent = agents[i];
-                int cellIndex = PlanetGridIndexing.DirectionToCellIndex(agent.position.normalized, resolution);
-                if (IsPredator(agent))
+                int cellIndex = PlanetGridIndexing.DirectionToCellIndex(populationState.Position[i].normalized, resolution);
+                if (populationState.Metabolism[i] == MetabolismType.Predation)
                 {
                     hasPredator = true;
                     planetResourceMap.AddScent(ResourceType.ToxicProteolyticWaste, cellIndex, wasteEmit);
@@ -1149,9 +1155,9 @@ public class ReplicatorManager : MonoBehaviour
 
     bool HasAnyPredators()
     {
-        for (int i = 0; i < agents.Count; i++)
+        for (int i = 0; i < populationState.Count; i++)
         {
-            if (IsPredator(agents[i]))
+            if (populationState.Metabolism[i] == MetabolismType.Predation)
             {
                 return true;
             }
@@ -1174,9 +1180,10 @@ public class ReplicatorManager : MonoBehaviour
 
     bool HasAnyActiveSteeringAgents()
     {
-        for (int i = 0; i < agents.Count; i++)
+        for (int i = 0; i < populationState.Count; i++)
         {
-            if (IsMotile(agents[i]))
+            LocomotionType locomotion = populationState.Locomotion[i];
+            if (locomotion == LocomotionType.Amoeboid || locomotion == LocomotionType.Flagellum)
             {
                 return true;
             }
@@ -1377,9 +1384,9 @@ public class ReplicatorManager : MonoBehaviour
             return false;
         }
 
-        using (PopulationStateSyncForLocomotionMarker.Auto())
+        using (PopulationStatePrepareForLocomotionMarker.Auto())
         {
-            populationState.SyncFromAgents(agents);
+            populationState.EnsureMatchesAgentCount(agents);
         }
 
         return true;
@@ -1522,7 +1529,7 @@ public class ReplicatorManager : MonoBehaviour
             planetResourceMap,
             settings,
             dtTick,
-            ResolveEnergyDeathCause,
+            ResolveEnergyDeathCauseAtIndex,
             DepositDeathOrganicC,
             RegisterDeathCause,
             out ReplicatorMetabolismSystem.DebugSnapshot debugSnapshot);
@@ -1986,6 +1993,7 @@ public class ReplicatorManager : MonoBehaviour
         }
 
         agents.Add(newAgent);
+        populationState.AddAgentFromReplicatorData(newAgent);
         spawnedAgent = newAgent;
         return true;
     }

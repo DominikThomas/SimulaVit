@@ -4,9 +4,7 @@ using Unity.Profiling;
 
 public class ReplicatorSteeringSystem
 {
-    private static readonly ProfilerMarker SteeringSyncFromPopulationStateMarker = new ProfilerMarker("ReplicatorSteeringSystem.SyncFromPopulationState");
     private static readonly ProfilerMarker SteeringHotLoopMarker = new ProfilerMarker("ReplicatorSteeringSystem.HotLoop");
-    private static readonly ProfilerMarker SteeringSyncToAgentsMarker = new ProfilerMarker("ReplicatorSteeringSystem.SyncToAgents");
     public struct Settings
     {
         public float SteerTempWeight;
@@ -184,13 +182,7 @@ public class ReplicatorSteeringSystem
             debugState.RunAndTumbleDebugTimer += deltaTime;
         }
 
-        if (!populationStatePrimed)
-        {
-            using (SteeringSyncFromPopulationStateMarker.Auto())
-            {
-                populationState.SyncSteeringFieldsFromAgents(agents);
-            }
-        }
+        populationState.EnsureMatchesAgentCount(agents);
 
         using (SteeringHotLoopMarker.Auto())
         {
@@ -262,11 +254,6 @@ public class ReplicatorSteeringSystem
                 debugState.TumbleProbabilityAccumulator += populationState.TumbleProbability[i];
                 debugState.TumbleProbabilitySampleCount++;
             }
-        }
-
-        using (SteeringSyncToAgentsMarker.Auto())
-        {
-            populationState.SyncSteeringFieldsToAgents(agents);
         }
 
         if (settings.EnableRunAndTumbleDebug && debugState.RunAndTumbleDebugTimer >= Mathf.Max(0.2f, settings.RunAndTumbleDebugWindowSeconds))
