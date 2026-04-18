@@ -833,8 +833,8 @@ MonoBehaviour:
   m_TargetGraphic: {fileID: 1049548737}
   m_HandleRect: {fileID: 1049548736}
   m_Direction: 2
-  m_Value: 0
-  m_Size: 0.47368413
+  m_Value: 1
+  m_Size: 1
   m_NumberOfSteps: 0
   m_OnValueChanged:
     m_PersistentCalls:
@@ -1201,15 +1201,15 @@ MonoBehaviour:
   minSpeedFactor: 0.15
   chemosynthesisCo2NeedPerTick: 0.02
   chemosynthesisH2sNeedPerTick: 0.01
-  chemosynthesisEnergyPerTick: 0.7
+  chemosynthesisEnergyPerTick: 0.01
   metabolismMutationChance: 0.2
   hydrogenotrophyH2PerTick: 0.02
   hydrogenotrophyCO2PerTick: 0.01
-  hydrogenotrophyEnergyPerTick: 0.5
-  hydrogenotrophyStoreFraction: 0.8
+  hydrogenotrophyEnergyPerTick: 0.01
+  hydrogenotrophyStoreFraction: 0.2
   fermentationOrganicCPerTick: 0.02
-  fermentationEnergyPerTick: 0.8
-  fermentationAssimilationFraction: 0.5
+  fermentationEnergyPerTick: 0.7
+  fermentationAssimilationFraction: 0.4
   methanogenesisH2PerTick: 0.08
   methanogenesisCO2PerTick: 0.04
   methanogenesisEnergyPerTick: 3
@@ -1231,10 +1231,10 @@ MonoBehaviour:
   anchoredToAmoeboidMutationChance: 0.01
   allowReverseMetabolismMutation: 0
   photosynthesisCo2PerTickAtFullInsolation: 0.02
-  photosynthesisEnergyPerCo2: 1.5
+  photosynthesisEnergyPerCo2: 8
   aerobicO2PerC: 0.02
   aerobicEnergyPerC: 0.05
-  photosynthStoreFraction: 0.2
+  photosynthStoreFraction: 0.4
   maxOrganicCStore: 6
   nightRespirationCPerTick: 0.01
   nightRespirationEnergyPerC: 0.05
