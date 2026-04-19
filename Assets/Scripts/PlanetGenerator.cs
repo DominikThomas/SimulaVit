@@ -215,6 +215,21 @@ public class PlanetGenerator : MonoBehaviour
 
     void GeneratePlanet()
     {
+        int cellCount = PlanetGridIndexing.GetCellCount(resolution);
+        string cacheKey = PlanetGenerationCache.BuildPlanetCacheKeyString(this);
+        string cachePath = PlanetGenerationCache.BuildPlanetCachePath(cacheKey);
+        if (PlanetGenerationCache.TryLoadPlanet(cachePath, cellCount, out PlanetGenerationCache.PlanetData cachedData))
+        {
+            oceanNoiseThreshold = cachedData.OceanNoiseThreshold;
+            generatedSurfaceRadiusByCell = cachedData.FinalTerrainRadii;
+            localOceanDepthByCell = cachedData.LocalOceanDepthByCell;
+            oceanDistanceToShoreByCell = cachedData.OceanDistanceToShoreByCell;
+            oceanMaskByCell = cachedData.OceanMaskByCell;
+            ApplyGeneratedPlanetGeometry(cachedData.UnitVertices, cachedData.Triangles, cachedData.FinalTerrainRadii);
+            Debug.Log($"[PlanetGenerationCache] Loaded planet generation cache ({cachePath}).");
+            return;
+        }
+
         Vector3[] faceDirections =
         {
             Vector3.up,
@@ -253,22 +268,48 @@ public class PlanetGenerator : MonoBehaviour
 
         oceanNoiseThreshold = CalculateNoiseThreshold(noiseSamples, oceanCoveragePercent);
         float seaRadius = GetOceanRadius();
-        int cellCount = unitVertices.Count;
+        cellCount = unitVertices.Count;
 
-        Vector3[] terrainVertices = new Vector3[cellCount];
-        Vector3[] oceanVertices = new Vector3[cellCount];
-        Vector3[] atmosphereVertices = new Vector3[cellCount];
         float[] finalTerrainRadii = new float[cellCount];
 
         int[] neighbors = BuildCellNeighborLookup(unitVertices, allTriangles);
         BuildOceanBathymetry(unitVertices, noiseSamples, finalTerrainRadii, seaRadius, neighbors);
+
+        int[] triangles = allTriangles.ToArray();
+        ApplyGeneratedPlanetGeometry(unitVertices.ToArray(), triangles, finalTerrainRadii);
+        PlanetGenerationCache.SavePlanet(
+            cachePath,
+            new PlanetGenerationCache.PlanetData
+            {
+                UnitVertices = unitVertices.ToArray(),
+                Triangles = triangles,
+                FinalTerrainRadii = (float[])generatedSurfaceRadiusByCell.Clone(),
+                OceanMaskByCell = (byte[])oceanMaskByCell.Clone(),
+                LocalOceanDepthByCell = (float[])localOceanDepthByCell.Clone(),
+                OceanDistanceToShoreByCell = (float[])oceanDistanceToShoreByCell.Clone(),
+                OceanNoiseThreshold = oceanNoiseThreshold
+            });
+        Debug.Log($"[PlanetGenerationCache] Regenerated planet and saved cache ({cachePath}).");
+    }
+
+    void ApplyGeneratedPlanetGeometry(Vector3[] unitVertices, int[] triangles, float[] finalTerrainRadii)
+    {
+        if (unitVertices == null || triangles == null || finalTerrainRadii == null)
+        {
+            return;
+        }
+
+        int cellCount = unitVertices.Length;
+        float seaRadius = GetOceanRadius();
+        Vector3[] terrainVertices = new Vector3[cellCount];
+        Vector3[] oceanVertices = new Vector3[cellCount];
+        Vector3[] atmosphereVertices = new Vector3[cellCount];
 
         for (int i = 0; i < cellCount; i++)
         {
             Vector3 dir = unitVertices[i];
             float shellBaseRadius = enableOcean ? seaRadius : radius;
             float atmosphereRadius = shellBaseRadius * atmosphereRadiusMultiplier;
-
             terrainVertices[i] = dir * finalTerrainRadii[i];
             oceanVertices[i] = dir * seaRadius;
             atmosphereVertices[i] = dir * atmosphereRadius;
@@ -276,8 +317,8 @@ public class PlanetGenerator : MonoBehaviour
 
         mesh.Clear();
         mesh.vertices = terrainVertices;
-        mesh.uv = BuildSphereUvs(unitVertices);
-        mesh.triangles = allTriangles.ToArray();
+        mesh.uv = BuildSphereUvs(new List<Vector3>(unitVertices));
+        mesh.triangles = triangles;
         mesh.RecalculateBounds();
         mesh.RecalculateNormals();
 
@@ -296,7 +337,7 @@ public class PlanetGenerator : MonoBehaviour
 
         oceanMesh.Clear();
         oceanMesh.vertices = oceanVertices;
-        oceanMesh.triangles = allTriangles.ToArray();
+        oceanMesh.triangles = triangles;
         oceanMesh.RecalculateBounds();
         oceanMesh.RecalculateNormals();
 
@@ -317,7 +358,7 @@ public class PlanetGenerator : MonoBehaviour
 
         atmosphereMesh.Clear();
         atmosphereMesh.vertices = atmosphereVertices;
-        atmosphereMesh.triangles = allTriangles.ToArray();
+        atmosphereMesh.triangles = triangles;
         atmosphereMesh.RecalculateBounds();
         atmosphereMesh.RecalculateNormals();
 
