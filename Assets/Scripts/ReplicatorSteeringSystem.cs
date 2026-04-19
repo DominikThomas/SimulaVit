@@ -62,8 +62,8 @@ public class ReplicatorSteeringSystem
 
         if (settings.UseScentPredation && planetResourceMap.enableScentFields)
         {
-            float dissolvedOrganicLeak = NormalizeScent(planetResourceMap.Get(ResourceType.DissolvedOrganicLeak, cellIndex), settings.ScentScoreSaturation);
-            float toxicProteolyticWaste = NormalizeScent(planetResourceMap.Get(ResourceType.ToxicProteolyticWaste, cellIndex), settings.ScentScoreSaturation);
+            float dissolvedOrganicLeak = NormalizeScent(planetResourceMap.GetScentValue(ResourceType.DissolvedOrganicLeak, cellIndex, layerIndex), settings.ScentScoreSaturation);
+            float toxicProteolyticWaste = NormalizeScent(planetResourceMap.GetScentValue(ResourceType.ToxicProteolyticWaste, cellIndex, layerIndex), settings.ScentScoreSaturation);
             float scentTerm;
             if (populationState.Metabolism[index] == MetabolismType.Predation)
             {
@@ -121,10 +121,13 @@ public class ReplicatorSteeringSystem
                     NormalizeResource(planetResourceMap, ResourceType.O2, cellIndex, agent.currentOceanLayerIndex, settings.SteerGoodO2));
                 break;
             case MetabolismType.Predation:
+            {
+                int agentLayerIndex = planetResourceMap.ClampOceanLayerIndex(cellIndex, agent.currentOceanLayerIndex);
                 foodFitness = Mathf.Min(
                     NormalizeResource(planetResourceMap, ResourceType.O2, cellIndex, agent.currentOceanLayerIndex, settings.SteerGoodO2),
-                    NormalizeScent(planetResourceMap.Get(ResourceType.DissolvedOrganicLeak, cellIndex), settings.ScentScoreSaturation));
+                    NormalizeScent(planetResourceMap.GetScentValue(ResourceType.DissolvedOrganicLeak, cellIndex, agentLayerIndex), settings.ScentScoreSaturation));
                 break;
+            }
             case MetabolismType.Fermentation:
                 foodFitness = NormalizeResource(planetResourceMap, ResourceType.OrganicC, cellIndex, agent.currentOceanLayerIndex, settings.SteerGoodOrganicC);
                 break;
@@ -144,8 +147,9 @@ public class ReplicatorSteeringSystem
 
         if (settings.UseScentPredation && planetResourceMap.enableScentFields)
         {
-            float dissolvedOrganicLeak = NormalizeScent(planetResourceMap.Get(ResourceType.DissolvedOrganicLeak, cellIndex), settings.ScentScoreSaturation);
-            float toxicProteolyticWaste = NormalizeScent(planetResourceMap.Get(ResourceType.ToxicProteolyticWaste, cellIndex), settings.ScentScoreSaturation);
+            int layerIndex = planetResourceMap.ClampOceanLayerIndex(cellIndex, agent.currentOceanLayerIndex);
+            float dissolvedOrganicLeak = NormalizeScent(planetResourceMap.GetScentValue(ResourceType.DissolvedOrganicLeak, cellIndex, layerIndex), settings.ScentScoreSaturation);
+            float toxicProteolyticWaste = NormalizeScent(planetResourceMap.GetScentValue(ResourceType.ToxicProteolyticWaste, cellIndex, layerIndex), settings.ScentScoreSaturation);
             score += agent.metabolism == MetabolismType.Predation
                 ? Mathf.Max(0f, settings.DissolvedOrganicLeakSteerWeight) * dissolvedOrganicLeak - 0.25f * toxicProteolyticWaste
                 : -Mathf.Max(0f, settings.ToxicProteolyticWasteSteerWeight) * toxicProteolyticWaste + 0.1f * dissolvedOrganicLeak;
@@ -320,7 +324,7 @@ public class ReplicatorSteeringSystem
             case MetabolismType.Predation:
             {
                 float o2 = NormalizeResource(planetResourceMap, ResourceType.O2, cellIndex, layerIndex, settings.SteerGoodO2);
-                float dissolvedOrganicLeak = NormalizeScent(planetResourceMap.Get(ResourceType.DissolvedOrganicLeak, cellIndex), settings.ScentScoreSaturation);
+                float dissolvedOrganicLeak = NormalizeScent(planetResourceMap.GetScentValue(ResourceType.DissolvedOrganicLeak, cellIndex, layerIndex), settings.ScentScoreSaturation);
                 return Mathf.Min(o2, dissolvedOrganicLeak);
             }
             case MetabolismType.Fermentation:

@@ -1141,14 +1141,18 @@ public class ReplicatorManager : MonoBehaviour
             for (int i = 0; i < populationState.Count; i++)
             {
                 int cellIndex = PlanetGridIndexing.DirectionToCellIndex(populationState.Position[i].normalized, resolution);
+                int layerIndex = ReplicatorPredationSystem.ResolvePredationLayerIndex(
+                    planetResourceMap,
+                    cellIndex,
+                    populationState.CurrentOceanLayerIndex[i]);
                 if (populationState.Metabolism[i] == MetabolismType.Predation)
                 {
                     hasPredator = true;
-                    planetResourceMap.AddScent(ResourceType.ToxicProteolyticWaste, cellIndex, wasteEmit);
+                    planetResourceMap.AddScent(ResourceType.ToxicProteolyticWaste, cellIndex, layerIndex, wasteEmit);
                 }
                 else
                 {
-                    planetResourceMap.AddScent(ResourceType.DissolvedOrganicLeak, cellIndex, leakEmit);
+                    planetResourceMap.AddScent(ResourceType.DissolvedOrganicLeak, cellIndex, layerIndex, leakEmit);
                 }
             }
 
