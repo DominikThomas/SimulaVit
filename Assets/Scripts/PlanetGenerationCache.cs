@@ -9,10 +9,12 @@ public static class PlanetGenerationCache
 {
     public const int PlanetCacheFormatVersion = 1;
     public const int ResourceCacheFormatVersion = 1;
+    public const int SurfaceTextureCacheFormatVersion = 1;
 
     private const string CacheFolderName = "SimulaVitPlanetCache";
     private const string PlanetMagic = "SV_PLANET_CACHE_V1";
     private const string ResourceMagic = "SV_RESOURCE_CACHE_V1";
+    private const string SurfaceTextureMagic = "SV_SURFACE_TEX_CACHE_V1";
 
     public sealed class PlanetData
     {
@@ -38,6 +40,15 @@ public static class PlanetGenerationCache
         public int[] VentCells;
     }
 
+    public sealed class SurfaceTextureData
+    {
+        public int Width;
+        public int Height;
+        public TextureFormat Format;
+        public bool LinearColorSpace;
+        public byte[] RawTextureData;
+    }
+
     public static string BuildPlanetCachePath(string keyString)
     {
         return BuildCachePath("planet", keyString);
@@ -46,6 +57,11 @@ public static class PlanetGenerationCache
     public static string BuildResourceCachePath(string keyString)
     {
         return BuildCachePath("resource", keyString);
+    }
+
+    public static string BuildSurfaceTextureCachePath(string keyString)
+    {
+        return BuildCachePath("surface_texture", keyString);
     }
 
     public static string BuildPlanetCacheKeyString(PlanetGenerator generator)
@@ -96,6 +112,29 @@ public static class PlanetGenerationCache
         AppendKey(sb, "ventStrengthMax", resourceMap.ventStrengthMax);
         AppendKey(sb, "ventNoiseScale", resourceMap.ventNoiseScale);
         AppendKey(sb, "ventThreshold", resourceMap.ventThreshold);
+        return sb.ToString();
+    }
+
+    public static string BuildSurfaceTextureCacheKeyString(PlanetGenerator generator, int width, int height, TextureFormat format, bool linearColorSpace)
+    {
+        StringBuilder sb = new StringBuilder(640);
+        AppendKey(sb, "format", SurfaceTextureCacheFormatVersion);
+        AppendKey(sb, "planetKey", BuildPlanetCacheKeyString(generator));
+        AppendKey(sb, "seed", generator.randomSeed);
+        AppendKey(sb, "resolution", generator.resolution);
+        AppendKey(sb, "width", width);
+        AppendKey(sb, "height", height);
+        AppendKey(sb, "textureFormat", (int)format);
+        AppendKey(sb, "linear", linearColorSpace);
+        AppendKey(sb, "largeNoiseScale", generator.largeNoiseScale);
+        AppendKey(sb, "mediumNoiseScale", generator.mediumNoiseScale);
+        AppendKey(sb, "detailNoiseScale", generator.detailNoiseScale);
+        AppendKey(sb, "contrast", generator.contrast);
+        AppendKey(sb, "crackDarkening", generator.crackDarkening);
+        AppendKey(sb, "noiseOffset", generator.noiseOffset);
+        AppendKey(sb, "darkRockColor", generator.darkRockColor);
+        AppendKey(sb, "midRockColor", generator.midRockColor);
+        AppendKey(sb, "lightRockColor", generator.lightRockColor);
         return sb.ToString();
     }
 
@@ -280,6 +319,83 @@ public static class PlanetGenerationCache
         }
     }
 
+    public static bool TryLoadSurfaceTexture(string cachePath, int expectedWidth, int expectedHeight, TextureFormat expectedFormat, bool expectedLinearColorSpace, out SurfaceTextureData data)
+    {
+        data = null;
+        if (!File.Exists(cachePath))
+        {
+            return false;
+        }
+
+        try
+        {
+            using FileStream stream = File.OpenRead(cachePath);
+            using BinaryReader reader = new BinaryReader(stream);
+            string magic = reader.ReadString();
+            if (!string.Equals(magic, SurfaceTextureMagic, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            int width = reader.ReadInt32();
+            int height = reader.ReadInt32();
+            TextureFormat format = (TextureFormat)reader.ReadInt32();
+            bool linearColorSpace = reader.ReadBoolean();
+            byte[] rawTextureData = ReadByteArray(reader);
+
+            if (width != expectedWidth || height != expectedHeight || format != expectedFormat || linearColorSpace != expectedLinearColorSpace || rawTextureData == null)
+            {
+                return false;
+            }
+
+            int expectedBytes = width * height * 4;
+            if (rawTextureData.Length != expectedBytes)
+            {
+                return false;
+            }
+
+            data = new SurfaceTextureData
+            {
+                Width = width,
+                Height = height,
+                Format = format,
+                LinearColorSpace = linearColorSpace,
+                RawTextureData = rawTextureData
+            };
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Debug.LogWarning($"[PlanetGenerationCache] Surface texture cache load failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    public static void SaveSurfaceTexture(string cachePath, SurfaceTextureData data)
+    {
+        if (data == null || data.RawTextureData == null)
+        {
+            return;
+        }
+
+        try
+        {
+            EnsureCacheDirectory(cachePath);
+            using FileStream stream = File.Open(cachePath, FileMode.Create, FileAccess.Write, FileShare.None);
+            using BinaryWriter writer = new BinaryWriter(stream);
+            writer.Write(SurfaceTextureMagic);
+            writer.Write(data.Width);
+            writer.Write(data.Height);
+            writer.Write((int)data.Format);
+            writer.Write(data.LinearColorSpace);
+            WriteByteArray(writer, data.RawTextureData);
+        }
+        catch (Exception ex)
+        {
+            Debug.LogWarning($"[PlanetGenerationCache] Surface texture cache save failed: {ex.Message}");
+        }
+    }
+
     private static string BuildCachePath(string kind, string keyString)
     {
         string keyHash = HashKey(keyString);
@@ -331,6 +447,15 @@ public static class PlanetGenerationCache
             .Append(value.x.ToString("R", CultureInfo.InvariantCulture)).Append(',')
             .Append(value.y.ToString("R", CultureInfo.InvariantCulture)).Append(',')
             .Append(value.z.ToString("R", CultureInfo.InvariantCulture)).Append(';');
+    }
+
+    private static void AppendKey(StringBuilder sb, string name, Color value)
+    {
+        sb.Append(name).Append('=')
+            .Append(value.r.ToString("R", CultureInfo.InvariantCulture)).Append(',')
+            .Append(value.g.ToString("R", CultureInfo.InvariantCulture)).Append(',')
+            .Append(value.b.ToString("R", CultureInfo.InvariantCulture)).Append(',')
+            .Append(value.a.ToString("R", CultureInfo.InvariantCulture)).Append(';');
     }
 
     private static void AppendKey(StringBuilder sb, string name, string value)
