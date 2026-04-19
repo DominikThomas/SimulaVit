@@ -1006,12 +1006,13 @@ public class ReplicatorManager : MonoBehaviour
         int resolution = Mathf.Max(1, planetGenerator.resolution);
         Vector3 normalizedDir = direction.normalized;
         int cellIndex = PlanetGridIndexing.DirectionToCellIndex(normalizedDir, resolution);
+        int layerIndex = ResolveHydrogenotrophySpawnLayer(cellIndex);
 
-        float co2Availability = NormalizeResource(ResourceType.CO2, cellIndex, steerGoodCO2);
-        float h2Availability = NormalizeResource(ResourceType.H2, cellIndex, steerGoodH2);
+        float co2Availability = NormalizeResource(ResourceType.CO2, cellIndex, layerIndex, steerGoodCO2);
+        float h2Availability = NormalizeResource(ResourceType.H2, cellIndex, layerIndex, steerGoodH2);
         float chemistryScore = Mathf.Min(h2Availability, co2Availability);
 
-        float temp = planetResourceMap.GetTemperature(normalizedDir, cellIndex);
+        float temp = GetTemperatureForHabitatLayer(normalizedDir, cellIndex, layerIndex);
 
         float tempFitness = ComputeTemperatureFitnessForRange(temp, hydrogenTempRange);
         float score = chemistryScore * tempFitness;
@@ -1034,8 +1035,9 @@ public class ReplicatorManager : MonoBehaviour
         int resolution = Mathf.Max(1, planetGenerator.resolution);
         Vector3 normalizedDir = direction.normalized;
         int cellIndex = PlanetGridIndexing.DirectionToCellIndex(normalizedDir, resolution);
+        int layerIndex = ResolveHydrogenotrophySpawnLayer(cellIndex);
 
-        float h2Availability = NormalizeResource(ResourceType.H2, cellIndex, steerGoodH2);
+        float h2Availability = NormalizeResource(ResourceType.H2, cellIndex, layerIndex, steerGoodH2);
         if (h2Availability < minHydrogenSpawnH2)
         {
             return false;
@@ -1067,8 +1069,15 @@ public class ReplicatorManager : MonoBehaviour
 
     float NormalizeResource(ResourceType resourceType, int cellIndex, float goodEnoughScale)
     {
+        return NormalizeResource(resourceType, cellIndex, -1, goodEnoughScale);
+    }
+
+    float NormalizeResource(ResourceType resourceType, int cellIndex, int habitatOceanLayerIndex, float goodEnoughScale)
+    {
         float scale = Mathf.Max(0.0001f, goodEnoughScale);
-        float value = planetResourceMap.Get(resourceType, cellIndex);
+        float value = habitatOceanLayerIndex >= 0
+            ? planetResourceMap.GetResourceForCellLayer(resourceType, cellIndex, habitatOceanLayerIndex)
+            : planetResourceMap.Get(resourceType, cellIndex);
         float normalized = Mathf.Clamp01(value / scale);
         return float.IsNaN(normalized) || float.IsInfinity(normalized) ? 0f : normalized;
     }
@@ -1897,9 +1906,18 @@ public class ReplicatorManager : MonoBehaviour
             return 0f;
         }
 
-        return IsSeaLocation(normalizedDir)
-            ? planetResourceMap.GetResourceForCellLayer(resourceType, cellIndex, habitatOceanLayerIndex)
-            : planetResourceMap.Get(resourceType, cellIndex);
+        if (!IsSeaLocation(normalizedDir))
+        {
+            return planetResourceMap.Get(resourceType, cellIndex);
+        }
+
+        int clampedLayer = planetResourceMap.ClampOceanLayerIndex(cellIndex, habitatOceanLayerIndex);
+        if (clampedLayer < 0)
+        {
+            return planetResourceMap.Get(resourceType, cellIndex);
+        }
+
+        return planetResourceMap.GetResourceForCellLayer(resourceType, cellIndex, clampedLayer);
     }
 
     float EstimateGlobalOrganicC()
@@ -1969,6 +1987,7 @@ public class ReplicatorManager : MonoBehaviour
         newAgent.tumbleProbability = Mathf.Clamp(baseTumbleProbability, minTumbleProbability, maxTumbleProbability);
         newAgent.lastHabitatValue = 0f;
         newAgent.nextSenseTime = 0f;
+        ResolveSpawnLayers(newAgent, parent, metabolism, randomDir);
 
         float baselineTarget = Mathf.Max(0.0001f, defaultBiomassTarget);
         if (parent == null)
@@ -1997,6 +2016,111 @@ public class ReplicatorManager : MonoBehaviour
         populationState.AddAgentFromReplicatorData(newAgent);
         spawnedAgent = newAgent;
         return true;
+    }
+
+    void ResolveSpawnLayers(Replicator agent, Replicator parent, MetabolismType metabolism, Vector3 spawnDirection)
+    {
+        if (agent == null || planetResourceMap == null || planetGenerator == null)
+        {
+            return;
+        }
+
+        int resolution = Mathf.Max(1, planetGenerator.resolution);
+        int cellIndex = PlanetGridIndexing.DirectionToCellIndex(spawnDirection.normalized, resolution);
+        if (cellIndex < 0 || !planetResourceMap.IsOceanCell(cellIndex))
+        {
+            agent.currentOceanLayerIndex = -1;
+            agent.preferredOceanLayerIndex = -1;
+            return;
+        }
+
+        int bottomLayer = planetResourceMap.GetOceanBottomLayerIndex(cellIndex);
+        int topLayer = planetResourceMap.GetOceanTopLayerIndex(cellIndex);
+        if (bottomLayer < 0 || topLayer < 0)
+        {
+            agent.currentOceanLayerIndex = -1;
+            agent.preferredOceanLayerIndex = -1;
+            return;
+        }
+
+        int spawnLayer;
+        if (parent == null && metabolism == MetabolismType.Hydrogenotrophy)
+        {
+            // Transitional compatibility: spontaneous seeders stay vent-adjacent at the ocean floor,
+            // while richer layered habitat scoring continues to be handled by normal exploration.
+            spawnLayer = bottomLayer;
+        }
+        else if (metabolism == MetabolismType.Photosynthesis)
+        {
+            spawnLayer = topLayer;
+        }
+        else if (metabolism == MetabolismType.Hydrogenotrophy
+                 || metabolism == MetabolismType.SulfurChemosynthesis
+                 || metabolism == MetabolismType.Methanogenesis)
+        {
+            spawnLayer = bottomLayer;
+        }
+        else if (parent != null)
+        {
+            spawnLayer = planetResourceMap.ClampOceanLayerIndex(cellIndex, parent.currentOceanLayerIndex);
+            if (spawnLayer < 0)
+            {
+                spawnLayer = planetResourceMap.ClampOceanLayerIndex(cellIndex, parent.preferredOceanLayerIndex);
+            }
+
+            if (spawnLayer < 0)
+            {
+                // Transitional compatibility: preferred layer is still treated as a local exploration bias,
+                // never as an omniscient depth plan. Clamp to this spawn cell only.
+                spawnLayer = planetResourceMap.ClampOceanLayerIndex(cellIndex, agent.preferredOceanLayerIndex);
+            }
+        }
+        else
+        {
+            spawnLayer = planetResourceMap.ClampOceanLayerIndex(cellIndex, agent.preferredOceanLayerIndex);
+        }
+
+        if (spawnLayer < 0)
+        {
+            spawnLayer = bottomLayer;
+        }
+
+        agent.currentOceanLayerIndex = spawnLayer;
+        // Keep preferred aligned with concrete spawn habitat for compatibility until Preferred is removed/reworked.
+        agent.preferredOceanLayerIndex = spawnLayer;
+    }
+
+    int ResolveHydrogenotrophySpawnLayer(int cellIndex)
+    {
+        if (planetResourceMap == null || cellIndex < 0 || !planetResourceMap.IsOceanCell(cellIndex))
+        {
+            return -1;
+        }
+
+        return planetResourceMap.GetOceanBottomLayerIndex(cellIndex);
+    }
+
+    float GetTemperatureForHabitatLayer(Vector3 direction, int cellIndex, int habitatOceanLayerIndex)
+    {
+        if (planetResourceMap == null)
+        {
+            return 0f;
+        }
+
+        float baseTemperature = planetResourceMap.GetTemperature(direction, cellIndex);
+        if (habitatOceanLayerIndex < 0 || !planetResourceMap.IsOceanCell(cellIndex))
+        {
+            return baseTemperature;
+        }
+
+        int clampedLayer = planetResourceMap.ClampOceanLayerIndex(cellIndex, habitatOceanLayerIndex);
+        if (clampedLayer < 0)
+        {
+            return baseTemperature;
+        }
+
+        float offset = planetResourceMap.GetLayerTemperatureOffset(cellIndex, clampedLayer);
+        return Mathf.Max(0f, baseTemperature + offset);
     }
 
     void AssignTemperatureTraits(Replicator agent, Replicator parent, MetabolismType metabolism)
