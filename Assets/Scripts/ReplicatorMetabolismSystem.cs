@@ -233,8 +233,8 @@ public class ReplicatorMetabolismSystem
                         if (actualRespire > 0f)
                         {
                             float o2Consumed = actualRespire * o2PerC;
-                            planetResourceMap.Add(ResourceType.O2, cellIndex, -o2Consumed);
-                            planetResourceMap.Add(ResourceType.CO2, cellIndex, actualRespire);
+                            AddAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.O2, cellIndex, -o2Consumed);
+                            AddAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.CO2, cellIndex, actualRespire);
                             populationState.Energy[i] += actualRespire * energyPerC * performance;
                             lackO2 = false;
                         }
@@ -248,7 +248,7 @@ public class ReplicatorMetabolismSystem
                     lackStoredC = !hasStore && desiredResp > 0f;
                     lackO2 = hasStore && desiredResp > 0f && o2Available <= Mathf.Epsilon;
 
-                    float gained = AerobicRespireFromStore(ref populationState.OrganicCStore[i], ref populationState.Energy[i], cellIndex, desiredResp, o2PerC, energyPerC, planetResourceMap);
+                    float gained = AerobicRespireFromStore(populationState, i, ref populationState.OrganicCStore[i], ref populationState.Energy[i], cellIndex, desiredResp, o2PerC, energyPerC, planetResourceMap);
                     if (gained > 0f)
                     {
                         populationState.Energy[i] -= gained * (1f - performance);
@@ -276,7 +276,7 @@ public class ReplicatorMetabolismSystem
                 bool lackStoredC = !hasStore && desiredResp > 0f;
                 bool lackO2 = hasStore && desiredResp > 0f && o2Available <= Mathf.Epsilon;
 
-                float gained = AerobicRespireFromStore(ref populationState.OrganicCStore[i], ref populationState.Energy[i], cellIndex, desiredResp, o2PerC, energyPerC, planetResourceMap);
+                float gained = AerobicRespireFromStore(populationState, i, ref populationState.OrganicCStore[i], ref populationState.Energy[i], cellIndex, desiredResp, o2PerC, energyPerC, planetResourceMap);
                 if (gained > 0f)
                 {
                     populationState.Energy[i] -= gained * (1f - performance);
@@ -368,7 +368,7 @@ public class ReplicatorMetabolismSystem
                     if (fermentedOrganicC > 0f)
                     {
                         planetResourceMap.Add(ResourceType.H2, cellIndex, fermentedOrganicC);
-                        planetResourceMap.Add(ResourceType.CO2, cellIndex, fermentedOrganicC);
+                        AddAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.CO2, cellIndex, fermentedOrganicC);
                         // Keep energy proportional only to the actually fermented fraction.
                         populationState.Energy[i] += Mathf.Max(0f, settings.FermentationEnergyPerTick) * (fermentedOrganicC / Mathf.Max(0.0001f, cNeed)) * performance;
                     }
@@ -461,13 +461,13 @@ public class ReplicatorMetabolismSystem
                     float oxidizedCH4 = Mathf.Max(0f, ch4Consumed - storedOrganicC);
 
                     planetResourceMap.Add(ResourceType.CH4, cellIndex, -ch4Consumed);
-                    planetResourceMap.Add(ResourceType.O2, cellIndex, -o2Consumed);
+                    AddAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.O2, cellIndex, -o2Consumed);
 
                     if (storedOrganicC > 0f)
                         populationState.OrganicCStore[i] = Mathf.Clamp(populationState.OrganicCStore[i] + storedOrganicC, 0f, maxStore);
 
                     if (oxidizedCH4 > 0f)
-                        planetResourceMap.Add(ResourceType.CO2, cellIndex, oxidizedCH4);
+                        AddAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.CO2, cellIndex, oxidizedCH4);
 
                     // Keep methanotrophy energy tied to the oxidized (not stored) CH4 fraction.
                     populationState.Energy[i] += Mathf.Max(0f, settings.MethanotrophyEnergyPerTick) * (oxidizedCH4 / Mathf.Max(0.0001f, ch4Need)) * performance;
@@ -748,8 +748,8 @@ public class ReplicatorMetabolismSystem
             return false;
         }
 
-        planetResourceMap.Add(ResourceType.CO2, cellIndex, -co2Consumed);
-        planetResourceMap.Add(ResourceType.O2, cellIndex, co2Consumed);
+        AddAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, ResourceType.CO2, cellIndex, -co2Consumed);
+        AddAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, ResourceType.O2, cellIndex, co2Consumed);
 
         float producedEnergy = co2Consumed * Mathf.Max(0f, settings.PhotosynthesisEnergyPerCo2) * performance;
         populationState.Energy[index] += producedEnergy;
@@ -781,7 +781,7 @@ public class ReplicatorMetabolismSystem
         lackStoredC = !hasStore && desiredResp > 0f;
         lackO2 = hasStore && desiredResp > 0f && o2Available <= Mathf.Epsilon;
 
-        float gained = AerobicRespireFromStore(ref populationState.OrganicCStore[index], ref populationState.Energy[index], cellIndex, desiredResp, o2PerC, energyPerC, planetResourceMap);
+        float gained = AerobicRespireFromStore(populationState, index, ref populationState.OrganicCStore[index], ref populationState.Energy[index], cellIndex, desiredResp, o2PerC, energyPerC, planetResourceMap);
         if (gained > 0f)
         {
             populationState.Energy[index] -= gained * (1f - performance);
@@ -850,7 +850,7 @@ public class ReplicatorMetabolismSystem
         co2Released = organicCUsed * Mathf.Clamp01(settings.PhotosynthDarkAnoxicCO2ReleaseFraction);
         if (co2Released > 0f)
         {
-            planetResourceMap.Add(ResourceType.CO2, cellIndex, co2Released);
+            AddAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, ResourceType.CO2, cellIndex, co2Released);
         }
 
         h2Released = organicCUsed * Mathf.Clamp01(settings.PhotosynthDarkAnoxicH2ReleaseFraction);
@@ -1105,10 +1105,27 @@ public class ReplicatorMetabolismSystem
         return Mathf.Clamp01(raw / Mathf.Max(0.0001f, goodEnoughScale));
     }
 
+    private static bool TryGetValidAgentOceanLayer(ReplicatorPopulationState populationState, int index, PlanetResourceMap planetResourceMap, int cellIndex, out int clampedLayer)
+    {
+        clampedLayer = -1;
+        if (!planetResourceMap.IsOceanCell(cellIndex))
+        {
+            return false;
+        }
+
+        int requestedLayer = populationState.CurrentOceanLayerIndex[index];
+        if (requestedLayer < 0)
+        {
+            return false;
+        }
+
+        clampedLayer = planetResourceMap.ClampOceanLayerIndex(cellIndex, requestedLayer);
+        return clampedLayer >= 0;
+    }
+
     private static float GetAgentResourceAtCurrentLayer(ReplicatorPopulationState populationState, int index, PlanetResourceMap planetResourceMap, ResourceType resourceType, int cellIndex)
     {
-        int layer = populationState.CurrentOceanLayerIndex[index];
-        if (layer >= 0 && planetResourceMap.IsOceanCell(cellIndex))
+        if (TryGetValidAgentOceanLayer(populationState, index, planetResourceMap, cellIndex, out int layer))
         {
             return planetResourceMap.GetResourceForCellLayer(resourceType, cellIndex, layer);
         }
@@ -1116,7 +1133,35 @@ public class ReplicatorMetabolismSystem
         return planetResourceMap.Get(resourceType, cellIndex);
     }
 
+    // Layer-aware metabolism writes migrated in this pass:
+    // - aerobic O2 consumption / CO2 release from stored-organic-C respiration
+    // - direct O2 consumption and direct CO2 production where the agent's current layer is known
+    // Intentionally aggregate in this pass: non-O2/CO2 fluxes (OrganicC/H2/H2S/CH4/S0/leak) to keep chemistry balance drift low.
+    private static void AddAgentResourceAtCurrentLayer(
+        ReplicatorPopulationState populationState,
+        int index,
+        PlanetResourceMap planetResourceMap,
+        ResourceType resourceType,
+        int cellIndex,
+        float delta)
+    {
+        if (Mathf.Approximately(delta, 0f))
+        {
+            return;
+        }
+
+        if (TryGetValidAgentOceanLayer(populationState, index, planetResourceMap, cellIndex, out int layer))
+        {
+            planetResourceMap.AddResourceForCellLayer(resourceType, cellIndex, layer, delta);
+            return;
+        }
+
+        planetResourceMap.Add(resourceType, cellIndex, delta);
+    }
+
     private static float AerobicRespireFromStore(
+        ReplicatorPopulationState populationState,
+        int index,
         ref float organicCStore,
         ref float energy,
         int cellIndex,
@@ -1132,15 +1177,15 @@ public class ReplicatorMetabolismSystem
         if (cUsed <= 0f) return 0f;
 
         float o2Needed = cUsed * o2PerC;
-        float o2Available = planetResourceMap.Get(ResourceType.O2, cellIndex);
+        float o2Available = GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, ResourceType.O2, cellIndex);
         float ratio = o2Needed <= Mathf.Epsilon ? 1f : Mathf.Clamp01(o2Available / o2Needed);
         cUsed *= ratio;
 
         if (cUsed <= 0f) return 0f;
 
         float o2Consumed = cUsed * o2PerC;
-        planetResourceMap.Add(ResourceType.O2, cellIndex, -o2Consumed);
-        planetResourceMap.Add(ResourceType.CO2, cellIndex, cUsed);
+        AddAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, ResourceType.O2, cellIndex, -o2Consumed);
+        AddAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, ResourceType.CO2, cellIndex, cUsed);
 
         organicCStore = Mathf.Max(0f, organicCStore - cUsed);
         float gainedEnergy = cUsed * energyPerC;
