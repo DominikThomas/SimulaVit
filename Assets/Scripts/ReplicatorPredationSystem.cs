@@ -12,6 +12,7 @@ public class ReplicatorPredationSystem
     {
         public bool EnablePredators;
         public bool UseScentPredation;
+        public int AdjacentLayerSearchDepth;
         public float PredatorBiteOrganicC;
         public float PredatorBiteEnergy;
         public float PredatorAssimilationFraction;
@@ -27,7 +28,8 @@ public class ReplicatorPredationSystem
         Settings settings,
         float deltaTime,
         int resolution,
-        Dictionary<int, List<int>> preyAgentsByCell,
+        PlanetResourceMap planetResourceMap,
+        Dictionary<long, List<int>> preyAgentsBySpatialBin,
         Action<MetabolismType, DeathCause> registerDeathCause,
         Action<Replicator> depositDeathOrganicC,
         Action<Replicator, float> depositPredationOrganicC,
@@ -66,12 +68,15 @@ public class ReplicatorPredationSystem
             }
 
             int predatorCell = PlanetGridIndexing.DirectionToCellIndex(populationState.Position[i].normalized, resolution);
-            if (!preyAgentsByCell.TryGetValue(predatorCell, out List<int> preyInCell) || preyInCell.Count == 0)
-            {
-                continue;
-            }
-
-            if (!TryBuildPredationCandidates(i, preyInCell, localPredationCandidates, pendingPredationRemovals))
+            int predatorLayer = ResolvePredationLayerIndex(planetResourceMap, predatorCell, populationState.CurrentOceanLayerIndex[i]);
+            if (!TryBuildPredationCandidates(
+                    predatorIndex: i,
+                    predatorCell: predatorCell,
+                    predatorLayer: predatorLayer,
+                    settings: settings,
+                    preyAgentsBySpatialBin: preyAgentsBySpatialBin,
+                    localPredationCandidates: localPredationCandidates,
+                    pendingPredationRemovals: pendingPredationRemovals))
             {
                 continue;
             }
@@ -111,15 +116,76 @@ public class ReplicatorPredationSystem
 
     private bool TryBuildPredationCandidates(
         int predatorIndex,
-        List<int> preyInCell,
+        int predatorCell,
+        int predatorLayer,
+        Settings settings,
+        Dictionary<long, List<int>> preyAgentsBySpatialBin,
         List<int> localPredationCandidates,
         HashSet<int> pendingPredationRemovals)
     {
         localPredationCandidates.Clear();
-
-        for (int preyListIndex = 0; preyListIndex < preyInCell.Count; preyListIndex++)
+        if (preyAgentsBySpatialBin == null || preyAgentsBySpatialBin.Count == 0)
         {
-            int preyIndexCandidate = preyInCell[preyListIndex];
+            return false;
+        }
+
+        CollectPreyCandidatesForLayer(
+            predatorIndex,
+            predatorCell,
+            predatorLayer,
+            preyAgentsBySpatialBin,
+            localPredationCandidates,
+            pendingPredationRemovals);
+
+        if (localPredationCandidates.Count > 0)
+        {
+            return true;
+        }
+
+        int adjacentDepth = Mathf.Max(0, settings.AdjacentLayerSearchDepth);
+        if (adjacentDepth <= 0 || predatorLayer < 0)
+        {
+            return false;
+        }
+
+        for (int offset = 1; offset <= adjacentDepth; offset++)
+        {
+            CollectPreyCandidatesForLayer(
+                predatorIndex,
+                predatorCell,
+                predatorLayer - offset,
+                preyAgentsBySpatialBin,
+                localPredationCandidates,
+                pendingPredationRemovals);
+            CollectPreyCandidatesForLayer(
+                predatorIndex,
+                predatorCell,
+                predatorLayer + offset,
+                preyAgentsBySpatialBin,
+                localPredationCandidates,
+                pendingPredationRemovals);
+        }
+
+        return localPredationCandidates.Count > 0;
+    }
+
+    private void CollectPreyCandidatesForLayer(
+        int predatorIndex,
+        int cellIndex,
+        int layerIndex,
+        Dictionary<long, List<int>> preyAgentsBySpatialBin,
+        List<int> localPredationCandidates,
+        HashSet<int> pendingPredationRemovals)
+    {
+        long spatialKey = BuildSpatialBinKey(cellIndex, layerIndex);
+        if (!preyAgentsBySpatialBin.TryGetValue(spatialKey, out List<int> preyInBin) || preyInBin.Count == 0)
+        {
+            return;
+        }
+
+        for (int preyListIndex = 0; preyListIndex < preyInBin.Count; preyListIndex++)
+        {
+            int preyIndexCandidate = preyInBin[preyListIndex];
             if (preyIndexCandidate == predatorIndex || pendingPredationRemovals.Contains(preyIndexCandidate))
             {
                 continue;
@@ -127,8 +193,25 @@ public class ReplicatorPredationSystem
 
             localPredationCandidates.Add(preyIndexCandidate);
         }
+    }
 
-        return localPredationCandidates.Count > 0;
+    public static long BuildSpatialBinKey(int cellIndex, int layerIndex)
+    {
+        unchecked
+        {
+            uint layer = (uint)(layerIndex + 1);
+            return ((long)cellIndex << 32) | layer;
+        }
+    }
+
+    public static int ResolvePredationLayerIndex(PlanetResourceMap planetResourceMap, int cellIndex, int layerIndex)
+    {
+        if (planetResourceMap == null || !planetResourceMap.IsOceanCell(cellIndex))
+        {
+            return -1;
+        }
+
+        return planetResourceMap.ClampOceanLayerIndex(cellIndex, layerIndex);
     }
 
     private float ApplyPredationBite(
