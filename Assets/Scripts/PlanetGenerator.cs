@@ -429,16 +429,28 @@ public class PlanetGenerator : MonoBehaviour
     {
         const int textureWidth = 4096;
         const int textureHeight = 2048;
+        const TextureFormat textureFormat = TextureFormat.RGBA32;
+        const bool linearColorSpace = true;
         int pixelCount = textureWidth * textureHeight;
 
         if (runtimeSurfaceTexture == null || runtimeSurfaceTexture.width != textureWidth || runtimeSurfaceTexture.height != textureHeight)
         {
-            runtimeSurfaceTexture = new Texture2D(textureWidth, textureHeight, TextureFormat.RGBA32, false, true)
+            runtimeSurfaceTexture = new Texture2D(textureWidth, textureHeight, textureFormat, false, linearColorSpace)
             {
                 name = "Planet Surface Rock Colors",
                 wrapMode = TextureWrapMode.Repeat,
                 filterMode = FilterMode.Bilinear
             };
+        }
+
+        string textureCacheKey = PlanetGenerationCache.BuildSurfaceTextureCacheKeyString(this, textureWidth, textureHeight, textureFormat, linearColorSpace);
+        string textureCachePath = PlanetGenerationCache.BuildSurfaceTextureCachePath(textureCacheKey);
+        if (PlanetGenerationCache.TryLoadSurfaceTexture(textureCachePath, textureWidth, textureHeight, textureFormat, linearColorSpace, out PlanetGenerationCache.SurfaceTextureData cachedTextureData))
+        {
+            runtimeSurfaceTexture.LoadRawTextureData(cachedTextureData.RawTextureData);
+            runtimeSurfaceTexture.Apply(false, false);
+            Debug.Log($"[PlanetGenerationCache] Loaded surface texture cache ({textureCachePath}).");
+            return runtimeSurfaceTexture;
         }
 
         Color[] pixels = new Color[pixelCount];
@@ -482,6 +494,20 @@ public class PlanetGenerator : MonoBehaviour
 
         runtimeSurfaceTexture.SetPixels(pixels);
         runtimeSurfaceTexture.Apply(false, false);
+        var rawTextureData = runtimeSurfaceTexture.GetRawTextureData<byte>();
+        byte[] rawTextureBytes = new byte[rawTextureData.Length];
+        rawTextureData.CopyTo(rawTextureBytes);
+        PlanetGenerationCache.SaveSurfaceTexture(
+            textureCachePath,
+            new PlanetGenerationCache.SurfaceTextureData
+            {
+                Width = textureWidth,
+                Height = textureHeight,
+                Format = textureFormat,
+                LinearColorSpace = linearColorSpace,
+                RawTextureData = rawTextureBytes
+            });
+        Debug.Log($"[PlanetGenerationCache] Regenerated surface texture and saved cache ({textureCachePath}).");
         return runtimeSurfaceTexture;
     }
 
