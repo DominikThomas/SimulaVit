@@ -103,7 +103,7 @@ public class Replicator
     public float movementSeed;
     [Tooltip("Current logical ocean layer index used for layered chemistry queries. World-space movement remains surface-constrained for now.")]
     public int currentOceanLayerIndex;
-    [Tooltip("Preferred logical ocean layer index for gradual layer-settling. World-space movement remains surface-constrained for now.")]
+    [Tooltip("Temporary exploratory ocean-layer intent/bias used for local up/down probing. Not a global target depth.")]
     public int preferredOceanLayerIndex;
 
     // Constructor
@@ -151,26 +151,13 @@ public class Replicator
 
     private static int GetDefaultPreferredOceanLayerIndex(MetabolismType metabolism, LocomotionType locomotion)
     {
-        if (locomotion == LocomotionType.Anchored)
-        {
-            return 4;
-        }
-
         switch (metabolism)
         {
-            case MetabolismType.Photosynthesis:
-                return 0;
             case MetabolismType.SulfurChemosynthesis:
             case MetabolismType.Hydrogenotrophy:
                 return 4;
-            case MetabolismType.Saprotrophy:
-            case MetabolismType.Methanotrophy:
-                return 2;
-            case MetabolismType.Methanogenesis:
-            case MetabolismType.Fermentation:
-                return 3;
             default:
-                return 1;
+                return locomotion == LocomotionType.Anchored ? 4 : -1;
         }
     }
 }

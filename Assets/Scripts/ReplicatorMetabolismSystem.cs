@@ -882,28 +882,230 @@ public class ReplicatorMetabolismSystem
             return -1;
         }
 
-        int preferred = populationState.PreferredOceanLayerIndex[index];
-        int current = populationState.CurrentOceanLayerIndex[index];
-        int clampedPreferred = planetResourceMap.ClampOceanLayerIndex(cellIndex, preferred >= 0 ? preferred : current);
-        int clampedCurrent = planetResourceMap.ClampOceanLayerIndex(cellIndex, current);
-
-        if (clampedCurrent < 0)
+        int activeLayerCount = planetResourceMap.GetOceanActiveLayerCount(cellIndex);
+        if (activeLayerCount <= 0)
         {
-            clampedCurrent = clampedPreferred;
+            populationState.CurrentOceanLayerIndex[index] = -1;
+            populationState.PreferredOceanLayerIndex[index] = -1;
+            return -1;
         }
 
-        if (clampedCurrent < clampedPreferred)
+        int deepestLayer = activeLayerCount - 1;
+        int current = planetResourceMap.ClampOceanLayerIndex(cellIndex, populationState.CurrentOceanLayerIndex[index]);
+        int preferred = planetResourceMap.ClampOceanLayerIndex(cellIndex, populationState.PreferredOceanLayerIndex[index]);
+        if (current < 0)
         {
-            clampedCurrent++;
-        }
-        else if (clampedCurrent > clampedPreferred)
-        {
-            clampedCurrent--;
+            current = deepestLayer;
         }
 
-        populationState.PreferredOceanLayerIndex[index] = clampedPreferred;
-        populationState.CurrentOceanLayerIndex[index] = clampedCurrent;
-        return clampedCurrent;
+        MetabolismType metabolism = populationState.Metabolism[index];
+        LocomotionType locomotion = populationState.Locomotion[index];
+        bool bottomAssociated = locomotion == LocomotionType.Anchored
+            || metabolism == MetabolismType.SulfurChemosynthesis
+            || metabolism == MetabolismType.Hydrogenotrophy;
+
+        if (bottomAssociated)
+        {
+            int next = StepTowardAdjacentLayer(current, deepestLayer);
+            populationState.CurrentOceanLayerIndex[index] = next;
+            populationState.PreferredOceanLayerIndex[index] = deepestLayer;
+            return next;
+        }
+
+        float currentScore = EvaluateLayerScore(populationState, index, cellIndex, current, planetResourceMap);
+        int bestProbeLayer = current;
+        float bestProbeScore = currentScore;
+
+        int upLayer = current - 1;
+        int downLayer = current + 1;
+        bool canProbeUp = upLayer >= 0;
+        bool canProbeDown = downLayer <= deepestLayer;
+
+        if (canProbeUp)
+        {
+            float upScore = EvaluateLayerScore(populationState, index, cellIndex, upLayer, planetResourceMap);
+            if (upScore > bestProbeScore)
+            {
+                bestProbeScore = upScore;
+                bestProbeLayer = upLayer;
+            }
+        }
+
+        if (canProbeDown)
+        {
+            float downScore = EvaluateLayerScore(populationState, index, cellIndex, downLayer, planetResourceMap);
+            if (downScore > bestProbeScore)
+            {
+                bestProbeScore = downScore;
+                bestProbeLayer = downLayer;
+            }
+        }
+
+        bool shouldProbe = ShouldPerformVerticalProbe(populationState, index);
+        if (!shouldProbe && preferred >= 0 && Mathf.Abs(preferred - current) == 1)
+        {
+            float preferredScore = EvaluateLayerScore(populationState, index, cellIndex, preferred, planetResourceMap);
+            if (preferredScore + 0.03f >= currentScore)
+            {
+                shouldProbe = true;
+                bestProbeLayer = preferred;
+                bestProbeScore = preferredScore;
+            }
+            else
+            {
+                preferred = -1;
+            }
+        }
+
+        int nextLayer = current;
+        if (shouldProbe && bestProbeLayer != current && bestProbeScore > currentScore + GetVerticalImproveThreshold(locomotion))
+        {
+            int trendDirection = bestProbeLayer > current ? 1 : -1;
+            nextLayer = bestProbeLayer;
+
+            int trendLayer = nextLayer + trendDirection;
+            if (trendLayer >= 0 && trendLayer <= deepestLayer)
+            {
+                float trendScore = EvaluateLayerScore(populationState, index, cellIndex, trendLayer, planetResourceMap);
+                preferred = trendScore + 0.02f >= bestProbeScore ? trendLayer : -1;
+            }
+            else
+            {
+                preferred = -1;
+            }
+        }
+        else if (shouldProbe && bestProbeLayer != current && bestProbeScore < currentScore - 0.08f)
+        {
+            preferred = -1;
+        }
+
+        populationState.PreferredOceanLayerIndex[index] = preferred;
+        populationState.CurrentOceanLayerIndex[index] = nextLayer;
+        return nextLayer;
+    }
+
+    private static int StepTowardAdjacentLayer(int current, int target)
+    {
+        if (current < target)
+        {
+            return current + 1;
+        }
+
+        if (current > target)
+        {
+            return current - 1;
+        }
+
+        return current;
+    }
+
+    private static bool ShouldPerformVerticalProbe(ReplicatorPopulationState populationState, int index)
+    {
+        float age = Mathf.Max(0f, populationState.Age[index]);
+        float seed = populationState.MovementSeed[index];
+        LocomotionType locomotion = populationState.Locomotion[index];
+
+        float probesPerSecond;
+        switch (locomotion)
+        {
+            case LocomotionType.PassiveDrift:
+                probesPerSecond = 0.32f;
+                break;
+            case LocomotionType.Amoeboid:
+                probesPerSecond = 0.18f;
+                break;
+            case LocomotionType.Flagellum:
+                probesPerSecond = 0.2f;
+                break;
+            default:
+                probesPerSecond = 0.08f;
+                break;
+        }
+
+        float phase = Mathf.Abs(Mathf.Sin((age * probesPerSecond * 6.28318f) + (seed * 17.123f)));
+        return phase > 0.965f;
+    }
+
+    private static float GetVerticalImproveThreshold(LocomotionType locomotion)
+    {
+        switch (locomotion)
+        {
+            case LocomotionType.PassiveDrift:
+                return 0.02f;
+            case LocomotionType.Amoeboid:
+                return 0.04f;
+            case LocomotionType.Flagellum:
+                return 0.035f;
+            default:
+                return 0.06f;
+        }
+    }
+
+    private static float EvaluateLayerScore(ReplicatorPopulationState populationState, int index, int cellIndex, int layerIndex, PlanetResourceMap planetResourceMap)
+    {
+        float co2 = NormalizeLayeredResource(planetResourceMap, ResourceType.CO2, cellIndex, layerIndex, 0.35f, useCompatibility: true);
+        float o2 = NormalizeLayeredResource(planetResourceMap, ResourceType.O2, cellIndex, layerIndex, 0.25f);
+        float organic = NormalizeLayeredResource(planetResourceMap, ResourceType.OrganicC, cellIndex, layerIndex, 0.25f);
+        float h2 = NormalizeLayeredResource(planetResourceMap, ResourceType.H2, cellIndex, layerIndex, 0.22f);
+        float h2s = NormalizeLayeredResource(planetResourceMap, ResourceType.H2S, cellIndex, layerIndex, 0.22f);
+        float ch4 = NormalizeLayeredResource(planetResourceMap, ResourceType.CH4, cellIndex, layerIndex, 0.18f);
+        float light = Mathf.Clamp01(planetResourceMap.GetLayerLightFactor(cellIndex, layerIndex));
+
+        float score;
+        switch (populationState.Metabolism[index])
+        {
+            case MetabolismType.SulfurChemosynthesis:
+                score = Mathf.Min(h2s, co2);
+                break;
+            case MetabolismType.Hydrogenotrophy:
+                score = Mathf.Min(h2, co2);
+                break;
+            case MetabolismType.Photosynthesis:
+                score = Mathf.Min(light, co2) + 0.06f;
+                break;
+            case MetabolismType.Saprotrophy:
+                score = Mathf.Min(organic, o2);
+                break;
+            case MetabolismType.Predation:
+                score = o2 * 0.6f + organic * 0.4f;
+                break;
+            case MetabolismType.Fermentation:
+                score = organic;
+                break;
+            case MetabolismType.Methanogenesis:
+                score = Mathf.Min(h2, co2) + (1f - o2) * 0.15f;
+                break;
+            case MetabolismType.Methanotrophy:
+                score = Mathf.Min(ch4, o2);
+                break;
+            default:
+                score = 0f;
+                break;
+        }
+
+        if (populationState.Locomotion[index] == LocomotionType.PassiveDrift)
+        {
+            float age = populationState.Age[index];
+            float seed = populationState.MovementSeed[index];
+            float pseudoRandom = 0.5f + 0.5f * Mathf.Sin((seed * 11.37f) + (age * 0.73f) + (layerIndex * 1.93f));
+            score = (score * 0.55f) + (0.45f * pseudoRandom);
+        }
+
+        return Mathf.Clamp01(score);
+    }
+
+    private static float NormalizeLayeredResource(
+        PlanetResourceMap planetResourceMap,
+        ResourceType resourceType,
+        int cellIndex,
+        int layerIndex,
+        float goodEnoughScale,
+        bool useCompatibility = false)
+    {
+        float raw = useCompatibility
+            ? planetResourceMap.GetCompatibilityResourceValue(resourceType, cellIndex)
+            : planetResourceMap.GetResourceForCellLayer(resourceType, cellIndex, layerIndex);
+        return Mathf.Clamp01(raw / Mathf.Max(0.0001f, goodEnoughScale));
     }
 
     private static float GetAgentResourceAtCurrentLayer(ReplicatorPopulationState populationState, int index, PlanetResourceMap planetResourceMap, ResourceType resourceType, int cellIndex)

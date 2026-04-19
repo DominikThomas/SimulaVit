@@ -366,11 +366,9 @@ public class ReplicatorSteeringSystem
         int current = planetResourceMap.ClampOceanLayerIndex(cellIndex, populationState.CurrentOceanLayerIndex[index]);
         if (current < 0)
         {
-            current = preferred;
+            int deepest = Mathf.Max(0, planetResourceMap.GetOceanActiveLayerCount(cellIndex) - 1);
+            current = preferred >= 0 ? preferred : deepest;
         }
-
-        if (current < preferred) current++;
-        else if (current > preferred) current--;
 
         populationState.PreferredOceanLayerIndex[index] = preferred;
         populationState.CurrentOceanLayerIndex[index] = current;
