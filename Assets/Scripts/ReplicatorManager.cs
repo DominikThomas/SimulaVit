@@ -172,6 +172,9 @@ public class ReplicatorManager : MonoBehaviour
     public float predatorBiteEnergy = 0.05f;
     public float predatorKillEnergyThreshold = 0.01f;
     [Range(0f, 1f)] public float predatorAssimilationFraction = 0.6f;
+    [Range(0, 2)]
+    [Tooltip("Optional small vertical predation reach in ocean layers. 0 = same-layer only (default).")]
+    public int predatorAdjacentLayerSearchDepth = 0;
     public float predatorEnergyPerC = 1.0f;
     public float predatorBasalCostMultiplier = 1.5f;
     public float predatorMoveSpeedMultiplier = 1.1f;
@@ -407,7 +410,9 @@ public class ReplicatorManager : MonoBehaviour
     private double simulationTimeSeconds;
     private float currentStepDeltaTime;
     private ReplicatorSteeringSystem.DebugState steeringDebugState;
-    private readonly Dictionary<int, List<int>> preyAgentsByCell = new Dictionary<int, List<int>>(2048);
+    // Validity window: rebuilt from authoritative population state for the current simulation step
+    // and consumed by predation in the same step. Treat as ephemeral (do not persist across steps/removals).
+    private readonly Dictionary<long, List<int>> preyAgentsBySpatialBin = new Dictionary<long, List<int>>(2048);
     private readonly List<int> spontaneousHydrogenSpawnCandidateCells = new List<int>(1024);
     private int spontaneousSpawnCandidateCacheLastRefreshStep = -1;
     private int simulationStepCount;
@@ -1127,7 +1132,7 @@ public class ReplicatorManager : MonoBehaviour
             int cellCount = PlanetGridIndexing.GetCellCount(resolution);
             planetResourceMap.EnsureScentArrays(cellCount);
             populationState.EnsureMatchesAgentCount(agents);
-            RebuildPreyCellBins(resolution, populationState);
+            RebuildPreySpatialBins(resolution, populationState);
 
             float leakEmit = Mathf.Max(0f, dissolvedOrganicLeakEmitPerSecond) * interval;
             float wasteEmit = Mathf.Max(0f, toxicProteolyticWasteEmitPerSecond) * interval;
@@ -1213,9 +1218,9 @@ public class ReplicatorManager : MonoBehaviour
         return activeSteeringPresenceCached;
     }
 
-    void RebuildPreyCellBins(int resolution, ReplicatorPopulationState state)
+    void RebuildPreySpatialBins(int resolution, ReplicatorPopulationState state)
     {
-        preyAgentsByCell.Clear();
+        preyAgentsBySpatialBin.Clear();
         int count = Mathf.Min(agents.Count, state != null ? state.Count : 0);
         for (int i = 0; i < count; i++)
         {
@@ -1225,10 +1230,15 @@ public class ReplicatorManager : MonoBehaviour
             }
 
             int cellIndex = PlanetGridIndexing.DirectionToCellIndex(state.Position[i].normalized, resolution);
-            if (!preyAgentsByCell.TryGetValue(cellIndex, out List<int> preyIndices))
+            int layerIndex = ReplicatorPredationSystem.ResolvePredationLayerIndex(
+                planetResourceMap,
+                cellIndex,
+                state.CurrentOceanLayerIndex[i]);
+            long spatialKey = ReplicatorPredationSystem.BuildSpatialBinKey(cellIndex, layerIndex);
+            if (!preyAgentsBySpatialBin.TryGetValue(spatialKey, out List<int> preyIndices))
             {
                 preyIndices = new List<int>(4);
-                preyAgentsByCell[cellIndex] = preyIndices;
+                preyAgentsBySpatialBin[spatialKey] = preyIndices;
             }
 
             preyIndices.Add(i);
@@ -1298,10 +1308,15 @@ public class ReplicatorManager : MonoBehaviour
             return;
         }
 
+        int resolution = Mathf.Max(1, planetGenerator.resolution);
+        populationState.EnsureMatchesAgentCount(agents);
+        RebuildPreySpatialBins(resolution, populationState);
+
         ReplicatorPredationSystem.Settings settings = new ReplicatorPredationSystem.Settings
         {
             EnablePredators = enablePredators,
             UseScentPredation = useScentPredation,
+            AdjacentLayerSearchDepth = Mathf.Max(0, predatorAdjacentLayerSearchDepth),
             PredatorBiteOrganicC = predatorBiteOrganicC,
             PredatorBiteEnergy = predatorBiteEnergy,
             PredatorAssimilationFraction = predatorAssimilationFraction,
@@ -1316,8 +1331,9 @@ public class ReplicatorManager : MonoBehaviour
             populationState,
             settings,
             simulationDeltaTime,
-            Mathf.Max(1, planetGenerator.resolution),
-            preyAgentsByCell,
+            resolution,
+            planetResourceMap,
+            preyAgentsBySpatialBin,
             RegisterDeathCause,
             DepositDeathOrganicC,
             DepositPredationOrganicCAtLocation,
