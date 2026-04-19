@@ -855,58 +855,100 @@ public class PlanetResourceMap : MonoBehaviour
         ConfigureLayeredOceanResources(cellCount);
         EnsureScentArrays(cellCount);
 
+        string resourceCacheKey = PlanetGenerationCache.BuildResourceCacheKeyString(planetGenerator, this, resolution);
+        string resourceCachePath = PlanetGenerationCache.BuildResourceCachePath(resourceCacheKey);
+        bool loadedResourceCache = PlanetGenerationCache.TryLoadResource(resourceCachePath, cellCount, out PlanetGenerationCache.ResourceData cachedResourceData);
+
         int ventCount = 0;
-        for (int cell = 0; cell < cellCount; cell++)
+        if (loadedResourceCache)
         {
-            Vector3 dir = CellIndexToDirection(cell, resolution);
-            cellDirections[cell] = dir;
+            cellDirections = cachedResourceData.CellDirections;
+            oceanMask = cachedResourceData.OceanMask;
+            p = cachedResourceData.Phosphorus;
+            fe = cachedResourceData.Iron;
+            si = cachedResourceData.Silicon;
+            ca = cachedResourceData.Calcium;
+            ventMask = cachedResourceData.VentMask;
+            ventStrength = cachedResourceData.VentStrength;
+            ventCells = cachedResourceData.VentCells;
+            ventCount = ventCells.Length;
 
-            oceanMask[cell] = planetGenerator.IsOceanCell(cell) ? (byte)1 : (byte)0;
-
-            co2[cell] = baselineCO2;
-            o2[cell] = baselineO2;
-            organicC[cell] = 0f;
-            ch4[cell] = baselineCH4;
-            s0[cell] = baselineS0;
-
-            float phosphorusNoise = SampleResourceNoise(dir, new Vector3(13.7f, -4.2f, 9.9f));
-            float ironNoise = SampleResourceNoise(dir, new Vector3(-8.4f, 3.1f, 15.2f));
-            float siliconNoise = SampleResourceNoise(dir, new Vector3(2.3f, 11.9f, -6.6f));
-            float calciumNoise = SampleResourceNoise(dir, new Vector3(-12.5f, -7.4f, 4.8f));
-
-            p[cell] = Mathf.Max(0f, phosphorusScale * phosphorusNoise);
-            fe[cell] = Mathf.Max(0f, ironScale * ironNoise);
-            si[cell] = Mathf.Max(0f, baselineSi + siliconPatchScale * (siliconNoise - 0.5f));
-            ca[cell] = Mathf.Max(0f, baselineCa + calciumPatchScale * (calciumNoise - 0.5f));
-
-            if (oceanMask[cell] != 0)
+            for (int cell = 0; cell < cellCount; cell++)
             {
-                SetOceanDissolvedInitial(ResourceType.DissolvedFe2Plus, cell, Mathf.Max(0f, initialDissolvedFe2PlusPerOceanCell));
-            }
+                co2[cell] = baselineCO2;
+                o2[cell] = baselineO2;
+                organicC[cell] = 0f;
+                ch4[cell] = baselineCH4;
+                s0[cell] = baselineS0;
 
-            float ventNoise = HighFrequencyNoise(dir);
-            bool isVent = ventNoise > ventThreshold;
-            if (isVent)
-            {
-                float strengthT = Mathf.InverseLerp(ventThreshold, 1f, ventNoise);
-                float strength = Mathf.Lerp(ventStrengthMin, ventStrengthMax, Mathf.Clamp01(strengthT));
-                ventStrength[cell] = strength;
+                bool hasVent = ventMask[cell] != 0;
+                float strength = hasVent ? ventStrength[cell] : 0f;
                 h2s[cell] = strength;
                 h2[cell] = strength;
-            }
-            else
-            {
-                ventStrength[cell] = 0f;
-                h2s[cell] = 0f;
-                h2[cell] = 0f;
+
+                if (oceanMask[cell] != 0)
+                {
+                    SetOceanDissolvedInitial(ResourceType.DissolvedFe2Plus, cell, Mathf.Max(0f, initialDissolvedFe2PlusPerOceanCell));
+                }
             }
 
-            if (isVent)
+            Debug.Log($"[PlanetGenerationCache] Loaded resource-generation cache ({resourceCachePath}).");
+        }
+        else
+        {
+            for (int cell = 0; cell < cellCount; cell++)
             {
-                ventMask[cell] = 1;
-                ventCount++;
+                Vector3 dir = CellIndexToDirection(cell, resolution);
+                cellDirections[cell] = dir;
+
+                oceanMask[cell] = planetGenerator.IsOceanCell(cell) ? (byte)1 : (byte)0;
+
+                co2[cell] = baselineCO2;
+                o2[cell] = baselineO2;
+                organicC[cell] = 0f;
+                ch4[cell] = baselineCH4;
+                s0[cell] = baselineS0;
+
+                float phosphorusNoise = SampleResourceNoise(dir, new Vector3(13.7f, -4.2f, 9.9f));
+                float ironNoise = SampleResourceNoise(dir, new Vector3(-8.4f, 3.1f, 15.2f));
+                float siliconNoise = SampleResourceNoise(dir, new Vector3(2.3f, 11.9f, -6.6f));
+                float calciumNoise = SampleResourceNoise(dir, new Vector3(-12.5f, -7.4f, 4.8f));
+
+                p[cell] = Mathf.Max(0f, phosphorusScale * phosphorusNoise);
+                fe[cell] = Mathf.Max(0f, ironScale * ironNoise);
+                si[cell] = Mathf.Max(0f, baselineSi + siliconPatchScale * (siliconNoise - 0.5f));
+                ca[cell] = Mathf.Max(0f, baselineCa + calciumPatchScale * (calciumNoise - 0.5f));
+
+                if (oceanMask[cell] != 0)
+                {
+                    SetOceanDissolvedInitial(ResourceType.DissolvedFe2Plus, cell, Mathf.Max(0f, initialDissolvedFe2PlusPerOceanCell));
+                }
+
+                float ventNoise = HighFrequencyNoise(dir);
+                bool isVent = ventNoise > ventThreshold;
+                if (isVent)
+                {
+                    float strengthT = Mathf.InverseLerp(ventThreshold, 1f, ventNoise);
+                    float strength = Mathf.Lerp(ventStrengthMin, ventStrengthMax, Mathf.Clamp01(strengthT));
+                    ventStrength[cell] = strength;
+                    h2s[cell] = strength;
+                    h2[cell] = strength;
+                }
+                else
+                {
+                    ventStrength[cell] = 0f;
+                    h2s[cell] = 0f;
+                    h2[cell] = 0f;
+                }
+
+                if (isVent)
+                {
+                    ventMask[cell] = 1;
+                    ventCount++;
+                }
             }
         }
+
         isInitialized = true;
         BuildVentHeatNeighbors();
         RebuildVentHeatField();
@@ -915,14 +957,33 @@ public class PlanetResourceMap : MonoBehaviour
         int total = cellCount;
         Debug.Log($"Vents: {ventCount}/{total} = {(100f * ventCount / total):F1}%");
 
-        ventCells = new int[ventCount];
-        int ventWrite = 0;
-        for (int cell = 0; cell < cellCount; cell++)
+        if (!loadedResourceCache)
         {
-            if (ventMask[cell] != 0)
+            ventCells = new int[ventCount];
+            int ventWrite = 0;
+            for (int cell = 0; cell < cellCount; cell++)
             {
-                ventCells[ventWrite++] = cell;
+                if (ventMask[cell] != 0)
+                {
+                    ventCells[ventWrite++] = cell;
+                }
             }
+
+            PlanetGenerationCache.SaveResource(
+                resourceCachePath,
+                new PlanetGenerationCache.ResourceData
+                {
+                    CellDirections = (Vector3[])cellDirections.Clone(),
+                    OceanMask = (byte[])oceanMask.Clone(),
+                    Phosphorus = (float[])p.Clone(),
+                    Iron = (float[])fe.Clone(),
+                    Silicon = (float[])si.Clone(),
+                    Calcium = (float[])ca.Clone(),
+                    VentMask = (byte[])ventMask.Clone(),
+                    VentStrength = (float[])ventStrength.Clone(),
+                    VentCells = (int[])ventCells.Clone()
+                });
+            Debug.Log($"[PlanetGenerationCache] Regenerated resources and saved cache ({resourceCachePath}).");
         }
 
         ventTimer = 0f;
