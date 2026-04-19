@@ -1,6 +1,7 @@
 using System;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using UnityEngine;
@@ -15,6 +16,8 @@ public static class PlanetGenerationCache
     private const string PlanetMagic = "SV_PLANET_CACHE_V1";
     private const string ResourceMagic = "SV_RESOURCE_CACHE_V1";
     private const string SurfaceTextureMagic = "SV_SURFACE_TEX_CACHE_V1";
+    private const int MaxCacheEntries = 256;
+    private const int MaxTotalCacheSizeMb = 1024;
 
     public sealed class PlanetData
     {
@@ -188,6 +191,7 @@ public static class PlanetGenerationCache
                 OceanDistanceToShoreByCell = distanceToShore,
                 OceanNoiseThreshold = oceanNoiseThreshold
             };
+            TouchCacheFile(cachePath);
             return true;
         }
         catch (Exception ex)
@@ -217,6 +221,7 @@ public static class PlanetGenerationCache
             WriteFloatArray(writer, data.LocalOceanDepthByCell);
             WriteFloatArray(writer, data.OceanDistanceToShoreByCell);
             writer.Write(data.OceanNoiseThreshold);
+            PruneCacheIfNeeded();
         }
         catch (Exception ex)
         {
@@ -281,6 +286,7 @@ public static class PlanetGenerationCache
                 VentStrength = ventStrength,
                 VentCells = ventCells
             };
+            TouchCacheFile(cachePath);
             return true;
         }
         catch (Exception ex)
@@ -312,6 +318,7 @@ public static class PlanetGenerationCache
             WriteByteArray(writer, data.VentMask);
             WriteFloatArray(writer, data.VentStrength);
             WriteIntArray(writer, data.VentCells);
+            PruneCacheIfNeeded();
         }
         catch (Exception ex)
         {
@@ -362,6 +369,7 @@ public static class PlanetGenerationCache
                 LinearColorSpace = linearColorSpace,
                 RawTextureData = rawTextureData
             };
+            TouchCacheFile(cachePath);
             return true;
         }
         catch (Exception ex)
@@ -389,6 +397,7 @@ public static class PlanetGenerationCache
             writer.Write((int)data.Format);
             writer.Write(data.LinearColorSpace);
             WriteByteArray(writer, data.RawTextureData);
+            PruneCacheIfNeeded();
         }
         catch (Exception ex)
         {
@@ -396,11 +405,41 @@ public static class PlanetGenerationCache
         }
     }
 
+    public static int ClearAllCacheFiles()
+    {
+        string cacheDirectory = GetCacheDirectoryPath();
+        if (!Directory.Exists(cacheDirectory))
+        {
+            return 0;
+        }
+
+        int deletedCount = 0;
+        foreach (string path in Directory.GetFiles(cacheDirectory, "*.bin", SearchOption.TopDirectoryOnly))
+        {
+            try
+            {
+                File.Delete(path);
+                deletedCount++;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[PlanetGenerationCache] Failed to delete cache file '{path}': {ex.Message}");
+            }
+        }
+
+        if (deletedCount > 0)
+        {
+            Debug.Log($"[PlanetGenerationCache] Cleared {deletedCount} cache file(s).");
+        }
+
+        return deletedCount;
+    }
+
     private static string BuildCachePath(string kind, string keyString)
     {
         string keyHash = HashKey(keyString);
         string fileName = $"{kind}_{keyHash}.bin";
-        return Path.Combine(Application.persistentDataPath, CacheFolderName, fileName);
+        return Path.Combine(GetCacheDirectoryPath(), fileName);
     }
 
     private static string HashKey(string key)
@@ -423,6 +462,99 @@ public static class PlanetGenerationCache
         if (!string.IsNullOrEmpty(directory))
         {
             Directory.CreateDirectory(directory);
+        }
+    }
+
+    private static string GetCacheDirectoryPath()
+    {
+        return Path.Combine(Application.persistentDataPath, CacheFolderName);
+    }
+
+    private static void TouchCacheFile(string cachePath)
+    {
+        try
+        {
+            File.SetLastWriteTimeUtc(cachePath, DateTime.UtcNow);
+        }
+        catch
+        {
+            // Best effort only; cache remains valid even if touch fails.
+        }
+    }
+
+    private static void PruneCacheIfNeeded()
+    {
+        try
+        {
+            string cacheDirectory = GetCacheDirectoryPath();
+            if (!Directory.Exists(cacheDirectory))
+            {
+                return;
+            }
+
+            FileInfo[] files = new DirectoryInfo(cacheDirectory)
+                .GetFiles("*.bin", SearchOption.TopDirectoryOnly)
+                .OrderBy(f => f.LastWriteTimeUtc)
+                .ToArray();
+            if (files.Length == 0)
+            {
+                return;
+            }
+
+            long maxBytes = MaxTotalCacheSizeMb * 1024L * 1024L;
+            long totalBytes = 0;
+            for (int i = 0; i < files.Length; i++)
+            {
+                totalBytes += files[i].Length;
+            }
+
+            int filesToDeleteForCount = Math.Max(0, files.Length - MaxCacheEntries);
+            int filesToDelete = filesToDeleteForCount;
+            long bytesAfterCountPrune = totalBytes;
+            for (int i = 0; i < filesToDeleteForCount; i++)
+            {
+                bytesAfterCountPrune -= files[i].Length;
+            }
+
+            while (bytesAfterCountPrune > maxBytes && filesToDelete < files.Length)
+            {
+                bytesAfterCountPrune -= files[filesToDelete].Length;
+                filesToDelete++;
+            }
+
+            if (filesToDelete <= 0)
+            {
+                return;
+            }
+
+            long prunedBytes = 0;
+            int prunedFiles = 0;
+            for (int i = 0; i < filesToDelete; i++)
+            {
+                try
+                {
+                    long fileSize = files[i].Length;
+                    files[i].Delete();
+                    prunedBytes += fileSize;
+                    prunedFiles++;
+                    totalBytes -= fileSize;
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[PlanetGenerationCache] Failed to prune cache file '{files[i].Name}': {ex.Message}");
+                }
+            }
+
+            if (prunedFiles > 0)
+            {
+                double prunedMb = prunedBytes / (1024d * 1024d);
+                double remainingMb = Math.Max(0d, totalBytes) / (1024d * 1024d);
+                Debug.Log($"[PlanetGenerationCache] Pruned {prunedFiles} cache file(s) ({prunedMb:F1} MB). Remaining cache size: {remainingMb:F1} MB.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.LogWarning($"[PlanetGenerationCache] Cache prune failed: {ex.Message}");
         }
     }
 
