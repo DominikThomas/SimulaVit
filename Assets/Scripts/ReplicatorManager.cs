@@ -1620,6 +1620,7 @@ public class ReplicatorManager : MonoBehaviour
             populationState,
             settings,
             planetGenerator,
+            planetResourceMap,
             simulationDeltaTime,
             (float)currentSimulationTimeSeconds,
             populationStatePrimed);
