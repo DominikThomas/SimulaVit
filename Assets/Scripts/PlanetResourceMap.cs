@@ -420,6 +420,38 @@ public class PlanetResourceMap : MonoBehaviour
         arr[cell] = Mathf.Max(0f, arr[cell] + delta);
     }
 
+    public void AddResourceForCellLayer(ResourceType t, int cell, int requestedLayerIndex, float delta)
+    {
+        if (!isInitialized || !IsCellValid(cell) || Mathf.Approximately(delta, 0f))
+        {
+            return;
+        }
+
+        if (!ShouldUseLayeredOceanForResource(t, cell))
+        {
+            Add(t, cell, delta);
+            return;
+        }
+
+        int clampedLayer = ClampOceanLayerIndex(cell, requestedLayerIndex);
+        if (clampedLayer < 0)
+        {
+            Add(t, cell, delta);
+            return;
+        }
+
+        float[] layered = GetLayeredOceanArray(t);
+        if (layered == null)
+        {
+            Add(t, cell, delta);
+            return;
+        }
+
+        int idx = GetLayeredArrayIndex(cell, clampedLayer);
+        layered[idx] = Mathf.Max(0f, layered[idx] + delta);
+        SyncLegacyOceanResourceFromLayers(t, cell);
+    }
+
     public bool IsVolatile(ResourceType t)
     {
         return t == ResourceType.CO2 || t == ResourceType.O2 || t == ResourceType.CH4;
