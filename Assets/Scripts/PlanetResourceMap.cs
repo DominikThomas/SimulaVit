@@ -490,6 +490,85 @@ public class PlanetResourceMap : MonoBehaviour
         return count > 0 ? count - 1 : -1;
     }
 
+    public float GetOceanTopRadius(int cell)
+    {
+        if (!isInitialized || !IsCellValid(cell))
+        {
+            return planetGenerator != null ? planetGenerator.radius : 0f;
+        }
+
+        if (planetGenerator == null)
+        {
+            return 0f;
+        }
+
+        return planetGenerator.GetOceanTopRadius(cell);
+    }
+
+    public float GetOceanFloorRadius(int cell)
+    {
+        if (!isInitialized || !IsCellValid(cell))
+        {
+            return planetGenerator != null ? planetGenerator.radius : 0f;
+        }
+
+        if (planetGenerator == null)
+        {
+            return 0f;
+        }
+
+        return planetGenerator.GetOceanFloorRadius(cell);
+    }
+
+    public float GetOceanLayerShellRadius(int cell, int requestedLayerIndex)
+    {
+        if (!isInitialized || !IsCellValid(cell))
+        {
+            return 0f;
+        }
+
+        // Layer index semantics:
+        // - 0 = top ocean layer (sea surface)
+        // - (activeCount - 1) = deepest active ocean layer (seafloor-adjacent)
+        // Intermediate layers are monotonically interpolated between top and bottom.
+        int activeCount = GetOceanActiveLayerCount(cell);
+        if (activeCount <= 0)
+        {
+            return planetGenerator != null ? planetGenerator.GetSurfaceRadius(cell) : 0f;
+        }
+
+        int clampedLayerIndex = Mathf.Clamp(requestedLayerIndex, 0, activeCount - 1);
+        float topRadius = GetOceanTopRadius(cell);
+        float floorRadius = GetOceanFloorRadius(cell);
+        float upper = Mathf.Max(topRadius, floorRadius);
+        float lower = Mathf.Min(topRadius, floorRadius);
+
+        if (activeCount == 1)
+        {
+            return lower;
+        }
+
+        float depthT = clampedLayerIndex / (float)(activeCount - 1);
+        return Mathf.Lerp(upper, lower, depthT);
+    }
+
+    public float GetOceanLayerShellRadius(Vector3 worldPosOrDir, int requestedLayerIndex)
+    {
+        if (!isInitialized || resolution <= 0)
+        {
+            return 0f;
+        }
+
+        Vector3 dir = ResolveSurfaceDirection(worldPosOrDir);
+        int cell = PlanetGridIndexing.DirectionToCellIndex(dir, resolution);
+        if (!IsCellValid(cell))
+        {
+            return 0f;
+        }
+
+        return GetOceanLayerShellRadius(cell, requestedLayerIndex);
+    }
+
     public float GetLayerLightFactor(int cell, int layerIndex)
     {
         if (!IsLayerAccessValid(cell, layerIndex))

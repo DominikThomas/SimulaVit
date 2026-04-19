@@ -559,6 +559,34 @@ public class PlanetGenerator : MonoBehaviour
         return GetSurfaceRadiusFromNoise(noise);
     }
 
+    public float GetSurfaceRadius(int cellIndex)
+    {
+        if (generatedSurfaceRadiusByCell != null && cellIndex >= 0 && cellIndex < generatedSurfaceRadiusByCell.Length)
+        {
+            return generatedSurfaceRadiusByCell[cellIndex];
+        }
+
+        return radius;
+    }
+
+    public float GetOceanFloorRadius(int cellIndex)
+    {
+        // For ocean cells this is the local seafloor shell.
+        // For land cells this remains the terrain surface radius (unchanged behavior).
+        return GetSurfaceRadius(cellIndex);
+    }
+
+    public float GetOceanTopRadius(int cellIndex)
+    {
+        if (!IsOceanCell(cellIndex))
+        {
+            return GetSurfaceRadius(cellIndex);
+        }
+
+        // Sea level shell used by the ocean surface mesh.
+        return GetOceanRadius();
+    }
+
     public float GetSurfaceRadiusFromNoise(float noise)
     {
         return GetSurfaceRadiusFromNoise(noise, GetSurfaceQueryParameters());
