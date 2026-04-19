@@ -6,6 +6,7 @@ using UnityEngine;
 
 public class ReplicatorMovementSystem
 {
+    private const float ShellSkinOffset = 0.05f;
     private static readonly ProfilerMarker MovementSyncFromPopulationStateMarker = new ProfilerMarker("ReplicatorMovementSystem.SyncFromPopulationState");
     private static readonly ProfilerMarker MovementCompanionCopyMarker = new ProfilerMarker("ReplicatorMovementSystem.CopyToCompanionObjects");
 
@@ -37,6 +38,7 @@ public class ReplicatorMovementSystem
         ReplicatorPopulationState populationState,
         Settings settings,
         PlanetGenerator planetGenerator,
+        PlanetResourceMap planetResourceMap,
         float deltaTime,
         float timeValue,
         bool populationStatePrimed)
@@ -94,11 +96,32 @@ public class ReplicatorMovementSystem
 
         using (MovementCompanionCopyMarker.Auto())
         {
+            int resolution = planetGenerator != null ? Mathf.Max(1, planetGenerator.resolution) : 1;
             for (int i = 0; i < count; i++)
             {
                 Replicator agent = agents[i];
                 Vector3 newPosition = jobPositions[i];
                 Vector3 newDirection = newPosition.normalized;
+
+                if (planetResourceMap != null)
+                {
+                    int cellIndex = PlanetGridIndexing.DirectionToCellIndex(newDirection, resolution);
+                    if (planetResourceMap.IsOceanCell(cellIndex))
+                    {
+                        int requestedLayer = populationState.CurrentOceanLayerIndex[i];
+                        int clampedLayer = planetResourceMap.ClampOceanLayerIndex(cellIndex, requestedLayer);
+
+                        if (clampedLayer >= 0)
+                        {
+                            float layerRadius = planetResourceMap.GetOceanLayerShellRadius(cellIndex, clampedLayer);
+                            if (layerRadius > 0f)
+                            {
+                                newPosition = newDirection * (layerRadius + ShellSkinOffset);
+                            }
+                        }
+                    }
+                }
+
                 populationState.Position[i] = newPosition;
                 populationState.Rotation[i] = jobRotations[i];
                 populationState.CurrentDirection[i] = newDirection;
@@ -239,7 +262,7 @@ public class ReplicatorMovementSystem
 
             float terrainNoise = CalculateNoise(newDirection);
             float displacement = GetSurfaceRadiusFromNoise(terrainNoise);
-            Vector3 newPos = newDirection * (displacement + 0.05f);
+            Vector3 newPos = newDirection * (displacement + ShellSkinOffset);
 
             Vector3 newNormal = newPos.normalized;
             Quaternion targetRot = Quaternion.LookRotation(Vector3.ProjectOnPlane(forward, newNormal), newNormal);
