@@ -233,6 +233,8 @@ public class PlanetResourceMap : MonoBehaviour
     public float toxicProteolyticWasteDecayPerSecond = 0.8f;
     [Range(0f, 1f)] public float scentDiffuseStrength = 0.25f;
     [Range(0, 4)] public int scentDiffusePasses = 1;
+    [Tooltip("Weak vertical coupling between adjacent ocean scent layers (0 = none, 1 = full).")]
+    [Range(0f, 1f)] public float scentAdjacentLayerCoupling = 0.15f;
     public float scentMaxPerCell = 10f;
     public float scentUpdateInterval = 0.2f;
 
@@ -280,6 +282,8 @@ public class PlanetResourceMap : MonoBehaviour
     private float[] surfaceO2DemandTmp;
     private float[] scentWasteTmp;
     private float[] scentLeakTmp;
+    private float[] layeredScentWasteTmp;
+    private float[] layeredScentLeakTmp;
     private int[] ventHeatNeighbors;
     private byte[] ventMask;
     private int[] ventCells;
@@ -956,6 +960,8 @@ public class PlanetResourceMap : MonoBehaviour
         RegisterLayeredOceanResource(ResourceType.H2S, cellCount);
         RegisterLayeredOceanResource(ResourceType.CH4, cellCount);
         RegisterLayeredOceanResource(ResourceType.DissolvedFe2Plus, cellCount);
+        RegisterLayeredOceanResource(ResourceType.DissolvedOrganicLeak, cellCount);
+        RegisterLayeredOceanResource(ResourceType.ToxicProteolyticWaste, cellCount);
     }
 
     private void RegisterLayeredOceanResource(ResourceType resourceType, int cellCount)
@@ -1003,6 +1009,8 @@ public class PlanetResourceMap : MonoBehaviour
             dissolvedOrganicLeak = null;
             scentWasteTmp = null;
             scentLeakTmp = null;
+            layeredScentWasteTmp = null;
+            layeredScentLeakTmp = null;
             return;
         }
 
@@ -1010,6 +1018,8 @@ public class PlanetResourceMap : MonoBehaviour
         EnsureArrayCapacity(ref dissolvedOrganicLeak, cellCount);
         EnsureArrayCapacity(ref scentWasteTmp, cellCount);
         EnsureArrayCapacity(ref scentLeakTmp, cellCount);
+        EnsureArrayCapacity(ref layeredScentWasteTmp, cellCount * MaxOceanLayers);
+        EnsureArrayCapacity(ref layeredScentLeakTmp, cellCount * MaxOceanLayers);
     }
 
     public void ClearScents()
@@ -1021,9 +1031,26 @@ public class PlanetResourceMap : MonoBehaviour
 
         System.Array.Clear(toxicProteolyticWaste, 0, toxicProteolyticWaste.Length);
         System.Array.Clear(dissolvedOrganicLeak, 0, dissolvedOrganicLeak.Length);
+
+        float[] layeredLeak = GetLayeredOceanArray(ResourceType.DissolvedOrganicLeak);
+        float[] layeredWaste = GetLayeredOceanArray(ResourceType.ToxicProteolyticWaste);
+        if (layeredLeak != null)
+        {
+            System.Array.Clear(layeredLeak, 0, layeredLeak.Length);
+        }
+
+        if (layeredWaste != null)
+        {
+            System.Array.Clear(layeredWaste, 0, layeredWaste.Length);
+        }
     }
 
     public void AddScent(ResourceType scentType, int cell, float amount)
+    {
+        AddScent(scentType, cell, -1, amount);
+    }
+
+    public void AddScent(ResourceType scentType, int cell, int requestedLayerIndex, float amount)
     {
         if (!enableScentFields || !isInitialized || !IsCellValid(cell) || amount <= 0f)
         {
@@ -1032,6 +1059,20 @@ public class PlanetResourceMap : MonoBehaviour
 
         EnsureScentArrays();
         float cap = Mathf.Max(0f, scentMaxPerCell);
+        if (enableLayeredOcean && IsOceanCell(cell))
+        {
+            float[] layered = GetLayeredOceanArray(scentType);
+            int clampedLayer = ClampOceanLayerIndex(cell, requestedLayerIndex);
+            if (layered != null && clampedLayer >= 0)
+            {
+                int layerIdx = GetLayeredArrayIndex(cell, clampedLayer);
+                float updated = layered[layerIdx] + amount;
+                layered[layerIdx] = cap > 0f ? Mathf.Min(cap, updated) : updated;
+                SyncLegacyOceanResourceFromLayers(scentType, cell);
+                return;
+            }
+        }
+
         if (scentType == ResourceType.DissolvedOrganicLeak)
         {
             dissolvedOrganicLeak[cell] = cap > 0f
@@ -1044,6 +1085,73 @@ public class PlanetResourceMap : MonoBehaviour
                 ? Mathf.Min(cap, toxicProteolyticWaste[cell] + amount)
                 : toxicProteolyticWaste[cell] + amount;
         }
+    }
+
+    public float GetScentValue(ResourceType scentType, int cell, int requestedLayerIndex, bool includeAdjacentLayers = true)
+    {
+        if (!enableScentFields || !isInitialized || !IsCellValid(cell))
+        {
+            return 0f;
+        }
+
+        if (!enableLayeredOcean || !IsOceanCell(cell))
+        {
+            return Get(scentType, cell);
+        }
+
+        int layerIndex = ClampOceanLayerIndex(cell, requestedLayerIndex);
+        if (layerIndex < 0)
+        {
+            return Get(scentType, cell);
+        }
+
+        float[] layered = GetLayeredOceanArray(scentType);
+        if (layered == null)
+        {
+            return Get(scentType, cell);
+        }
+
+        float center = GetLayerValue(layered, cell, layerIndex);
+        if (!includeAdjacentLayers)
+        {
+            return center;
+        }
+
+        float coupling = Mathf.Clamp01(scentAdjacentLayerCoupling);
+        if (coupling <= 0f)
+        {
+            return center;
+        }
+
+        int active = GetOceanActiveLayerCount(cell);
+        if (active <= 1)
+        {
+            return center;
+        }
+
+        float adjacentSum = 0f;
+        int adjacentCount = 0;
+        int above = layerIndex - 1;
+        int below = layerIndex + 1;
+        if (above >= 0)
+        {
+            adjacentSum += GetLayerValue(layered, cell, above);
+            adjacentCount++;
+        }
+
+        if (below < active)
+        {
+            adjacentSum += GetLayerValue(layered, cell, below);
+            adjacentCount++;
+        }
+
+        if (adjacentCount <= 0)
+        {
+            return center;
+        }
+
+        float adjacentAvg = adjacentSum / adjacentCount;
+        return Mathf.Lerp(center, adjacentAvg, coupling);
     }
 
     public void ApplyScentDecayAndDiffuse(float dt)
@@ -1063,6 +1171,21 @@ public class PlanetResourceMap : MonoBehaviour
 
         float wasteDecay = Mathf.Exp(-Mathf.Max(0f, toxicProteolyticWasteDecayPerSecond) * Mathf.Max(0f, dt));
         float leakDecay = Mathf.Exp(-Mathf.Max(0f, dissolvedOrganicLeakDecayPerSecond) * Mathf.Max(0f, dt));
+        int passes = Mathf.Clamp(scentDiffusePasses, 0, 4);
+        float strength = Mathf.Clamp01(scentDiffuseStrength);
+        float capPerCell = Mathf.Max(0f, scentMaxPerCell);
+        bool useLayeredScents = enableLayeredOcean
+                                && GetLayeredOceanArray(ResourceType.DissolvedOrganicLeak) != null
+                                && GetLayeredOceanArray(ResourceType.ToxicProteolyticWaste) != null;
+
+        if (useLayeredScents)
+        {
+            ApplyLayeredScentDecayAndDiffuse(cellCount, wasteDecay, leakDecay, passes, strength, capPerCell);
+            SyncLegacyOceanResourceFromLayers(ResourceType.DissolvedOrganicLeak);
+            SyncLegacyOceanResourceFromLayers(ResourceType.ToxicProteolyticWaste);
+            return;
+        }
+
         for (int cell = 0; cell < cellCount; cell++)
         {
             toxicProteolyticWaste[cell] = Mathf.Max(0f, toxicProteolyticWaste[cell] * wasteDecay);
@@ -1078,10 +1201,6 @@ public class PlanetResourceMap : MonoBehaviour
         {
             return;
         }
-
-        int passes = Mathf.Clamp(scentDiffusePasses, 0, 4);
-        float strength = Mathf.Clamp01(scentDiffuseStrength);
-        float capPerCell = Mathf.Max(0f, scentMaxPerCell);
 
         for (int pass = 0; pass < passes; pass++)
         {
@@ -1120,6 +1239,142 @@ public class PlanetResourceMap : MonoBehaviour
             float[] preySwap = dissolvedOrganicLeak;
             dissolvedOrganicLeak = scentLeakTmp;
             scentLeakTmp = preySwap;
+        }
+    }
+
+    private void ApplyLayeredScentDecayAndDiffuse(int cellCount, float wasteDecay, float leakDecay, int passes, float horizontalStrength, float capPerCell)
+    {
+        float[] layeredWaste = GetLayeredOceanArray(ResourceType.ToxicProteolyticWaste);
+        float[] layeredLeak = GetLayeredOceanArray(ResourceType.DissolvedOrganicLeak);
+        if (layeredWaste == null || layeredLeak == null)
+        {
+            return;
+        }
+
+        for (int cell = 0; cell < cellCount; cell++)
+        {
+            int active = GetOceanActiveLayerCount(cell);
+            if (active <= 0)
+            {
+                continue;
+            }
+
+            for (int layer = 0; layer < active; layer++)
+            {
+                int idx = GetLayeredArrayIndex(cell, layer);
+                layeredWaste[idx] = Mathf.Max(0f, layeredWaste[idx] * wasteDecay);
+                layeredLeak[idx] = Mathf.Max(0f, layeredLeak[idx] * leakDecay);
+            }
+        }
+
+        if (passes <= 0)
+        {
+            return;
+        }
+
+        if (ventHeatNeighbors == null)
+        {
+            BuildVentHeatNeighbors();
+        }
+
+        if (ventHeatNeighbors == null)
+        {
+            return;
+        }
+
+        float verticalCoupling = Mathf.Clamp01(scentAdjacentLayerCoupling);
+        for (int pass = 0; pass < passes; pass++)
+        {
+            for (int cell = 0; cell < cellCount; cell++)
+            {
+                int active = GetOceanActiveLayerCount(cell);
+                if (active <= 0)
+                {
+                    continue;
+                }
+
+                for (int layer = 0; layer < active; layer++)
+                {
+                    int idx = GetLayeredArrayIndex(cell, layer);
+                    int baseIndex = cell * NeighborCount;
+                    float wasteNeighborSum = 0f;
+                    float leakNeighborSum = 0f;
+                    int neighborCount = 0;
+
+                    for (int n = 0; n < NeighborCount; n++)
+                    {
+                        int neighborCell = ventHeatNeighbors[baseIndex + n];
+                        if (neighborCell < 0 || neighborCell >= cellCount || !IsOceanCell(neighborCell))
+                        {
+                            continue;
+                        }
+
+                        int neighborLayer = ClampOceanLayerIndex(neighborCell, layer);
+                        if (neighborLayer < 0)
+                        {
+                            continue;
+                        }
+
+                        int neighborIdx = GetLayeredArrayIndex(neighborCell, neighborLayer);
+                        wasteNeighborSum += layeredWaste[neighborIdx];
+                        leakNeighborSum += layeredLeak[neighborIdx];
+                        neighborCount++;
+                    }
+
+                    float centerWaste = layeredWaste[idx];
+                    float centerLeak = layeredLeak[idx];
+                    float wasteNeighborAvg = neighborCount > 0 ? wasteNeighborSum / neighborCount : centerWaste;
+                    float leakNeighborAvg = neighborCount > 0 ? leakNeighborSum / neighborCount : centerLeak;
+                    float mixedWaste = Mathf.Lerp(centerWaste, wasteNeighborAvg, horizontalStrength);
+                    float mixedLeak = Mathf.Lerp(centerLeak, leakNeighborAvg, horizontalStrength);
+
+                    if (verticalCoupling > 0f && active > 1)
+                    {
+                        float wasteVerticalSum = 0f;
+                        float leakVerticalSum = 0f;
+                        int verticalCount = 0;
+                        int above = layer - 1;
+                        int below = layer + 1;
+                        if (above >= 0)
+                        {
+                            int aboveIdx = GetLayeredArrayIndex(cell, above);
+                            wasteVerticalSum += layeredWaste[aboveIdx];
+                            leakVerticalSum += layeredLeak[aboveIdx];
+                            verticalCount++;
+                        }
+
+                        if (below < active)
+                        {
+                            int belowIdx = GetLayeredArrayIndex(cell, below);
+                            wasteVerticalSum += layeredWaste[belowIdx];
+                            leakVerticalSum += layeredLeak[belowIdx];
+                            verticalCount++;
+                        }
+
+                        if (verticalCount > 0)
+                        {
+                            float wasteVerticalAvg = wasteVerticalSum / verticalCount;
+                            float leakVerticalAvg = leakVerticalSum / verticalCount;
+                            mixedWaste = Mathf.Lerp(mixedWaste, wasteVerticalAvg, verticalCoupling);
+                            mixedLeak = Mathf.Lerp(mixedLeak, leakVerticalAvg, verticalCoupling);
+                        }
+                    }
+
+                    layeredScentWasteTmp[idx] = capPerCell > 0f ? Mathf.Min(capPerCell, Mathf.Max(0f, mixedWaste)) : Mathf.Max(0f, mixedWaste);
+                    layeredScentLeakTmp[idx] = capPerCell > 0f ? Mathf.Min(capPerCell, Mathf.Max(0f, mixedLeak)) : Mathf.Max(0f, mixedLeak);
+                }
+            }
+
+            float[] wasteSwap = layeredWaste;
+            layeredWaste = layeredScentWasteTmp;
+            layeredScentWasteTmp = wasteSwap;
+
+            float[] leakSwap = layeredLeak;
+            layeredLeak = layeredScentLeakTmp;
+            layeredScentLeakTmp = leakSwap;
+
+            layeredOceanResources[ResourceType.ToxicProteolyticWaste] = layeredWaste;
+            layeredOceanResources[ResourceType.DissolvedOrganicLeak] = layeredLeak;
         }
     }
 
@@ -2380,6 +2635,8 @@ public class PlanetResourceMap : MonoBehaviour
         SyncResourceLegacyToLayered(ResourceType.H2S);
         SyncResourceLegacyToLayered(ResourceType.CH4);
         SyncResourceLegacyToLayered(ResourceType.DissolvedFe2Plus);
+        SyncResourceLegacyToLayered(ResourceType.DissolvedOrganicLeak);
+        SyncResourceLegacyToLayered(ResourceType.ToxicProteolyticWaste);
     }
 
     private void SyncResourceLegacyToLayered(ResourceType resourceType)
@@ -2664,6 +2921,7 @@ public class PlanetResourceMap : MonoBehaviour
         toxicProteolyticWasteDecayPerSecond = Mathf.Max(0f, toxicProteolyticWasteDecayPerSecond);
         scentDiffusePasses = Mathf.Clamp(scentDiffusePasses, 0, 4);
         scentDiffuseStrength = Mathf.Clamp01(scentDiffuseStrength);
+        scentAdjacentLayerCoupling = Mathf.Clamp01(scentAdjacentLayerCoupling);
         scentMaxPerCell = Mathf.Max(0f, scentMaxPerCell);
         scentUpdateInterval = Mathf.Max(0.01f, scentUpdateInterval);
         depth01ForLayer2 = Mathf.Clamp01(depth01ForLayer2);
