@@ -1043,7 +1043,7 @@ public class ReplicatorMetabolismSystem
 
     private static float EvaluateLayerScore(ReplicatorPopulationState populationState, int index, int cellIndex, int layerIndex, PlanetResourceMap planetResourceMap)
     {
-        float co2 = NormalizeLayeredResource(planetResourceMap, ResourceType.CO2, cellIndex, layerIndex, 0.35f, useCompatibility: true);
+        float co2 = NormalizeLayeredResource(planetResourceMap, ResourceType.CO2, cellIndex, layerIndex, 0.35f);
         float o2 = NormalizeLayeredResource(planetResourceMap, ResourceType.O2, cellIndex, layerIndex, 0.25f);
         float organic = NormalizeLayeredResource(planetResourceMap, ResourceType.OrganicC, cellIndex, layerIndex, 0.25f);
         float h2 = NormalizeLayeredResource(planetResourceMap, ResourceType.H2, cellIndex, layerIndex, 0.22f);
@@ -1099,12 +1099,9 @@ public class ReplicatorMetabolismSystem
         ResourceType resourceType,
         int cellIndex,
         int layerIndex,
-        float goodEnoughScale,
-        bool useCompatibility = false)
+        float goodEnoughScale)
     {
-        float raw = useCompatibility
-            ? planetResourceMap.GetCompatibilityResourceValue(resourceType, cellIndex)
-            : planetResourceMap.GetResourceForCellLayer(resourceType, cellIndex, layerIndex);
+        float raw = planetResourceMap.GetResourceForCellLayer(resourceType, cellIndex, layerIndex);
         return Mathf.Clamp01(raw / Mathf.Max(0.0001f, goodEnoughScale));
     }
 
@@ -1116,7 +1113,7 @@ public class ReplicatorMetabolismSystem
             return planetResourceMap.GetResourceForCellLayer(resourceType, cellIndex, layer);
         }
 
-        return planetResourceMap.GetCompatibilityResourceValue(resourceType, cellIndex);
+        return planetResourceMap.Get(resourceType, cellIndex);
     }
 
     private static float AerobicRespireFromStore(

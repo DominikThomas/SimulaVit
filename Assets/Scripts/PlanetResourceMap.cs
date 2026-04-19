@@ -630,11 +630,6 @@ public class PlanetResourceMap : MonoBehaviour
         return GetLayerResource(resourceType, cell, clampedLayer);
     }
 
-    public float GetCompatibilityResourceValue(ResourceType resourceType, int cell)
-    {
-        return Get(resourceType, cell);
-    }
-
     public LegacyEnvironmentSnapshot GetEffectiveLegacyEnvironment(int cell, Vector3 worldPosOrDir)
     {
         LegacyEnvironmentSnapshot snapshot = default;
