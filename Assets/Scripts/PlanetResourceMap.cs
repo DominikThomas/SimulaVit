@@ -110,6 +110,10 @@ public class PlanetResourceMap : MonoBehaviour
     public float ventStrengthMax = 1.0f;
     public float ventNoiseScale = 3.0f;
     [Range(0f, 1f)] public float ventThreshold = 0.7f;
+    [Tooltip("Reference resolution used for vent-abundance normalization (vents scale with planet surface area, not simulation tile count).")]
+    [Min(1)] public int ventReferenceResolution = 100;
+    [Tooltip("Reference planet radius used for vent-abundance normalization.")]
+    [Min(0.0001f)] public float ventReferencePlanetRadius = 1f;
 
     [Header("Vents")]
     public bool enableVentReplenishment = true;
@@ -327,6 +331,7 @@ public class PlanetResourceMap : MonoBehaviour
     private float[] oceanLayerTemperatureOffsets;
     private float ventTimer;
     private float atmosphereTimer;
+    private float ventSourceStrengthNormalization = 1f;
 
     private const int NeighborCount = 6;
 
@@ -1033,38 +1038,93 @@ public class PlanetResourceMap : MonoBehaviour
                     SetOceanDissolvedInitial(ResourceType.DissolvedFe2Plus, cell, 0f);
                 }
 
-                float ventNoise = HighFrequencyNoise(dir);
-                bool isVent = ventNoise > ventThreshold;
-                if (isVent)
+                ventMask[cell] = 0;
+                ventStrength[cell] = 0f;
+                h2s[cell] = 0f;
+                h2[cell] = 0f;
+            }
+
+            // Resolution-independent vent abundance:
+            // - each cell still gets deterministic procedural randomness from vent noise
+            // - but the number of selected vents is normalized to a reference-resolution planet area
+            //   so reducing simulation tile count does not collapse total vent abundance.
+            float[] ventNoiseSamples = new float[cellCount];
+            float[] ventStrengthCandidates = new float[cellCount];
+            int thresholdVentCount = 0;
+            for (int cell = 0; cell < cellCount; cell++)
+            {
+                float ventNoise = HighFrequencyNoise(cellDirections[cell]);
+                ventNoiseSamples[cell] = ventNoise;
+                if (ventNoise > ventThreshold)
                 {
                     float strengthT = Mathf.InverseLerp(ventThreshold, 1f, ventNoise);
-                    float strength = Mathf.Lerp(ventStrengthMin, ventStrengthMax, Mathf.Clamp01(strengthT));
+                    ventStrengthCandidates[cell] = Mathf.Lerp(ventStrengthMin, ventStrengthMax, Mathf.Clamp01(strengthT));
+                    thresholdVentCount++;
+                }
+            }
+
+            int targetVentCount = ResolveResolutionIndependentVentTarget(cellCount, thresholdVentCount, out float desiredVentCount);
+            if (targetVentCount > 0)
+            {
+                int[] sortedCells = new int[cellCount];
+                for (int i = 0; i < cellCount; i++)
+                {
+                    sortedCells[i] = i;
+                }
+
+                System.Array.Sort(sortedCells, (a, b) =>
+                {
+                    int compare = ventNoiseSamples[b].CompareTo(ventNoiseSamples[a]);
+                    return compare != 0 ? compare : a.CompareTo(b);
+                });
+
+                for (int i = 0; i < targetVentCount; i++)
+                {
+                    int cell = sortedCells[i];
+                    float strength = ventStrengthCandidates[cell];
+                    if (strength <= 0f)
+                    {
+                        float strengthT = Mathf.InverseLerp(ventThreshold, 1f, ventNoiseSamples[cell]);
+                        strength = Mathf.Lerp(ventStrengthMin, ventStrengthMax, Mathf.Clamp01(strengthT));
+                    }
+
+                    ventMask[cell] = 1;
                     ventStrength[cell] = strength;
                     h2s[cell] = strength;
                     h2[cell] = strength;
                 }
-                else
-                {
-                    ventStrength[cell] = 0f;
-                    h2s[cell] = 0f;
-                    h2[cell] = 0f;
-                }
-
-                if (isVent)
-                {
-                    ventMask[cell] = 1;
-                    ventCount++;
-                }
             }
+
+            ventCount = targetVentCount;
+            ventSourceStrengthNormalization = ComputeVentSourceStrengthNormalization(desiredVentCount, ventCount);
         }
 
+        if (loadedResourceCache)
+        {
+            int thresholdVentCount = 0;
+            for (int cell = 0; cell < cellCount; cell++)
+            {
+                if (HighFrequencyNoise(cellDirections[cell]) > ventThreshold)
+                {
+                    thresholdVentCount++;
+                }
+            }
+
+            ResolveResolutionIndependentVentTarget(cellCount, thresholdVentCount, out float desiredVentCount);
+            ventSourceStrengthNormalization = ComputeVentSourceStrengthNormalization(desiredVentCount, ventCount);
+        }
+
+        if (ventSourceStrengthNormalization <= 0f || !float.IsFinite(ventSourceStrengthNormalization))
+        {
+            ventSourceStrengthNormalization = 1f;
+        }
         isInitialized = true;
         BuildVentHeatNeighbors();
         RebuildVentHeatField();
         InitializeLayeredOceanState();
 
         int total = cellCount;
-        Debug.Log($"Vents: {ventCount}/{total} = {(100f * ventCount / total):F1}%");
+        Debug.Log($"Vents: {ventCount}/{total} = {(100f * ventCount / total):F1}% (sourceNorm={ventSourceStrengthNormalization:0.###})");
 
         if (!loadedResourceCache)
         {
@@ -2321,6 +2381,11 @@ public class PlanetResourceMap : MonoBehaviour
             return;
         }
 
+        // The vent list is now normalized to planet area (reference-resolution equivalent count).
+        // We keep a secondary source scale so total injected chemistry stays approximately
+        // resolution-independent if low resolutions cannot represent the full target vent count.
+        float sourceScale = Mathf.Max(0f, ventSourceStrengthNormalization);
+
         bool applyH2SCap = ventH2SMax > 0f;
         bool applyH2Cap = ventH2Max > 0f;
         for (int i = 0; i < ventCells.Length; i++)
@@ -2348,18 +2413,18 @@ public class PlanetResourceMap : MonoBehaviour
 
             if (enableLayeredOcean && IsOceanCell(cell))
             {
-                InjectVentProductToBottomLayer(ResourceType.H2S, cell, h2sPerTick * cellVentStrength);
-                InjectVentProductToBottomLayer(ResourceType.H2, cell, h2PerTick * cellVentStrength);
-                InjectVentProductToBottomLayer(ResourceType.DissolvedFe2Plus, cell, dissolvedFe2PlusPerTick * cellVentStrength);
+                InjectVentProductToBottomLayer(ResourceType.H2S, cell, h2sPerTick * cellVentStrength * sourceScale);
+                InjectVentProductToBottomLayer(ResourceType.H2, cell, h2PerTick * cellVentStrength * sourceScale);
+                InjectVentProductToBottomLayer(ResourceType.DissolvedFe2Plus, cell, dissolvedFe2PlusPerTick * cellVentStrength * sourceScale);
             }
             else
             {
-                Add(ResourceType.H2S, cell, h2sPerTick * cellVentStrength);
-                Add(ResourceType.H2, cell, h2PerTick * cellVentStrength);
-                Add(ResourceType.DissolvedFe2Plus, cell, dissolvedFe2PlusPerTick * cellVentStrength);
+                Add(ResourceType.H2S, cell, h2sPerTick * cellVentStrength * sourceScale);
+                Add(ResourceType.H2, cell, h2PerTick * cellVentStrength * sourceScale);
+                Add(ResourceType.DissolvedFe2Plus, cell, dissolvedFe2PlusPerTick * cellVentStrength * sourceScale);
             }
 
-            Add(ResourceType.CO2, cell, Mathf.Max(0f, ventCO2PerTick) * cellVentStrength);
+            Add(ResourceType.CO2, cell, Mathf.Max(0f, ventCO2PerTick) * cellVentStrength * sourceScale);
             if (applyH2SCap)
             {
                 h2s[cell] = Mathf.Min(h2s[cell], ventH2SMax);
@@ -2770,6 +2835,38 @@ public class PlanetResourceMap : MonoBehaviour
     {
         int referenceResolution = Mathf.Max(1, inventoryReferenceResolution);
         return Mathf.Max(1, PlanetGridIndexing.GetCellCount(referenceResolution));
+    }
+
+    private int GetReferenceCellCountForVents()
+    {
+        int referenceResolution = Mathf.Max(1, ventReferenceResolution);
+        return Mathf.Max(1, PlanetGridIndexing.GetCellCount(referenceResolution));
+    }
+
+    private int ResolveResolutionIndependentVentTarget(int totalCellCount, int thresholdVentCountAtCurrentResolution, out float desiredVentCount)
+    {
+        desiredVentCount = 0f;
+        if (totalCellCount <= 0 || thresholdVentCountAtCurrentResolution <= 0)
+        {
+            return 0;
+        }
+
+        float currentFraction = Mathf.Clamp01(thresholdVentCountAtCurrentResolution / (float)totalCellCount);
+        float referenceRadius = Mathf.Max(0.0001f, ventReferencePlanetRadius);
+        float currentRadius = planetGenerator != null ? Mathf.Max(0.0001f, planetGenerator.radius) : referenceRadius;
+        float areaScale = (currentRadius * currentRadius) / (referenceRadius * referenceRadius);
+        desiredVentCount = Mathf.Max(0f, currentFraction * GetReferenceCellCountForVents() * areaScale);
+        return Mathf.Clamp(Mathf.RoundToInt(desiredVentCount), 0, totalCellCount);
+    }
+
+    private static float ComputeVentSourceStrengthNormalization(float desiredVentCount, int selectedVentCount)
+    {
+        if (desiredVentCount <= 0f || selectedVentCount <= 0)
+        {
+            return 1f;
+        }
+
+        return Mathf.Max(1f, desiredVentCount / selectedVentCount);
     }
 
     // Inventory normalization bridge:
@@ -3378,6 +3475,8 @@ public class PlanetResourceMap : MonoBehaviour
         simulationResolution = Mathf.Max(0, simulationResolution);
         inventoryReferenceResolution = Mathf.Max(1, inventoryReferenceResolution);
         inventoryReferencePlanetRadius = Mathf.Max(0.0001f, inventoryReferencePlanetRadius);
+        ventReferenceResolution = Mathf.Max(1, ventReferenceResolution);
+        ventReferencePlanetRadius = Mathf.Max(0.0001f, ventReferencePlanetRadius);
         ventTickSeconds = Mathf.Max(0.0001f, ventTickSeconds);
         ventH2SPerTick = Mathf.Max(0f, ventH2SPerTick);
         ventCO2PerTick = Mathf.Max(0f, ventCO2PerTick);
