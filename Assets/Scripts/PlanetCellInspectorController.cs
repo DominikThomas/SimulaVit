@@ -78,7 +78,7 @@ public class PlanetCellInspectorController : MonoBehaviour
         }
 
         Vector3 directionFromCenter = (hitInfo.point - planetGenerator.transform.position).normalized;
-        int cellIndex = PlanetGridIndexing.DirectionToCellIndex(directionFromCenter, Mathf.Max(1, planetGenerator.resolution));
+        int cellIndex = planetResourceMap.GetCellIndexFromDirection(directionFromCenter);
 
         if (!planetResourceMap.TryGetCellInspectionSnapshot(cellIndex, directionFromCenter, out PlanetResourceMap.CellInspectionSnapshot snapshot))
         {

@@ -179,7 +179,10 @@ public class ReplicatorSteeringSystem
             return;
         }
 
-        int resolution = Mathf.Max(1, planetGenerator.resolution);
+        // Steering habitat/resource lookups follow simulation/resource resolution.
+        int resolution = planetResourceMap != null
+            ? Mathf.Max(1, planetResourceMap.SimulationResolution)
+            : Mathf.Max(1, planetGenerator.resolution);
 
         if (settings.EnableRunAndTumbleDebug)
         {
