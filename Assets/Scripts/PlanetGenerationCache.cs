@@ -115,6 +115,9 @@ public static class PlanetGenerationCache
         AppendKey(sb, "ventStrengthMax", resourceMap.ventStrengthMax);
         AppendKey(sb, "ventNoiseScale", resourceMap.ventNoiseScale);
         AppendKey(sb, "ventThreshold", resourceMap.ventThreshold);
+        AppendKey(sb, "ventReferenceResolution", resourceMap.ventReferenceResolution);
+        AppendKey(sb, "ventReferencePlanetRadius", resourceMap.ventReferencePlanetRadius);
+        AppendKey(sb, "ventSelectionModel", 2);
         return sb.ToString();
     }
 
