@@ -315,7 +315,10 @@ public class ReplicatorSteeringSystem
             }
             case MetabolismType.Photosynthesis:
             {
-                float light = Mathf.Clamp01(planetResourceMap.GetInsolation(normalizedDir));
+                float surfaceInsolation = Mathf.Clamp01(planetResourceMap.GetInsolation(normalizedDir));
+                float light = layerIndex >= 0
+                    ? planetResourceMap.GetLayeredLightForCell(cellIndex, layerIndex, surfaceInsolation)
+                    : surfaceInsolation;
                 return Mathf.Min(light, co2);
             }
             case MetabolismType.Saprotrophy:

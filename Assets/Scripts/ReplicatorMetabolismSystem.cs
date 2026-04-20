@@ -646,21 +646,22 @@ public class ReplicatorMetabolismSystem
         ref float speedCapMultiplier,
         ref DebugSnapshot debugSnapshot)
     {
-        float insolation = Mathf.Clamp01(planetResourceMap.GetInsolation(dir));
+        float surfaceInsolation = Mathf.Clamp01(planetResourceMap.GetInsolation(dir));
+        float photosynthesisLight = ResolvePhotosynthesisLightAvailability(populationState, index, cellIndex, planetResourceMap, surfaceInsolation);
         bool lackCo2 = false;
         bool lackLight = false;
         bool lackO2 = false;
         bool lackStoredC = false;
 
-        if (TryPhotosynthesisEnergyGain(populationState, index, cellIndex, planetResourceMap, settings, insolation, performance))
+        if (TryPhotosynthesisEnergyGain(populationState, index, cellIndex, planetResourceMap, settings, photosynthesisLight, performance))
         {
             debugSnapshot.PhotosynthLightModeCount++;
         }
         else
         {
-            if (insolation > 0f)
+            if (photosynthesisLight > 0f)
             {
-                float co2Need = Mathf.Max(0f, settings.PhotosynthesisCo2PerTickAtFullInsolation) * insolation;
+                float co2Need = Mathf.Max(0f, settings.PhotosynthesisCo2PerTickAtFullInsolation) * photosynthesisLight;
                 float co2Available = GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, ResourceType.CO2, cellIndex);
                 lackCo2 = co2Need > 0f && co2Available <= Mathf.Epsilon;
             }
@@ -708,7 +709,7 @@ public class ReplicatorMetabolismSystem
             }
         }
 
-        if (insolation <= 0f)
+        if (photosynthesisLight <= 0f)
         {
             if (populationState.OrganicCStore[index] <= Mathf.Epsilon)
             {
@@ -745,9 +746,6 @@ public class ReplicatorMetabolismSystem
             return false;
         }
 
-        // Audit note: photosynthesis currently uses surface insolation directly.
-        // Layer attenuation is represented in layered ocean data (GetLayerLightFactor),
-        // but not yet applied to this production path to avoid behavior rebalance in this pass.
         float co2Need = Mathf.Max(0f, settings.PhotosynthesisCo2PerTickAtFullInsolation) * insolation;
         float co2Available = GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, ResourceType.CO2, cellIndex);
         float co2Consumed = Mathf.Min(co2Need, co2Available);
@@ -798,6 +796,21 @@ public class ReplicatorMetabolismSystem
         }
 
         return gained;
+    }
+
+    private static float ResolvePhotosynthesisLightAvailability(
+        ReplicatorPopulationState populationState,
+        int index,
+        int cellIndex,
+        PlanetResourceMap planetResourceMap,
+        float surfaceInsolation)
+    {
+        if (TryGetValidAgentOceanLayer(populationState, index, planetResourceMap, cellIndex, out int layer))
+        {
+            return planetResourceMap.GetLayeredLightForCell(cellIndex, layer, surfaceInsolation);
+        }
+
+        return Mathf.Clamp01(surfaceInsolation);
     }
 
     private static bool TryPhotosynthAnoxicDarkFallback(

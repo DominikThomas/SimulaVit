@@ -212,8 +212,14 @@ public class PlanetResourceMap : MonoBehaviour
     [Range(0f, 1f)] public float depth01ForLayer4 = 0.58f;
     [Tooltip("Fraction of local max ocean depth needed to activate all five layers.")]
     [Range(0f, 1f)] public float depth01ForLayer5 = 0.82f;
-    [Tooltip("Light attenuation per vertical layer. Higher values darken deep layers faster.")]
+    [Tooltip("Legacy light attenuation knob kept for compatibility. Discrete top/second/deep light factors are now preferred.")]
     [Range(0f, 8f)] public float layeredLightAttenuation = 1.15f;
+    [Tooltip("Layered light model: layer 0 (surface) uses strong light = 1.0.")]
+    [Range(0f, 1f)] public float layeredTopLightFactor = 1f;
+    [Tooltip("Layered light model: layer 1 uses moderate light relative to top (target ~0.40-0.70).")]
+    [Range(0.4f, 0.7f)] public float layeredSecondLayerLightFactor = 0.55f;
+    [Tooltip("Layered light model: layers 2+ are near-dark by default.")]
+    [Range(0f, 0.2f)] public float layeredDeepLightFactor = 0.02f;
     [Tooltip("Simple conservative adjacent-layer diffusion rate applied each atmosphere tick.")]
     [Range(0f, 1f)] public float layeredVerticalMixRate = 0.02f;
     [Tooltip("Slow oxygenation source that pushes atmospheric O2 into ocean surface layers.")]
@@ -228,6 +234,16 @@ public class PlanetResourceMap : MonoBehaviour
     [Min(0f)] public float layeredTempDropPerLayer = 2f;
     [Tooltip("Vent heating contribution per layer toward bottom (Kelvin at full vent strength).")]
     [Min(0f)] public float layeredBottomVentTempGain = 25f;
+    [Tooltip("Layered solar heating model: relative heating at layer 0 (surface).")]
+    [Range(0f, 1f)] public float layeredTopSolarHeatingFactor = 1f;
+    [Tooltip("Layered solar heating model: relative heating at layer 1 (use similar scaling to light).")]
+    [Range(0f, 1f)] public float layeredSecondLayerSolarHeatingFactor = 0.55f;
+    [Tooltip("Layered solar heating model: direct solar heating for layers 2+ (keep near zero).")]
+    [Range(0f, 0.2f)] public float layeredDeepSolarHeatingFactor = 0f;
+    [Tooltip("Layered vent heating model: strongest direct vent heating on the bottom-most ocean layer.")]
+    [Range(0f, 1f)] public float layeredBottomVentHeatingFactor = 1f;
+    [Tooltip("Layered vent heating model: weaker direct vent heating one layer above the bottom.")]
+    [Range(0f, 1f)] public float layeredAboveBottomVentHeatingFactor = 0.45f;
 
     [Header("Layered Ocean Debug")]
     [Tooltip("Inspector sample cell for quick per-cell layered debug values.")]
@@ -673,6 +689,28 @@ public class PlanetResourceMap : MonoBehaviour
         return oceanLayerTemperatureOffsets[GetLayeredArrayIndex(cell, layerIndex)];
     }
 
+    public float GetLayeredLightForCell(int cell, int requestedLayerIndex, float surfaceInsolation)
+    {
+        float clampedInsolation = Mathf.Clamp01(surfaceInsolation);
+        if (!isInitialized || !IsCellValid(cell))
+        {
+            return clampedInsolation;
+        }
+
+        if (!enableLayeredOcean || !IsOceanCell(cell))
+        {
+            return clampedInsolation;
+        }
+
+        int clampedLayer = ClampOceanLayerIndex(cell, requestedLayerIndex);
+        if (clampedLayer < 0)
+        {
+            return clampedInsolation;
+        }
+
+        return clampedInsolation * Mathf.Clamp01(GetLayerLightFactor(cell, clampedLayer));
+    }
+
     public float GetLayerResource(ResourceType resourceType, int cell, int layerIndex)
     {
         if (!IsLayerAccessValid(cell, layerIndex))
@@ -835,6 +873,12 @@ public class PlanetResourceMap : MonoBehaviour
         if (ventHeat != null && cellIndex >= 0 && cellIndex < ventHeat.Length)
         {
             ventTerm = Mathf.Max(0f, ventHeat[cellIndex]);
+        }
+
+        if (underwater && enableLayeredOcean)
+        {
+            insolationTerm *= GetLayeredSolarHeatingAggregateFactor(cellIndex);
+            ventTerm *= GetLayeredVentHeatingAggregateFactor(cellIndex);
         }
 
         float tempKelvin = baseTempKelvin + insolationTerm + ventTerm;
@@ -3067,7 +3111,6 @@ public class PlanetResourceMap : MonoBehaviour
             return;
         }
 
-        float attenuation = Mathf.Max(0f, layeredLightAttenuation);
         float tempDrop = Mathf.Max(0f, layeredTempDropPerLayer);
         float ventTempGain = Mathf.Max(0f, layeredBottomVentTempGain);
         for (int cell = 0; cell < oceanMask.Length; cell++)
@@ -3089,12 +3132,104 @@ public class PlanetResourceMap : MonoBehaviour
                     continue;
                 }
 
-                float depthT = active <= 1 ? 0f : layer / (float)(active - 1);
-                oceanLayerLightFactors[idx] = Mathf.Exp(-attenuation * depthT);
-                float ventBias = Mathf.SmoothStep(0f, 1f, depthT) * ventStrengthFactor;
-                oceanLayerTemperatureOffsets[idx] = (-tempDrop * layer) + (ventBias * ventTempGain);
+                // Layered light model (intended simplified profile):
+                // - layer 0 (surface): strong light
+                // - layer 1: moderate light (~40%-70% of top)
+                // - layers 2+: near-dark
+                oceanLayerLightFactors[idx] = GetDiscreteLayerLightFactor(layer);
+
+                // Layered temperature offsets are an incremental visualization/fitness bridge:
+                // - small depth cooling per layer
+                // - vent-biased warming concentrated at bottom, with weaker warming one layer above bottom
+                float ventLayerFactor = GetVentHeatingFactorForLayer(layer, active);
+                oceanLayerTemperatureOffsets[idx] = (-tempDrop * layer) + (ventStrengthFactor * ventTempGain * ventLayerFactor);
             }
         }
+    }
+
+    private float GetDiscreteLayerLightFactor(int layerIndex)
+    {
+        if (layerIndex <= 0)
+        {
+            return Mathf.Clamp01(layeredTopLightFactor);
+        }
+
+        if (layerIndex == 1)
+        {
+            return Mathf.Clamp01(layeredSecondLayerLightFactor);
+        }
+
+        return Mathf.Clamp01(layeredDeepLightFactor);
+    }
+
+    private float GetSolarHeatingFactorForLayer(int layerIndex)
+    {
+        if (layerIndex <= 0)
+        {
+            return Mathf.Clamp01(layeredTopSolarHeatingFactor);
+        }
+
+        if (layerIndex == 1)
+        {
+            return Mathf.Clamp01(layeredSecondLayerSolarHeatingFactor);
+        }
+
+        return Mathf.Clamp01(layeredDeepSolarHeatingFactor);
+    }
+
+    private float GetVentHeatingFactorForLayer(int layerIndex, int activeLayerCount)
+    {
+        if (activeLayerCount <= 0)
+        {
+            return 0f;
+        }
+
+        int bottom = activeLayerCount - 1;
+        if (layerIndex == bottom)
+        {
+            return Mathf.Clamp01(layeredBottomVentHeatingFactor);
+        }
+
+        if (layerIndex == bottom - 1)
+        {
+            return Mathf.Clamp01(layeredAboveBottomVentHeatingFactor);
+        }
+
+        return 0f;
+    }
+
+    private float GetLayeredSolarHeatingAggregateFactor(int cell)
+    {
+        int active = GetOceanActiveLayerCount(cell);
+        if (active <= 0)
+        {
+            return 1f;
+        }
+
+        float sum = 0f;
+        for (int layer = 0; layer < active; layer++)
+        {
+            sum += GetSolarHeatingFactorForLayer(layer);
+        }
+
+        return Mathf.Clamp01(sum / active);
+    }
+
+    private float GetLayeredVentHeatingAggregateFactor(int cell)
+    {
+        int active = GetOceanActiveLayerCount(cell);
+        if (active <= 0)
+        {
+            return 1f;
+        }
+
+        float sum = 0f;
+        for (int layer = 0; layer < active; layer++)
+        {
+            sum += GetVentHeatingFactorForLayer(layer, active);
+        }
+
+        return Mathf.Clamp01(sum / active);
     }
 
     private void SyncLayeredOceanFromLegacyArrays()
@@ -3508,6 +3643,9 @@ public class PlanetResourceMap : MonoBehaviour
         depth01ForLayer4 = Mathf.Clamp01(Mathf.Max(depth01ForLayer3, depth01ForLayer4));
         depth01ForLayer5 = Mathf.Clamp01(Mathf.Max(depth01ForLayer4, depth01ForLayer5));
         layeredLightAttenuation = Mathf.Max(0f, layeredLightAttenuation);
+        layeredTopLightFactor = Mathf.Clamp01(layeredTopLightFactor);
+        layeredSecondLayerLightFactor = Mathf.Clamp(layeredSecondLayerLightFactor, 0.4f, 0.7f);
+        layeredDeepLightFactor = Mathf.Clamp(layeredDeepLightFactor, 0f, 0.2f);
         layeredVerticalMixRate = Mathf.Clamp01(layeredVerticalMixRate);
         layeredSurfaceOxygenationRate = Mathf.Clamp01(layeredSurfaceOxygenationRate);
         layeredMarineSnowRate = Mathf.Clamp01(layeredMarineSnowRate);
@@ -3515,6 +3653,11 @@ public class PlanetResourceMap : MonoBehaviour
         layeredOrganicCUpwardBleedRate = Mathf.Clamp01(layeredOrganicCUpwardBleedRate);
         layeredTempDropPerLayer = Mathf.Max(0f, layeredTempDropPerLayer);
         layeredBottomVentTempGain = Mathf.Max(0f, layeredBottomVentTempGain);
+        layeredTopSolarHeatingFactor = Mathf.Clamp01(layeredTopSolarHeatingFactor);
+        layeredSecondLayerSolarHeatingFactor = Mathf.Clamp01(layeredSecondLayerSolarHeatingFactor);
+        layeredDeepSolarHeatingFactor = Mathf.Clamp(layeredDeepSolarHeatingFactor, 0f, 0.2f);
+        layeredBottomVentHeatingFactor = Mathf.Clamp01(layeredBottomVentHeatingFactor);
+        layeredAboveBottomVentHeatingFactor = Mathf.Clamp01(layeredAboveBottomVentHeatingFactor);
     }
 
 
