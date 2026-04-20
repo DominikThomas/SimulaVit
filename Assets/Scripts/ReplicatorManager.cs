@@ -1028,6 +1028,33 @@ public class ReplicatorManager : MonoBehaviour
         return PlanetGridIndexing.GetCellCount(GetSimulationResolution());
     }
 
+    int GetReferenceSimulationCellCountForThresholds()
+    {
+        // Resolution-aware threshold bridge:
+        // - local spawn/unlock thresholds are authored as per-cell amounts at a reference simulation resolution
+        // - lower simulation resolutions have larger cells and therefore larger per-cell inventories
+        // - scale threshold by cell-area ratio so local eligibility remains biologically comparable across resolutions
+        if (planetResourceMap != null)
+        {
+            int referenceResolution = Mathf.Max(1, planetResourceMap.inventoryReferenceResolution);
+            return Mathf.Max(1, PlanetGridIndexing.GetCellCount(referenceResolution));
+        }
+
+        return Mathf.Max(1, GetSimulationCellCount());
+    }
+
+    float GetLocalPerCellThresholdScaleFromReference()
+    {
+        int simulationCellCount = Mathf.Max(1, GetSimulationCellCount());
+        int referenceCellCount = Mathf.Max(1, GetReferenceSimulationCellCountForThresholds());
+        return referenceCellCount / (float)simulationCellCount;
+    }
+
+    float GetAreaNormalizedLocalThreshold(float referencePerCellThreshold)
+    {
+        return Mathf.Max(0f, referencePerCellThreshold) * GetLocalPerCellThresholdScaleFromReference();
+    }
+
     int DirectionToSimulationCellIndex(Vector3 direction)
     {
         if (planetResourceMap != null)
@@ -1930,7 +1957,8 @@ public class ReplicatorManager : MonoBehaviour
 
         if (unlockedByLocalOxygen)
         {
-            Debug.Log($"[LocalO2Mutation] Saprotrophy mutation became eligible due to local O2 (global O2 {globalO2:0.0000} <= {minGlobalO2:0.0000}). Local O2: " + GetLocalHabitatResource(ResourceType.O2, parent.currentDirection, parent.currentOceanLayerIndex));
+            float localO2Threshold = GetAreaNormalizedLocalThreshold(minLocalO2);
+            Debug.Log($"[LocalO2Mutation] Saprotrophy mutation became eligible due to local O2 (global O2 {globalO2:0.0000} <= {minGlobalO2:0.0000}). Local O2: {GetLocalHabitatResource(ResourceType.O2, parent.currentDirection, parent.currentOceanLayerIndex):0.0000}, threshold(area-normalized): {localO2Threshold:0.0000}");
         }
 
         return hasLocalO2 && hasLocalOrganicC;
@@ -1953,7 +1981,8 @@ public class ReplicatorManager : MonoBehaviour
 
         if (unlockedByLocalOxygen)
         {
-            Debug.Log($"[LocalO2Mutation] Methanotrophy mutation became eligible due to local O2 (global O2 {globalO2:0.0000} <= {minGlobalO2:0.0000}). Local O2: " + GetLocalHabitatResource(ResourceType.O2, parent.currentDirection, parent.currentOceanLayerIndex));
+            float localO2Threshold = GetAreaNormalizedLocalThreshold(minLocalO2);
+            Debug.Log($"[LocalO2Mutation] Methanotrophy mutation became eligible due to local O2 (global O2 {globalO2:0.0000} <= {minGlobalO2:0.0000}). Local O2: {GetLocalHabitatResource(ResourceType.O2, parent.currentDirection, parent.currentOceanLayerIndex):0.0000}, threshold(area-normalized): {localO2Threshold:0.0000}");
         }
 
         return hasLocalO2 && globalMethane > minGlobalMethane;
@@ -1962,13 +1991,18 @@ public class ReplicatorManager : MonoBehaviour
     bool IsOxygenLocallyAvailable(Vector3 habitatDirection, int habitatOceanLayerIndex, float minimumAmount)
     {
         bool isOxygenGloballyAvailable = planetResourceMap.debugGlobalO2 > minGlobalO2;
-        bool isLocalOxygenAboveThreshold = GetLocalHabitatResource(ResourceType.O2, habitatDirection, habitatOceanLayerIndex) > Mathf.Max(0f, minimumAmount);
+        // Local O2 gameplay gates are area-normalized from reference resolution so
+        // oxygen-requiring unlock/spawn behavior is stable across simulation tile sizes.
+        float localO2Threshold = GetAreaNormalizedLocalThreshold(minimumAmount);
+        bool isLocalOxygenAboveThreshold = GetLocalHabitatResource(ResourceType.O2, habitatDirection, habitatOceanLayerIndex) > localO2Threshold;
         return isOxygenGloballyAvailable || isLocalOxygenAboveThreshold;
     }
 
     bool IsOrganicCLocallyAvailable(Vector3 habitatDirection, int habitatOceanLayerIndex, float minimumAmount)
     {
-        return GetLocalHabitatResource(ResourceType.OrganicC, habitatDirection, habitatOceanLayerIndex) > Mathf.Max(0f, minimumAmount);
+        // Organic C spawn/unlock gate is also area-normalized from reference resolution.
+        float localOrganicThreshold = GetAreaNormalizedLocalThreshold(minimumAmount);
+        return GetLocalHabitatResource(ResourceType.OrganicC, habitatDirection, habitatOceanLayerIndex) > localOrganicThreshold;
     }
 
     float GetLocalHabitatResource(ResourceType resourceType, Vector3 habitatDirection, int habitatOceanLayerIndex)
