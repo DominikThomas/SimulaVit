@@ -209,6 +209,10 @@ public class PlanetResourceMap : MonoBehaviour
     [Range(0f, 1f)] public float layeredSurfaceOxygenationRate = 0.02f;
     [Tooltip("Downward sinking flux of organic material (marine snow) per atmosphere tick.")]
     [Range(0f, 1f)] public float layeredMarineSnowRate = 0.015f;
+    [Tooltip("Weak in-layer lateral spread for OrganicC (marine snow plume broadening).")]
+    [Range(0f, 1f)] public float layeredOrganicCLateralSpreadRate = 0.002f;
+    [Tooltip("Optional tiny upward bleed for OrganicC between adjacent layers (kept near zero by default).")]
+    [Range(0f, 1f)] public float layeredOrganicCUpwardBleedRate = 0.0002f;
     [Tooltip("Simple temperature decrease per layer away from the surface (Kelvin).")]
     [Min(0f)] public float layeredTempDropPerLayer = 2f;
     [Tooltip("Vent heating contribution per layer toward bottom (Kelvin at full vent strength).")]
@@ -284,6 +288,7 @@ public class PlanetResourceMap : MonoBehaviour
     private float[] scentLeakTmp;
     private float[] layeredScentWasteTmp;
     private float[] layeredScentLeakTmp;
+    private float[] layeredOrganicCTmp;
     private int[] ventHeatNeighbors;
     private byte[] ventMask;
     private int[] ventCells;
@@ -883,6 +888,7 @@ public class PlanetResourceMap : MonoBehaviour
         oceanActiveLayerCounts = new byte[cellCount];
         oceanLayerLightFactors = new float[cellCount * MaxOceanLayers];
         oceanLayerTemperatureOffsets = new float[cellCount * MaxOceanLayers];
+        layeredOrganicCTmp = new float[cellCount * MaxOceanLayers];
         ConfigureOceanDissolvedSpecies(cellCount);
         ConfigureLayeredOceanResources(cellCount);
         EnsureScentArrays(cellCount);
@@ -1099,6 +1105,7 @@ public class PlanetResourceMap : MonoBehaviour
             scentLeakTmp = null;
             layeredScentWasteTmp = null;
             layeredScentLeakTmp = null;
+            layeredOrganicCTmp = null;
             return;
         }
 
@@ -1108,6 +1115,7 @@ public class PlanetResourceMap : MonoBehaviour
         EnsureArrayCapacity(ref scentLeakTmp, cellCount);
         EnsureArrayCapacity(ref layeredScentWasteTmp, cellCount * MaxOceanLayers);
         EnsureArrayCapacity(ref layeredScentLeakTmp, cellCount * MaxOceanLayers);
+        EnsureArrayCapacity(ref layeredOrganicCTmp, cellCount * MaxOceanLayers);
     }
 
     public void ClearScents()
@@ -1851,7 +1859,7 @@ public class PlanetResourceMap : MonoBehaviour
         UpdateLayerLightAndTemperatureProfiles();
         ApplySurfaceOxygenationToLayers(dt);
         ApplyVerticalDiffusion(dt);
-        ApplyMarineSnowSinking(dt);
+        ApplyLayeredOrganicCTransport(dt);
         SyncLegacyOceanFromLayeredArrays();
         UpdateLayeredDebugSample();
     }
@@ -1903,7 +1911,6 @@ public class PlanetResourceMap : MonoBehaviour
         }
 
         ApplyVerticalDiffusionForResource(ResourceType.O2, transferRate);
-        ApplyVerticalDiffusionForResource(ResourceType.OrganicC, transferRate);
         ApplyVerticalDiffusionForResource(ResourceType.H2, transferRate);
         ApplyVerticalDiffusionForResource(ResourceType.H2S, transferRate);
         ApplyVerticalDiffusionForResource(ResourceType.CH4, transferRate);
@@ -1937,16 +1944,38 @@ public class PlanetResourceMap : MonoBehaviour
         }
     }
 
-    private void ApplyMarineSnowSinking(float dt)
+    private void ApplyLayeredOrganicCTransport(float dt)
     {
         float sinkRate = Mathf.Clamp01(layeredMarineSnowRate) * Mathf.Max(0f, dt);
-        if (sinkRate <= 0f)
+        float lateralRate = Mathf.Clamp01(layeredOrganicCLateralSpreadRate) * Mathf.Max(0f, dt);
+        float upwardBleedRate = Mathf.Clamp01(layeredOrganicCUpwardBleedRate) * Mathf.Max(0f, dt);
+        if (sinkRate <= 0f && lateralRate <= 0f && upwardBleedRate <= 0f)
         {
             return;
         }
 
         float[] organicLayers = GetLayeredOceanArray(ResourceType.OrganicC);
+        if (organicLayers == null || layeredOrganicCTmp == null || ventHeatNeighbors == null)
+        {
+            return;
+        }
+
+        ApplyOrganicCDownwardSettling(organicLayers, sinkRate);
+        ApplyOrganicCLateralSpread(organicLayers, lateralRate);
+
+        // Lateral pass uses a swap-buffer; reacquire the authoritative array before upward bleed.
+        organicLayers = GetLayeredOceanArray(ResourceType.OrganicC);
         if (organicLayers == null)
+        {
+            return;
+        }
+
+        ApplyOrganicCUpwardBleed(organicLayers, upwardBleedRate);
+    }
+
+    private void ApplyOrganicCDownwardSettling(float[] organicLayers, float sinkRate)
+    {
+        if (sinkRate <= 0f)
         {
             return;
         }
@@ -1959,9 +1988,8 @@ public class PlanetResourceMap : MonoBehaviour
                 continue;
             }
 
-            // Simple per-cell marine snow model:
-            // move a fraction of each layer's OrganicC to the next deeper layer each tick.
-            // This allows interception/consumption in intermediate layers and gradual benthic accumulation.
+            // Marine-snow model:
+            // OrganicC is mostly particulate detritus, so it preferentially sinks down one layer at a time.
             for (int layer = 0; layer < activeCount - 1; layer++)
             {
                 int upper = GetLayeredArrayIndex(cell, layer);
@@ -1974,6 +2002,103 @@ public class PlanetResourceMap : MonoBehaviour
 
                 organicLayers[upper] = Mathf.Max(0f, organicLayers[upper] - flux);
                 organicLayers[lower] = Mathf.Max(0f, organicLayers[lower] + flux);
+            }
+        }
+    }
+
+    private void ApplyOrganicCLateralSpread(float[] organicLayers, float lateralRate)
+    {
+        if (lateralRate <= 0f)
+        {
+            return;
+        }
+
+        int cellCount = oceanMask != null ? oceanMask.Length : 0;
+        if (cellCount <= 0)
+        {
+            return;
+        }
+
+        System.Array.Copy(organicLayers, layeredOrganicCTmp, organicLayers.Length);
+
+        for (int cell = 0; cell < cellCount; cell++)
+        {
+            int activeCount = GetOceanActiveLayerCount(cell);
+            if (activeCount <= 0)
+            {
+                continue;
+            }
+
+            int baseNeighbor = cell * NeighborCount;
+            for (int layer = 0; layer < activeCount; layer++)
+            {
+                float neighborSum = 0f;
+                int neighborCount = 0;
+
+                for (int n = 0; n < NeighborCount; n++)
+                {
+                    int neighbor = ventHeatNeighbors[baseNeighbor + n];
+                    if (neighbor < 0 || neighbor >= cellCount || !IsOceanCell(neighbor))
+                    {
+                        continue;
+                    }
+
+                    int neighborLayer = ClampOceanLayerIndex(neighbor, layer);
+                    if (neighborLayer < 0)
+                    {
+                        continue;
+                    }
+
+                    neighborSum += organicLayers[GetLayeredArrayIndex(neighbor, neighborLayer)];
+                    neighborCount++;
+                }
+
+                if (neighborCount <= 0)
+                {
+                    continue;
+                }
+
+                int idx = GetLayeredArrayIndex(cell, layer);
+                float neighborAvg = neighborSum / neighborCount;
+                // Keep horizontal spread weak so top-layer production forms a narrow sinking plume.
+                layeredOrganicCTmp[idx] = Mathf.Max(0f, Mathf.Lerp(organicLayers[idx], neighborAvg, lateralRate));
+            }
+        }
+
+        float[] swap = layeredOrganicCTmp;
+        layeredOrganicCTmp = organicLayers;
+        layeredOceanResources[ResourceType.OrganicC] = swap;
+    }
+
+    private void ApplyOrganicCUpwardBleed(float[] organicLayers, float upwardBleedRate)
+    {
+        if (upwardBleedRate <= 0f)
+        {
+            return;
+        }
+
+        for (int cell = 0; cell < oceanMask.Length; cell++)
+        {
+            int activeCount = GetOceanActiveLayerCount(cell);
+            if (activeCount <= 1)
+            {
+                continue;
+            }
+
+            // Optional tiny local redistribution to avoid hard discontinuities.
+            // Intentionally one-way and very small: no symmetric vertical diffusion for OrganicC.
+            for (int layer = activeCount - 1; layer > 0; layer--)
+            {
+                int lower = GetLayeredArrayIndex(cell, layer);
+                int upper = GetLayeredArrayIndex(cell, layer - 1);
+                float bleed = organicLayers[lower] * upwardBleedRate;
+                if (bleed <= 0f)
+                {
+                    continue;
+                }
+
+                organicLayers[lower] = Mathf.Max(0f, organicLayers[lower] - bleed);
+                organicLayers[upper] = Mathf.Max(0f, organicLayers[upper] + bleed);
             }
         }
     }
@@ -3023,6 +3148,8 @@ public class PlanetResourceMap : MonoBehaviour
         layeredVerticalMixRate = Mathf.Clamp01(layeredVerticalMixRate);
         layeredSurfaceOxygenationRate = Mathf.Clamp01(layeredSurfaceOxygenationRate);
         layeredMarineSnowRate = Mathf.Clamp01(layeredMarineSnowRate);
+        layeredOrganicCLateralSpreadRate = Mathf.Clamp01(layeredOrganicCLateralSpreadRate);
+        layeredOrganicCUpwardBleedRate = Mathf.Clamp01(layeredOrganicCUpwardBleedRate);
         layeredTempDropPerLayer = Mathf.Max(0f, layeredTempDropPerLayer);
         layeredBottomVentTempGain = Mathf.Max(0f, layeredBottomVentTempGain);
     }
