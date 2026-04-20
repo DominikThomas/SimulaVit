@@ -21,6 +21,8 @@ public class PlanetGenerator : MonoBehaviour
     }
 
     [SerializeField] private ReplicatorManager replicatorManager;
+    [Header("Visual Mesh")]
+    [Tooltip("Visual/mesh resolution used for terrain/ocean/atmosphere geometry generation. Simulation/resource resolution is configured on PlanetResourceMap.")]
     [Range(3, 240)]
     public int resolution = 10;
     public float radius = 1f;
@@ -118,6 +120,7 @@ public class PlanetGenerator : MonoBehaviour
 
     public MeshRenderer OceanRenderer => oceanMeshRenderer;
     public IReadOnlyList<float> LocalOceanDepths => localOceanDepthByCell;
+    public int VisualResolution => Mathf.Max(1, resolution);
 
     void Awake()
     {
@@ -643,6 +646,12 @@ public class PlanetGenerator : MonoBehaviour
         return GetSurfaceRadius(cellIndex);
     }
 
+    public float GetOceanFloorRadius(Vector3 pointOnSphere)
+    {
+        // Direction-based query used by lower-resolution simulation grids.
+        return GetSurfaceRadius(pointOnSphere);
+    }
+
     public float GetOceanTopRadius(int cellIndex)
     {
         if (!IsOceanCell(cellIndex))
@@ -651,6 +660,16 @@ public class PlanetGenerator : MonoBehaviour
         }
 
         // Sea level shell used by the ocean surface mesh.
+        return GetOceanRadius();
+    }
+
+    public float GetOceanTopRadius(Vector3 pointOnSphere)
+    {
+        if (!IsOceanAtDirection(pointOnSphere))
+        {
+            return GetSurfaceRadius(pointOnSphere);
+        }
+
         return GetOceanRadius();
     }
 

@@ -96,7 +96,10 @@ public class ReplicatorMovementSystem
 
         using (MovementCompanionCopyMarker.Auto())
         {
-            int resolution = planetGenerator != null ? Mathf.Max(1, planetGenerator.resolution) : 1;
+            // Movement shell placement must sample ocean layers on the simulation/resource grid.
+            int resolution = planetResourceMap != null
+                ? Mathf.Max(1, planetResourceMap.SimulationResolution)
+                : (planetGenerator != null ? Mathf.Max(1, planetGenerator.resolution) : 1);
             for (int i = 0; i < count; i++)
             {
                 Replicator agent = agents[i];

@@ -967,8 +967,7 @@ public class ReplicatorManager : MonoBehaviour
         spontaneousSpawnCandidateCacheLastRefreshStep = simulationStepCount;
         spontaneousHydrogenSpawnCandidateCells.Clear();
 
-        int resolution = Mathf.Max(1, planetGenerator.resolution);
-        int cellCount = PlanetGridIndexing.GetCellCount(resolution);
+        int cellCount = GetSimulationCellCount();
         for (int cell = 0; cell < cellCount; cell++)
         {
             float h2Availability = NormalizeResource(ResourceType.H2, cell, steerGoodH2);
@@ -981,6 +980,11 @@ public class ReplicatorManager : MonoBehaviour
 
     Vector3 GetDirectionForCellIndex(int cell)
     {
+        if (planetResourceMap != null && planetResourceMap.TryGetCellDirection(cell, out Vector3 simDirection))
+        {
+            return simDirection;
+        }
+
         int resolution = Mathf.Max(1, planetGenerator.resolution);
         int cellsPerFace = resolution * resolution;
         int face = Mathf.Clamp(cell / cellsPerFace, 0, 5);
@@ -1006,11 +1010,38 @@ public class ReplicatorManager : MonoBehaviour
         return pointOnCube.normalized;
     }
 
+    // Simulation/resource grid helpers:
+    // - Prefer PlanetResourceMap simulation resolution for indexing and cell counts.
+    // - Fall back to PlanetGenerator visual resolution for backward compatibility.
+    int GetSimulationResolution()
+    {
+        if (planetResourceMap != null)
+        {
+            return Mathf.Max(1, planetResourceMap.SimulationResolution);
+        }
+
+        return Mathf.Max(1, planetGenerator != null ? planetGenerator.resolution : 1);
+    }
+
+    int GetSimulationCellCount()
+    {
+        return PlanetGridIndexing.GetCellCount(GetSimulationResolution());
+    }
+
+    int DirectionToSimulationCellIndex(Vector3 direction)
+    {
+        if (planetResourceMap != null)
+        {
+            return planetResourceMap.GetCellIndexFromDirection(direction);
+        }
+
+        return PlanetGridIndexing.DirectionToCellIndex(direction.normalized, GetSimulationResolution());
+    }
+
     float GetHydrogenotrophySpawnScore(Vector3 direction)
     {
-        int resolution = Mathf.Max(1, planetGenerator.resolution);
         Vector3 normalizedDir = direction.normalized;
-        int cellIndex = PlanetGridIndexing.DirectionToCellIndex(normalizedDir, resolution);
+        int cellIndex = DirectionToSimulationCellIndex(normalizedDir);
         int layerIndex = ResolveHydrogenotrophySpawnLayer(cellIndex);
 
         float co2Availability = NormalizeResource(ResourceType.CO2, cellIndex, layerIndex, steerGoodCO2);
@@ -1037,9 +1068,8 @@ public class ReplicatorManager : MonoBehaviour
             return true;
         }
 
-        int resolution = Mathf.Max(1, planetGenerator.resolution);
         Vector3 normalizedDir = direction.normalized;
-        int cellIndex = PlanetGridIndexing.DirectionToCellIndex(normalizedDir, resolution);
+        int cellIndex = DirectionToSimulationCellIndex(normalizedDir);
         int layerIndex = ResolveHydrogenotrophySpawnLayer(cellIndex);
 
         float h2Availability = NormalizeResource(ResourceType.H2, cellIndex, layerIndex, steerGoodH2);
@@ -1128,8 +1158,8 @@ public class ReplicatorManager : MonoBehaviour
                 return;
             }
 
-            int resolution = Mathf.Max(1, planetGenerator.resolution);
-            int cellCount = PlanetGridIndexing.GetCellCount(resolution);
+            int resolution = GetSimulationResolution();
+            int cellCount = GetSimulationCellCount();
             planetResourceMap.EnsureScentArrays(cellCount);
             populationState.EnsureMatchesAgentCount(agents);
             RebuildPreySpatialBins(resolution, populationState);
@@ -1312,7 +1342,7 @@ public class ReplicatorManager : MonoBehaviour
             return;
         }
 
-        int resolution = Mathf.Max(1, planetGenerator.resolution);
+        int resolution = GetSimulationResolution();
         populationState.EnsureMatchesAgentCount(agents);
         RebuildPreySpatialBins(resolution, populationState);
 
@@ -1466,7 +1496,7 @@ public class ReplicatorManager : MonoBehaviour
 
     internal void UpdateLifecycle(float simulationDeltaTime)
     {
-        int resolution = planetGenerator != null ? planetGenerator.resolution : 1;
+        int resolution = GetSimulationResolution();
         lifecycleSystem.UpdateLifecycle(
             agents,
             populationState,
@@ -1601,8 +1631,7 @@ public class ReplicatorManager : MonoBehaviour
             return;
         }
 
-        int resolution = Mathf.Max(1, planetGenerator.resolution);
-        int cellIndex = PlanetGridIndexing.DirectionToCellIndex(agent.position.normalized, resolution);
+        int cellIndex = DirectionToSimulationCellIndex(agent.position.normalized);
         DepositOrganicCAtAgentLocation(agent, cellIndex, depositAmount);
     }
 
@@ -1619,8 +1648,7 @@ public class ReplicatorManager : MonoBehaviour
             return;
         }
 
-        int resolution = Mathf.Max(1, planetGenerator.resolution);
-        int cellIndex = PlanetGridIndexing.DirectionToCellIndex(agent.position.normalized, resolution);
+        int cellIndex = DirectionToSimulationCellIndex(agent.position.normalized);
         float depositAmount = stored;
 
         if (depositAmount > 0f)
@@ -1950,15 +1978,14 @@ public class ReplicatorManager : MonoBehaviour
             return 0f;
         }
 
-        int resolution = Mathf.Max(1, planetGenerator.resolution);
         Vector3 normalizedDir = habitatDirection.normalized;
-        int cellIndex = PlanetGridIndexing.DirectionToCellIndex(normalizedDir, resolution);
+        int cellIndex = DirectionToSimulationCellIndex(normalizedDir);
         if (cellIndex < 0)
         {
             return 0f;
         }
 
-        if (!IsSeaLocation(normalizedDir))
+        if (!planetResourceMap.IsOceanCell(cellIndex))
         {
             return planetResourceMap.Get(resourceType, cellIndex);
         }
@@ -1979,8 +2006,7 @@ public class ReplicatorManager : MonoBehaviour
             return 0f;
         }
 
-        int resolution = Mathf.Max(1, planetGenerator.resolution);
-        int cellCount = PlanetGridIndexing.GetCellCount(resolution);
+        int cellCount = GetSimulationCellCount();
         if (cellCount <= 0)
         {
             return 0f;
@@ -2077,8 +2103,7 @@ public class ReplicatorManager : MonoBehaviour
             return;
         }
 
-        int resolution = Mathf.Max(1, planetGenerator.resolution);
-        int cellIndex = PlanetGridIndexing.DirectionToCellIndex(spawnDirection.normalized, resolution);
+        int cellIndex = DirectionToSimulationCellIndex(spawnDirection.normalized);
         if (cellIndex < 0 || !planetResourceMap.IsOceanCell(cellIndex))
         {
             agent.currentOceanLayerIndex = -1;

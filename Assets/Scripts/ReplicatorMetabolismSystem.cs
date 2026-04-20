@@ -91,7 +91,10 @@ public class ReplicatorMetabolismSystem
         Action<MetabolismType, DeathCause> registerDeathCause,
         out DebugSnapshot debugSnapshot)
     {
-        int resolution = Mathf.Max(1, planetGenerator.resolution);
+        // Metabolism/resource lookups must use simulation/resource grid resolution.
+        int resolution = planetResourceMap != null
+            ? Mathf.Max(1, planetResourceMap.SimulationResolution)
+            : Mathf.Max(1, planetGenerator.resolution);
         float basalCost = Mathf.Max(0f, settings.BasalEnergyCostPerSecond) * dtTick;
         float safeEnergyForFullSpeed = Mathf.Max(0.0001f, settings.EnergyForFullSpeed);
 

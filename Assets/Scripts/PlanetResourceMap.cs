@@ -76,6 +76,9 @@ public class PlanetResourceMap : MonoBehaviour
 
     [SerializeField] private PlanetGenerator planetGenerator;
     [SerializeField] private ReplicatorManager replicatorManager;
+    [Header("Grid Resolution")]
+    [Tooltip("Simulation/resource grid resolution. 0 keeps backward-compatible behavior and follows PlanetGenerator visual resolution.")]
+    [Min(0)] [SerializeField] private int simulationResolution = 0;
     [Header("References")]
     [Tooltip("Optional directional light. If empty, will try SunSkyRotator's Light, then RenderSettings.sun.")]
     public Light sunLight;
@@ -281,6 +284,8 @@ public class PlanetResourceMap : MonoBehaviour
     public bool drawVentDebugPoints = false;
     public Color ventDebugColor = Color.magenta;
 
+    // Simulation/resource resolution used for resource arrays, indexing, chemistry, and lookup APIs.
+    // Visual/mesh resolution remains owned by PlanetGenerator.resolution.
     private int resolution;
     private Vector3[] cellDirections;
 
@@ -329,6 +334,10 @@ public class PlanetResourceMap : MonoBehaviour
     public int VentCount => ventCells != null ? ventCells.Length : 0;
     public int[] VentCells => ventCells;
     public Vector3[] CellDirs => cellDirections;
+    public int SimulationResolution => Mathf.Max(1, simulationResolution > 0
+        ? simulationResolution
+        : (planetGenerator != null ? planetGenerator.resolution : resolution));
+    public int SimulationCellCount => PlanetGridIndexing.GetCellCount(SimulationResolution);
 
     private void Awake()
     {
@@ -572,7 +581,7 @@ public class PlanetResourceMap : MonoBehaviour
             return 0f;
         }
 
-        return planetGenerator.GetOceanTopRadius(cell);
+        return planetGenerator.GetOceanTopRadius(GetDirectionForCell(cell));
     }
 
     public float GetOceanFloorRadius(int cell)
@@ -587,7 +596,7 @@ public class PlanetResourceMap : MonoBehaviour
             return 0f;
         }
 
-        return planetGenerator.GetOceanFloorRadius(cell);
+        return planetGenerator.GetOceanFloorRadius(GetDirectionForCell(cell));
     }
 
     public float GetOceanLayerShellRadius(int cell, int requestedLayerIndex)
@@ -604,7 +613,7 @@ public class PlanetResourceMap : MonoBehaviour
         int activeCount = GetOceanActiveLayerCount(cell);
         if (activeCount <= 0)
         {
-            return planetGenerator != null ? planetGenerator.GetSurfaceRadius(cell) : 0f;
+            return planetGenerator != null ? planetGenerator.GetSurfaceRadius(GetDirectionForCell(cell)) : 0f;
         }
 
         int clampedLayerIndex = Mathf.Clamp(requestedLayerIndex, 0, activeCount - 1);
@@ -630,7 +639,7 @@ public class PlanetResourceMap : MonoBehaviour
         }
 
         Vector3 dir = ResolveSurfaceDirection(worldPosOrDir);
-        int cell = PlanetGridIndexing.DirectionToCellIndex(dir, resolution);
+        int cell = GetCellIndexFromDirection(dir);
         if (!IsCellValid(cell))
         {
             return 0f;
@@ -783,7 +792,7 @@ public class PlanetResourceMap : MonoBehaviour
         }
 
         Vector3 dir = ResolveSurfaceDirection(worldPosOrDir);
-        int cell = PlanetGridIndexing.DirectionToCellIndex(dir, resolution);
+        int cell = GetCellIndexFromDirection(dir);
         return TryGetCellInspectionSnapshot(cell, dir, out snapshot);
     }
 
@@ -810,7 +819,7 @@ public class PlanetResourceMap : MonoBehaviour
 
         if (cellIndex < 0 && isInitialized && resolution > 0)
         {
-            cellIndex = PlanetGridIndexing.DirectionToCellIndex(surfaceDir, resolution);
+            cellIndex = GetCellIndexFromDirection(surfaceDir);
         }
 
         bool underwater = IsOceanCell(cellIndex);
@@ -885,7 +894,8 @@ public class PlanetResourceMap : MonoBehaviour
             return;
         }
 
-        int targetResolution = Mathf.Max(1, planetGenerator.resolution);
+        // Resource/simulation arrays are sized from simulationResolution (or visual resolution when in compatibility mode).
+        int targetResolution = SimulationResolution;
 
         if (isInitialized && targetResolution == resolution)
         {
@@ -980,7 +990,7 @@ public class PlanetResourceMap : MonoBehaviour
             {
                 Vector3 dir = CellIndexToDirection(cell, resolution);
                 cellDirections[cell] = dir;
-                bool isOcean = planetGenerator.IsOceanCell(cell);
+                bool isOcean = planetGenerator.IsOceanAtDirection(dir);
                 oceanMask[cell] = isOcean ? (byte)1 : (byte)0;
                 if (isOcean)
                 {
@@ -1903,7 +1913,8 @@ public class PlanetResourceMap : MonoBehaviour
                 continue;
             }
 
-            float localDepth = planetGenerator != null ? planetGenerator.GetLocalOceanDepth(cell) : 0f;
+            Vector3 dir = GetDirectionForCell(cell);
+            float localDepth = planetGenerator != null ? planetGenerator.GetLocalOceanDepth(dir) : 0f;
             oceanActiveLayerCounts[cell] = (byte)Mathf.Clamp(DetermineActiveLayerCount(localDepth), 1, MaxOceanLayers);
         }
 
@@ -2323,7 +2334,7 @@ public class PlanetResourceMap : MonoBehaviour
                     continue;
                 }
 
-                if (!planetGenerator.IsOceanCell(cell))
+                if (!planetGenerator.IsOceanAtDirection(GetDirectionForCell(cell)))
                 {
                     continue;
                 }
@@ -3271,6 +3282,42 @@ public class PlanetResourceMap : MonoBehaviour
         return co2 != null && cell >= 0 && cell < co2.Length;
     }
 
+    /// <summary>
+    /// Simulation/resource grid index lookup. Uses PlanetResourceMap simulation resolution, not mesh resolution.
+    /// </summary>
+    public int GetCellIndexFromDirection(Vector3 worldPosOrDir)
+    {
+        if (!isInitialized || resolution <= 0)
+        {
+            return -1;
+        }
+
+        Vector3 dir = ResolveSurfaceDirection(worldPosOrDir);
+        return PlanetGridIndexing.DirectionToCellIndex(dir, resolution);
+    }
+
+    public bool TryGetCellDirection(int cell, out Vector3 direction)
+    {
+        direction = Vector3.up;
+        if (!isInitialized || cellDirections == null || cell < 0 || cell >= cellDirections.Length)
+        {
+            return false;
+        }
+
+        direction = cellDirections[cell];
+        return true;
+    }
+
+    private Vector3 GetDirectionForCell(int cell)
+    {
+        if (TryGetCellDirection(cell, out Vector3 direction))
+        {
+            return direction;
+        }
+
+        return Vector3.up;
+    }
+
     private static Vector3 CellIndexToDirection(int cell, int resolution)
     {
         int cellsPerFace = resolution * resolution;
@@ -3328,6 +3375,7 @@ public class PlanetResourceMap : MonoBehaviour
 
         EnsureDebugGradient();
 
+        simulationResolution = Mathf.Max(0, simulationResolution);
         inventoryReferenceResolution = Mathf.Max(1, inventoryReferenceResolution);
         inventoryReferencePlanetRadius = Mathf.Max(0.0001f, inventoryReferencePlanetRadius);
         ventTickSeconds = Mathf.Max(0.0001f, ventTickSeconds);
