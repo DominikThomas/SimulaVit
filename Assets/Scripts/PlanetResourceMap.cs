@@ -1959,6 +1959,9 @@ public class PlanetResourceMap : MonoBehaviour
                 continue;
             }
 
+            // Simple per-cell marine snow model:
+            // move a fraction of each layer's OrganicC to the next deeper layer each tick.
+            // This allows interception/consumption in intermediate layers and gradual benthic accumulation.
             for (int layer = 0; layer < activeCount - 1; layer++)
             {
                 int upper = GetLayeredArrayIndex(cell, layer);
