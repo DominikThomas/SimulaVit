@@ -227,6 +227,26 @@ public class PlanetResourceMap : MonoBehaviour
     public float debugLayeredBottomLight;
     public float debugLayeredEffectiveO2;
     public float debugLayeredEffectiveOrganicC;
+    [Tooltip("Ocean-wide mean O2 in top active layer (layer 0) across ocean cells.")]
+    public float debugLayeredTopO2Mean;
+    [Tooltip("Ocean-wide mean O2 in bottom active layer across ocean cells.")]
+    public float debugLayeredBottomO2Mean;
+    [Tooltip("Ocean-wide mean OrganicC in top active layer (layer 0) across ocean cells.")]
+    public float debugLayeredTopOrganicCMean;
+    [Tooltip("Ocean-wide mean OrganicC in bottom active layer across ocean cells.")]
+    public float debugLayeredBottomOrganicCMean;
+    [Tooltip("Ocean-wide mean H2S in top active layer (layer 0) across ocean cells.")]
+    public float debugLayeredTopH2SMean;
+    [Tooltip("Ocean-wide mean H2S in bottom active layer across ocean cells.")]
+    public float debugLayeredBottomH2SMean;
+    [Tooltip("How often aggregate Add(...) compatibility distribution was applied to layered ocean resources.")]
+    public int debugLayeredAggregateAddCompatibilityCount;
+    [Tooltip("Total absolute delta routed through aggregate Add(...) compatibility distribution for layered resources.")]
+    public float debugLayeredAggregateAddCompatibilityAbsDelta;
+    [Tooltip("How often AddResourceForCellLayer(...) had to fall back to aggregate Add(...) due to invalid or unavailable layer context.")]
+    public int debugLayeredWriteFallbackToAggregateCount;
+    [Tooltip("How often GetResourceForCellLayer(...) had to fall back to effective aggregate Get(...) due to invalid or unavailable layer context.")]
+    public int debugLayeredReadFallbackToAggregateCount;
 
     [Header("Scent Fields")]
     [Tooltip("Enable diffuse chemical cue fields used for scent-based predation/fear steering.")]
@@ -411,6 +431,8 @@ public class PlanetResourceMap : MonoBehaviour
 
         if (ShouldUseLayeredOceanForResource(t, cell))
         {
+            debugLayeredAggregateAddCompatibilityCount++;
+            debugLayeredAggregateAddCompatibilityAbsDelta += Mathf.Abs(delta);
             AddLayeredResourceDelta(t, cell, delta);
             SyncLegacyOceanResourceFromLayers(t, cell);
             return;
@@ -434,6 +456,7 @@ public class PlanetResourceMap : MonoBehaviour
 
         if (!ShouldUseLayeredOceanForResource(t, cell))
         {
+            debugLayeredWriteFallbackToAggregateCount++;
             Add(t, cell, delta);
             return;
         }
@@ -441,6 +464,7 @@ public class PlanetResourceMap : MonoBehaviour
         int clampedLayer = ClampOceanLayerIndex(cell, requestedLayerIndex);
         if (clampedLayer < 0)
         {
+            debugLayeredWriteFallbackToAggregateCount++;
             Add(t, cell, delta);
             return;
         }
@@ -448,6 +472,7 @@ public class PlanetResourceMap : MonoBehaviour
         float[] layered = GetLayeredOceanArray(t);
         if (layered == null)
         {
+            debugLayeredWriteFallbackToAggregateCount++;
             Add(t, cell, delta);
             return;
         }
@@ -655,12 +680,14 @@ public class PlanetResourceMap : MonoBehaviour
 
         if (!ShouldUseLayeredOceanForResource(resourceType, cell))
         {
+            debugLayeredReadFallbackToAggregateCount++;
             return Get(resourceType, cell);
         }
 
         int clampedLayer = ClampOceanLayerIndex(cell, requestedLayerIndex);
         if (clampedLayer < 0)
         {
+            debugLayeredReadFallbackToAggregateCount++;
             return Get(resourceType, cell);
         }
 
@@ -1056,6 +1083,9 @@ public class PlanetResourceMap : MonoBehaviour
         RegisterLayeredOceanResource(ResourceType.DissolvedFe2Plus, cellCount);
         RegisterLayeredOceanResource(ResourceType.DissolvedOrganicLeak, cellCount);
         RegisterLayeredOceanResource(ResourceType.ToxicProteolyticWaste, cellCount);
+        // Intentional compatibility choice (for now): CO2 remains aggregate/per-cell and is not
+        // registered as a layered resource yet. This keeps atmospheric coupling behavior stable
+        // during migration but is a known locality realism drift point for future work.
     }
 
     private void RegisterLayeredOceanResource(ResourceType resourceType, int cellCount)
@@ -3032,6 +3062,12 @@ public class PlanetResourceMap : MonoBehaviour
             debugLayeredBottomLight = 0f;
             debugLayeredEffectiveO2 = 0f;
             debugLayeredEffectiveOrganicC = 0f;
+            debugLayeredTopO2Mean = 0f;
+            debugLayeredBottomO2Mean = 0f;
+            debugLayeredTopOrganicCMean = 0f;
+            debugLayeredBottomOrganicCMean = 0f;
+            debugLayeredTopH2SMean = 0f;
+            debugLayeredBottomH2SMean = 0f;
             return;
         }
 
@@ -3053,6 +3089,65 @@ public class PlanetResourceMap : MonoBehaviour
             debugLayeredEffectiveO2 = 0f;
             debugLayeredEffectiveOrganicC = 0f;
         }
+
+        UpdateLayeredOceanTrendDebugStats();
+    }
+
+    // Lightweight observability for layered-ocean drift checks.
+    // These means help detect whether chemistry is collapsing toward uniform values
+    // (over-diffusive behavior / excessive compatibility smearing) versus maintaining
+    // plausible top-vs-bottom structure.
+    private void UpdateLayeredOceanTrendDebugStats()
+    {
+        float topO2Sum = 0f;
+        float bottomO2Sum = 0f;
+        float topOrganicCSum = 0f;
+        float bottomOrganicCSum = 0f;
+        float topH2SSum = 0f;
+        float bottomH2SSum = 0f;
+        int oceanCells = 0;
+
+        for (int cell = 0; cell < oceanMask.Length; cell++)
+        {
+            if (!IsOceanCell(cell))
+            {
+                continue;
+            }
+
+            int top = GetOceanTopLayerIndex(cell);
+            int bottom = GetOceanBottomLayerIndex(cell);
+            if (top < 0 || bottom < 0)
+            {
+                continue;
+            }
+
+            topO2Sum += GetLayerResource(ResourceType.O2, cell, top);
+            bottomO2Sum += GetLayerResource(ResourceType.O2, cell, bottom);
+            topOrganicCSum += GetLayerResource(ResourceType.OrganicC, cell, top);
+            bottomOrganicCSum += GetLayerResource(ResourceType.OrganicC, cell, bottom);
+            topH2SSum += GetLayerResource(ResourceType.H2S, cell, top);
+            bottomH2SSum += GetLayerResource(ResourceType.H2S, cell, bottom);
+            oceanCells++;
+        }
+
+        if (oceanCells <= 0)
+        {
+            debugLayeredTopO2Mean = 0f;
+            debugLayeredBottomO2Mean = 0f;
+            debugLayeredTopOrganicCMean = 0f;
+            debugLayeredBottomOrganicCMean = 0f;
+            debugLayeredTopH2SMean = 0f;
+            debugLayeredBottomH2SMean = 0f;
+            return;
+        }
+
+        float invOcean = 1f / oceanCells;
+        debugLayeredTopO2Mean = topO2Sum * invOcean;
+        debugLayeredBottomO2Mean = bottomO2Sum * invOcean;
+        debugLayeredTopOrganicCMean = topOrganicCSum * invOcean;
+        debugLayeredBottomOrganicCMean = bottomOrganicCSum * invOcean;
+        debugLayeredTopH2SMean = topH2SSum * invOcean;
+        debugLayeredBottomH2SMean = bottomH2SSum * invOcean;
     }
 
     private bool IsCellValid(int cell)
