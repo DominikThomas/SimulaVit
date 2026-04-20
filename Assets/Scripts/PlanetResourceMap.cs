@@ -82,6 +82,10 @@ public class PlanetResourceMap : MonoBehaviour
     public SunSkyRotator sunSkyRotator;
 
     [Header("Resource Baselines")]
+    [Tooltip("Reference resolution used to convert legacy per-cell baseline fields into resolution-independent total inventories (cell count = 6 * resolution^2).")]
+    [Min(1)] public int inventoryReferenceResolution = 100;
+    [Tooltip("Reference planet radius used for baseline inventory calibration. Initial totals scale with surface area (radius^2).")]
+    [Min(0.0001f)] public float inventoryReferencePlanetRadius = 1f;
     public float baselineCO2 = 1.0f;
     public float baselineO2 = 0.01f;
     public float baselineCH4 = 0f;
@@ -146,7 +150,7 @@ public class PlanetResourceMap : MonoBehaviour
     public float debugGlobalCH4;
 
     [Header("Ocean Dissolved Chemistry")]
-    [Tooltip("Initial dissolved Fe2+ loaded into each ocean cell. Represents a large reduced-iron ocean reservoir before oxygenation.")]
+    [Tooltip("Legacy per-cell baseline at reference resolution/radius; converted into a resolution-independent total dissolved Fe2+ ocean inventory.")]
     public float initialDissolvedFe2PlusPerOceanCell = 8f;
     [Tooltip("Optional vent source of dissolved Fe2+ per vent tick, scaled by vent strength.")]
     public float ventDissolvedFe2PlusPerTick = 0f;
@@ -925,6 +929,7 @@ public class PlanetResourceMap : MonoBehaviour
         bool loadedResourceCache = PlanetGenerationCache.TryLoadResource(resourceCachePath, cellCount, out PlanetGenerationCache.ResourceData cachedResourceData);
 
         int ventCount = 0;
+        int oceanCellCount = 0;
         if (loadedResourceCache)
         {
             cellDirections = cachedResourceData.CellDirections;
@@ -937,23 +942,33 @@ public class PlanetResourceMap : MonoBehaviour
             ventStrength = cachedResourceData.VentStrength;
             ventCells = cachedResourceData.VentCells;
             ventCount = ventCells.Length;
+            oceanCellCount = CountDomainCells(oceanMask, true);
+
+            float allCellInventoryScale = ComputeDomainPerCellInventoryScale(cellCount, cellCount);
+            float oceanCellInventoryScale = ComputeDomainPerCellInventoryScale(cellCount, oceanCellCount);
 
             for (int cell = 0; cell < cellCount; cell++)
             {
-                co2[cell] = baselineCO2;
-                o2[cell] = baselineO2;
+                bool isOcean = oceanMask[cell] != 0;
+
+                co2[cell] = Mathf.Max(0f, baselineCO2 * allCellInventoryScale);
+                o2[cell] = Mathf.Max(0f, baselineO2 * allCellInventoryScale);
                 organicC[cell] = 0f;
-                ch4[cell] = baselineCH4;
-                s0[cell] = baselineS0;
+                ch4[cell] = Mathf.Max(0f, baselineCH4 * allCellInventoryScale);
+                s0[cell] = Mathf.Max(0f, baselineS0 * allCellInventoryScale);
 
                 bool hasVent = ventMask[cell] != 0;
                 float strength = hasVent ? ventStrength[cell] : 0f;
                 h2s[cell] = strength;
                 h2[cell] = strength;
 
-                if (oceanMask[cell] != 0)
+                if (isOcean)
                 {
-                    SetOceanDissolvedInitial(ResourceType.DissolvedFe2Plus, cell, Mathf.Max(0f, initialDissolvedFe2PlusPerOceanCell));
+                    SetOceanDissolvedInitial(ResourceType.DissolvedFe2Plus, cell, Mathf.Max(0f, initialDissolvedFe2PlusPerOceanCell * oceanCellInventoryScale));
+                }
+                else
+                {
+                    SetOceanDissolvedInitial(ResourceType.DissolvedFe2Plus, cell, 0f);
                 }
             }
 
@@ -965,28 +980,47 @@ public class PlanetResourceMap : MonoBehaviour
             {
                 Vector3 dir = CellIndexToDirection(cell, resolution);
                 cellDirections[cell] = dir;
+                bool isOcean = planetGenerator.IsOceanCell(cell);
+                oceanMask[cell] = isOcean ? (byte)1 : (byte)0;
+                if (isOcean)
+                {
+                    oceanCellCount++;
+                }
+            }
 
-                oceanMask[cell] = planetGenerator.IsOceanCell(cell) ? (byte)1 : (byte)0;
+            float allCellInventoryScale = ComputeDomainPerCellInventoryScale(cellCount, cellCount);
+            float oceanCellInventoryScale = ComputeDomainPerCellInventoryScale(cellCount, oceanCellCount);
+            float landCellInventoryScale = ComputeDomainPerCellInventoryScale(cellCount, cellCount - oceanCellCount);
 
-                co2[cell] = baselineCO2;
-                o2[cell] = baselineO2;
+            for (int cell = 0; cell < cellCount; cell++)
+            {
+                Vector3 dir = cellDirections[cell];
+                bool isOcean = oceanMask[cell] != 0;
+
+                co2[cell] = Mathf.Max(0f, baselineCO2 * allCellInventoryScale);
+                o2[cell] = Mathf.Max(0f, baselineO2 * allCellInventoryScale);
                 organicC[cell] = 0f;
-                ch4[cell] = baselineCH4;
-                s0[cell] = baselineS0;
+                ch4[cell] = Mathf.Max(0f, baselineCH4 * allCellInventoryScale);
+                s0[cell] = Mathf.Max(0f, baselineS0 * allCellInventoryScale);
 
                 float phosphorusNoise = SampleResourceNoise(dir, new Vector3(13.7f, -4.2f, 9.9f));
                 float ironNoise = SampleResourceNoise(dir, new Vector3(-8.4f, 3.1f, 15.2f));
                 float siliconNoise = SampleResourceNoise(dir, new Vector3(2.3f, 11.9f, -6.6f));
                 float calciumNoise = SampleResourceNoise(dir, new Vector3(-12.5f, -7.4f, 4.8f));
 
-                p[cell] = Mathf.Max(0f, phosphorusScale * phosphorusNoise);
-                fe[cell] = Mathf.Max(0f, ironScale * ironNoise);
-                si[cell] = Mathf.Max(0f, baselineSi + siliconPatchScale * (siliconNoise - 0.5f));
-                ca[cell] = Mathf.Max(0f, baselineCa + calciumPatchScale * (calciumNoise - 0.5f));
+                float domainInventoryScale = isOcean ? oceanCellInventoryScale : landCellInventoryScale;
+                p[cell] = Mathf.Max(0f, phosphorusScale * phosphorusNoise * domainInventoryScale);
+                fe[cell] = Mathf.Max(0f, ironScale * ironNoise * domainInventoryScale);
+                si[cell] = Mathf.Max(0f, (baselineSi + siliconPatchScale * (siliconNoise - 0.5f)) * domainInventoryScale);
+                ca[cell] = Mathf.Max(0f, (baselineCa + calciumPatchScale * (calciumNoise - 0.5f)) * domainInventoryScale);
 
-                if (oceanMask[cell] != 0)
+                if (isOcean)
                 {
-                    SetOceanDissolvedInitial(ResourceType.DissolvedFe2Plus, cell, Mathf.Max(0f, initialDissolvedFe2PlusPerOceanCell));
+                    SetOceanDissolvedInitial(ResourceType.DissolvedFe2Plus, cell, Mathf.Max(0f, initialDissolvedFe2PlusPerOceanCell * oceanCellInventoryScale));
+                }
+                else
+                {
+                    SetOceanDissolvedInitial(ResourceType.DissolvedFe2Plus, cell, 0f);
                 }
 
                 float ventNoise = HighFrequencyNoise(dir);
@@ -1056,6 +1090,7 @@ public class PlanetResourceMap : MonoBehaviour
         initialDissolvedFe2PlusTotal = 0f;
         UpdateAtmosphereDebugMeans();
         UpdateOceanChemistryDebugStats();
+        LogInitializationInventoryDebug(cellCount, CountDomainCells(oceanMask, true));
         Debug.Log($"Initialized {VentCount} vents", this);
     }
 
@@ -2720,6 +2755,87 @@ public class PlanetResourceMap : MonoBehaviour
         Debug.Log($"Vent heat field: oceanAvg={oceanAvgC:0.0} °C ({oceanAvg:0.0} K) oceanMax={oceanMaxC:0.0} °C ({oceanTempMax:0.0} K) landAvg={landAvgC:0.0} °C ({landAvg:0.0} K) landMax={landMaxC:0.0} °C ({landTempMax:0.0} K)", this);
     }
 
+    private int GetReferenceCellCountForInventory()
+    {
+        int referenceResolution = Mathf.Max(1, inventoryReferenceResolution);
+        return Mathf.Max(1, PlanetGridIndexing.GetCellCount(referenceResolution));
+    }
+
+    // Inventory normalization bridge:
+    // - inspector baseline fields now represent legacy per-cell values at a reference resolution/radius
+    // - initialization converts those into resolution-independent total inventories
+    // - resulting per-cell starting values scale with tile area (fewer tiles => more per tile)
+    private float ComputeDomainPerCellInventoryScale(int totalCellCount, int domainCellCount)
+    {
+        if (totalCellCount <= 0 || domainCellCount <= 0)
+        {
+            return 0f;
+        }
+
+        float referenceRadius = Mathf.Max(0.0001f, inventoryReferencePlanetRadius);
+        float currentRadius = planetGenerator != null ? Mathf.Max(0.0001f, planetGenerator.radius) : referenceRadius;
+        float areaScale = (currentRadius * currentRadius) / (referenceRadius * referenceRadius);
+        float referenceDomainCellCount = GetReferenceCellCountForInventory() * (domainCellCount / (float)totalCellCount);
+        float totalInventory = referenceDomainCellCount * areaScale;
+        return totalInventory / domainCellCount;
+    }
+
+    private static int CountDomainCells(byte[] mask, bool nonZero)
+    {
+        if (mask == null)
+        {
+            return 0;
+        }
+
+        int count = 0;
+        for (int i = 0; i < mask.Length; i++)
+        {
+            bool include = nonZero ? mask[i] != 0 : mask[i] == 0;
+            if (include)
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    private void LogInitializationInventoryDebug(int cellCount, int oceanCellCount)
+    {
+        float co2Total = SumArray(co2);
+        float o2Total = SumArray(o2);
+        float ch4Total = SumArray(ch4);
+        float s0Total = SumArray(s0);
+        float pTotal = SumArray(p);
+        float feTotal = SumArray(fe);
+        float siTotal = SumArray(si);
+        float caTotal = SumArray(ca);
+        float dissolvedFe2Total = SumArray(GetOceanDissolvedArray(ResourceType.DissolvedFe2Plus));
+
+        Debug.Log(
+            $"[PlanetResourceMap] Init inventory totals (resolution-independent targets): " +
+            $"cells={cellCount}, oceanCells={oceanCellCount}, refCells={GetReferenceCellCountForInventory()}, " +
+            $"CO2={co2Total:F3}, O2={o2Total:F3}, CH4={ch4Total:F3}, S0={s0Total:F3}, " +
+            $"P={pTotal:F3}, Fe={feTotal:F3}, Si={siTotal:F3}, Ca={caTotal:F3}, DissolvedFe2+={dissolvedFe2Total:F3}",
+            this);
+    }
+
+    private static float SumArray(float[] values)
+    {
+        if (values == null)
+        {
+            return 0f;
+        }
+
+        float sum = 0f;
+        for (int i = 0; i < values.Length; i++)
+        {
+            sum += Mathf.Max(0f, values[i]);
+        }
+
+        return sum;
+    }
+
     private void ResolveSunReferences()
     {
         if (sunSkyRotator == null)
@@ -3212,6 +3328,8 @@ public class PlanetResourceMap : MonoBehaviour
 
         EnsureDebugGradient();
 
+        inventoryReferenceResolution = Mathf.Max(1, inventoryReferenceResolution);
+        inventoryReferencePlanetRadius = Mathf.Max(0.0001f, inventoryReferencePlanetRadius);
         ventTickSeconds = Mathf.Max(0.0001f, ventTickSeconds);
         ventH2SPerTick = Mathf.Max(0f, ventH2SPerTick);
         ventCO2PerTick = Mathf.Max(0f, ventCO2PerTick);
