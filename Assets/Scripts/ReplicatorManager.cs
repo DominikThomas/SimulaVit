@@ -1631,6 +1631,7 @@ public class ReplicatorManager : MonoBehaviour
 
     // Marine-snow compatibility bridge:
     // - For ocean agents with valid layer data, inject dead/leaked OrganicC into that specific layer.
+    // - If current layer is invalid, clamp preferred layer when available for ocean-local deposition.
     // - PlanetResourceMap marine snow then settles it layer-by-layer over time.
     // - If no valid layer is available (land/invalid), preserve prior aggregate Add() behavior.
     void DepositOrganicCAtAgentLocation(Replicator agent, int cellIndex, float amount)
@@ -1643,7 +1644,13 @@ public class ReplicatorManager : MonoBehaviour
 
         if (planetResourceMap.IsOceanCell(cellIndex))
         {
-            int clampedLayer = planetResourceMap.ClampOceanLayerIndex(cellIndex, agent.currentOceanLayerIndex);
+            int requestedLayer = agent.currentOceanLayerIndex;
+            if (requestedLayer < 0)
+            {
+                requestedLayer = agent.preferredOceanLayerIndex;
+            }
+
+            int clampedLayer = planetResourceMap.ClampOceanLayerIndex(cellIndex, requestedLayer);
             if (clampedLayer >= 0)
             {
                 planetResourceMap.AddResourceForCellLayer(ResourceType.OrganicC, cellIndex, clampedLayer, depositAmount);
