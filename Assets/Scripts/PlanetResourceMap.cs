@@ -2988,6 +2988,9 @@ public class PlanetResourceMap : MonoBehaviour
             return;
         }
 
+        // Compatibility bridge intentionally kept during incremental migration:
+        // aggregate Add(...) on layered ocean resources spreads deltas uniformly across active layers.
+        // New OrganicC source paths should prefer AddResourceForCellLayer(...) when a specific layer is known.
         float perLayerDelta = delta / active;
         for (int layer = 0; layer < active; layer++)
         {

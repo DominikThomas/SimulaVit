@@ -1135,12 +1135,42 @@ public class ReplicatorMetabolismSystem
         return planetResourceMap.Get(resourceType, cellIndex);
     }
 
+    private static bool TryResolveAgentResourceWriteLayer(
+        ReplicatorPopulationState populationState,
+        int index,
+        PlanetResourceMap planetResourceMap,
+        int cellIndex,
+        out int clampedLayer)
+    {
+        clampedLayer = -1;
+        if (!planetResourceMap.IsOceanCell(cellIndex))
+        {
+            return false;
+        }
+
+        int requestedLayer = populationState.CurrentOceanLayerIndex[index];
+        if (requestedLayer < 0)
+        {
+            requestedLayer = populationState.PreferredOceanLayerIndex[index];
+        }
+
+        if (requestedLayer < 0)
+        {
+            return false;
+        }
+
+        clampedLayer = planetResourceMap.ClampOceanLayerIndex(cellIndex, requestedLayer);
+        return clampedLayer >= 0;
+    }
+
     // Layer-aware metabolism writes migrated in this pass:
     // - aerobic O2 consumption / CO2 release from stored-organic-C respiration
     // - direct O2 consumption and direct CO2 production where the agent's current layer is known
     // - direct agent-local OrganicC uptake in saprotrophy/fermentation paths where cell+layer are already known
+    // - fallback-to-preferred-layer writes when current layer is invalid but ocean context is known
     // Intentionally aggregate in this pass: non-local and lower-priority chemistry fluxes
-    // (e.g., H2/H2S/CH4/S0/leak and some aggregate CO2/H2 pathways) to keep this migration incremental.
+    // (e.g., H2/H2S/CH4/S0/leak and some aggregate CO2/H2 pathways), and any writes where no valid
+    // ocean layer can be resolved, to keep this migration incremental and compatibility-safe.
     private static void AddAgentResourceAtCurrentLayer(
         ReplicatorPopulationState populationState,
         int index,
@@ -1154,7 +1184,7 @@ public class ReplicatorMetabolismSystem
             return;
         }
 
-        if (TryGetValidAgentOceanLayer(populationState, index, planetResourceMap, cellIndex, out int layer))
+        if (TryResolveAgentResourceWriteLayer(populationState, index, planetResourceMap, cellIndex, out int layer))
         {
             planetResourceMap.AddResourceForCellLayer(resourceType, cellIndex, layer, delta);
             return;
