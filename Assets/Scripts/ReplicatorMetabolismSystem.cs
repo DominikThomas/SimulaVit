@@ -225,7 +225,8 @@ public class ReplicatorMetabolismSystem
 
                     if (totalActuallyUsed > 0f)
                     {
-                        planetResourceMap.Add(ResourceType.OrganicC, cellIndex, -totalActuallyUsed);
+                        // Layer-aware OrganicC uptake (saprotrophy): remove consumed detrital carbon from the agent's current layer when valid.
+                        AddAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.OrganicC, cellIndex, -totalActuallyUsed);
 
                         if (actualStore > 0f)
                             populationState.OrganicCStore[i] = Mathf.Clamp(populationState.OrganicCStore[i] + actualStore, 0f, maxStore);
@@ -360,7 +361,8 @@ public class ReplicatorMetabolismSystem
                     float storedOrganicC = Mathf.Min(desiredStore, storeCapacity);
                     float fermentedOrganicC = Mathf.Max(0f, pulled - storedOrganicC);
 
-                    planetResourceMap.Add(ResourceType.OrganicC, cellIndex, -pulled);
+                    // Layer-aware OrganicC uptake (fermentation): pull substrate from the agent-local ocean layer when valid.
+                    AddAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.OrganicC, cellIndex, -pulled);
 
                     if (storedOrganicC > 0f)
                         populationState.OrganicCStore[i] = Mathf.Clamp(populationState.OrganicCStore[i] + storedOrganicC, 0f, maxStore);
@@ -1136,7 +1138,9 @@ public class ReplicatorMetabolismSystem
     // Layer-aware metabolism writes migrated in this pass:
     // - aerobic O2 consumption / CO2 release from stored-organic-C respiration
     // - direct O2 consumption and direct CO2 production where the agent's current layer is known
-    // Intentionally aggregate in this pass: non-O2/CO2 fluxes (OrganicC/H2/H2S/CH4/S0/leak) to keep chemistry balance drift low.
+    // - direct agent-local OrganicC uptake in saprotrophy/fermentation paths where cell+layer are already known
+    // Intentionally aggregate in this pass: non-local and lower-priority chemistry fluxes
+    // (e.g., H2/H2S/CH4/S0/leak and some aggregate CO2/H2 pathways) to keep this migration incremental.
     private static void AddAgentResourceAtCurrentLayer(
         ReplicatorPopulationState populationState,
         int index,

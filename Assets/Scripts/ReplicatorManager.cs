@@ -1603,7 +1603,7 @@ public class ReplicatorManager : MonoBehaviour
 
         int resolution = Mathf.Max(1, planetGenerator.resolution);
         int cellIndex = PlanetGridIndexing.DirectionToCellIndex(agent.position.normalized, resolution);
-        planetResourceMap.Add(ResourceType.OrganicC, cellIndex, depositAmount);
+        DepositOrganicCAtAgentLocation(agent, cellIndex, depositAmount);
     }
 
     void DepositDeathOrganicC(Replicator agent)
@@ -1625,8 +1625,33 @@ public class ReplicatorManager : MonoBehaviour
 
         if (depositAmount > 0f)
         {
-            planetResourceMap.Add(ResourceType.OrganicC, cellIndex, depositAmount);
+            DepositOrganicCAtAgentLocation(agent, cellIndex, depositAmount);
         }
+    }
+
+    // Marine-snow compatibility bridge:
+    // - For ocean agents with valid layer data, inject dead/leaked OrganicC into that specific layer.
+    // - PlanetResourceMap marine snow then settles it layer-by-layer over time.
+    // - If no valid layer is available (land/invalid), preserve prior aggregate Add() behavior.
+    void DepositOrganicCAtAgentLocation(Replicator agent, int cellIndex, float amount)
+    {
+        float depositAmount = Mathf.Max(0f, amount);
+        if (depositAmount <= 0f || cellIndex < 0)
+        {
+            return;
+        }
+
+        if (planetResourceMap.IsOceanCell(cellIndex))
+        {
+            int clampedLayer = planetResourceMap.ClampOceanLayerIndex(cellIndex, agent.currentOceanLayerIndex);
+            if (clampedLayer >= 0)
+            {
+                planetResourceMap.AddResourceForCellLayer(ResourceType.OrganicC, cellIndex, clampedLayer, depositAmount);
+                return;
+            }
+        }
+
+        planetResourceMap.Add(ResourceType.OrganicC, cellIndex, depositAmount);
     }
 
     internal void RunMovementJob(bool populationStatePrimed, float simulationDeltaTime, double currentSimulationTimeSeconds)
