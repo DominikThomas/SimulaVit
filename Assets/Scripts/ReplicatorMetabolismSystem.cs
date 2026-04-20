@@ -315,8 +315,8 @@ public class ReplicatorMetabolismSystem
                     float co2Consumed = co2Need * pulledRatio;
                     float h2Consumed = h2Need * pulledRatio;
 
-                    planetResourceMap.Add(ResourceType.CO2, cellIndex, -co2Consumed);
-                    planetResourceMap.Add(ResourceType.H2, cellIndex, -h2Consumed);
+                    AddAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.CO2, cellIndex, -co2Consumed);
+                    AddAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.H2, cellIndex, -h2Consumed);
 
                     float producedEnergy = Mathf.Max(0f, settings.HydrogenotrophyEnergyPerTick) * pulledRatio * performance;
                     populationState.Energy[i] += producedEnergy;
@@ -369,7 +369,7 @@ public class ReplicatorMetabolismSystem
 
                     if (fermentedOrganicC > 0f)
                     {
-                        planetResourceMap.Add(ResourceType.H2, cellIndex, fermentedOrganicC);
+                        AddAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.H2, cellIndex, fermentedOrganicC);
                         AddAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.CO2, cellIndex, fermentedOrganicC);
                         // Keep energy proportional only to the actually fermented fraction.
                         populationState.Energy[i] += Mathf.Max(0f, settings.FermentationEnergyPerTick) * (fermentedOrganicC / Mathf.Max(0.0001f, cNeed)) * performance;
@@ -409,14 +409,14 @@ public class ReplicatorMetabolismSystem
                     float storedOrganicC = Mathf.Min(desiredStore, storeCapacity);
                     float methanizedCarbon = Mathf.Max(0f, co2Consumed - storedOrganicC);
 
-                    planetResourceMap.Add(ResourceType.CO2, cellIndex, -co2Consumed);
-                    planetResourceMap.Add(ResourceType.H2, cellIndex, -h2Consumed);
+                    AddAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.CO2, cellIndex, -co2Consumed);
+                    AddAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.H2, cellIndex, -h2Consumed);
 
                     if (storedOrganicC > 0f)
                         populationState.OrganicCStore[i] = Mathf.Clamp(populationState.OrganicCStore[i] + storedOrganicC, 0f, maxStore);
 
                     if (methanizedCarbon > 0f)
-                        planetResourceMap.Add(ResourceType.CH4, cellIndex, methanizedCarbon);
+                        AddAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.CH4, cellIndex, methanizedCarbon);
 
                     // Keep methanogenesis energy tied only to the carbon that is actually converted to CH4.
                     populationState.Energy[i] += Mathf.Max(0f, settings.MethanogenesisEnergyPerTick) * (methanizedCarbon / Mathf.Max(0.0001f, co2Need)) * performance;
@@ -462,7 +462,7 @@ public class ReplicatorMetabolismSystem
                     float storedOrganicC = Mathf.Min(desiredStore, storeCapacity);
                     float oxidizedCH4 = Mathf.Max(0f, ch4Consumed - storedOrganicC);
 
-                    planetResourceMap.Add(ResourceType.CH4, cellIndex, -ch4Consumed);
+                    AddAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.CH4, cellIndex, -ch4Consumed);
                     AddAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.O2, cellIndex, -o2Consumed);
 
                     if (storedOrganicC > 0f)
@@ -517,9 +517,9 @@ public class ReplicatorMetabolismSystem
                     float co2Consumed = co2Need * pulledRatio;
                     float h2sConsumed = h2sNeed * pulledRatio;
 
-                    planetResourceMap.Add(ResourceType.CO2, cellIndex, -co2Consumed);
-                    planetResourceMap.Add(ResourceType.H2S, cellIndex, -h2sConsumed);
-                    planetResourceMap.Add(ResourceType.S0, cellIndex, h2sConsumed);
+                    AddAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.CO2, cellIndex, -co2Consumed);
+                    AddAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.H2S, cellIndex, -h2sConsumed);
+                    AddAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.S0, cellIndex, h2sConsumed);
 
                     float producedEnergy = Mathf.Max(0f, settings.ChemosynthesisEnergyPerTick) * pulledRatio * performance;
                     populationState.Energy[i] += producedEnergy;
@@ -858,13 +858,13 @@ public class ReplicatorMetabolismSystem
         h2Released = organicCUsed * Mathf.Clamp01(settings.PhotosynthDarkAnoxicH2ReleaseFraction);
         if (h2Released > 0f)
         {
-            planetResourceMap.Add(ResourceType.H2, cellIndex, h2Released);
+            AddAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, ResourceType.H2, cellIndex, h2Released);
         }
 
         float dissolvedOrganicLeak = organicCUsed * Mathf.Clamp01(settings.PhotosynthDarkAnoxicOrganicLeakFraction);
         if (dissolvedOrganicLeak > 0f)
         {
-            planetResourceMap.Add(ResourceType.DissolvedOrganicLeak, cellIndex, dissolvedOrganicLeak);
+            AddAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, ResourceType.DissolvedOrganicLeak, cellIndex, dissolvedOrganicLeak);
         }
 
         return true;
@@ -1165,12 +1165,14 @@ public class ReplicatorMetabolismSystem
 
     // Layer-aware metabolism writes migrated in this pass:
     // - aerobic O2 consumption / CO2 release from stored-organic-C respiration
-    // - direct O2 consumption and direct CO2 production where the agent's current layer is known
-    // - direct agent-local OrganicC uptake in saprotrophy/fermentation paths where cell+layer are already known
+    // - direct O2/CO2/OrganicC handling in photosynthesis, saprotrophy, fermentation, and methanotrophy paths
+    // - hydrogenotrophy local CO2/H2 consumption
+    // - methanogenesis local CO2/H2 consumption and CH4 production
+    // - sulfur chemosynthesis local CO2/H2S/S0 handling
+    // - local H2 and dissolved-organic-leak byproducts from photosynth dark-anoxic fallback
     // - fallback-to-preferred-layer writes when current layer is invalid but ocean context is known
-    // Intentionally aggregate in this pass: non-local and lower-priority chemistry fluxes
-    // (e.g., H2/H2S/CH4/S0/leak and some aggregate CO2/H2 pathways), and any writes where no valid
-    // ocean layer can be resolved, to keep this migration incremental and compatibility-safe.
+    // Intentionally aggregate in this pass: any writes where no valid ocean layer can be resolved
+    // (land/non-ocean agents, invalid layer data), which preserves compatibility bridges in PlanetResourceMap.Add(...).
     private static void AddAgentResourceAtCurrentLayer(
         ReplicatorPopulationState populationState,
         int index,
