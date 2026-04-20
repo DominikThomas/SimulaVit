@@ -160,7 +160,7 @@ MonoBehaviour:
   surfaceOffset: 0.01
   showLandVents: 1
   showUnderwaterVents: 1
-  clusterAngleMultiplier: 2
+  clusterAngleMultiplier: 10
   minClusterStrengthToRender: 0
 --- !u!4 &184847770
 Transform:
@@ -1265,6 +1265,7 @@ MonoBehaviour:
   predatorBiteEnergy: 0
   predatorKillEnergyThreshold: 0.01
   predatorAssimilationFraction: 0.6
+  predatorAdjacentLayerSearchDepth: 0
   predatorEnergyPerC: 0.3
   predatorBasalCostMultiplier: 1.5
   predatorMoveSpeedMultiplier: 0.8
@@ -1421,8 +1422,11 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::PlanetResourceMap
   planetGenerator: {fileID: 382753102}
   replicatorManager: {fileID: 0}
+  simulationResolution: 40
   sunLight: {fileID: 0}
   sunSkyRotator: {fileID: 0}
+  inventoryReferenceResolution: 100
+  inventoryReferencePlanetRadius: 8
   baselineCO2: 8
   baselineO2: 0
   baselineCH4: 0.5
@@ -1438,6 +1442,8 @@ MonoBehaviour:
   ventStrengthMax: 1
   ventNoiseScale: 2
   ventThreshold: 0.8
+  ventReferenceResolution: 100
+  ventReferencePlanetRadius: 8
   enableVentReplenishment: 1
   ventTickSeconds: 0.5
   ventsOnlyBelowSeaLevel: 0
@@ -1493,6 +1499,8 @@ MonoBehaviour:
   layeredVerticalMixRate: 0.02
   layeredSurfaceOxygenationRate: 0.02
   layeredMarineSnowRate: 0.015
+  layeredOrganicCLateralSpreadRate: 0.002
+  layeredOrganicCUpwardBleedRate: 0.0002
   layeredTempDropPerLayer: 2
   layeredBottomVentTempGain: 25
   debugLayeredCellIndex: 0
@@ -1502,11 +1510,22 @@ MonoBehaviour:
   debugLayeredBottomLight: 0
   debugLayeredEffectiveO2: 0
   debugLayeredEffectiveOrganicC: 0
+  debugLayeredTopO2Mean: 0
+  debugLayeredBottomO2Mean: 0
+  debugLayeredTopOrganicCMean: 0
+  debugLayeredBottomOrganicCMean: 0
+  debugLayeredTopH2SMean: 0
+  debugLayeredBottomH2SMean: 0
+  debugLayeredAggregateAddCompatibilityCount: 0
+  debugLayeredAggregateAddCompatibilityAbsDelta: 0
+  debugLayeredWriteFallbackToAggregateCount: 0
+  debugLayeredReadFallbackToAggregateCount: 0
   enableScentFields: 1
   dissolvedOrganicLeakDecayPerSecond: 0.6
   toxicProteolyticWasteDecayPerSecond: 0.8
   scentDiffuseStrength: 0.25
   scentDiffusePasses: 1
+  scentAdjacentLayerCoupling: 0.15
   scentMaxPerCell: 10
   scentUpdateInterval: 0.2
   debugViewType: 0
