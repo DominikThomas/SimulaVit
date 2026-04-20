@@ -742,6 +742,9 @@ public class ReplicatorMetabolismSystem
             return false;
         }
 
+        // Audit note: photosynthesis currently uses surface insolation directly.
+        // Layer attenuation is represented in layered ocean data (GetLayerLightFactor),
+        // but not yet applied to this production path to avoid behavior rebalance in this pass.
         float co2Need = Mathf.Max(0f, settings.PhotosynthesisCo2PerTickAtFullInsolation) * insolation;
         float co2Available = GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, ResourceType.CO2, cellIndex);
         float co2Consumed = Mathf.Min(co2Need, co2Available);
