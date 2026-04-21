@@ -102,7 +102,10 @@ public class ReplicatorSteeringSystem
         float safeBand = tempTolerance + lethalMargin;
         float tempFitness = distFromOptimal <= tempTolerance ? 1f : Mathf.Clamp01(1f - ((distFromOptimal - tempTolerance) / safeBand));
 
-        float co2 = NormalizeResource(planetResourceMap, ResourceType.CO2, cellIndex, -1, settings.SteerGoodCO2);
+        int habitatLayerIndex = planetResourceMap.IsOceanCell(cellIndex)
+            ? planetResourceMap.ClampOceanLayerIndex(cellIndex, agent.currentOceanLayerIndex)
+            : -1;
+        float co2 = NormalizeResource(planetResourceMap, ResourceType.CO2, cellIndex, habitatLayerIndex, settings.SteerGoodCO2);
         float foodFitness;
         switch (agent.metabolism)
         {
@@ -299,7 +302,7 @@ public class ReplicatorSteeringSystem
 
     float ComputeFoodFitness(ReplicatorPopulationState populationState, int index, Vector3 normalizedDir, int cellIndex, int layerIndex, PlanetResourceMap planetResourceMap, in Settings settings)
     {
-        float co2 = NormalizeResource(planetResourceMap, ResourceType.CO2, cellIndex, -1, settings.SteerGoodCO2);
+        float co2 = NormalizeResource(planetResourceMap, ResourceType.CO2, cellIndex, layerIndex, settings.SteerGoodCO2);
 
         switch (populationState.Metabolism[index])
         {
