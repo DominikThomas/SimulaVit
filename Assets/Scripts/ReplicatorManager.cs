@@ -970,7 +970,12 @@ public class ReplicatorManager : MonoBehaviour
         int cellCount = GetSimulationCellCount();
         for (int cell = 0; cell < cellCount; cell++)
         {
-            float h2Availability = NormalizeResource(ResourceType.H2, cell, steerGoodH2);
+            // Layered-ocean cleanup:
+            // spontaneous hydrogenotrophy seeding is a bottom-layer vent ecology path,
+            // so prefer bottom-layer H2 whenever an ocean layer is available.
+            // Keep aggregate fallback only for non-ocean / invalid layer contexts.
+            int layerIndex = ResolveHydrogenotrophySpawnLayer(cell);
+            float h2Availability = NormalizeResource(ResourceType.H2, cell, layerIndex, steerGoodH2);
             if (h2Availability >= minHydrogenSpawnH2)
             {
                 spontaneousHydrogenSpawnCandidateCells.Add(cell);
