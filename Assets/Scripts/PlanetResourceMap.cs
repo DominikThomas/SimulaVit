@@ -767,7 +767,8 @@ public class PlanetResourceMap : MonoBehaviour
     /// <summary>
     /// Read-only inspection snapshot for debug UI.
     /// Notes:
-    /// - CO2 is currently represented as a per-cell atmospheric value and is repeated per ocean layer.
+    /// - In layered ocean cells, CO2 now reports true per-layer values.
+    /// - Legacy aggregate CO2 views are still bridged for compatibility using top-layer coupling.
     /// - Layer temperature is estimated from the current cell effective temperature plus that layer's offset.
     /// </summary>
     public bool TryGetCellInspectionSnapshot(int cell, Vector3 worldPosOrDir, out CellInspectionSnapshot snapshot)
@@ -811,7 +812,7 @@ public class PlanetResourceMap : MonoBehaviour
             layerSnapshot.LayerIndex = layer;
             layerSnapshot.O2 = GetLayerResource(ResourceType.O2, cell, layer);
             layerSnapshot.DissolvedFe2Plus = GetLayerResource(ResourceType.DissolvedFe2Plus, cell, layer);
-            layerSnapshot.CO2 = Get(ResourceType.CO2, cell);
+            layerSnapshot.CO2 = GetLayerResource(ResourceType.CO2, cell, layer);
             layerSnapshot.CH4 = GetLayerResource(ResourceType.CH4, cell, layer);
             layerSnapshot.OrganicC = GetLayerResource(ResourceType.OrganicC, cell, layer);
             layerSnapshot.H2 = GetLayerResource(ResourceType.H2, cell, layer);
@@ -1225,6 +1226,7 @@ public class PlanetResourceMap : MonoBehaviour
         }
 
         RegisterLayeredOceanResource(ResourceType.O2, cellCount);
+        RegisterLayeredOceanResource(ResourceType.CO2, cellCount);
         RegisterLayeredOceanResource(ResourceType.OrganicC, cellCount);
         RegisterLayeredOceanResource(ResourceType.H2, cellCount);
         RegisterLayeredOceanResource(ResourceType.H2S, cellCount);
@@ -1232,9 +1234,9 @@ public class PlanetResourceMap : MonoBehaviour
         RegisterLayeredOceanResource(ResourceType.DissolvedFe2Plus, cellCount);
         RegisterLayeredOceanResource(ResourceType.DissolvedOrganicLeak, cellCount);
         RegisterLayeredOceanResource(ResourceType.ToxicProteolyticWaste, cellCount);
-        // Intentional compatibility choice (for now): CO2 remains aggregate/per-cell and is not
-        // registered as a layered resource yet. This keeps atmospheric coupling behavior stable
-        // during migration but is a known locality realism drift point for future work.
+        // CO2 now participates in layered ocean chemistry.
+        // Atmosphere coupling is still explicit/top-layer only in ApplyAtmosphereMixing(),
+        // while legacy aggregate Get()/debug views are bridged via SyncLegacyOceanFromLayeredArrays().
     }
 
     private void RegisterLayeredOceanResource(ResourceType resourceType, int cellCount)
@@ -1653,6 +1655,10 @@ public class PlanetResourceMap : MonoBehaviour
         }
     }
 
+    // Atmosphere coupling note:
+    // - Land cells continue to exchange directly using legacy per-cell volatile arrays.
+    // - Ocean CO2 now exchanges with atmosphere through ocean layer 0 (surface) only.
+    // - Deeper ocean layers affect atmosphere indirectly through layered vertical diffusion/mixing.
     private void ApplyAtmosphereMixing()
     {
         if (!enableAtmosphereMixing || !isInitialized || co2 == null || o2 == null || oceanMask == null)
@@ -1669,13 +1675,24 @@ public class PlanetResourceMap : MonoBehaviour
             return;
         }
 
+        float[] layeredCo2 = GetLayeredOceanArray(ResourceType.CO2);
+        bool useLayeredCo2 = enableLayeredOcean && layeredCo2 != null;
+
         float totalCO2 = 0f;
         float totalAtmosphereO2 = 0f;
         float totalAtmosphereCH4 = 0f;
         int atmosphereCellCount = 0;
         for (int cell = 0; cell < cellCount; cell++)
         {
-            totalCO2 += co2[cell];
+            if (useLayeredCo2 && oceanMask[cell] != 0)
+            {
+                int top = GetOceanTopLayerIndex(cell);
+                totalCO2 += top >= 0 ? layeredCo2[GetLayeredArrayIndex(cell, top)] : co2[cell];
+            }
+            else
+            {
+                totalCO2 += co2[cell];
+            }
             if (oceanMask[cell] == 0)
             {
                 totalAtmosphereO2 += o2[cell];
@@ -1696,13 +1713,36 @@ public class PlanetResourceMap : MonoBehaviour
         {
             float exchangeRate = oceanMask[cell] != 0 ? oceanRate : landRate;
 
-            float mixedCO2 = co2[cell] + exchangeRate * (globalCO2 - co2[cell]);
+            float currentCO2 = co2[cell];
+            int topLayer = -1;
+            if (useLayeredCo2 && oceanMask[cell] != 0)
+            {
+                topLayer = GetOceanTopLayerIndex(cell);
+                if (topLayer >= 0)
+                {
+                    currentCO2 = layeredCo2[GetLayeredArrayIndex(cell, topLayer)];
+                }
+            }
+
+            float mixedCO2 = currentCO2 + exchangeRate * (globalCO2 - currentCO2);
             float mixedO2 = o2[cell] + exchangeRate * (globalO2 - o2[cell]);
             float mixedCH4 = ch4[cell] + exchangeRate * (globalCH4 - ch4[cell]);
 
-            co2[cell] = Mathf.Max(0f, mixedCO2);
+            if (topLayer >= 0)
+            {
+                layeredCo2[GetLayeredArrayIndex(cell, topLayer)] = Mathf.Max(0f, mixedCO2);
+            }
+            else
+            {
+                co2[cell] = Mathf.Max(0f, mixedCO2);
+            }
             o2[cell] = Mathf.Max(0f, mixedO2);
             ch4[cell] = Mathf.Max(0f, mixedCH4);
+        }
+
+        if (useLayeredCo2)
+        {
+            SyncLegacyOceanResourceFromLayers(ResourceType.CO2);
         }
 
         UpdateAtmosphereDebugMeans();
@@ -2091,6 +2131,7 @@ public class PlanetResourceMap : MonoBehaviour
         }
 
         ApplyVerticalDiffusionForResource(ResourceType.O2, transferRate);
+        ApplyVerticalDiffusionForResource(ResourceType.CO2, transferRate);
         ApplyVerticalDiffusionForResource(ResourceType.H2, transferRate);
         ApplyVerticalDiffusionForResource(ResourceType.H2S, transferRate);
         ApplyVerticalDiffusionForResource(ResourceType.CH4, transferRate);
@@ -2459,16 +2500,16 @@ public class PlanetResourceMap : MonoBehaviour
             {
                 InjectVentProductToBottomLayer(ResourceType.H2S, cell, h2sPerTick * cellVentStrength * sourceScale);
                 InjectVentProductToBottomLayer(ResourceType.H2, cell, h2PerTick * cellVentStrength * sourceScale);
+                InjectVentProductToBottomLayer(ResourceType.CO2, cell, Mathf.Max(0f, ventCO2PerTick) * cellVentStrength * sourceScale);
                 InjectVentProductToBottomLayer(ResourceType.DissolvedFe2Plus, cell, dissolvedFe2PlusPerTick * cellVentStrength * sourceScale);
             }
             else
             {
                 Add(ResourceType.H2S, cell, h2sPerTick * cellVentStrength * sourceScale);
                 Add(ResourceType.H2, cell, h2PerTick * cellVentStrength * sourceScale);
+                Add(ResourceType.CO2, cell, Mathf.Max(0f, ventCO2PerTick) * cellVentStrength * sourceScale);
                 Add(ResourceType.DissolvedFe2Plus, cell, dissolvedFe2PlusPerTick * cellVentStrength * sourceScale);
             }
-
-            Add(ResourceType.CO2, cell, Mathf.Max(0f, ventCO2PerTick) * cellVentStrength * sourceScale);
             if (applyH2SCap)
             {
                 h2s[cell] = Mathf.Min(h2s[cell], ventH2SMax);
@@ -3235,6 +3276,7 @@ public class PlanetResourceMap : MonoBehaviour
     private void SyncLayeredOceanFromLegacyArrays()
     {
         SyncResourceLegacyToLayered(ResourceType.O2);
+        SyncResourceLegacyToLayered(ResourceType.CO2);
         SyncResourceLegacyToLayered(ResourceType.OrganicC);
         SyncResourceLegacyToLayered(ResourceType.H2);
         SyncResourceLegacyToLayered(ResourceType.H2S);
@@ -3273,6 +3315,11 @@ public class PlanetResourceMap : MonoBehaviour
     {
         // Compatibility sync is intentionally minimal while layered arrays remain authoritative.
         // Most gameplay reads should use Get()/GetResourceForCellLayer() which already resolve layered values.
+        // Transitional compatibility bridge:
+        // - CO2 legacy per-cell values mirror the ocean top layer so atmosphere exchange remains
+        //   coupled to the surface interface only.
+        // - DissolvedFe2+ legacy values mirror layered state for existing debug/legacy readers.
+        SyncLegacyOceanResourceFromLayers(ResourceType.CO2);
         SyncLegacyOceanResourceFromLayers(ResourceType.DissolvedFe2Plus);
     }
 
@@ -3313,6 +3360,7 @@ public class PlanetResourceMap : MonoBehaviour
         {
             // Surface-driven
             case ResourceType.O2:
+            case ResourceType.CO2:
                 return GetLayerValue(arr, cell, 0);
 
             // Deep / vent-driven
@@ -3377,11 +3425,21 @@ public class PlanetResourceMap : MonoBehaviour
             return;
         }
 
-        // Compatibility bridge intentionally kept during incremental migration:
-        // aggregate Add(...) on layered ocean resources spreads deltas uniformly across active layers.
-        // New OrganicC source paths should prefer AddResourceForCellLayer(...) when a specific layer is known.
+        // Compatibility bridge intentionally kept during incremental migration.
+        // Most resources still spread aggregate Add(...) uniformly across active layers.
+        // CO2 is an exception: aggregate CO2 writes in ocean cells are applied to layer 0
+        // so direct atmosphere coupling remains surface-only; deeper influence comes from
+        // explicit vertical diffusion/mixing.
+        int startLayer = 0;
+        int endLayerExclusive = active;
         float perLayerDelta = delta / active;
-        for (int layer = 0; layer < active; layer++)
+        if (resourceType == ResourceType.CO2)
+        {
+            endLayerExclusive = 1;
+            perLayerDelta = delta;
+        }
+
+        for (int layer = startLayer; layer < endLayerExclusive; layer++)
         {
             int idx = GetLayeredArrayIndex(cell, layer);
             layered[idx] = Mathf.Max(0f, layered[idx] + perLayerDelta);
