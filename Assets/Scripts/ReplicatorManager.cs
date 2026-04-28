@@ -1955,15 +1955,19 @@ public class ReplicatorManager : MonoBehaviour
             return false;
         }
 
+        int cellIndex = DirectionToSimulationCellIndex(parent.currentDirection.normalized);
+        int preferredLayerIndex = parent.preferredOceanLayerIndex;
+
         float globalO2 = planetResourceMap.debugGlobalO2;
-        bool hasLocalO2 = IsOxygenLocallyAvailable(parent.currentDirection, parent.currentOceanLayerIndex, minLocalO2);
-        bool hasLocalOrganicC = IsOrganicCLocallyAvailable(parent.currentDirection, parent.currentOceanLayerIndex, minLocalOrganicC);
+        bool hasLocalO2 = IsOxygenLocallyAvailable(cellIndex, parent.currentOceanLayerIndex, preferredLayerIndex, minLocalO2);
+        bool hasLocalOrganicC = IsOrganicCLocallyAvailable(cellIndex, parent.currentOceanLayerIndex, preferredLayerIndex, minLocalOrganicC);
         unlockedByLocalOxygen = globalO2 <= minGlobalO2 && hasLocalO2;
 
         if (unlockedByLocalOxygen)
         {
             float localO2Threshold = GetAreaNormalizedLocalThreshold(minLocalO2);
-            Debug.Log($"[LocalO2Mutation] Saprotrophy mutation became eligible due to local O2 (global O2 {globalO2:0.0000} <= {minGlobalO2:0.0000}). Local O2: {GetLocalHabitatResource(ResourceType.O2, parent.currentDirection, parent.currentOceanLayerIndex):0.0000}, threshold(area-normalized): {localO2Threshold:0.0000}");
+            float localO2 = GetLocalHabitatResource(ResourceType.O2, cellIndex, parent.currentOceanLayerIndex, preferredLayerIndex);
+            Debug.Log($"[LocalO2Mutation] Saprotrophy mutation became eligible due to local O2 (global O2 {globalO2:0.0000} <= {minGlobalO2:0.0000}). Local O2: {localO2:0.0000}, threshold(area-normalized): {localO2Threshold:0.0000}");
         }
 
         return hasLocalO2 && hasLocalOrganicC;
@@ -1978,36 +1982,39 @@ public class ReplicatorManager : MonoBehaviour
         }
 
         const float minGlobalMethane = 0.01f;
+        int cellIndex = DirectionToSimulationCellIndex(parent.currentDirection.normalized);
+        int preferredLayerIndex = parent.preferredOceanLayerIndex;
 
         float globalO2 = planetResourceMap.debugGlobalO2;
         float globalMethane = planetResourceMap.debugGlobalCH4;
-        bool hasLocalO2 = IsOxygenLocallyAvailable(parent.currentDirection, parent.currentOceanLayerIndex, minLocalO2);
+        bool hasLocalO2 = IsOxygenLocallyAvailable(cellIndex, parent.currentOceanLayerIndex, preferredLayerIndex, minLocalO2);
         unlockedByLocalOxygen = globalO2 <= minGlobalO2 && hasLocalO2;
 
         if (unlockedByLocalOxygen)
         {
             float localO2Threshold = GetAreaNormalizedLocalThreshold(minLocalO2);
-            Debug.Log($"[LocalO2Mutation] Methanotrophy mutation became eligible due to local O2 (global O2 {globalO2:0.0000} <= {minGlobalO2:0.0000}). Local O2: {GetLocalHabitatResource(ResourceType.O2, parent.currentDirection, parent.currentOceanLayerIndex):0.0000}, threshold(area-normalized): {localO2Threshold:0.0000}");
+            float localO2 = GetLocalHabitatResource(ResourceType.O2, cellIndex, parent.currentOceanLayerIndex, preferredLayerIndex);
+            Debug.Log($"[LocalO2Mutation] Methanotrophy mutation became eligible due to local O2 (global O2 {globalO2:0.0000} <= {minGlobalO2:0.0000}). Local O2: {localO2:0.0000}, threshold(area-normalized): {localO2Threshold:0.0000}");
         }
 
         return hasLocalO2 && globalMethane > minGlobalMethane;
     }
 
-    bool IsOxygenLocallyAvailable(Vector3 habitatDirection, int habitatOceanLayerIndex, float minimumAmount)
+    bool IsOxygenLocallyAvailable(int habitatCellIndex, int habitatOceanLayerIndex, int fallbackOceanLayerIndex, float minimumAmount)
     {
         bool isOxygenGloballyAvailable = planetResourceMap.debugGlobalO2 > minGlobalO2;
         // Local O2 gameplay gates are area-normalized from reference resolution so
         // oxygen-requiring unlock/spawn behavior is stable across simulation tile sizes.
         float localO2Threshold = GetAreaNormalizedLocalThreshold(minimumAmount);
-        bool isLocalOxygenAboveThreshold = GetLocalHabitatResource(ResourceType.O2, habitatDirection, habitatOceanLayerIndex) > localO2Threshold;
+        bool isLocalOxygenAboveThreshold = GetLocalHabitatResource(ResourceType.O2, habitatCellIndex, habitatOceanLayerIndex, fallbackOceanLayerIndex) > localO2Threshold;
         return isOxygenGloballyAvailable || isLocalOxygenAboveThreshold;
     }
 
-    bool IsOrganicCLocallyAvailable(Vector3 habitatDirection, int habitatOceanLayerIndex, float minimumAmount)
+    bool IsOrganicCLocallyAvailable(int habitatCellIndex, int habitatOceanLayerIndex, int fallbackOceanLayerIndex, float minimumAmount)
     {
         // Organic C spawn/unlock gate is also area-normalized from reference resolution.
         float localOrganicThreshold = GetAreaNormalizedLocalThreshold(minimumAmount);
-        return GetLocalHabitatResource(ResourceType.OrganicC, habitatDirection, habitatOceanLayerIndex) > localOrganicThreshold;
+        return GetLocalHabitatResource(ResourceType.OrganicC, habitatCellIndex, habitatOceanLayerIndex, fallbackOceanLayerIndex) > localOrganicThreshold;
     }
 
     float GetLocalHabitatResource(ResourceType resourceType, Vector3 habitatDirection, int habitatOceanLayerIndex)
@@ -2024,14 +2031,33 @@ public class ReplicatorManager : MonoBehaviour
             return 0f;
         }
 
+        return GetLocalHabitatResource(resourceType, cellIndex, habitatOceanLayerIndex);
+    }
+
+    float GetLocalHabitatResource(ResourceType resourceType, int habitatCellIndex, int habitatOceanLayerIndex, int fallbackOceanLayerIndex = -1)
+    {
+        if (planetResourceMap == null || habitatCellIndex < 0)
+        {
+            return 0f;
+        }
+
+        int cellIndex = habitatCellIndex;
         if (!planetResourceMap.IsOceanCell(cellIndex))
         {
             return planetResourceMap.Get(resourceType, cellIndex);
         }
 
         int clampedLayer = planetResourceMap.ClampOceanLayerIndex(cellIndex, habitatOceanLayerIndex);
+        if (clampedLayer < 0 && fallbackOceanLayerIndex >= 0)
+        {
+            // Prefer an explicit fallback layer (usually preferred/inherited habitat layer)
+            // before aggregate reads when ocean context is already known.
+            clampedLayer = planetResourceMap.ClampOceanLayerIndex(cellIndex, fallbackOceanLayerIndex);
+        }
+
         if (clampedLayer < 0)
         {
+            // Intentional compatibility fallback for land/non-ocean/invalid layer contexts.
             return planetResourceMap.Get(resourceType, cellIndex);
         }
 
