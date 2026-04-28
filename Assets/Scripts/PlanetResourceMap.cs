@@ -25,6 +25,20 @@ public enum ResourceType
 [DisallowMultipleComponent]
 public class PlanetResourceMap : MonoBehaviour
 {
+    // Lightweight callsite tagging used by layered-ocean aggregate compatibility telemetry.
+    // Keep this broad (subsystem-level) so counters stay stable and low-overhead.
+    public enum AggregateCompatibilityCallsite
+    {
+        UnknownLegacy = 0,
+        Metabolism = 1,
+        SpawningLifecycle = 2,
+        ResourcePhysics = 3,
+        AtmosphereVents = 4,
+        DebugTelemetry = 5,
+    }
+
+    private const int AggregateCompatibilityCallsiteCount = 6;
+
     private const int MaxOceanLayers = 5;
 
     public struct OceanLayerSnapshot
@@ -274,6 +288,18 @@ public class PlanetResourceMap : MonoBehaviour
     public int debugLayeredWriteFallbackToAggregateCount;
     [Tooltip("How often GetResourceForCellLayer(...) had to fall back to effective aggregate Get(...) due to invalid or unavailable layer context.")]
     public int debugLayeredReadFallbackToAggregateCount;
+    [Tooltip("Optional: enable per-callsite counters for layered aggregate compatibility usage. Keep disabled in normal gameplay unless auditing migration progress.")]
+    public bool enableLayeredCompatibilityCallsiteTelemetry;
+    [Tooltip("Compatibility Add(...) calls in layered ocean cells routed through aggregate-to-layer distribution, grouped by callsite.")]
+    public int[] debugLayeredAggregateAddCompatibilityCountByCallsite = new int[AggregateCompatibilityCallsiteCount];
+    [Tooltip("Compatibility Add(...) absolute delta routed through aggregate-to-layer distribution, grouped by callsite.")]
+    public float[] debugLayeredAggregateAddCompatibilityAbsDeltaByCallsite = new float[AggregateCompatibilityCallsiteCount];
+    [Tooltip("Aggregate Get(...) calls for layered resources (effective layered aggregate reads), grouped by callsite.")]
+    public int[] debugLayeredAggregateGetCompatibilityCountByCallsite = new int[AggregateCompatibilityCallsiteCount];
+    [Tooltip("AddResourceForCellLayer(...) fallback-to-aggregate writes, grouped by callsite.")]
+    public int[] debugLayeredWriteFallbackToAggregateCountByCallsite = new int[AggregateCompatibilityCallsiteCount];
+    [Tooltip("GetResourceForCellLayer(...) fallback-to-aggregate reads, grouped by callsite.")]
+    public int[] debugLayeredReadFallbackToAggregateCountByCallsite = new int[AggregateCompatibilityCallsiteCount];
 
     [Header("Scent Fields")]
     [Tooltip("Enable diffuse chemical cue fields used for scent-based predation/fear steering.")]
@@ -441,7 +467,7 @@ public class PlanetResourceMap : MonoBehaviour
         UpdateOceanVisuals();
     }
 
-    public float Get(ResourceType t, int cell)
+    public float Get(ResourceType t, int cell, AggregateCompatibilityCallsite callsite = AggregateCompatibilityCallsite.UnknownLegacy)
     {
         if (!isInitialized || !IsCellValid(cell))
         {
@@ -450,13 +476,14 @@ public class PlanetResourceMap : MonoBehaviour
 
         if (ShouldUseLayeredOceanForResource(t, cell))
         {
+            RecordAggregateGetCompatibilityCallsite(callsite);
             return GetEffectiveLayeredResource(t, cell);
         }
 
         return GetArray(t)[cell];
     }
 
-    public void Add(ResourceType t, int cell, float delta)
+    public void Add(ResourceType t, int cell, float delta, AggregateCompatibilityCallsite callsite = AggregateCompatibilityCallsite.UnknownLegacy)
     {
         if (!isInitialized || !IsCellValid(cell) || Mathf.Approximately(delta, 0f))
         {
@@ -467,7 +494,8 @@ public class PlanetResourceMap : MonoBehaviour
         {
             debugLayeredAggregateAddCompatibilityCount++;
             debugLayeredAggregateAddCompatibilityAbsDelta += Mathf.Abs(delta);
-            AddLayeredResourceDelta(t, cell, delta);
+            RecordAggregateAddCompatibilityCallsite(callsite, delta);
+            AddLayeredResourceDelta(t, cell, delta, callsite);
             SyncLegacyOceanResourceFromLayers(t, cell);
             return;
         }
@@ -481,7 +509,7 @@ public class PlanetResourceMap : MonoBehaviour
         arr[cell] = Mathf.Max(0f, arr[cell] + delta);
     }
 
-    public void AddResourceForCellLayer(ResourceType t, int cell, int requestedLayerIndex, float delta)
+    public void AddResourceForCellLayer(ResourceType t, int cell, int requestedLayerIndex, float delta, AggregateCompatibilityCallsite callsite = AggregateCompatibilityCallsite.UnknownLegacy)
     {
         if (!isInitialized || !IsCellValid(cell) || Mathf.Approximately(delta, 0f))
         {
@@ -491,7 +519,8 @@ public class PlanetResourceMap : MonoBehaviour
         if (!ShouldUseLayeredOceanForResource(t, cell))
         {
             debugLayeredWriteFallbackToAggregateCount++;
-            Add(t, cell, delta);
+            RecordWriteFallbackToAggregateCallsite(callsite);
+            Add(t, cell, delta, callsite);
             return;
         }
 
@@ -499,7 +528,8 @@ public class PlanetResourceMap : MonoBehaviour
         if (clampedLayer < 0)
         {
             debugLayeredWriteFallbackToAggregateCount++;
-            Add(t, cell, delta);
+            RecordWriteFallbackToAggregateCallsite(callsite);
+            Add(t, cell, delta, callsite);
             return;
         }
 
@@ -507,7 +537,8 @@ public class PlanetResourceMap : MonoBehaviour
         if (layered == null)
         {
             debugLayeredWriteFallbackToAggregateCount++;
-            Add(t, cell, delta);
+            RecordWriteFallbackToAggregateCallsite(callsite);
+            Add(t, cell, delta, callsite);
             return;
         }
 
@@ -727,7 +758,7 @@ public class PlanetResourceMap : MonoBehaviour
         return layeredArray[GetLayeredArrayIndex(cell, layerIndex)];
     }
 
-    public float GetResourceForCellLayer(ResourceType resourceType, int cell, int requestedLayerIndex)
+    public float GetResourceForCellLayer(ResourceType resourceType, int cell, int requestedLayerIndex, AggregateCompatibilityCallsite callsite = AggregateCompatibilityCallsite.UnknownLegacy)
     {
         if (!isInitialized || !IsCellValid(cell))
         {
@@ -737,14 +768,16 @@ public class PlanetResourceMap : MonoBehaviour
         if (!ShouldUseLayeredOceanForResource(resourceType, cell))
         {
             debugLayeredReadFallbackToAggregateCount++;
-            return Get(resourceType, cell);
+            RecordReadFallbackToAggregateCallsite(callsite);
+            return Get(resourceType, cell, callsite);
         }
 
         int clampedLayer = ClampOceanLayerIndex(cell, requestedLayerIndex);
         if (clampedLayer < 0)
         {
             debugLayeredReadFallbackToAggregateCount++;
-            return Get(resourceType, cell);
+            RecordReadFallbackToAggregateCallsite(callsite);
+            return Get(resourceType, cell, callsite);
         }
 
         return GetLayerResource(resourceType, cell, clampedLayer);
@@ -753,12 +786,12 @@ public class PlanetResourceMap : MonoBehaviour
     public LegacyEnvironmentSnapshot GetEffectiveLegacyEnvironment(int cell, Vector3 worldPosOrDir)
     {
         LegacyEnvironmentSnapshot snapshot = default;
-        snapshot.O2 = Get(ResourceType.O2, cell);
-        snapshot.OrganicC = Get(ResourceType.OrganicC, cell);
-        snapshot.H2 = Get(ResourceType.H2, cell);
-        snapshot.H2S = Get(ResourceType.H2S, cell);
-        snapshot.CH4 = Get(ResourceType.CH4, cell);
-        snapshot.DissolvedFe2Plus = Get(ResourceType.DissolvedFe2Plus, cell);
+        snapshot.O2 = Get(ResourceType.O2, cell, AggregateCompatibilityCallsite.DebugTelemetry);
+        snapshot.OrganicC = Get(ResourceType.OrganicC, cell, AggregateCompatibilityCallsite.DebugTelemetry);
+        snapshot.H2 = Get(ResourceType.H2, cell, AggregateCompatibilityCallsite.DebugTelemetry);
+        snapshot.H2S = Get(ResourceType.H2S, cell, AggregateCompatibilityCallsite.DebugTelemetry);
+        snapshot.CH4 = Get(ResourceType.CH4, cell, AggregateCompatibilityCallsite.DebugTelemetry);
+        snapshot.DissolvedFe2Plus = Get(ResourceType.DissolvedFe2Plus, cell, AggregateCompatibilityCallsite.DebugTelemetry);
         snapshot.TemperatureKelvin = GetTemperature(worldPosOrDir, cell);
         snapshot.LightFactor = GetEffectiveLayeredLight(cell);
         return snapshot;
@@ -791,13 +824,13 @@ public class PlanetResourceMap : MonoBehaviour
         snapshot.VentStrength = ventStrength != null && cell < ventStrength.Length ? Mathf.Max(0f, ventStrength[cell]) : 0f;
         snapshot.EffectiveLegacy = GetEffectiveLegacyEnvironment(cell, dir);
         snapshot.EffectiveTemperatureKelvin = snapshot.EffectiveLegacy.TemperatureKelvin;
-        snapshot.EffectiveCO2 = Get(ResourceType.CO2, cell);
-        snapshot.EffectiveO2 = Get(ResourceType.O2, cell);
-        snapshot.EffectiveCH4 = Get(ResourceType.CH4, cell);
-        snapshot.EffectiveOrganicC = Get(ResourceType.OrganicC, cell);
-        snapshot.EffectiveH2 = Get(ResourceType.H2, cell);
-        snapshot.EffectiveH2S = Get(ResourceType.H2S, cell);
-        snapshot.EffectiveDissolvedFe2Plus = Get(ResourceType.DissolvedFe2Plus, cell);
+        snapshot.EffectiveCO2 = Get(ResourceType.CO2, cell, AggregateCompatibilityCallsite.DebugTelemetry);
+        snapshot.EffectiveO2 = Get(ResourceType.O2, cell, AggregateCompatibilityCallsite.DebugTelemetry);
+        snapshot.EffectiveCH4 = Get(ResourceType.CH4, cell, AggregateCompatibilityCallsite.DebugTelemetry);
+        snapshot.EffectiveOrganicC = Get(ResourceType.OrganicC, cell, AggregateCompatibilityCallsite.DebugTelemetry);
+        snapshot.EffectiveH2 = Get(ResourceType.H2, cell, AggregateCompatibilityCallsite.DebugTelemetry);
+        snapshot.EffectiveH2S = Get(ResourceType.H2S, cell, AggregateCompatibilityCallsite.DebugTelemetry);
+        snapshot.EffectiveDissolvedFe2Plus = Get(ResourceType.DissolvedFe2Plus, cell, AggregateCompatibilityCallsite.DebugTelemetry);
 
         if (!isOcean || activeLayerCount <= 0)
         {
@@ -1373,19 +1406,19 @@ public class PlanetResourceMap : MonoBehaviour
 
         if (!enableLayeredOcean || !IsOceanCell(cell))
         {
-            return Get(scentType, cell);
+            return Get(scentType, cell, AggregateCompatibilityCallsite.ResourcePhysics);
         }
 
         int layerIndex = ClampOceanLayerIndex(cell, requestedLayerIndex);
         if (layerIndex < 0)
         {
-            return Get(scentType, cell);
+            return Get(scentType, cell, AggregateCompatibilityCallsite.ResourcePhysics);
         }
 
         float[] layered = GetLayeredOceanArray(scentType);
         if (layered == null)
         {
-            return Get(scentType, cell);
+            return Get(scentType, cell, AggregateCompatibilityCallsite.ResourcePhysics);
         }
 
         float center = GetLayerValue(layered, cell, layerIndex);
@@ -2505,10 +2538,10 @@ public class PlanetResourceMap : MonoBehaviour
             }
             else
             {
-                Add(ResourceType.H2S, cell, h2sPerTick * cellVentStrength * sourceScale);
-                Add(ResourceType.H2, cell, h2PerTick * cellVentStrength * sourceScale);
-                Add(ResourceType.CO2, cell, Mathf.Max(0f, ventCO2PerTick) * cellVentStrength * sourceScale);
-                Add(ResourceType.DissolvedFe2Plus, cell, dissolvedFe2PlusPerTick * cellVentStrength * sourceScale);
+                Add(ResourceType.H2S, cell, h2sPerTick * cellVentStrength * sourceScale, AggregateCompatibilityCallsite.AtmosphereVents);
+                Add(ResourceType.H2, cell, h2PerTick * cellVentStrength * sourceScale, AggregateCompatibilityCallsite.AtmosphereVents);
+                Add(ResourceType.CO2, cell, Mathf.Max(0f, ventCO2PerTick) * cellVentStrength * sourceScale, AggregateCompatibilityCallsite.AtmosphereVents);
+                Add(ResourceType.DissolvedFe2Plus, cell, dissolvedFe2PlusPerTick * cellVentStrength * sourceScale, AggregateCompatibilityCallsite.AtmosphereVents);
             }
             if (applyH2SCap)
             {
@@ -3411,8 +3444,9 @@ public class PlanetResourceMap : MonoBehaviour
         return Mathf.Clamp01(sum / active);
     }
 
-    private void AddLayeredResourceDelta(ResourceType resourceType, int cell, float delta)
+    private void AddLayeredResourceDelta(ResourceType resourceType, int cell, float delta, AggregateCompatibilityCallsite callsite)
     {
+        _ = callsite;
         float[] layered = GetLayeredOceanArray(resourceType);
         if (layered == null)
         {
@@ -3456,7 +3490,7 @@ public class PlanetResourceMap : MonoBehaviour
         float[] layered = GetLayeredOceanArray(resourceType);
         if (layered == null)
         {
-            Add(resourceType, cell, amount);
+            Add(resourceType, cell, amount, AggregateCompatibilityCallsite.AtmosphereVents);
             return;
         }
 
@@ -3721,7 +3755,77 @@ public class PlanetResourceMap : MonoBehaviour
 
     private string BuildDebugLabelText(int cellIndex)
     {
-        return $"{debugViewType}: {Get(debugViewType, cellIndex):0.###}\nCO2: {Get(ResourceType.CO2, cellIndex):0.###}\nH2: {Get(ResourceType.H2, cellIndex):0.###}\nCH4: {Get(ResourceType.CH4, cellIndex):0.###}\nH2S: {Get(ResourceType.H2S, cellIndex):0.###}\nS0: {Get(ResourceType.S0, cellIndex):0.###}";
+        return $"{debugViewType}: {Get(debugViewType, cellIndex, AggregateCompatibilityCallsite.DebugTelemetry):0.###}\nCO2: {Get(ResourceType.CO2, cellIndex, AggregateCompatibilityCallsite.DebugTelemetry):0.###}\nH2: {Get(ResourceType.H2, cellIndex, AggregateCompatibilityCallsite.DebugTelemetry):0.###}\nCH4: {Get(ResourceType.CH4, cellIndex, AggregateCompatibilityCallsite.DebugTelemetry):0.###}\nH2S: {Get(ResourceType.H2S, cellIndex, AggregateCompatibilityCallsite.DebugTelemetry):0.###}\nS0: {Get(ResourceType.S0, cellIndex, AggregateCompatibilityCallsite.DebugTelemetry):0.###}";
+    }
+
+    // Interpretation note:
+    // - "AggregateAddCompatibility" = layered resource write that entered Add(...) and was distributed
+    //   through the compatibility bridge rather than an explicit layer target.
+    // - "Write/ReadFallbackToAggregate" = layer-aware API called without valid layer context, then fell back.
+    // Use *_ByCallsite arrays to identify which subsystem should be migrated next.
+    private void RecordAggregateAddCompatibilityCallsite(AggregateCompatibilityCallsite callsite, float deltaAbs)
+    {
+        if (!enableLayeredCompatibilityCallsiteTelemetry)
+        {
+            return;
+        }
+
+        int index = (int)callsite;
+        if (index < 0 || index >= AggregateCompatibilityCallsiteCount)
+        {
+            index = (int)AggregateCompatibilityCallsite.UnknownLegacy;
+        }
+
+        debugLayeredAggregateAddCompatibilityCountByCallsite[index]++;
+        debugLayeredAggregateAddCompatibilityAbsDeltaByCallsite[index] += Mathf.Abs(deltaAbs);
+    }
+
+    private void RecordAggregateGetCompatibilityCallsite(AggregateCompatibilityCallsite callsite)
+    {
+        if (!enableLayeredCompatibilityCallsiteTelemetry)
+        {
+            return;
+        }
+
+        int index = (int)callsite;
+        if (index < 0 || index >= AggregateCompatibilityCallsiteCount)
+        {
+            index = (int)AggregateCompatibilityCallsite.UnknownLegacy;
+        }
+
+        debugLayeredAggregateGetCompatibilityCountByCallsite[index]++;
+    }
+
+    private void RecordWriteFallbackToAggregateCallsite(AggregateCompatibilityCallsite callsite)
+    {
+        if (!enableLayeredCompatibilityCallsiteTelemetry)
+        {
+            return;
+        }
+
+        int index = (int)callsite;
+        if (index < 0 || index >= AggregateCompatibilityCallsiteCount)
+        {
+            index = (int)AggregateCompatibilityCallsite.UnknownLegacy;
+        }
+
+        debugLayeredWriteFallbackToAggregateCountByCallsite[index]++;
+    }
+
+    private void RecordReadFallbackToAggregateCallsite(AggregateCompatibilityCallsite callsite)
+    {
+        if (!enableLayeredCompatibilityCallsiteTelemetry)
+        {
+            return;
+        }
+
+        int index = (int)callsite;
+        if (index < 0 || index >= AggregateCompatibilityCallsiteCount)
+        {
+            index = (int)AggregateCompatibilityCallsite.UnknownLegacy;
+        }
+
+        debugLayeredReadFallbackToAggregateCountByCallsite[index]++;
     }
 
 
