@@ -833,8 +833,8 @@ MonoBehaviour:
   m_TargetGraphic: {fileID: 1049548737}
   m_HandleRect: {fileID: 1049548736}
   m_Direction: 2
-  m_Value: 1
-  m_Size: 1
+  m_Value: 0
+  m_Size: 0.47368428
   m_NumberOfSteps: 0
   m_OnValueChanged:
     m_PersistentCalls:
@@ -1201,7 +1201,7 @@ MonoBehaviour:
   minSpeedFactor: 0.15
   chemosynthesisCo2NeedPerTick: 0.02
   chemosynthesisH2sNeedPerTick: 0.01
-  chemosynthesisEnergyPerTick: 0.01
+  chemosynthesisEnergyPerTick: 1
   metabolismMutationChance: 0.2
   hydrogenotrophyH2PerTick: 0.02
   hydrogenotrophyCO2PerTick: 0.01
@@ -1231,7 +1231,7 @@ MonoBehaviour:
   anchoredToAmoeboidMutationChance: 0.01
   allowReverseMetabolismMutation: 0
   photosynthesisCo2PerTickAtFullInsolation: 0.02
-  photosynthesisEnergyPerCo2: 8
+  photosynthesisEnergyPerCo2: 4
   aerobicO2PerC: 0.02
   aerobicEnergyPerC: 0.05
   photosynthStoreFraction: 0.4
@@ -1447,7 +1447,7 @@ MonoBehaviour:
   enableVentReplenishment: 1
   ventTickSeconds: 0.5
   ventsOnlyBelowSeaLevel: 0
-  ventH2SPerTick: 0.01
+  ventH2SPerTick: 0.04
   ventH2PerTick: 0.06
   ventCO2PerTick: 0.25
   ventH2SMax: 1
@@ -1482,13 +1482,13 @@ MonoBehaviour:
   oceanColorLerpSpeed: 2
   baseTempKelvin: 279.15
   insolationTempGain: 35
-  ventTempGain: 120
+  ventTempGain: 200
   oceanTempDamping: 0.5
   enableVentHeatGradient: 1
   ventHeatBlurPasses: 3
   ventHeatSpread: 0.4
   maxOceanTempKelvin: 500
-  maxLandTempKelvin: 500
+  maxLandTempKelvin: 700
   minTempKelvin: 150
   enableLayeredOcean: 1
   depth01ForLayer2: 0.12
@@ -1496,6 +1496,9 @@ MonoBehaviour:
   depth01ForLayer4: 0.58
   depth01ForLayer5: 0.82
   layeredLightAttenuation: 1.15
+  layeredTopLightFactor: 1
+  layeredSecondLayerLightFactor: 0.55
+  layeredDeepLightFactor: 0.02
   layeredVerticalMixRate: 0.02
   layeredSurfaceOxygenationRate: 0.02
   layeredMarineSnowRate: 0.015
@@ -1503,6 +1506,11 @@ MonoBehaviour:
   layeredOrganicCUpwardBleedRate: 0.0002
   layeredTempDropPerLayer: 2
   layeredBottomVentTempGain: 25
+  layeredTopSolarHeatingFactor: 1
+  layeredSecondLayerSolarHeatingFactor: 0.55
+  layeredDeepSolarHeatingFactor: 0
+  layeredBottomVentHeatingFactor: 1
+  layeredAboveBottomVentHeatingFactor: 0.45
   debugLayeredCellIndex: 0
   debugLayeredSampleLayer: 1
   debugLayeredActiveCount: 0
@@ -51261,7 +51269,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 1}
   m_AnchorMax: {x: 1, y: 1}
-  m_AnchoredPosition: {x: 0, y: -0.000061035156}
+  m_AnchoredPosition: {x: 0, y: 0.000061035156}
   m_SizeDelta: {x: 0, y: 500}
   m_Pivot: {x: 0, y: 1}
 --- !u!114 &1582151553

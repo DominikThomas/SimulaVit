@@ -291,10 +291,10 @@ public class ReplicatorManager : MonoBehaviour
     [Tooltip("0 = land-only bias, 0.5 = balanced, 1 = sea-only bias (when ocean is enabled).")]
     public float seaSpawnPreference = 1.0f;
     [Min(0)]
-    [Tooltip("Disables spontaneous spawning while total population is at or above this value.")]
+    [Tooltip("Disables spontaneous hydrogenotroph spawning while hydrogenotroph population is at or above this value.")]
     public int disableSpontaneousSpawningAtPopulation = 1000;
     [Min(0)]
-    [Tooltip("Re-enables spontaneous spawning when total population falls to or below this value.")]
+    [Tooltip("Re-enables spontaneous hydrogenotroph spawning when hydrogenotroph population falls to or below this value.")]
     public int reenableSpontaneousSpawningAtPopulation = 200;
 
     [Header("Default Traits")]
@@ -871,7 +871,7 @@ public class ReplicatorManager : MonoBehaviour
             guaranteedFirstSpawnWithinSeconds,
             spawnAttemptInterval,
             simulationDeltaTime,
-            () => agents.Count,
+            () => hydrogenotrophAgentCount,
             disableSpontaneousSpawningAtPopulation,
             reenableSpontaneousSpawningAtPopulation,
             SpawnAgentAtRandomLocation,
@@ -970,7 +970,12 @@ public class ReplicatorManager : MonoBehaviour
         int cellCount = GetSimulationCellCount();
         for (int cell = 0; cell < cellCount; cell++)
         {
-            float h2Availability = NormalizeResource(ResourceType.H2, cell, steerGoodH2);
+            // Layered-ocean cleanup:
+            // spontaneous hydrogenotrophy seeding is a bottom-layer vent ecology path,
+            // so prefer bottom-layer H2 whenever an ocean layer is available.
+            // Keep aggregate fallback only for non-ocean / invalid layer contexts.
+            int layerIndex = ResolveHydrogenotrophySpawnLayer(cell);
+            float h2Availability = NormalizeResource(ResourceType.H2, cell, layerIndex, steerGoodH2);
             if (h2Availability >= minHydrogenSpawnH2)
             {
                 spontaneousHydrogenSpawnCandidateCells.Add(cell);
