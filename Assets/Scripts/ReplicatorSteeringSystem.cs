@@ -356,8 +356,15 @@ public class ReplicatorSteeringSystem
     {
         float scale = Mathf.Max(0.0001f, goodEnoughScale);
         float value = layerIndex >= 0
-            ? planetResourceMap.GetResourceForCellLayer(resourceType, cellIndex, layerIndex)
-            : planetResourceMap.Get(resourceType, cellIndex);
+            ? planetResourceMap.GetResourceForCellLayer(
+                resourceType,
+                cellIndex,
+                layerIndex,
+                PlanetResourceMap.AggregateCompatibilityCallsite.UnknownLegacy)
+            : planetResourceMap.Get(
+                resourceType,
+                cellIndex,
+                PlanetResourceMap.AggregateCompatibilityCallsite.UnknownLegacy);
         float normalized = Mathf.Clamp01(value / scale);
         return float.IsNaN(normalized) || float.IsInfinity(normalized) ? 0f : normalized;
     }

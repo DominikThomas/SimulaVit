@@ -1143,8 +1143,15 @@ public class ReplicatorManager : MonoBehaviour
     {
         float scale = Mathf.Max(0.0001f, goodEnoughScale);
         float value = habitatOceanLayerIndex >= 0
-            ? planetResourceMap.GetResourceForCellLayer(resourceType, cellIndex, habitatOceanLayerIndex)
-            : planetResourceMap.Get(resourceType, cellIndex);
+            ? planetResourceMap.GetResourceForCellLayer(
+                resourceType,
+                cellIndex,
+                habitatOceanLayerIndex,
+                PlanetResourceMap.AggregateCompatibilityCallsite.SpawningLifecycle)
+            : planetResourceMap.Get(
+                resourceType,
+                cellIndex,
+                PlanetResourceMap.AggregateCompatibilityCallsite.SpawningLifecycle);
         float normalized = Mathf.Clamp01(value / scale);
         return float.IsNaN(normalized) || float.IsInfinity(normalized) ? 0f : normalized;
     }
@@ -1713,12 +1720,21 @@ public class ReplicatorManager : MonoBehaviour
             int clampedLayer = planetResourceMap.ClampOceanLayerIndex(cellIndex, requestedLayer);
             if (clampedLayer >= 0)
             {
-                planetResourceMap.AddResourceForCellLayer(ResourceType.OrganicC, cellIndex, clampedLayer, depositAmount);
+                planetResourceMap.AddResourceForCellLayer(
+                    ResourceType.OrganicC,
+                    cellIndex,
+                    clampedLayer,
+                    depositAmount,
+                    PlanetResourceMap.AggregateCompatibilityCallsite.SpawningLifecycle);
                 return;
             }
         }
 
-        planetResourceMap.Add(ResourceType.OrganicC, cellIndex, depositAmount);
+        planetResourceMap.Add(
+            ResourceType.OrganicC,
+            cellIndex,
+            depositAmount,
+            PlanetResourceMap.AggregateCompatibilityCallsite.SpawningLifecycle);
     }
 
     internal void RunMovementJob(bool populationStatePrimed, float simulationDeltaTime, double currentSimulationTimeSeconds)
@@ -2044,7 +2060,7 @@ public class ReplicatorManager : MonoBehaviour
         int cellIndex = habitatCellIndex;
         if (!planetResourceMap.IsOceanCell(cellIndex))
         {
-            return planetResourceMap.Get(resourceType, cellIndex);
+            return planetResourceMap.Get(resourceType, cellIndex, PlanetResourceMap.AggregateCompatibilityCallsite.SpawningLifecycle);
         }
 
         int clampedLayer = planetResourceMap.ClampOceanLayerIndex(cellIndex, habitatOceanLayerIndex);
@@ -2058,10 +2074,14 @@ public class ReplicatorManager : MonoBehaviour
         if (clampedLayer < 0)
         {
             // Intentional compatibility fallback for land/non-ocean/invalid layer contexts.
-            return planetResourceMap.Get(resourceType, cellIndex);
+            return planetResourceMap.Get(resourceType, cellIndex, PlanetResourceMap.AggregateCompatibilityCallsite.SpawningLifecycle);
         }
 
-        return planetResourceMap.GetResourceForCellLayer(resourceType, cellIndex, clampedLayer);
+        return planetResourceMap.GetResourceForCellLayer(
+            resourceType,
+            cellIndex,
+            clampedLayer,
+            PlanetResourceMap.AggregateCompatibilityCallsite.SpawningLifecycle);
     }
 
     float EstimateGlobalOrganicC()
@@ -2080,7 +2100,10 @@ public class ReplicatorManager : MonoBehaviour
         float totalOrganicC = 0f;
         for (int cell = 0; cell < cellCount; cell++)
         {
-            totalOrganicC += planetResourceMap.Get(ResourceType.OrganicC, cell);
+            totalOrganicC += planetResourceMap.Get(
+                ResourceType.OrganicC,
+                cell,
+                PlanetResourceMap.AggregateCompatibilityCallsite.DebugTelemetry);
         }
 
         return totalOrganicC / cellCount;

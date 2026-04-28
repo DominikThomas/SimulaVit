@@ -1122,7 +1122,11 @@ public class ReplicatorMetabolismSystem
         int layerIndex,
         float goodEnoughScale)
     {
-        float raw = planetResourceMap.GetResourceForCellLayer(resourceType, cellIndex, layerIndex);
+        float raw = planetResourceMap.GetResourceForCellLayer(
+            resourceType,
+            cellIndex,
+            layerIndex,
+            PlanetResourceMap.AggregateCompatibilityCallsite.Metabolism);
         return Mathf.Clamp01(raw / Mathf.Max(0.0001f, goodEnoughScale));
     }
 
@@ -1148,10 +1152,14 @@ public class ReplicatorMetabolismSystem
     {
         if (TryGetValidAgentOceanLayer(populationState, index, planetResourceMap, cellIndex, out int layer))
         {
-            return planetResourceMap.GetResourceForCellLayer(resourceType, cellIndex, layer);
+            return planetResourceMap.GetResourceForCellLayer(
+                resourceType,
+                cellIndex,
+                layer,
+                PlanetResourceMap.AggregateCompatibilityCallsite.Metabolism);
         }
 
-        return planetResourceMap.Get(resourceType, cellIndex);
+        return planetResourceMap.Get(resourceType, cellIndex, PlanetResourceMap.AggregateCompatibilityCallsite.Metabolism);
     }
 
     private static bool TryResolveAgentResourceWriteLayer(
@@ -1207,11 +1215,16 @@ public class ReplicatorMetabolismSystem
 
         if (TryResolveAgentResourceWriteLayer(populationState, index, planetResourceMap, cellIndex, out int layer))
         {
-            planetResourceMap.AddResourceForCellLayer(resourceType, cellIndex, layer, delta);
+            planetResourceMap.AddResourceForCellLayer(
+                resourceType,
+                cellIndex,
+                layer,
+                delta,
+                PlanetResourceMap.AggregateCompatibilityCallsite.Metabolism);
             return;
         }
 
-        planetResourceMap.Add(resourceType, cellIndex, delta);
+        planetResourceMap.Add(resourceType, cellIndex, delta, PlanetResourceMap.AggregateCompatibilityCallsite.Metabolism);
     }
 
     private static float AerobicRespireFromStore(
