@@ -609,6 +609,45 @@ public class PlanetResourceMap : MonoBehaviour
         return Mathf.Clamp(requestedLayerIndex, 0, activeCount - 1);
     }
 
+
+    public bool TryResolveLayeredOceanWriteLayer(int cell, int currentLayerIndex, int preferredLayerIndex, out int resolvedLayerIndex)
+    {
+        resolvedLayerIndex = -1;
+        if (!isInitialized || !IsCellValid(cell) || !ShouldUseLayeredOceanForResource(ResourceType.OrganicC, cell))
+        {
+            return false;
+        }
+
+        if (currentLayerIndex >= 0)
+        {
+            int currentClamped = ClampOceanLayerIndex(cell, currentLayerIndex);
+            if (currentClamped >= 0)
+            {
+                resolvedLayerIndex = currentClamped;
+                return true;
+            }
+        }
+
+        if (preferredLayerIndex >= 0)
+        {
+            int preferredClamped = ClampOceanLayerIndex(cell, preferredLayerIndex);
+            if (preferredClamped >= 0)
+            {
+                resolvedLayerIndex = preferredClamped;
+                return true;
+            }
+        }
+
+        int deterministicFallback = GetOceanBottomLayerIndex(cell);
+        if (deterministicFallback >= 0)
+        {
+            resolvedLayerIndex = deterministicFallback;
+            return true;
+        }
+
+        return false;
+    }
+
     public int GetOceanTopLayerIndex(int cell)
     {
         int count = GetOceanActiveLayerCount(cell);
