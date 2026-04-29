@@ -1169,25 +1169,11 @@ public class ReplicatorMetabolismSystem
         int cellIndex,
         out int clampedLayer)
     {
-        clampedLayer = -1;
-        if (!planetResourceMap.IsOceanCell(cellIndex))
-        {
-            return false;
-        }
-
-        int requestedLayer = populationState.CurrentOceanLayerIndex[index];
-        if (requestedLayer < 0)
-        {
-            requestedLayer = populationState.PreferredOceanLayerIndex[index];
-        }
-
-        if (requestedLayer < 0)
-        {
-            return false;
-        }
-
-        clampedLayer = planetResourceMap.ClampOceanLayerIndex(cellIndex, requestedLayer);
-        return clampedLayer >= 0;
+        return planetResourceMap.TryResolveLayeredOceanWriteLayer(
+            cellIndex,
+            populationState.CurrentOceanLayerIndex[index],
+            populationState.PreferredOceanLayerIndex[index],
+            out clampedLayer);
     }
 
     // Layer-aware metabolism writes migrated in this pass:

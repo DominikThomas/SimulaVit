@@ -1709,27 +1709,22 @@ public class ReplicatorManager : MonoBehaviour
             return;
         }
 
-        if (planetResourceMap.IsOceanCell(cellIndex))
+        if (planetResourceMap.TryResolveLayeredOceanWriteLayer(
+                cellIndex,
+                agent.currentOceanLayerIndex,
+                agent.preferredOceanLayerIndex,
+                out int resolvedLayer))
         {
-            int requestedLayer = agent.currentOceanLayerIndex;
-            if (requestedLayer < 0)
-            {
-                requestedLayer = agent.preferredOceanLayerIndex;
-            }
-
-            int clampedLayer = planetResourceMap.ClampOceanLayerIndex(cellIndex, requestedLayer);
-            if (clampedLayer >= 0)
-            {
-                planetResourceMap.AddResourceForCellLayer(
-                    ResourceType.OrganicC,
-                    cellIndex,
-                    clampedLayer,
-                    depositAmount,
-                    PlanetResourceMap.AggregateCompatibilityCallsite.SpawningLifecycle);
-                return;
-            }
+            planetResourceMap.AddResourceForCellLayer(
+                ResourceType.OrganicC,
+                cellIndex,
+                resolvedLayer,
+                depositAmount,
+                PlanetResourceMap.AggregateCompatibilityCallsite.SpawningLifecycle);
+            return;
         }
 
+        // Compatibility fallback remains for land/non-ocean contexts and truly invalid cell/layer state.
         planetResourceMap.Add(
             ResourceType.OrganicC,
             cellIndex,
