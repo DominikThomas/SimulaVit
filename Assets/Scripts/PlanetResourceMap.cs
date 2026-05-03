@@ -295,6 +295,10 @@ public class PlanetResourceMap : MonoBehaviour
     public float debugLayeredTopH2SMean;
     [Tooltip("Ocean-wide mean H2S in bottom active layer across ocean cells.")]
     public float debugLayeredBottomH2SMean;
+    [Tooltip("Ocean-wide mean S0 in top active layer (layer 0) across ocean cells.")]
+    public float debugLayeredTopS0Mean;
+    [Tooltip("Ocean-wide mean S0 in bottom active layer across ocean cells.")]
+    public float debugLayeredBottomS0Mean;
     [Tooltip("How often aggregate Add(...) compatibility distribution was applied to layered ocean resources.")]
     public int debugLayeredAggregateAddCompatibilityCount;
     [Tooltip("Total absolute delta routed through aggregate Add(...) compatibility distribution for layered resources.")]
@@ -1329,6 +1333,7 @@ public class PlanetResourceMap : MonoBehaviour
         RegisterLayeredOceanResource(ResourceType.OrganicC, cellCount);
         RegisterLayeredOceanResource(ResourceType.H2, cellCount);
         RegisterLayeredOceanResource(ResourceType.H2S, cellCount);
+        RegisterLayeredOceanResource(ResourceType.S0, cellCount);
         RegisterLayeredOceanResource(ResourceType.CH4, cellCount);
         RegisterLayeredOceanResource(ResourceType.DissolvedFe2Plus, cellCount);
         RegisterLayeredOceanResource(ResourceType.DissolvedOrganicLeak, cellCount);
@@ -2235,6 +2240,9 @@ public class PlanetResourceMap : MonoBehaviour
         ApplyVerticalDiffusionForResource(ResourceType.H2S, transferRate);
         ApplyVerticalDiffusionForResource(ResourceType.CH4, transferRate);
         ApplyVerticalDiffusionForResource(ResourceType.DissolvedFe2Plus, transferRate);
+        // S0 intentionally excluded from strong symmetric vertical diffusion.
+        // In this pass we treat elemental sulfur as primarily local particulate storage,
+        // preserving layer-local persistence while compatibility bridges remain in place.
     }
 
     private void ApplyVerticalDiffusionForResource(ResourceType resourceType, float transferRate)
@@ -3379,6 +3387,7 @@ public class PlanetResourceMap : MonoBehaviour
         SyncResourceLegacyToLayered(ResourceType.OrganicC);
         SyncResourceLegacyToLayered(ResourceType.H2);
         SyncResourceLegacyToLayered(ResourceType.H2S);
+        SyncResourceLegacyToLayered(ResourceType.S0);
         SyncResourceLegacyToLayered(ResourceType.CH4);
         SyncResourceLegacyToLayered(ResourceType.DissolvedFe2Plus);
         SyncResourceLegacyToLayered(ResourceType.DissolvedOrganicLeak);
@@ -3585,6 +3594,8 @@ public class PlanetResourceMap : MonoBehaviour
             debugLayeredBottomOrganicCMean = 0f;
             debugLayeredTopH2SMean = 0f;
             debugLayeredBottomH2SMean = 0f;
+            debugLayeredTopS0Mean = 0f;
+            debugLayeredBottomS0Mean = 0f;
             return;
         }
 
@@ -3622,6 +3633,8 @@ public class PlanetResourceMap : MonoBehaviour
         float bottomOrganicCSum = 0f;
         float topH2SSum = 0f;
         float bottomH2SSum = 0f;
+        float topS0Sum = 0f;
+        float bottomS0Sum = 0f;
         int oceanCells = 0;
 
         for (int cell = 0; cell < oceanMask.Length; cell++)
@@ -3644,6 +3657,8 @@ public class PlanetResourceMap : MonoBehaviour
             bottomOrganicCSum += GetLayerResource(ResourceType.OrganicC, cell, bottom);
             topH2SSum += GetLayerResource(ResourceType.H2S, cell, top);
             bottomH2SSum += GetLayerResource(ResourceType.H2S, cell, bottom);
+            topS0Sum += GetLayerResource(ResourceType.S0, cell, top);
+            bottomS0Sum += GetLayerResource(ResourceType.S0, cell, bottom);
             oceanCells++;
         }
 
@@ -3655,6 +3670,8 @@ public class PlanetResourceMap : MonoBehaviour
             debugLayeredBottomOrganicCMean = 0f;
             debugLayeredTopH2SMean = 0f;
             debugLayeredBottomH2SMean = 0f;
+            debugLayeredTopS0Mean = 0f;
+            debugLayeredBottomS0Mean = 0f;
             return;
         }
 
@@ -3665,6 +3682,8 @@ public class PlanetResourceMap : MonoBehaviour
         debugLayeredBottomOrganicCMean = bottomOrganicCSum * invOcean;
         debugLayeredTopH2SMean = topH2SSum * invOcean;
         debugLayeredBottomH2SMean = bottomH2SSum * invOcean;
+        debugLayeredTopS0Mean = topS0Sum * invOcean;
+        debugLayeredBottomS0Mean = bottomS0Sum * invOcean;
     }
 
     public bool IsCellValid(int cell)
