@@ -53,6 +53,10 @@ public class PlanetResourceMap : MonoBehaviour
 
     private const int LayeredWriteFallbackReasonCount = 8;
     private const int MetabolismTypeTelemetryCount = 9;
+    private const int ResourceTelemetryCount = 14;
+
+    // Flattened indexing helper for reason-by-resource counters: (reason * ResourceTelemetryCount) + resourceIndex.
+    private const int MetabolismWriteFallbackReasonByResourceTelemetryCount = LayeredWriteFallbackReasonCount * ResourceTelemetryCount;
 
     private const int MaxOceanLayers = 5;
 
@@ -320,13 +324,19 @@ public class PlanetResourceMap : MonoBehaviour
     [Tooltip("Layered write fallback reasons aggregated across callsites.")]
     public int[] debugLayeredWriteFallbackReasonCount = new int[LayeredWriteFallbackReasonCount];
     [Tooltip("Metabolism-only layered write fallback counts by resource index.")]
-    public int[] debugMetabolismWriteFallbackCountByResource = new int[14];
+    public int[] debugMetabolismWriteFallbackCountByResource = new int[ResourceTelemetryCount];
     [Tooltip("Metabolism-only layered write fallback counts by metabolism type enum value.")]
     public int[] debugMetabolismWriteFallbackCountByMetabolismType = new int[MetabolismTypeTelemetryCount];
     [Tooltip("Metabolism-only layered write fallback counts by reason.")]
     public int[] debugMetabolismWriteFallbackCountByReason = new int[LayeredWriteFallbackReasonCount];
+    [Tooltip("Metabolism-only layered write fallback counts by resource and reason (flattened as reason * ResourceTelemetryCount + resource).")]
+    public int[] debugMetabolismWriteFallbackCountByReasonByResource = new int[MetabolismWriteFallbackReasonByResourceTelemetryCount];
+    [Tooltip("Metabolism-only layered write fallbacks considered true ocean-layer issues (layered ocean resource with ocean context but unresolved/invalid layer).")]
+    public int[] debugMetabolismOceanLayerFallbackCountByResource = new int[ResourceTelemetryCount];
+    [Tooltip("Metabolism-only layered write fallbacks considered expected non-ocean aggregate compatibility behavior.")]
+    public int[] debugMetabolismExpectedNonOceanFallbackCountByResource = new int[ResourceTelemetryCount];
     [Tooltip("Metabolism-only counts for ResourceNotLayeredInOcean fallbacks by resource index.")]
-    public int[] debugMetabolismResourceNotLayeredInOceanCountByResource = new int[14];
+    public int[] debugMetabolismResourceNotLayeredInOceanCountByResource = new int[ResourceTelemetryCount];
     [Tooltip("Metabolism-only counts for ResourceNotLayeredInOcean fallbacks by metabolism type enum value.")]
     public int[] debugMetabolismResourceNotLayeredInOceanCountByMetabolismType = new int[MetabolismTypeTelemetryCount];
     [Tooltip("GetResourceForCellLayer(...) fallback-to-aggregate reads, grouped by callsite.")]
@@ -3912,12 +3922,35 @@ public class PlanetResourceMap : MonoBehaviour
         debugMetabolismWriteFallbackCountByResource[resourceIndex]++;
         debugMetabolismWriteFallbackCountByMetabolismType[metabolismIndex]++;
         debugMetabolismWriteFallbackCountByReason[reasonIndex]++;
+        debugMetabolismWriteFallbackCountByReasonByResource[(reasonIndex * ResourceTelemetryCount) + resourceIndex]++;
+
+        if (IsTrueOceanLayerFallbackReason(reason))
+        {
+            debugMetabolismOceanLayerFallbackCountByResource[resourceIndex]++;
+        }
+        else if (IsExpectedNonOceanFallbackReason(reason))
+        {
+            debugMetabolismExpectedNonOceanFallbackCountByResource[resourceIndex]++;
+        }
 
         if (reason == LayeredWriteFallbackReason.ResourceNotLayeredInOcean)
         {
             debugMetabolismResourceNotLayeredInOceanCountByResource[resourceIndex]++;
             debugMetabolismResourceNotLayeredInOceanCountByMetabolismType[metabolismIndex]++;
         }
+    }
+
+    private static bool IsTrueOceanLayerFallbackReason(LayeredWriteFallbackReason reason)
+    {
+        return reason == LayeredWriteFallbackReason.NoActiveOceanLayers
+            || reason == LayeredWriteFallbackReason.InvalidCurrentOrPreferredLayer
+            || reason == LayeredWriteFallbackReason.MissingPopulationStateSync;
+    }
+
+    private static bool IsExpectedNonOceanFallbackReason(LayeredWriteFallbackReason reason)
+    {
+        return reason == LayeredWriteFallbackReason.LandOrNonOcean
+            || reason == LayeredWriteFallbackReason.ResourceNotLayeredNonOcean;
     }
 
     private void RecordReadFallbackToAggregateCallsite(AggregateCompatibilityCallsite callsite)
