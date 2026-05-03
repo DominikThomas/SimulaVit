@@ -1226,8 +1226,15 @@ public class ReplicatorMetabolismSystem
         bool canUseLayeredResource)
     {
         if (!planetResourceMap.IsCellValid(cellIndex)) return PlanetResourceMap.LayeredWriteFallbackReason.InvalidCell;
-        if (!canUseLayeredResource) return PlanetResourceMap.LayeredWriteFallbackReason.ResourceNotLayered;
-        if (!planetResourceMap.IsOceanCell(cellIndex)) return PlanetResourceMap.LayeredWriteFallbackReason.LandOrNonOcean;
+        bool isOceanCell = planetResourceMap.IsOceanCell(cellIndex);
+        if (!isOceanCell)
+        {
+            return canUseLayeredResource
+                ? PlanetResourceMap.LayeredWriteFallbackReason.LandOrNonOcean
+                : PlanetResourceMap.LayeredWriteFallbackReason.ResourceNotLayeredNonOcean;
+        }
+
+        if (!canUseLayeredResource) return PlanetResourceMap.LayeredWriteFallbackReason.ResourceNotLayeredInOcean;
         if (planetResourceMap.GetOceanActiveLayerCount(cellIndex) <= 0) return PlanetResourceMap.LayeredWriteFallbackReason.NoActiveOceanLayers;
 
         int current = populationState.CurrentOceanLayerIndex[index];

@@ -47,10 +47,11 @@ public class PlanetResourceMap : MonoBehaviour
         NoActiveOceanLayers = 3,
         InvalidCurrentOrPreferredLayer = 4,
         MissingPopulationStateSync = 5,
-        ResourceNotLayered = 6,
+        ResourceNotLayeredInOcean = 6,
+        ResourceNotLayeredNonOcean = 7,
     }
 
-    private const int LayeredWriteFallbackReasonCount = 7;
+    private const int LayeredWriteFallbackReasonCount = 8;
     private const int MetabolismTypeTelemetryCount = 9;
 
     private const int MaxOceanLayers = 5;
@@ -320,6 +321,10 @@ public class PlanetResourceMap : MonoBehaviour
     public int[] debugMetabolismWriteFallbackCountByMetabolismType = new int[MetabolismTypeTelemetryCount];
     [Tooltip("Metabolism-only layered write fallback counts by reason.")]
     public int[] debugMetabolismWriteFallbackCountByReason = new int[LayeredWriteFallbackReasonCount];
+    [Tooltip("Metabolism-only counts for ResourceNotLayeredInOcean fallbacks by resource index.")]
+    public int[] debugMetabolismResourceNotLayeredInOceanCountByResource = new int[14];
+    [Tooltip("Metabolism-only counts for ResourceNotLayeredInOcean fallbacks by metabolism type enum value.")]
+    public int[] debugMetabolismResourceNotLayeredInOceanCountByMetabolismType = new int[MetabolismTypeTelemetryCount];
     [Tooltip("GetResourceForCellLayer(...) fallback-to-aggregate reads, grouped by callsite.")]
     public int[] debugLayeredReadFallbackToAggregateCountByCallsite = new int[AggregateCompatibilityCallsiteCount];
 
@@ -3888,6 +3893,12 @@ public class PlanetResourceMap : MonoBehaviour
         debugMetabolismWriteFallbackCountByResource[resourceIndex]++;
         debugMetabolismWriteFallbackCountByMetabolismType[metabolismIndex]++;
         debugMetabolismWriteFallbackCountByReason[reasonIndex]++;
+
+        if (reason == LayeredWriteFallbackReason.ResourceNotLayeredInOcean)
+        {
+            debugMetabolismResourceNotLayeredInOceanCountByResource[resourceIndex]++;
+            debugMetabolismResourceNotLayeredInOceanCountByMetabolismType[metabolismIndex]++;
+        }
     }
 
     private void RecordReadFallbackToAggregateCallsite(AggregateCompatibilityCallsite callsite)
