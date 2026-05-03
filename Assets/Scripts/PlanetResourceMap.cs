@@ -3545,24 +3545,31 @@ public class PlanetResourceMap : MonoBehaviour
         }
 
         // Compatibility bridge intentionally kept during incremental migration.
-        // Most resources still spread aggregate Add(...) uniformly across active layers.
-        // CO2 is an exception: aggregate CO2 writes in ocean cells are applied to layer 0
-        // so direct atmosphere coupling remains surface-only; deeper influence comes from
-        // explicit vertical diffusion/mixing.
-        int startLayer = 0;
-        int endLayerExclusive = active;
-        float perLayerDelta = delta / active;
+        // IMPORTANT: ocean aggregate Add(...) for layered resources no longer smears
+        // uniformly across every active layer. We now route aggregate writes to a
+        // single deterministic layer so unresolved compatibility paths remain explicit
+        // and measurable without introducing hidden vertical redistribution.
+        //
+        // - CO2 keeps top-layer routing so atmosphere coupling remains surface-first.
+        // - All other layered ocean resources use bottom-layer routing as a conservative
+        //   deterministic fallback until all gameplay callsites provide explicit layers.
+        int targetLayer;
         if (resourceType == ResourceType.CO2)
         {
-            endLayerExclusive = 1;
-            perLayerDelta = delta;
+            targetLayer = GetOceanTopLayerIndex(cell);
+        }
+        else
+        {
+            targetLayer = GetOceanBottomLayerIndex(cell);
         }
 
-        for (int layer = startLayer; layer < endLayerExclusive; layer++)
+        if (targetLayer < 0)
         {
-            int idx = GetLayeredArrayIndex(cell, layer);
-            layered[idx] = Mathf.Max(0f, layered[idx] + perLayerDelta);
+            return;
         }
+
+        int idx = GetLayeredArrayIndex(cell, targetLayer);
+        layered[idx] = Mathf.Max(0f, layered[idx] + delta);
     }
 
     private void InjectVentProductToBottomLayer(ResourceType resourceType, int cell, float amount)
