@@ -3206,7 +3206,7 @@ public class PlanetResourceMap : MonoBehaviour
         }
     }
 
-    private bool ShouldUseLayeredOceanForResource(ResourceType resourceType, int cell)
+    public bool ShouldUseLayeredOceanForResource(ResourceType resourceType, int cell)
     {
         return enableLayeredOcean && IsOceanCell(cell) && GetLayeredOceanArray(resourceType) != null;
     }
@@ -3662,7 +3662,7 @@ public class PlanetResourceMap : MonoBehaviour
         debugLayeredBottomH2SMean = bottomH2SSum * invOcean;
     }
 
-    private bool IsCellValid(int cell)
+    public bool IsCellValid(int cell)
     {
         return co2 != null && cell >= 0 && cell < co2.Length;
     }
