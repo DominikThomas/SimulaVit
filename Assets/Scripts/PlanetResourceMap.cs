@@ -39,6 +39,20 @@ public class PlanetResourceMap : MonoBehaviour
 
     private const int AggregateCompatibilityCallsiteCount = 6;
 
+    public enum LayeredWriteFallbackReason
+    {
+        Unknown = 0,
+        LandOrNonOcean = 1,
+        InvalidCell = 2,
+        NoActiveOceanLayers = 3,
+        InvalidCurrentOrPreferredLayer = 4,
+        MissingPopulationStateSync = 5,
+        ResourceNotLayered = 6,
+    }
+
+    private const int LayeredWriteFallbackReasonCount = 7;
+    private const int MetabolismTypeTelemetryCount = 9;
+
     private const int MaxOceanLayers = 5;
 
     public struct OceanLayerSnapshot
@@ -298,6 +312,14 @@ public class PlanetResourceMap : MonoBehaviour
     public int[] debugLayeredAggregateGetCompatibilityCountByCallsite = new int[AggregateCompatibilityCallsiteCount];
     [Tooltip("AddResourceForCellLayer(...) fallback-to-aggregate writes, grouped by callsite.")]
     public int[] debugLayeredWriteFallbackToAggregateCountByCallsite = new int[AggregateCompatibilityCallsiteCount];
+    [Tooltip("Layered write fallback reasons aggregated across callsites.")]
+    public int[] debugLayeredWriteFallbackReasonCount = new int[LayeredWriteFallbackReasonCount];
+    [Tooltip("Metabolism-only layered write fallback counts by resource index.")]
+    public int[] debugMetabolismWriteFallbackCountByResource = new int[14];
+    [Tooltip("Metabolism-only layered write fallback counts by metabolism type enum value.")]
+    public int[] debugMetabolismWriteFallbackCountByMetabolismType = new int[MetabolismTypeTelemetryCount];
+    [Tooltip("Metabolism-only layered write fallback counts by reason.")]
+    public int[] debugMetabolismWriteFallbackCountByReason = new int[LayeredWriteFallbackReasonCount];
     [Tooltip("GetResourceForCellLayer(...) fallback-to-aggregate reads, grouped by callsite.")]
     public int[] debugLayeredReadFallbackToAggregateCountByCallsite = new int[AggregateCompatibilityCallsiteCount];
 
@@ -3849,6 +3871,23 @@ public class PlanetResourceMap : MonoBehaviour
         }
 
         debugLayeredWriteFallbackToAggregateCountByCallsite[index]++;
+        debugLayeredWriteFallbackReasonCount[(int)LayeredWriteFallbackReason.Unknown]++;
+    }
+
+
+    public void RecordMetabolismLayeredWriteFallback(ResourceType resourceType, int metabolismType, LayeredWriteFallbackReason reason)
+    {
+        if (!enableLayeredCompatibilityCallsiteTelemetry)
+        {
+            return;
+        }
+
+        int resourceIndex = Mathf.Clamp((int)resourceType, 0, debugMetabolismWriteFallbackCountByResource.Length - 1);
+        int metabolismIndex = Mathf.Clamp(metabolismType, 0, debugMetabolismWriteFallbackCountByMetabolismType.Length - 1);
+        int reasonIndex = Mathf.Clamp((int)reason, 0, debugMetabolismWriteFallbackCountByReason.Length - 1);
+        debugMetabolismWriteFallbackCountByResource[resourceIndex]++;
+        debugMetabolismWriteFallbackCountByMetabolismType[metabolismIndex]++;
+        debugMetabolismWriteFallbackCountByReason[reasonIndex]++;
     }
 
     private void RecordReadFallbackToAggregateCallsite(AggregateCompatibilityCallsite callsite)
