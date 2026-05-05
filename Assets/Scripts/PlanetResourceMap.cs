@@ -313,34 +313,36 @@ public class PlanetResourceMap : MonoBehaviour
     public int debugLayeredReadFallbackToAggregateCount;
     [Tooltip("Optional: enable per-callsite counters for layered aggregate compatibility usage. Keep disabled in normal gameplay unless auditing migration progress.")]
     public bool enableLayeredCompatibilityCallsiteTelemetry;
+    // Keep detailed compatibility telemetry for migration audits, but hide it from default Inspector to reduce noise.
+    // Values are still tracked at runtime and available for targeted debugging when telemetry is enabled.
     [Tooltip("Compatibility Add(...) calls in layered ocean cells routed through aggregate-to-layer distribution, grouped by callsite.")]
-    public int[] debugLayeredAggregateAddCompatibilityCountByCallsite = new int[AggregateCompatibilityCallsiteCount];
+    [HideInInspector] public int[] debugLayeredAggregateAddCompatibilityCountByCallsite = new int[AggregateCompatibilityCallsiteCount];
     [Tooltip("Compatibility Add(...) absolute delta routed through aggregate-to-layer distribution, grouped by callsite.")]
-    public float[] debugLayeredAggregateAddCompatibilityAbsDeltaByCallsite = new float[AggregateCompatibilityCallsiteCount];
+    [HideInInspector] public float[] debugLayeredAggregateAddCompatibilityAbsDeltaByCallsite = new float[AggregateCompatibilityCallsiteCount];
     [Tooltip("Aggregate Get(...) calls for layered resources (effective layered aggregate reads), grouped by callsite.")]
-    public int[] debugLayeredAggregateGetCompatibilityCountByCallsite = new int[AggregateCompatibilityCallsiteCount];
+    [HideInInspector] public int[] debugLayeredAggregateGetCompatibilityCountByCallsite = new int[AggregateCompatibilityCallsiteCount];
     [Tooltip("AddResourceForCellLayer(...) fallback-to-aggregate writes, grouped by callsite.")]
-    public int[] debugLayeredWriteFallbackToAggregateCountByCallsite = new int[AggregateCompatibilityCallsiteCount];
+    [HideInInspector] public int[] debugLayeredWriteFallbackToAggregateCountByCallsite = new int[AggregateCompatibilityCallsiteCount];
     [Tooltip("Layered write fallback reasons aggregated across callsites.")]
-    public int[] debugLayeredWriteFallbackReasonCount = new int[LayeredWriteFallbackReasonCount];
+    [HideInInspector] public int[] debugLayeredWriteFallbackReasonCount = new int[LayeredWriteFallbackReasonCount];
     [Tooltip("Metabolism-only layered write fallback counts by resource index.")]
-    public int[] debugMetabolismWriteFallbackCountByResource = new int[ResourceTelemetryCount];
+    [HideInInspector] public int[] debugMetabolismWriteFallbackCountByResource = new int[ResourceTelemetryCount];
     [Tooltip("Metabolism-only layered write fallback counts by metabolism type enum value.")]
-    public int[] debugMetabolismWriteFallbackCountByMetabolismType = new int[MetabolismTypeTelemetryCount];
+    [HideInInspector] public int[] debugMetabolismWriteFallbackCountByMetabolismType = new int[MetabolismTypeTelemetryCount];
     [Tooltip("Metabolism-only layered write fallback counts by reason.")]
-    public int[] debugMetabolismWriteFallbackCountByReason = new int[LayeredWriteFallbackReasonCount];
+    [HideInInspector] public int[] debugMetabolismWriteFallbackCountByReason = new int[LayeredWriteFallbackReasonCount];
     [Tooltip("Metabolism-only layered write fallback counts by resource and reason (flattened as reason * ResourceTelemetryCount + resource).")]
-    public int[] debugMetabolismWriteFallbackCountByReasonByResource = new int[MetabolismWriteFallbackReasonByResourceTelemetryCount];
+    [HideInInspector] public int[] debugMetabolismWriteFallbackCountByReasonByResource = new int[MetabolismWriteFallbackReasonByResourceTelemetryCount];
     [Tooltip("Metabolism-only layered write fallbacks considered true ocean-layer issues (layered ocean resource with ocean context but unresolved/invalid layer).")]
-    public int[] debugMetabolismOceanLayerFallbackCountByResource = new int[ResourceTelemetryCount];
+    [HideInInspector] public int[] debugMetabolismOceanLayerFallbackCountByResource = new int[ResourceTelemetryCount];
     [Tooltip("Metabolism-only layered write fallbacks considered expected non-ocean aggregate compatibility behavior.")]
-    public int[] debugMetabolismExpectedNonOceanFallbackCountByResource = new int[ResourceTelemetryCount];
+    [HideInInspector] public int[] debugMetabolismExpectedNonOceanFallbackCountByResource = new int[ResourceTelemetryCount];
     [Tooltip("Metabolism-only counts for ResourceNotLayeredInOcean fallbacks by resource index.")]
-    public int[] debugMetabolismResourceNotLayeredInOceanCountByResource = new int[ResourceTelemetryCount];
+    [HideInInspector] public int[] debugMetabolismResourceNotLayeredInOceanCountByResource = new int[ResourceTelemetryCount];
     [Tooltip("Metabolism-only counts for ResourceNotLayeredInOcean fallbacks by metabolism type enum value.")]
-    public int[] debugMetabolismResourceNotLayeredInOceanCountByMetabolismType = new int[MetabolismTypeTelemetryCount];
+    [HideInInspector] public int[] debugMetabolismResourceNotLayeredInOceanCountByMetabolismType = new int[MetabolismTypeTelemetryCount];
     [Tooltip("GetResourceForCellLayer(...) fallback-to-aggregate reads, grouped by callsite.")]
-    public int[] debugLayeredReadFallbackToAggregateCountByCallsite = new int[AggregateCompatibilityCallsiteCount];
+    [HideInInspector] public int[] debugLayeredReadFallbackToAggregateCountByCallsite = new int[AggregateCompatibilityCallsiteCount];
 
     [Header("Scent Fields")]
     [Tooltip("Enable diffuse chemical cue fields used for scent-based predation/fear steering.")]
