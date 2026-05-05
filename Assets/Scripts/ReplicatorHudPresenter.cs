@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 
 public class ReplicatorHudPresenter
@@ -140,42 +141,36 @@ public class ReplicatorHudPresenter
         float safeTotal = Mathf.Max(1f, totalAgents);
         string replicatorsText =
             "Replicators (Passive/Amoeboid/Flagellum/Anchored)\n" +
-            $"Total: {FormatLocomotionCounts(totalByLocomotion)}\n" +
-            $"<color=#D9FFFF>Hydrogen:</color> {FormatLocomotionCounts(hydrogenByLocomotion)} ({(100f * hydrogenotrophAgentCount / safeTotal):0.0}%)";
+            $"Total: {FormatLocomotionCounts(totalByLocomotion)}";
 
-        if (chemosynthAgentCount > 0)
+        // --- Build ALL metabolisms (including Hydrogen) ---
+        var metabolisms = new List<(string label, string color, int count, string locomotion)>
         {
-            replicatorsText += $"\n<color=#FFD54A>Sulfur:</color> {FormatLocomotionCounts(chemosynthByLocomotion)} ({(100f * chemosynthAgentCount / safeTotal):0.0}%)";
-        }
+            ("Hydrogen", "#D9FFFF", hydrogenotrophAgentCount, FormatLocomotionCounts(hydrogenByLocomotion)),
+            ("Sulfur", "#FFD54A", chemosynthAgentCount, FormatLocomotionCounts(chemosynthByLocomotion)),
+            ("Photo", "#79E07E", photosynthAgentCount, FormatLocomotionCounts(photosynthByLocomotion)),
+            ("Sapro", "#62B0FF", saprotrophAgentCount, FormatLocomotionCounts(saprotrophByLocomotion)),
+            ("Predator", "#FF5A5A", predatorAgentCount, FormatLocomotionCounts(predatorByLocomotion)),
+            ("Ferment", "#FF8C1A", fermenterAgentCount, FormatLocomotionCounts(fermentByLocomotion)),
+            ("Methanogen", "#9955E6", methanogenAgentCount, FormatLocomotionCounts(methanogenByLocomotion)),
+            ("Methanotroph", "#FF73BF", methanotrophAgentCount, FormatLocomotionCounts(methanotrophByLocomotion))
+        };
 
-        if (photosynthAgentCount > 0)
-        {
-            replicatorsText += $"\n<color=#79E07E>Photo:</color> {FormatLocomotionCounts(photosynthByLocomotion)} ({(100f * photosynthAgentCount / safeTotal):0.0}%)";
-        }
+        // --- Keep Hydrogen always, filter others ---
+        var filtered = metabolisms
+            .Where(m => m.label == "Hydrogen" || m.count > 0)
+            .ToList();
 
-        if (saprotrophAgentCount > 0)
-        {
-            replicatorsText += $"\n<color=#62B0FF>Sapro:</color> {FormatLocomotionCounts(saprotrophByLocomotion)} ({(100f * saprotrophAgentCount / safeTotal):0.0}%)";
-        }
+        // --- Sort ALL by count (descending) ---
+        filtered.Sort((a, b) => b.count.CompareTo(a.count));
 
-        if (predatorAgentCount > 0)
+        // --- Build text ---
+        foreach (var m in filtered)
         {
-            replicatorsText += $"\n<color=#FF5A5A>Predator:</color> {FormatLocomotionCounts(predatorByLocomotion)} ({(100f * predatorAgentCount / safeTotal):0.0}%)";
-        }
+            float percent = safeTotal > 0 ? 100f * m.count / safeTotal : 0f;
 
-        if (fermenterAgentCount > 0)
-        {
-            replicatorsText += $"\n<color=#FF8C1A>Ferment:</color> {FormatLocomotionCounts(fermentByLocomotion)} ({(100f * fermenterAgentCount / safeTotal):0.0}%)";
-        }
-
-        if (methanogenAgentCount > 0)
-        {
-            replicatorsText += $"\n<color=#9955E6>Methanogen:</color> {FormatLocomotionCounts(methanogenByLocomotion)} ({(100f * methanogenAgentCount / safeTotal):0.0}%)";
-        }
-
-        if (methanotrophAgentCount > 0)
-        {
-            replicatorsText += $"\n<color=#FF73BF>Methanotroph:</color> {FormatLocomotionCounts(methanotrophByLocomotion)} ({(100f * methanotrophAgentCount / safeTotal):0.0}%)";
+            replicatorsText +=
+                $"\n<color={m.color}>{m.label}:</color> {m.locomotion} ({percent:0.0}%)";
         }
 
         Matrix4x4 oldMatrix = GUI.matrix;
