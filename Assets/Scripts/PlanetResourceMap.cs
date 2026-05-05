@@ -252,7 +252,7 @@ public class PlanetResourceMap : MonoBehaviour
     [Tooltip("Layered light model: layer 1 uses moderate light relative to top (target ~0.40-0.70).")]
     [Range(0.4f, 0.7f)] public float layeredSecondLayerLightFactor = 0.55f;
     [Tooltip("Layered light model: layers 2+ are near-dark by default.")]
-    [Range(0f, 0.2f)] public float layeredDeepLightFactor = 0.02f;
+    [Range(0f, 0.2f)] public float layeredThirdLayerLightFactor = 0.02f;
     [Tooltip("Simple conservative adjacent-layer diffusion rate applied each atmosphere tick.")]
     [Range(0f, 1f)] public float layeredVerticalMixRate = 0.02f;
     [Tooltip("Slow oxygenation source that pushes atmospheric O2 into ocean surface layers.")]
@@ -3319,7 +3319,13 @@ public class PlanetResourceMap : MonoBehaviour
             return Mathf.Clamp01(layeredSecondLayerLightFactor);
         }
 
-        return Mathf.Clamp01(layeredDeepLightFactor);
+        if (layerIndex == 2)
+        {
+            return Mathf.Clamp01(layeredThirdLayerLightFactor);
+        }
+
+
+        return 0;
     }
 
     private float GetSolarHeatingFactorForLayer(int layerIndex)
@@ -3841,7 +3847,7 @@ public class PlanetResourceMap : MonoBehaviour
         layeredLightAttenuation = Mathf.Max(0f, layeredLightAttenuation);
         layeredTopLightFactor = Mathf.Clamp01(layeredTopLightFactor);
         layeredSecondLayerLightFactor = Mathf.Clamp(layeredSecondLayerLightFactor, 0.4f, 0.7f);
-        layeredDeepLightFactor = Mathf.Clamp(layeredDeepLightFactor, 0f, 0.2f);
+        layeredThirdLayerLightFactor = Mathf.Clamp(layeredThirdLayerLightFactor, 0f, 0.2f);
         layeredVerticalMixRate = Mathf.Clamp01(layeredVerticalMixRate);
         layeredSurfaceOxygenationRate = Mathf.Clamp01(layeredSurfaceOxygenationRate);
         layeredMarineSnowRate = Mathf.Clamp01(layeredMarineSnowRate);
