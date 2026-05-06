@@ -1909,7 +1909,8 @@ public class ReplicatorManager : MonoBehaviour
 
         if (mutateToAnchored)
         {
-            if (locomotion != LocomotionType.Anchored)
+            bool canMutateToAnchored = parent != null && CanMutateToAnchored(parent);
+            if (canMutateToAnchored && (locomotion != LocomotionType.Anchored))
             {
                 return LocomotionType.Anchored;
             }
@@ -1936,6 +1937,29 @@ public class ReplicatorManager : MonoBehaviour
         }
 
         return locomotion;
+    }
+
+    bool CanMutateToAnchored(Replicator replicator)
+    {
+        if (replicator == null || planetResourceMap == null)
+        {
+            return true;
+        }
+
+        int cellIndex = DirectionToSimulationCellIndex(replicator.currentDirection);
+        if (cellIndex < 0 || !planetResourceMap.IsOceanCell(cellIndex))
+        {
+            return true;
+        }
+
+        int bottomLayer = planetResourceMap.GetOceanBottomLayerIndex(cellIndex);
+        if (bottomLayer < 0)
+        {
+            return true;
+        }
+
+        int currentLayer = planetResourceMap.ClampOceanLayerIndex(cellIndex, replicator.currentOceanLayerIndex);
+        return currentLayer == bottomLayer;
     }
 
     float ResolveInheritedLocomotionSkill(Replicator parent)
