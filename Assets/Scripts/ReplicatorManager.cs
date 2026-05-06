@@ -1909,7 +1909,7 @@ public class ReplicatorManager : MonoBehaviour
 
         if (mutateToAnchored)
         {
-            if (locomotion == LocomotionType.PassiveDrift || locomotion == LocomotionType.Amoeboid)
+            if (locomotion != LocomotionType.Anchored)
             {
                 return LocomotionType.Anchored;
             }
