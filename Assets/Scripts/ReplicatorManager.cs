@@ -1910,7 +1910,7 @@ public class ReplicatorManager : MonoBehaviour
         if (mutateToAnchored)
         {
             bool canMutateToAnchored = parent != null && CanMutateToAnchored(parent);
-            if (canMutateToAnchored && (locomotion == LocomotionType.PassiveDrift || locomotion == LocomotionType.Amoeboid))
+            if (canMutateToAnchored && (locomotion != LocomotionType.Anchored))
             {
                 return LocomotionType.Anchored;
             }
