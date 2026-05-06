@@ -74,12 +74,26 @@ Each reaction definition should encode (explicitly, data-first):
 
 - inputs and outputs (resource deltas),
 - energy delta,
-- running cost (activity-dependent),
-- maintenance cost (baseline burden),
+- maintenance cost: baseline energetic burden of owning/maintaining the reaction machinery,
+- running cost: additional cost proportional to reaction activity/throughput,
 - environmental modifiers (light, temperature, layer context, concentration saturation),
 - inhibition/toxicity modifiers (e.g., O2 inhibition or toxicity pressure).
 
+Environmental modifiers should be generic scalar influences applied through shared interfaces rather than special-case metabolism branching.
 Execution remains deterministic and bounded: no arbitrary graph search, no user-authored chemistry strings, no unconstrained dynamic network mutation.
+
+### 3.3 Reaction capacity / enzyme budget
+
+Future phases may introduce a per-replicator reaction capacity budget.
+
+Each owned reaction package or reaction contributes to:
+- enzyme burden,
+- regulatory complexity,
+- membrane/protein maintenance cost.
+
+This provides a natural constraint preventing unrestricted accumulation of reactions and supports specialist vs generalist ecological tradeoffs.
+
+Phase 1 does not implement mutable reaction ownership or capacity limits.
 
 ---
 
@@ -93,6 +107,7 @@ Execution remains deterministic and bounded: no arbitrary graph search, no user-
    - Base energy delta
    - Base running/maintenance costs
    - Modifier slots (environment + inhibition/toxicity)
+   - ReactionDefinition instances should be immutable shared definitions referenced by agents/packages, not dynamically allocated per-agent mutable objects.
 
 2. **ReactionPackageDefinition**
    - Package identifier
@@ -136,13 +151,17 @@ Execution remains deterministic and bounded: no arbitrary graph search, no user-
    - `MetabolismType` remains authoritative identity for spawn/mutation/UI/telemetry.
    - Existing debug counters and death-cause reporting remain available.
 
-4. **Paritization strategy**
+4. **Parity strategy**
    - Use side-by-side validation mode (old branch outputs vs reaction outputs) where feasible.
    - Migrate one metabolism package at a time in low-risk order (e.g., hydrogenotrophy/sulfur first, then saprotrophy/fermentation/methanogen/methanotroph, then photosynthesis last due to special fallback logic).
 
 5. **No intentional macro behavior changes**
    - Keep population-level outcomes within expected noise bounds.
    - Defer balancing changes to explicit post-migration tuning.
+
+Phase 1 should introduce the reaction data model and bindings before replacing hot-loop behavior. The first implementation step may create definitions and validation scaffolding without using them to drive metabolism yet.
+Phase 1 should prioritize architecture parity over biological realism improvements.
+Each metabolism migration should be isolated in its own commit where possible, with before/after logs compared on the same seed.
 
 ---
 
@@ -184,10 +203,10 @@ Constraints:
 
 **Objective:** Replace hardcoded photosynthesis fallback branching with explicit reaction alternatives.
 
-- Define oxygenic and anoxygenic photosynthetic reactions as separate definitions inside the photosynthesis package (or adjacent package variants), selected by environmental conditions/modifiers.
+- Define oxygenic and anoxygenic photosynthetic reactions as separate definitions inside the photosynthesis package (or adjacent package variants).
 - Express current dark/anoxic fallback concepts as explicit low-yield reactions with clear inputs/outputs, energy yield constraints, and replication constraints.
 - Maintain compatibility with existing photosynthesis unlock mechanics and mutation gating logic initially (still enum-driven externally).
-
+- Current dark/anoxic fallback behavior should not be treated as biologically equivalent to anoxygenic photosynthesis. True anoxygenic photosynthesis should be modeled as light-dependent reactions using electron donors such as H2S, H2, or Fe2+.
 ---
 
 ## 9. Future UV/pigment direction
@@ -211,12 +230,27 @@ Given current architecture and profiler instrumentation:
 - Prefer compact fixed-size reaction arrays or prebuilt package lookup tables.
 - Preserve layer-aware resource write behavior and existing fallback telemetry hooks.
 - Avoid expensive indirection or runtime parsing in inner loops.
+- Avoid virtual/interface dispatch inside the hottest per-agent execution paths where possible.
 
 Reaction-backed execution is acceptable only if it remains within similar or better frame-time budget versus current branch implementation.
 
 ---
 
-## 11. Non-goals
+## 11. Emergent ecology goals
+
+Long-term ecological goals:
+- specialist vs generalist tradeoffs,
+- gradual oxygen transitions,
+- coexistence of aerobic and anaerobic niches,
+- layered ocean ecological stratification,
+- metabolic succession,
+- chemically limited carrying capacity,
+- partial resilience through metabolic diversity,
+- no single dominant metabolism in all environments.
+
+---
+
+## 12. Non-goals
 
 - No arbitrary chemistry grammar/parser.
 - No free mutable metabolic network editor/runtime for this migration.
@@ -226,16 +260,16 @@ Reaction-backed execution is acceptable only if it remains within similar or bet
 
 ---
 
-## 12. Risks and validation checklist
+## 13. Risks and validation checklist
 
-### 12.1 Key risks
+### 13.1 Key risks
 
 - **Behavior drift risk:** subtle stoichiometry/order differences can alter long-run ecology.
 - **Performance regression risk:** over-generalized reaction execution may slow hot loop.
 - **Telemetry mismatch risk:** existing death-cause/fallback counters may lose comparability.
 - **Layered-resource correctness risk:** reaction abstraction could bypass current layered write safeguards.
 
-### 12.2 Validation checklist (implementation-phase acceptance gates)
+### 13.2 Validation checklist (implementation-phase acceptance gates)
 
 1. **Behavior parity (short horizon)**
    - Per-metabolism resource flux signs and rough magnitudes match baseline scenarios.
