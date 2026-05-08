@@ -9,6 +9,14 @@ public class ReplicatorMetabolismSystem
     private static readonly ProfilerMarker MetabolismHotLoopMarker = new ProfilerMarker("ReplicatorMetabolismSystem.HotLoop");
     private static readonly ProfilerMarker RemoveDeadAgentsMarker = new ProfilerMarker("ReplicatorMetabolismSystem.RemoveDeadAgents");
 
+    private static readonly ResourceType HydrogenotrophyInput0Resource;
+    private static readonly ResourceType HydrogenotrophyInput1Resource;
+
+    static ReplicatorMetabolismSystem()
+    {
+        ResolveHydrogenotrophyInputResources(out HydrogenotrophyInput0Resource, out HydrogenotrophyInput1Resource);
+    }
+
     public struct Settings
     {
         public float BasalEnergyCostPerSecond;
@@ -598,19 +606,10 @@ public class ReplicatorMetabolismSystem
         float co2Need = Mathf.Max(0f, settings.HydrogenotrophyCO2PerTick);
         float h2Need = Mathf.Max(0f, settings.HydrogenotrophyH2PerTick);
 
-        ResourceType co2Resource = ResourceType.CO2;
-        ResourceType h2Resource = ResourceType.H2;
-        if (ReactionDefinitionRegistry.TryGetPackage(MetabolismType.Hydrogenotrophy, out ReactionPackageDefinition package)
-            && package.OrderedReactions != null
-            && package.OrderedReactions.Length > 0)
-        {
-            ReactionDefinition reaction = package.OrderedReactions[0];
-            if (reaction.Inputs != null && reaction.Inputs.Length >= 2)
-            {
-                co2Resource = reaction.Inputs[0].Resource;
-                h2Resource = reaction.Inputs[1].Resource;
-            }
-        }
+        // Resource identity is resolved once from the hydrogenotrophy package at type init.
+        // If scaffolding is missing or malformed, we intentionally fall back to CO2/H2 for behavior parity.
+        ResourceType co2Resource = HydrogenotrophyInput0Resource;
+        ResourceType h2Resource = HydrogenotrophyInput1Resource;
 
         float co2Available = GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, co2Resource, cellIndex);
         float h2Available = GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, h2Resource, cellIndex);
@@ -654,6 +653,24 @@ public class ReplicatorMetabolismSystem
         populationState.StarveH2Seconds[index] = UpdateStarveTimer(populationState.StarveH2Seconds[index], lackH2, dtTick);
     }
 
+
+    private static void ResolveHydrogenotrophyInputResources(out ResourceType co2Resource, out ResourceType h2Resource)
+    {
+        co2Resource = ResourceType.CO2;
+        h2Resource = ResourceType.H2;
+
+        if (!ReactionDefinitionRegistry.TryGetPackage(MetabolismType.Hydrogenotrophy, out ReactionPackageDefinition package)
+            || package.OrderedReactions == null
+            || package.OrderedReactions.Length == 0)
+            return;
+
+        ReactionDefinition reaction = package.OrderedReactions[0];
+        if (reaction.Inputs == null || reaction.Inputs.Length < 2)
+            return;
+
+        co2Resource = reaction.Inputs[0].Resource;
+        h2Resource = reaction.Inputs[1].Resource;
+    }
 
     private static void RemoveAgentAtSwapBack(List<Replicator> agents, ReplicatorPopulationState populationState, int index)
     {
