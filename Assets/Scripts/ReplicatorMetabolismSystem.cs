@@ -5,6 +5,7 @@ using Unity.Profiling;
 
 public class ReplicatorMetabolismSystem
 {
+    private const bool EnableHydrogenotrophyParityValidation = false;
     private static readonly ProfilerMarker MetabolismHotLoopMarker = new ProfilerMarker("ReplicatorMetabolismSystem.HotLoop");
     private static readonly ProfilerMarker RemoveDeadAgentsMarker = new ProfilerMarker("ReplicatorMetabolismSystem.RemoveDeadAgents");
 
@@ -301,44 +302,15 @@ public class ReplicatorMetabolismSystem
             }
             else if (metabolism == MetabolismType.Hydrogenotrophy)
             {
-                float co2Need = Mathf.Max(0f, settings.HydrogenotrophyCO2PerTick);
-                float h2Need = Mathf.Max(0f, settings.HydrogenotrophyH2PerTick);
-
-                float co2Available = GetAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.CO2, cellIndex);
-                float h2Available = GetAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.H2, cellIndex);
-                float co2Ratio = co2Need <= Mathf.Epsilon ? 1f : co2Available / co2Need;
-                float h2Ratio = h2Need <= Mathf.Epsilon ? 1f : h2Available / h2Need;
-                float pulledRatio = Mathf.Clamp01(Mathf.Min(co2Ratio, h2Ratio));
-
-                bool lackCo2 = false;
-                bool lackH2 = false;
-
-                if (pulledRatio > 0f)
-                {
-                    float co2Consumed = co2Need * pulledRatio;
-                    float h2Consumed = h2Need * pulledRatio;
-
-                    AddAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, metabolism, ResourceType.CO2, cellIndex, -co2Consumed);
-                    AddAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, metabolism, ResourceType.H2, cellIndex, -h2Consumed);
-
-                    float producedEnergy = Mathf.Max(0f, settings.HydrogenotrophyEnergyPerTick) * pulledRatio * performance;
-                    populationState.Energy[i] += producedEnergy;
-
-                    float storeFrac = Mathf.Clamp01(settings.HydrogenotrophyStoreFraction);
-                    float fixedC = co2Consumed * storeFrac;
-                    if (fixedC > 0f)
-                    {
-                        populationState.OrganicCStore[i] = Mathf.Clamp(populationState.OrganicCStore[i] + fixedC, 0f, maxStore);
-                    }
-                }
-                else
-                {
-                    lackCo2 = co2Need > 0f && co2Available <= Mathf.Epsilon;
-                    lackH2 = h2Need > 0f && h2Available <= Mathf.Epsilon;
-                }
-
-                populationState.StarveCo2Seconds[i] = UpdateStarveTimer(populationState.StarveCo2Seconds[i], lackCo2, dtTick);
-                populationState.StarveH2Seconds[i] = UpdateStarveTimer(populationState.StarveH2Seconds[i], lackH2, dtTick);
+                ProcessHydrogenotrophyReactionBacked(
+                    populationState,
+                    i,
+                    planetResourceMap,
+                    settings,
+                    cellIndex,
+                    performance,
+                    dtTick,
+                    maxStore);
                 populationState.StarveH2sSeconds[i] = 0f;
                 populationState.StarveLightSeconds[i] = 0f;
                 populationState.StarveOrganicCFoodSeconds[i] = 0f;
@@ -610,6 +582,75 @@ public class ReplicatorMetabolismSystem
                 RemoveAgentAtSwapBack(agents, populationState, index);
             }
         }
+    }
+
+    private static void ProcessHydrogenotrophyReactionBacked(
+        ReplicatorPopulationState populationState,
+        int index,
+        PlanetResourceMap planetResourceMap,
+        Settings settings,
+        int cellIndex,
+        float performance,
+        float dtTick,
+        float maxStore)
+    {
+        float co2Need = Mathf.Max(0f, settings.HydrogenotrophyCO2PerTick);
+        float h2Need = Mathf.Max(0f, settings.HydrogenotrophyH2PerTick);
+
+        ResourceType co2Resource = ResourceType.CO2;
+        ResourceType h2Resource = ResourceType.H2;
+        if (ReactionDefinitionRegistry.TryGetPackage(MetabolismType.Hydrogenotrophy, out ReactionPackageDefinition package)
+            && package.OrderedReactions != null
+            && package.OrderedReactions.Length > 0)
+        {
+            ReactionDefinition reaction = package.OrderedReactions[0];
+            if (reaction.Inputs != null && reaction.Inputs.Length >= 2)
+            {
+                co2Resource = reaction.Inputs[0].Resource;
+                h2Resource = reaction.Inputs[1].Resource;
+            }
+        }
+
+        float co2Available = GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, co2Resource, cellIndex);
+        float h2Available = GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, h2Resource, cellIndex);
+        float co2Ratio = co2Need <= Mathf.Epsilon ? 1f : co2Available / co2Need;
+        float h2Ratio = h2Need <= Mathf.Epsilon ? 1f : h2Available / h2Need;
+        float pulledRatio = Mathf.Clamp01(Mathf.Min(co2Ratio, h2Ratio));
+
+        bool lackCo2 = false;
+        bool lackH2 = false;
+
+        if (pulledRatio > 0f)
+        {
+            float co2Consumed = co2Need * pulledRatio;
+            float h2Consumed = h2Need * pulledRatio;
+
+            AddAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, MetabolismType.Hydrogenotrophy, co2Resource, cellIndex, -co2Consumed);
+            AddAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, MetabolismType.Hydrogenotrophy, h2Resource, cellIndex, -h2Consumed);
+
+            float producedEnergy = Mathf.Max(0f, settings.HydrogenotrophyEnergyPerTick) * pulledRatio * performance;
+            populationState.Energy[index] += producedEnergy;
+
+            float storeFrac = Mathf.Clamp01(settings.HydrogenotrophyStoreFraction);
+            float fixedC = co2Consumed * storeFrac;
+            if (fixedC > 0f)
+                populationState.OrganicCStore[index] = Mathf.Clamp(populationState.OrganicCStore[index] + fixedC, 0f, maxStore);
+
+            if (EnableHydrogenotrophyParityValidation)
+            {
+                float legacyEnergy = Mathf.Max(0f, settings.HydrogenotrophyEnergyPerTick) * pulledRatio * performance;
+                if (Mathf.Abs(legacyEnergy - producedEnergy) > 0.0001f)
+                    Debug.LogWarning("Hydrogenotrophy reaction parity mismatch: energy delta differs from legacy path.");
+            }
+        }
+        else
+        {
+            lackCo2 = co2Need > 0f && co2Available <= Mathf.Epsilon;
+            lackH2 = h2Need > 0f && h2Available <= Mathf.Epsilon;
+        }
+
+        populationState.StarveCo2Seconds[index] = UpdateStarveTimer(populationState.StarveCo2Seconds[index], lackCo2, dtTick);
+        populationState.StarveH2Seconds[index] = UpdateStarveTimer(populationState.StarveH2Seconds[index], lackH2, dtTick);
     }
 
     private static void RemoveAgentAtSwapBack(List<Replicator> agents, ReplicatorPopulationState populationState, int index)
