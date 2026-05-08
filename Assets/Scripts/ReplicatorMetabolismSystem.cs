@@ -9,11 +9,18 @@ public class ReplicatorMetabolismSystem
     private static readonly ProfilerMarker MetabolismHotLoopMarker = new ProfilerMarker("ReplicatorMetabolismSystem.HotLoop");
     private static readonly ProfilerMarker RemoveDeadAgentsMarker = new ProfilerMarker("ReplicatorMetabolismSystem.RemoveDeadAgents");
 
+    private static readonly ResourceType SulfurChemosynthesisInput0Resource;
+    private static readonly ResourceType SulfurChemosynthesisInput1Resource;
+    private static readonly ResourceType SulfurChemosynthesisOutput0Resource;
     private static readonly ResourceType HydrogenotrophyInput0Resource;
     private static readonly ResourceType HydrogenotrophyInput1Resource;
 
     static ReplicatorMetabolismSystem()
     {
+        ResolveSulfurChemosynthesisResources(
+            out SulfurChemosynthesisInput0Resource,
+            out SulfurChemosynthesisInput1Resource,
+            out SulfurChemosynthesisOutput0Resource);
         ResolveHydrogenotrophyInputResources(out HydrogenotrophyInput0Resource, out HydrogenotrophyInput1Resource);
     }
 
@@ -482,54 +489,17 @@ public class ReplicatorMetabolismSystem
             }
             else
             {
-                float co2Need = Mathf.Max(0f, settings.ChemosynthesisCo2NeedPerTick);
-                float h2sNeed = Mathf.Max(0f, settings.ChemosynthesisH2sNeedPerTick);
+                ProcessSulfurChemosynthesisReactionBacked(
+                    populationState,
+                    i,
+                    planetResourceMap,
+                    settings,
+                    cellIndex,
+                    performance,
+                    dtTick,
+                    maxStore);
 
-                float co2Available = GetAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.CO2, cellIndex);
-                float h2sAvailable = GetAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.H2S, cellIndex);
-                float co2Ratio = co2Need <= Mathf.Epsilon ? 1f : co2Available / co2Need;
-                float h2sRatio = h2sNeed <= Mathf.Epsilon ? 1f : h2sAvailable / h2sNeed;
-                float pulledRatio = Mathf.Clamp01(Mathf.Min(co2Ratio, h2sRatio));
-
-                bool lackCo2 = false;
-                bool lackH2s = false;
-                bool lackO2 = false;
-                bool lackStoredC = false;
-
-                if (pulledRatio > 0f)
-                {
-                    float co2Consumed = co2Need * pulledRatio;
-                    float h2sConsumed = h2sNeed * pulledRatio;
-
-                    AddAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, metabolism, ResourceType.CO2, cellIndex, -co2Consumed);
-                    AddAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, metabolism, ResourceType.H2S, cellIndex, -h2sConsumed);
-                    AddAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, metabolism, ResourceType.S0, cellIndex, h2sConsumed);
-
-                    float producedEnergy = Mathf.Max(0f, settings.ChemosynthesisEnergyPerTick) * pulledRatio * performance;
-                    populationState.Energy[i] += producedEnergy;
-
-                    float storeFrac = Mathf.Clamp01(settings.ChemosynthStoreFraction);
-                    float fixedC = co2Consumed * storeFrac;
-                    if (fixedC > 0f)
-                        populationState.OrganicCStore[i] = Mathf.Clamp(populationState.OrganicCStore[i] + fixedC, 0f, maxStore);
-                }
-                else
-                {
-                    lackCo2 = co2Need > 0f && co2Available <= Mathf.Epsilon;
-                    lackH2s = h2sNeed > 0f && h2sAvailable <= Mathf.Epsilon;
-
-                    float desiredResp = Mathf.Max(0f, settings.ChemoRespirationCPerTick);
-                    bool hasStore = populationState.OrganicCStore[i] > 0f;
-                    float o2Available = GetAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.O2, cellIndex);
-                    lackStoredC = !hasStore && desiredResp > 0f;
-                    lackO2 = hasStore && desiredResp > 0f && o2Available <= Mathf.Epsilon;
-                }
-
-                populationState.StarveCo2Seconds[i] = UpdateStarveTimer(populationState.StarveCo2Seconds[i], lackCo2, dtTick);
-                populationState.StarveH2sSeconds[i] = UpdateStarveTimer(populationState.StarveH2sSeconds[i], lackH2s, dtTick);
                 populationState.StarveH2Seconds[i] = 0f;
-                populationState.StarveO2Seconds[i] = UpdateStarveTimer(populationState.StarveO2Seconds[i], lackO2, dtTick);
-                populationState.StarveStoredCSeconds[i] = UpdateStarveTimer(populationState.StarveStoredCSeconds[i], lackStoredC, dtTick);
                 populationState.StarveLightSeconds[i] = 0f;
                 populationState.StarveOrganicCFoodSeconds[i] = 0f;
             }
@@ -591,6 +561,69 @@ public class ReplicatorMetabolismSystem
                 RemoveAgentAtSwapBack(agents, populationState, index);
             }
         }
+    }
+
+    private static void ProcessSulfurChemosynthesisReactionBacked(
+        ReplicatorPopulationState populationState,
+        int index,
+        PlanetResourceMap planetResourceMap,
+        Settings settings,
+        int cellIndex,
+        float performance,
+        float dtTick,
+        float maxStore)
+    {
+        float co2Need = Mathf.Max(0f, settings.ChemosynthesisCo2NeedPerTick);
+        float h2sNeed = Mathf.Max(0f, settings.ChemosynthesisH2sNeedPerTick);
+
+        ResourceType co2Resource = SulfurChemosynthesisInput0Resource;
+        ResourceType h2sResource = SulfurChemosynthesisInput1Resource;
+        ResourceType sulfurOutputResource = SulfurChemosynthesisOutput0Resource;
+
+        float co2Available = GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, co2Resource, cellIndex);
+        float h2sAvailable = GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, h2sResource, cellIndex);
+        float co2Ratio = co2Need <= Mathf.Epsilon ? 1f : co2Available / co2Need;
+        float h2sRatio = h2sNeed <= Mathf.Epsilon ? 1f : h2sAvailable / h2sNeed;
+        float pulledRatio = Mathf.Clamp01(Mathf.Min(co2Ratio, h2sRatio));
+
+        bool lackCo2 = false;
+        bool lackH2s = false;
+        bool lackO2 = false;
+        bool lackStoredC = false;
+
+        if (pulledRatio > 0f)
+        {
+            float co2Consumed = co2Need * pulledRatio;
+            float h2sConsumed = h2sNeed * pulledRatio;
+
+            AddAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, MetabolismType.SulfurChemosynthesis, co2Resource, cellIndex, -co2Consumed);
+            AddAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, MetabolismType.SulfurChemosynthesis, h2sResource, cellIndex, -h2sConsumed);
+            AddAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, MetabolismType.SulfurChemosynthesis, sulfurOutputResource, cellIndex, h2sConsumed);
+
+            float producedEnergy = Mathf.Max(0f, settings.ChemosynthesisEnergyPerTick) * pulledRatio * performance;
+            populationState.Energy[index] += producedEnergy;
+
+            float storeFrac = Mathf.Clamp01(settings.ChemosynthStoreFraction);
+            float fixedC = co2Consumed * storeFrac;
+            if (fixedC > 0f)
+                populationState.OrganicCStore[index] = Mathf.Clamp(populationState.OrganicCStore[index] + fixedC, 0f, maxStore);
+        }
+        else
+        {
+            lackCo2 = co2Need > 0f && co2Available <= Mathf.Epsilon;
+            lackH2s = h2sNeed > 0f && h2sAvailable <= Mathf.Epsilon;
+
+            float desiredResp = Mathf.Max(0f, settings.ChemoRespirationCPerTick);
+            bool hasStore = populationState.OrganicCStore[index] > 0f;
+            float o2Available = GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, ResourceType.O2, cellIndex);
+            lackStoredC = !hasStore && desiredResp > 0f;
+            lackO2 = hasStore && desiredResp > 0f && o2Available <= Mathf.Epsilon;
+        }
+
+        populationState.StarveCo2Seconds[index] = UpdateStarveTimer(populationState.StarveCo2Seconds[index], lackCo2, dtTick);
+        populationState.StarveH2sSeconds[index] = UpdateStarveTimer(populationState.StarveH2sSeconds[index], lackH2s, dtTick);
+        populationState.StarveO2Seconds[index] = UpdateStarveTimer(populationState.StarveO2Seconds[index], lackO2, dtTick);
+        populationState.StarveStoredCSeconds[index] = UpdateStarveTimer(populationState.StarveStoredCSeconds[index], lackStoredC, dtTick);
     }
 
     private static void ProcessHydrogenotrophyReactionBacked(
@@ -670,6 +703,28 @@ public class ReplicatorMetabolismSystem
 
         co2Resource = reaction.Inputs[0].Resource;
         h2Resource = reaction.Inputs[1].Resource;
+    }
+
+    private static void ResolveSulfurChemosynthesisResources(out ResourceType co2Resource, out ResourceType h2sResource, out ResourceType sulfurOutputResource)
+    {
+        co2Resource = ResourceType.CO2;
+        h2sResource = ResourceType.H2S;
+        sulfurOutputResource = ResourceType.S0;
+
+        if (!ReactionDefinitionRegistry.TryGetPackage(MetabolismType.SulfurChemosynthesis, out ReactionPackageDefinition package)
+            || package.OrderedReactions == null
+            || package.OrderedReactions.Length == 0)
+            return;
+
+        ReactionDefinition reaction = package.OrderedReactions[0];
+        if (reaction.Inputs != null && reaction.Inputs.Length >= 2)
+        {
+            co2Resource = reaction.Inputs[0].Resource;
+            h2sResource = reaction.Inputs[1].Resource;
+        }
+
+        if (reaction.Outputs != null && reaction.Outputs.Length >= 2)
+            sulfurOutputResource = reaction.Outputs[1].Resource;
     }
 
     private static void RemoveAgentAtSwapBack(List<Replicator> agents, ReplicatorPopulationState populationState, int index)
