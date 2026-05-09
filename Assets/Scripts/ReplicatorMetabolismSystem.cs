@@ -11,6 +11,7 @@ public class ReplicatorMetabolismSystem
 
     private static readonly MetabolismReactionRuntimeBinding SulfurChemosynthesisRuntimeBinding;
     private static readonly MetabolismReactionRuntimeBinding HydrogenotrophyRuntimeBinding;
+    private static readonly MetabolismReactionRuntimeBinding SaprotrophyRuntimeBinding;
     private static readonly MetabolismReactionRuntimeBinding FermentationRuntimeBinding;
     private static readonly MetabolismReactionRuntimeBinding MethanogenesisRuntimeBinding;
     private static readonly MetabolismReactionRuntimeBinding MethanotrophyRuntimeBinding;
@@ -23,6 +24,9 @@ public class ReplicatorMetabolismSystem
         HydrogenotrophyRuntimeBinding = GetRuntimeBindingOrFallback(
             MetabolismType.Hydrogenotrophy,
             new MetabolismReactionRuntimeBinding(MetabolismType.Hydrogenotrophy, ResourceType.CO2, ResourceType.H2, default, default));
+        SaprotrophyRuntimeBinding = GetRuntimeBindingOrFallback(
+            MetabolismType.Saprotrophy,
+            new MetabolismReactionRuntimeBinding(MetabolismType.Saprotrophy, ResourceType.OrganicC, ResourceType.O2, ResourceType.CO2, default));
         FermentationRuntimeBinding = GetRuntimeBindingOrFallback(
             MetabolismType.Fermentation,
             new MetabolismReactionRuntimeBinding(MetabolismType.Fermentation, ResourceType.OrganicC, default, ResourceType.H2, ResourceType.CO2));
@@ -224,68 +228,20 @@ public class ReplicatorMetabolismSystem
             }
             else if (metabolism == MetabolismType.Saprotrophy)
             {
-                float envC = GetAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.OrganicC, cellIndex);
-                float intakeCap = Mathf.Max(0f, settings.SaproCPerTick);
-                float desiredIntake = Mathf.Min(envC, intakeCap);
-
-                float assimilation = Mathf.Clamp01(settings.SaproAssimilationFraction);
-                bool lackFood = desiredIntake <= Mathf.Epsilon;
-                bool lackO2 = false;
-                bool lackStoredC = false;
-
-                if (desiredIntake > 0f)
-                {
-                    float desiredStore = desiredIntake * assimilation;
-                    float desiredRespire = desiredIntake - desiredStore;
-
-                    float storeCapacity = Mathf.Max(0f, maxStore - populationState.OrganicCStore[i]);
-                    float actualStore = Mathf.Min(desiredStore, storeCapacity);
-
-                    float actualRespire = 0f;
-                    if (desiredRespire > 0f && o2PerC > 0f && energyPerC > 0f)
-                    {
-                        float o2Available = GetAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.O2, cellIndex);
-                        float maxRespireByO2 = o2Available / o2PerC;
-                        actualRespire = Mathf.Clamp(desiredRespire, 0f, maxRespireByO2);
-                        lackO2 = desiredRespire > 0f && actualRespire <= Mathf.Epsilon;
-                    }
-
-                    float totalActuallyUsed = actualStore + actualRespire;
-
-                    if (totalActuallyUsed > 0f)
-                    {
-                        // Layer-aware OrganicC uptake (saprotrophy): remove consumed detrital carbon from the agent's current layer when valid.
-                        AddAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, metabolism, ResourceType.OrganicC, cellIndex, -totalActuallyUsed);
-
-                        if (actualStore > 0f)
-                            populationState.OrganicCStore[i] = Mathf.Clamp(populationState.OrganicCStore[i] + actualStore, 0f, maxStore);
-
-                        if (actualRespire > 0f)
-                        {
-                            float o2Consumed = actualRespire * o2PerC;
-                            AddAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, metabolism, ResourceType.O2, cellIndex, -o2Consumed);
-                            AddAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, metabolism, ResourceType.CO2, cellIndex, actualRespire);
-                            populationState.Energy[i] += actualRespire * energyPerC * performance;
-                            lackO2 = false;
-                        }
-                    }
-                }
-                else
-                {
-                    float desiredResp = Mathf.Max(0f, settings.SaproRespireStoreCPerTick);
-                    float o2Available = GetAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.O2, cellIndex);
-                    bool hasStore = populationState.OrganicCStore[i] > 0f;
-                    lackStoredC = !hasStore && desiredResp > 0f;
-                    lackO2 = hasStore && desiredResp > 0f && o2Available <= Mathf.Epsilon;
-
-                    float gained = AerobicRespireFromStore(populationState, i, ref populationState.OrganicCStore[i], ref populationState.Energy[i], cellIndex, desiredResp, o2PerC, energyPerC, planetResourceMap);
-                    if (gained > 0f)
-                    {
-                        populationState.Energy[i] -= gained * (1f - performance);
-                        lackStoredC = false;
-                        lackO2 = false;
-                    }
-                }
+                ProcessSaprotrophyReactionBacked(
+                    populationState,
+                    i,
+                    planetResourceMap,
+                    settings,
+                    metabolism,
+                    cellIndex,
+                    performance,
+                    o2PerC,
+                    energyPerC,
+                    maxStore,
+                    out bool lackFood,
+                    out bool lackO2,
+                    out bool lackStoredC);
 
                 populationState.StarveOrganicCFoodSeconds[i] = UpdateStarveTimer(populationState.StarveOrganicCFoodSeconds[i], lackFood, dtTick);
                 populationState.StarveO2Seconds[i] = UpdateStarveTimer(populationState.StarveO2Seconds[i], lackO2, dtTick);
@@ -557,6 +513,86 @@ public class ReplicatorMetabolismSystem
         populationState.StarveStoredCSeconds[index] = UpdateStarveTimer(populationState.StarveStoredCSeconds[index], lackStoredC, dtTick);
     }
 
+
+    private static void ProcessSaprotrophyReactionBacked(
+        ReplicatorPopulationState populationState,
+        int index,
+        PlanetResourceMap planetResourceMap,
+        Settings settings,
+        MetabolismType metabolism,
+        int cellIndex,
+        float performance,
+        float o2PerC,
+        float energyPerC,
+        float maxStore,
+        out bool lackFood,
+        out bool lackO2,
+        out bool lackStoredC)
+    {
+        ResourceType organicCResource = SaprotrophyRuntimeBinding.PrimaryInput0;
+        ResourceType o2Resource = SaprotrophyRuntimeBinding.PrimaryInput1;
+        ResourceType co2Resource = SaprotrophyRuntimeBinding.PrimaryOutput0;
+
+        float envC = GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, organicCResource, cellIndex);
+        float intakeCap = Mathf.Max(0f, settings.SaproCPerTick);
+        float desiredIntake = Mathf.Min(envC, intakeCap);
+
+        float assimilation = Mathf.Clamp01(settings.SaproAssimilationFraction);
+        lackFood = desiredIntake <= Mathf.Epsilon;
+        lackO2 = false;
+        lackStoredC = false;
+
+        if (desiredIntake > 0f)
+        {
+            float desiredStore = desiredIntake * assimilation;
+            float desiredRespire = desiredIntake - desiredStore;
+            float storeCapacity = Mathf.Max(0f, maxStore - populationState.OrganicCStore[index]);
+            float actualStore = Mathf.Min(desiredStore, storeCapacity);
+
+            float actualRespire = 0f;
+            if (desiredRespire > 0f && o2PerC > 0f && energyPerC > 0f)
+            {
+                float o2Available = GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, o2Resource, cellIndex);
+                float maxRespireByO2 = o2Available / o2PerC;
+                actualRespire = Mathf.Clamp(desiredRespire, 0f, maxRespireByO2);
+                lackO2 = desiredRespire > 0f && actualRespire <= Mathf.Epsilon;
+            }
+
+            float totalActuallyUsed = actualStore + actualRespire;
+            if (totalActuallyUsed > 0f)
+            {
+                AddAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, metabolism, organicCResource, cellIndex, -totalActuallyUsed);
+
+                if (actualStore > 0f)
+                    populationState.OrganicCStore[index] = Mathf.Clamp(populationState.OrganicCStore[index] + actualStore, 0f, maxStore);
+
+                if (actualRespire > 0f)
+                {
+                    float o2Consumed = actualRespire * o2PerC;
+                    AddAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, metabolism, o2Resource, cellIndex, -o2Consumed);
+                    AddAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, metabolism, co2Resource, cellIndex, actualRespire);
+                    populationState.Energy[index] += actualRespire * energyPerC * performance;
+                    lackO2 = false;
+                }
+            }
+        }
+        else
+        {
+            float desiredResp = Mathf.Max(0f, settings.SaproRespireStoreCPerTick);
+            float o2Available = GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, o2Resource, cellIndex);
+            bool hasStore = populationState.OrganicCStore[index] > 0f;
+            lackStoredC = !hasStore && desiredResp > 0f;
+            lackO2 = hasStore && desiredResp > 0f && o2Available <= Mathf.Epsilon;
+
+            float gained = AerobicRespireFromStore(populationState, index, ref populationState.OrganicCStore[index], ref populationState.Energy[index], cellIndex, desiredResp, o2PerC, energyPerC, planetResourceMap);
+            if (gained > 0f)
+            {
+                populationState.Energy[index] -= gained * (1f - performance);
+                lackStoredC = false;
+                lackO2 = false;
+            }
+        }
+    }
     private static void ProcessHydrogenotrophyReactionBacked(
     ReplicatorPopulationState populationState,
     int index,

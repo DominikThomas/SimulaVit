@@ -427,6 +427,54 @@ public static class ReactionDefinitionRegistry
                 }
                 return new MetabolismReactionRuntimeBinding(package.Metabolism, co2, h2s, sulfur, default);
             }
+            case MetabolismType.Saprotrophy:
+            {
+                ResourceType organicC = ResourceType.OrganicC;
+                ResourceType o2 = ResourceType.O2;
+                ResourceType co2 = ResourceType.CO2;
+                if (TryGetPrimaryReaction(package, out ReactionDefinition reaction))
+                {
+                    if (reaction.Inputs != null && reaction.Inputs.Length >= 1)
+                        organicC = reaction.Inputs[0].Resource;
+
+                    bool foundO2 = false;
+                    if (reaction.Inputs != null)
+                    {
+                        for (int i = 1; i < reaction.Inputs.Length; i++)
+                        {
+                            ResourceType input = reaction.Inputs[i].Resource;
+                            if (input == ResourceType.O2)
+                            {
+                                o2 = input;
+                                foundO2 = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    bool foundCo2 = false;
+                    if (reaction.Outputs != null)
+                    {
+                        for (int i = 0; i < reaction.Outputs.Length; i++)
+                        {
+                            ResourceType output = reaction.Outputs[i].Resource;
+                            if (output == ResourceType.CO2)
+                            {
+                                co2 = output;
+                                foundCo2 = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (!foundO2)
+                        o2 = ResourceType.O2;
+                    if (!foundCo2)
+                        co2 = ResourceType.CO2;
+                }
+
+                return new MetabolismReactionRuntimeBinding(package.Metabolism, organicC, o2, co2, default);
+            }
             case MetabolismType.Fermentation:
             {
                 ResourceType organicC = ResourceType.OrganicC;
