@@ -9,26 +9,21 @@ public class ReplicatorMetabolismSystem
     private static readonly ProfilerMarker MetabolismHotLoopMarker = new ProfilerMarker("ReplicatorMetabolismSystem.HotLoop");
     private static readonly ProfilerMarker RemoveDeadAgentsMarker = new ProfilerMarker("ReplicatorMetabolismSystem.RemoveDeadAgents");
 
-    private static readonly ResourceType SulfurChemosynthesisInput0Resource;
-    private static readonly ResourceType SulfurChemosynthesisInput1Resource;
-    private static readonly ResourceType SulfurChemosynthesisOutput0Resource;
-    private static readonly ResourceType HydrogenotrophyInput0Resource;
-    private static readonly ResourceType HydrogenotrophyInput1Resource;
-    private static readonly ResourceType FermentationInput0Resource;
-    private static readonly ResourceType FermentationOutput0Resource;
-    private static readonly ResourceType FermentationOutput1Resource;
+    private static readonly MetabolismReactionRuntimeBinding SulfurChemosynthesisRuntimeBinding;
+    private static readonly MetabolismReactionRuntimeBinding HydrogenotrophyRuntimeBinding;
+    private static readonly MetabolismReactionRuntimeBinding FermentationRuntimeBinding;
 
     static ReplicatorMetabolismSystem()
     {
-        ResolveSulfurChemosynthesisResources(
-            out SulfurChemosynthesisInput0Resource,
-            out SulfurChemosynthesisInput1Resource,
-            out SulfurChemosynthesisOutput0Resource);
-        ResolveHydrogenotrophyInputResources(out HydrogenotrophyInput0Resource, out HydrogenotrophyInput1Resource);
-        ResolveFermentationResources(
-            out FermentationInput0Resource,
-            out FermentationOutput0Resource,
-            out FermentationOutput1Resource);
+        SulfurChemosynthesisRuntimeBinding = GetRuntimeBindingOrFallback(
+            MetabolismType.SulfurChemosynthesis,
+            new MetabolismReactionRuntimeBinding(MetabolismType.SulfurChemosynthesis, ResourceType.CO2, ResourceType.H2S, ResourceType.S0, default));
+        HydrogenotrophyRuntimeBinding = GetRuntimeBindingOrFallback(
+            MetabolismType.Hydrogenotrophy,
+            new MetabolismReactionRuntimeBinding(MetabolismType.Hydrogenotrophy, ResourceType.CO2, ResourceType.H2, default, default));
+        FermentationRuntimeBinding = GetRuntimeBindingOrFallback(
+            MetabolismType.Fermentation,
+            new MetabolismReactionRuntimeBinding(MetabolismType.Fermentation, ResourceType.OrganicC, default, ResourceType.H2, ResourceType.CO2));
     }
 
     public struct Settings
@@ -562,9 +557,9 @@ public class ReplicatorMetabolismSystem
         float co2Need = Mathf.Max(0f, settings.ChemosynthesisCo2NeedPerTick);
         float h2sNeed = Mathf.Max(0f, settings.ChemosynthesisH2sNeedPerTick);
 
-        ResourceType co2Resource = SulfurChemosynthesisInput0Resource;
-        ResourceType h2sResource = SulfurChemosynthesisInput1Resource;
-        ResourceType sulfurOutputResource = SulfurChemosynthesisOutput0Resource;
+        ResourceType co2Resource = SulfurChemosynthesisRuntimeBinding.PrimaryInput0;
+        ResourceType h2sResource = SulfurChemosynthesisRuntimeBinding.PrimaryInput1;
+        ResourceType sulfurOutputResource = SulfurChemosynthesisRuntimeBinding.PrimaryOutput0;
 
         float co2Available = GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, co2Resource, cellIndex);
         float h2sAvailable = GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, h2sResource, cellIndex);
@@ -627,8 +622,8 @@ public class ReplicatorMetabolismSystem
 
         // Resource identity is resolved once from the hydrogenotrophy package at type init.
         // If scaffolding is missing or malformed, we intentionally fall back to CO2/H2 for behavior parity.
-        ResourceType co2Resource = HydrogenotrophyInput0Resource;
-        ResourceType h2Resource = HydrogenotrophyInput1Resource;
+        ResourceType co2Resource = HydrogenotrophyRuntimeBinding.PrimaryInput0;
+        ResourceType h2Resource = HydrogenotrophyRuntimeBinding.PrimaryInput1;
 
         float co2Available = GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, co2Resource, cellIndex);
         float h2Available = GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, h2Resource, cellIndex);
@@ -684,7 +679,7 @@ public class ReplicatorMetabolismSystem
         out bool lackStoredC)
     {
         float cNeed = Mathf.Max(0f, settings.FermentationOrganicCPerTick);
-        ResourceType organicCResource = FermentationInput0Resource;
+        ResourceType organicCResource = FermentationRuntimeBinding.PrimaryInput0;
         float organicCAvailable = GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, organicCResource, cellIndex);
         float pulled = Mathf.Min(cNeed, organicCAvailable);
         lackOrganicC = cNeed > 0f && pulled <= Mathf.Epsilon;
@@ -706,90 +701,22 @@ public class ReplicatorMetabolismSystem
 
         if (fermentedOrganicC > 0f)
         {
-            AddAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, MetabolismType.Fermentation, FermentationOutput0Resource, cellIndex, fermentedOrganicC);
-            AddAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, MetabolismType.Fermentation, FermentationOutput1Resource, cellIndex, fermentedOrganicC);
+            AddAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, MetabolismType.Fermentation, FermentationRuntimeBinding.PrimaryOutput0, cellIndex, fermentedOrganicC);
+            AddAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, MetabolismType.Fermentation, FermentationRuntimeBinding.PrimaryOutput1, cellIndex, fermentedOrganicC);
             populationState.Energy[index] += Mathf.Max(0f, settings.FermentationEnergyPerTick) * (fermentedOrganicC / Mathf.Max(0.0001f, cNeed)) * performance;
         }
 
         lackStoredC = storeCapacity <= Mathf.Epsilon && desiredStore > 0f;
     }
 
-    private static void ResolveFermentationResources(out ResourceType organicCResource, out ResourceType output0Resource, out ResourceType output1Resource)
+    private static MetabolismReactionRuntimeBinding GetRuntimeBindingOrFallback(
+        MetabolismType metabolism,
+        MetabolismReactionRuntimeBinding fallback)
     {
-        organicCResource = ResourceType.OrganicC;
-        // Keep legacy behavior/fallback exact: fermentation emits H2 and CO2.
-        output0Resource = ResourceType.H2;
-        output1Resource = ResourceType.CO2;
+        if (ReactionDefinitionRegistry.TryGetRuntimeBinding(metabolism, out MetabolismReactionRuntimeBinding binding))
+            return binding;
 
-        if (!ReactionDefinitionRegistry.TryGetPackage(MetabolismType.Fermentation, out ReactionPackageDefinition package)
-            || package.OrderedReactions == null
-            || package.OrderedReactions.Length == 0)
-            return;
-
-        ReactionDefinition reaction = package.OrderedReactions[0];
-        if (reaction.Inputs != null && reaction.Inputs.Length >= 1)
-            organicCResource = reaction.Inputs[0].Resource;
-
-        if (reaction.Outputs == null)
-            return;
-
-        bool foundH2 = false;
-        bool foundCo2 = false;
-        for (int i = 0; i < reaction.Outputs.Length; i++)
-        {
-            ResourceType output = reaction.Outputs[i].Resource;
-            if (!foundH2 && output == ResourceType.H2)
-            {
-                output0Resource = output;
-                foundH2 = true;
-            }
-            else if (!foundCo2 && output == ResourceType.CO2)
-            {
-                output1Resource = output;
-                foundCo2 = true;
-            }
-        }
-    }
-
-
-    private static void ResolveHydrogenotrophyInputResources(out ResourceType co2Resource, out ResourceType h2Resource)
-    {
-        co2Resource = ResourceType.CO2;
-        h2Resource = ResourceType.H2;
-
-        if (!ReactionDefinitionRegistry.TryGetPackage(MetabolismType.Hydrogenotrophy, out ReactionPackageDefinition package)
-            || package.OrderedReactions == null
-            || package.OrderedReactions.Length == 0)
-            return;
-
-        ReactionDefinition reaction = package.OrderedReactions[0];
-        if (reaction.Inputs == null || reaction.Inputs.Length < 2)
-            return;
-
-        co2Resource = reaction.Inputs[0].Resource;
-        h2Resource = reaction.Inputs[1].Resource;
-    }
-
-    private static void ResolveSulfurChemosynthesisResources(out ResourceType co2Resource, out ResourceType h2sResource, out ResourceType sulfurOutputResource)
-    {
-        co2Resource = ResourceType.CO2;
-        h2sResource = ResourceType.H2S;
-        sulfurOutputResource = ResourceType.S0;
-
-        if (!ReactionDefinitionRegistry.TryGetPackage(MetabolismType.SulfurChemosynthesis, out ReactionPackageDefinition package)
-            || package.OrderedReactions == null
-            || package.OrderedReactions.Length == 0)
-            return;
-
-        ReactionDefinition reaction = package.OrderedReactions[0];
-        if (reaction.Inputs != null && reaction.Inputs.Length >= 2)
-        {
-            co2Resource = reaction.Inputs[0].Resource;
-            h2sResource = reaction.Inputs[1].Resource;
-        }
-
-        if (reaction.Outputs != null && reaction.Outputs.Length >= 2)
-            sulfurOutputResource = reaction.Outputs[1].Resource;
+        return fallback;
     }
 
     private static void RemoveAgentAtSwapBack(List<Replicator> agents, ReplicatorPopulationState populationState, int index)
