@@ -475,6 +475,23 @@ public static class ReactionDefinitionRegistry
                 }
                 return new MetabolismReactionRuntimeBinding(package.Metabolism, co2, h2, ch4, default);
             }
+            case MetabolismType.Methanotrophy:
+            {
+                ResourceType ch4 = ResourceType.CH4;
+                ResourceType o2 = ResourceType.O2;
+                ResourceType co2 = ResourceType.CO2;
+                if (TryGetPrimaryReaction(package, out ReactionDefinition reaction))
+                {
+                    if (reaction.Inputs != null && reaction.Inputs.Length >= 2)
+                    {
+                        ch4 = reaction.Inputs[0].Resource;
+                        o2 = reaction.Inputs[1].Resource;
+                    }
+                    if (reaction.Outputs != null && reaction.Outputs.Length >= 1)
+                        co2 = reaction.Outputs[0].Resource;
+                }
+                return new MetabolismReactionRuntimeBinding(package.Metabolism, ch4, o2, co2, default);
+            }
             default:
                 return new MetabolismReactionRuntimeBinding(package.Metabolism, default, default, default, default);
         }
