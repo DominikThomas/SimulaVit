@@ -14,6 +14,9 @@ public class ReplicatorMetabolismSystem
     private static readonly ResourceType SulfurChemosynthesisOutput0Resource;
     private static readonly ResourceType HydrogenotrophyInput0Resource;
     private static readonly ResourceType HydrogenotrophyInput1Resource;
+    private static readonly ResourceType FermentationInput0Resource;
+    private static readonly ResourceType FermentationOutput0Resource;
+    private static readonly ResourceType FermentationOutput1Resource;
 
     static ReplicatorMetabolismSystem()
     {
@@ -22,6 +25,10 @@ public class ReplicatorMetabolismSystem
             out SulfurChemosynthesisInput1Resource,
             out SulfurChemosynthesisOutput0Resource);
         ResolveHydrogenotrophyInputResources(out HydrogenotrophyInput0Resource, out HydrogenotrophyInput1Resource);
+        ResolveFermentationResources(
+            out FermentationInput0Resource,
+            out FermentationOutput0Resource,
+            out FermentationOutput1Resource);
     }
 
     public struct Settings
@@ -337,37 +344,16 @@ public class ReplicatorMetabolismSystem
             }
             else if (metabolism == MetabolismType.Fermentation)
             {
-                float cNeed = Mathf.Max(0f, settings.FermentationOrganicCPerTick);
-                float organicCAvailable = GetAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.OrganicC, cellIndex);
-                float pulled = Mathf.Min(cNeed, organicCAvailable);
-                bool lackOrganicC = cNeed > 0f && pulled <= Mathf.Epsilon;
-                bool lackStoredC = false;
-
-                if (pulled > 0f)
-                {
-                    // Fermenters can now retain part of consumed OrganicC as biomass, similar to other carbon-fixing metabolisms.
-                    float assimilation = Mathf.Clamp01(settings.FermentationAssimilationFraction);
-                    float desiredStore = pulled * assimilation;
-                    float storeCapacity = Mathf.Max(0f, maxStore - populationState.OrganicCStore[i]);
-                    float storedOrganicC = Mathf.Min(desiredStore, storeCapacity);
-                    float fermentedOrganicC = Mathf.Max(0f, pulled - storedOrganicC);
-
-                    // Layer-aware OrganicC uptake (fermentation): pull substrate from the agent-local ocean layer when valid.
-                    AddAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, metabolism, ResourceType.OrganicC, cellIndex, -pulled);
-
-                    if (storedOrganicC > 0f)
-                        populationState.OrganicCStore[i] = Mathf.Clamp(populationState.OrganicCStore[i] + storedOrganicC, 0f, maxStore);
-
-                    if (fermentedOrganicC > 0f)
-                    {
-                        AddAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, metabolism, ResourceType.H2, cellIndex, fermentedOrganicC);
-                        AddAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, metabolism, ResourceType.CO2, cellIndex, fermentedOrganicC);
-                        // Keep energy proportional only to the actually fermented fraction.
-                        populationState.Energy[i] += Mathf.Max(0f, settings.FermentationEnergyPerTick) * (fermentedOrganicC / Mathf.Max(0.0001f, cNeed)) * performance;
-                    }
-
-                    lackStoredC = storeCapacity <= Mathf.Epsilon && desiredStore > 0f;
-                }
+                ProcessFermentationReactionBacked(
+                    populationState,
+                    i,
+                    planetResourceMap,
+                    settings,
+                    cellIndex,
+                    performance,
+                    maxStore,
+                    out bool lackOrganicC,
+                    out bool lackStoredC);
 
                 populationState.StarveOrganicCFoodSeconds[i] = UpdateStarveTimer(populationState.StarveOrganicCFoodSeconds[i], lackOrganicC, dtTick);
                 populationState.StarveStoredCSeconds[i] = UpdateStarveTimer(populationState.StarveStoredCSeconds[i], lackStoredC, dtTick);
@@ -684,6 +670,85 @@ public class ReplicatorMetabolismSystem
 
         populationState.StarveCo2Seconds[index] = UpdateStarveTimer(populationState.StarveCo2Seconds[index], lackCo2, dtTick);
         populationState.StarveH2Seconds[index] = UpdateStarveTimer(populationState.StarveH2Seconds[index], lackH2, dtTick);
+    }
+
+    private static void ProcessFermentationReactionBacked(
+        ReplicatorPopulationState populationState,
+        int index,
+        PlanetResourceMap planetResourceMap,
+        Settings settings,
+        int cellIndex,
+        float performance,
+        float maxStore,
+        out bool lackOrganicC,
+        out bool lackStoredC)
+    {
+        float cNeed = Mathf.Max(0f, settings.FermentationOrganicCPerTick);
+        ResourceType organicCResource = FermentationInput0Resource;
+        float organicCAvailable = GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, organicCResource, cellIndex);
+        float pulled = Mathf.Min(cNeed, organicCAvailable);
+        lackOrganicC = cNeed > 0f && pulled <= Mathf.Epsilon;
+        lackStoredC = false;
+
+        if (pulled <= 0f)
+            return;
+
+        float assimilation = Mathf.Clamp01(settings.FermentationAssimilationFraction);
+        float desiredStore = pulled * assimilation;
+        float storeCapacity = Mathf.Max(0f, maxStore - populationState.OrganicCStore[index]);
+        float storedOrganicC = Mathf.Min(desiredStore, storeCapacity);
+        float fermentedOrganicC = Mathf.Max(0f, pulled - storedOrganicC);
+
+        AddAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, MetabolismType.Fermentation, organicCResource, cellIndex, -pulled);
+
+        if (storedOrganicC > 0f)
+            populationState.OrganicCStore[index] = Mathf.Clamp(populationState.OrganicCStore[index] + storedOrganicC, 0f, maxStore);
+
+        if (fermentedOrganicC > 0f)
+        {
+            AddAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, MetabolismType.Fermentation, FermentationOutput0Resource, cellIndex, fermentedOrganicC);
+            AddAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, MetabolismType.Fermentation, FermentationOutput1Resource, cellIndex, fermentedOrganicC);
+            populationState.Energy[index] += Mathf.Max(0f, settings.FermentationEnergyPerTick) * (fermentedOrganicC / Mathf.Max(0.0001f, cNeed)) * performance;
+        }
+
+        lackStoredC = storeCapacity <= Mathf.Epsilon && desiredStore > 0f;
+    }
+
+    private static void ResolveFermentationResources(out ResourceType organicCResource, out ResourceType output0Resource, out ResourceType output1Resource)
+    {
+        organicCResource = ResourceType.OrganicC;
+        // Keep legacy behavior/fallback exact: fermentation emits H2 and CO2.
+        output0Resource = ResourceType.H2;
+        output1Resource = ResourceType.CO2;
+
+        if (!ReactionDefinitionRegistry.TryGetPackage(MetabolismType.Fermentation, out ReactionPackageDefinition package)
+            || package.OrderedReactions == null
+            || package.OrderedReactions.Length == 0)
+            return;
+
+        ReactionDefinition reaction = package.OrderedReactions[0];
+        if (reaction.Inputs != null && reaction.Inputs.Length >= 1)
+            organicCResource = reaction.Inputs[0].Resource;
+
+        if (reaction.Outputs == null)
+            return;
+
+        bool foundH2 = false;
+        bool foundCo2 = false;
+        for (int i = 0; i < reaction.Outputs.Length; i++)
+        {
+            ResourceType output = reaction.Outputs[i].Resource;
+            if (!foundH2 && output == ResourceType.H2)
+            {
+                output0Resource = output;
+                foundH2 = true;
+            }
+            else if (!foundCo2 && output == ResourceType.CO2)
+            {
+                output1Resource = output;
+                foundCo2 = true;
+            }
+        }
     }
 
 
