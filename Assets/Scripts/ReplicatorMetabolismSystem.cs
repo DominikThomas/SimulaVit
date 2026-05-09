@@ -13,6 +13,7 @@ public class ReplicatorMetabolismSystem
     private static readonly MetabolismReactionRuntimeBinding HydrogenotrophyRuntimeBinding;
     private static readonly MetabolismReactionRuntimeBinding FermentationRuntimeBinding;
     private static readonly MetabolismReactionRuntimeBinding MethanogenesisRuntimeBinding;
+    private static readonly MetabolismReactionRuntimeBinding MethanotrophyRuntimeBinding;
 
     static ReplicatorMetabolismSystem()
     {
@@ -28,6 +29,9 @@ public class ReplicatorMetabolismSystem
         MethanogenesisRuntimeBinding = GetRuntimeBindingOrFallback(
             MetabolismType.Methanogenesis,
             new MetabolismReactionRuntimeBinding(MetabolismType.Methanogenesis, ResourceType.CO2, ResourceType.H2, ResourceType.CH4, default));
+        MethanotrophyRuntimeBinding = GetRuntimeBindingOrFallback(
+            MetabolismType.Methanotrophy,
+            new MetabolismReactionRuntimeBinding(MetabolismType.Methanotrophy, ResourceType.CH4, ResourceType.O2, ResourceType.CO2, default));
     }
 
     public struct Settings
@@ -390,51 +394,19 @@ public class ReplicatorMetabolismSystem
             }
             else if (metabolism == MetabolismType.Methanotrophy)
             {
-                float ch4Need = Mathf.Max(0f, settings.MethanotrophyCH4PerTick);
-                float o2Need = Mathf.Max(0f, settings.MethanotrophyO2PerTick);
-                float ch4Available = GetAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.CH4, cellIndex);
-                float o2Available = GetAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.O2, cellIndex);
-                float pulledRatio = Mathf.Clamp01(Mathf.Min(ch4Need <= Mathf.Epsilon ? 1f : ch4Available / ch4Need, o2Need <= Mathf.Epsilon ? 1f : o2Available / o2Need));
-                bool lackCh4 = false;
-                bool lackO2 = false;
-                bool lackStoredC = false;
-                bool o2Toxic = false;
-                float comfortMax = Mathf.Max(0f, populationState.O2ComfortMax[i]);
-                float stressMax = Mathf.Max(comfortMax, populationState.O2StressMax[i]);
-
-                if (pulledRatio > 0f)
-                {
-                    float ch4Consumed = ch4Need * pulledRatio;
-                    float o2Consumed = o2Need * pulledRatio;
-                    float assimilation = Mathf.Clamp01(settings.MethanotrophyAssimilationFraction);
-                    float desiredStore = ch4Consumed * assimilation;
-                    float storeCapacity = Mathf.Max(0f, maxStore - populationState.OrganicCStore[i]);
-                    float storedOrganicC = Mathf.Min(desiredStore, storeCapacity);
-                    float oxidizedCH4 = Mathf.Max(0f, ch4Consumed - storedOrganicC);
-
-                    AddAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, metabolism, ResourceType.CH4, cellIndex, -ch4Consumed);
-                    AddAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, metabolism, ResourceType.O2, cellIndex, -o2Consumed);
-
-                    if (storedOrganicC > 0f)
-                        populationState.OrganicCStore[i] = Mathf.Clamp(populationState.OrganicCStore[i] + storedOrganicC, 0f, maxStore);
-
-                    if (oxidizedCH4 > 0f)
-                        AddAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, metabolism, ResourceType.CO2, cellIndex, oxidizedCH4);
-
-                    // Keep methanotrophy energy tied to the oxidized (not stored) CH4 fraction.
-                    populationState.Energy[i] += Mathf.Max(0f, settings.MethanotrophyEnergyPerTick) * (oxidizedCH4 / Mathf.Max(0.0001f, ch4Need)) * performance;
-                    lackStoredC = storeCapacity <= Mathf.Epsilon && desiredStore > 0f;
-                }
-                else
-                {
-                    lackCh4 = ch4Need > 0f && ch4Available <= Mathf.Epsilon;
-                    lackO2 = o2Need > 0f && o2Available <= Mathf.Epsilon;
-                }
-
-                if (stressMax > 0f && o2Available > comfortMax)
-                {
-                    o2Toxic = o2Available > stressMax;
-                }
+                ProcessMethanotrophyReactionBacked(
+                    populationState,
+                    i,
+                    planetResourceMap,
+                    settings,
+                    metabolism,
+                    cellIndex,
+                    performance,
+                    maxStore,
+                    out bool lackCh4,
+                    out bool lackO2,
+                    out bool lackStoredC,
+                    out bool o2Toxic);
 
                 populationState.StarveCh4Seconds[i] = UpdateStarveTimer(populationState.StarveCh4Seconds[i], lackCh4, dtTick);
                 populationState.StarveO2Seconds[i] = UpdateStarveTimer(populationState.StarveO2Seconds[i], lackO2, dtTick);
@@ -740,6 +712,67 @@ public class ReplicatorMetabolismSystem
 
         populationState.Energy[index] += Mathf.Max(0f, settings.MethanogenesisEnergyPerTick) * (methanizedCarbon / Mathf.Max(0.0001f, co2Need)) * performance;
         lackStoredC = storeCapacity <= Mathf.Epsilon && desiredStore > 0f;
+    }
+
+    private static void ProcessMethanotrophyReactionBacked(
+        ReplicatorPopulationState populationState,
+        int index,
+        PlanetResourceMap planetResourceMap,
+        Settings settings,
+        MetabolismType metabolism,
+        int cellIndex,
+        float performance,
+        float maxStore,
+        out bool lackCh4,
+        out bool lackO2,
+        out bool lackStoredC,
+        out bool o2Toxic)
+    {
+        float ch4Need = Mathf.Max(0f, settings.MethanotrophyCH4PerTick);
+        float o2Need = Mathf.Max(0f, settings.MethanotrophyO2PerTick);
+        ResourceType ch4Resource = MethanotrophyRuntimeBinding.PrimaryInput0;
+        ResourceType o2Resource = MethanotrophyRuntimeBinding.PrimaryInput1;
+        ResourceType co2Resource = MethanotrophyRuntimeBinding.PrimaryOutput0;
+        float ch4Available = GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, ch4Resource, cellIndex);
+        float o2Available = GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, o2Resource, cellIndex);
+        float pulledRatio = Mathf.Clamp01(Mathf.Min(ch4Need <= Mathf.Epsilon ? 1f : ch4Available / ch4Need, o2Need <= Mathf.Epsilon ? 1f : o2Available / o2Need));
+        lackCh4 = false;
+        lackO2 = false;
+        lackStoredC = false;
+        o2Toxic = false;
+        float comfortMax = Mathf.Max(0f, populationState.O2ComfortMax[index]);
+        float stressMax = Mathf.Max(comfortMax, populationState.O2StressMax[index]);
+
+        if (pulledRatio > 0f)
+        {
+            float ch4Consumed = ch4Need * pulledRatio;
+            float o2Consumed = o2Need * pulledRatio;
+            float assimilation = Mathf.Clamp01(settings.MethanotrophyAssimilationFraction);
+            float desiredStore = ch4Consumed * assimilation;
+            float storeCapacity = Mathf.Max(0f, maxStore - populationState.OrganicCStore[index]);
+            float storedOrganicC = Mathf.Min(desiredStore, storeCapacity);
+            float oxidizedCH4 = Mathf.Max(0f, ch4Consumed - storedOrganicC);
+
+            AddAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, metabolism, ch4Resource, cellIndex, -ch4Consumed);
+            AddAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, metabolism, o2Resource, cellIndex, -o2Consumed);
+
+            if (storedOrganicC > 0f)
+                populationState.OrganicCStore[index] = Mathf.Clamp(populationState.OrganicCStore[index] + storedOrganicC, 0f, maxStore);
+
+            if (oxidizedCH4 > 0f)
+                AddAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, metabolism, co2Resource, cellIndex, oxidizedCH4);
+
+            populationState.Energy[index] += Mathf.Max(0f, settings.MethanotrophyEnergyPerTick) * (oxidizedCH4 / Mathf.Max(0.0001f, ch4Need)) * performance;
+            lackStoredC = storeCapacity <= Mathf.Epsilon && desiredStore > 0f;
+        }
+        else
+        {
+            lackCh4 = ch4Need > 0f && ch4Available <= Mathf.Epsilon;
+            lackO2 = o2Need > 0f && o2Available <= Mathf.Epsilon;
+        }
+
+        if (stressMax > 0f && o2Available > comfortMax)
+            o2Toxic = o2Available > stressMax;
     }
 
     private static MetabolismReactionRuntimeBinding GetRuntimeBindingOrFallback(
