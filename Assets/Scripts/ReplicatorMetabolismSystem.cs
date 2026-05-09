@@ -12,6 +12,7 @@ public class ReplicatorMetabolismSystem
     private static readonly MetabolismReactionRuntimeBinding SulfurChemosynthesisRuntimeBinding;
     private static readonly MetabolismReactionRuntimeBinding HydrogenotrophyRuntimeBinding;
     private static readonly MetabolismReactionRuntimeBinding FermentationRuntimeBinding;
+    private static readonly MetabolismReactionRuntimeBinding MethanogenesisRuntimeBinding;
 
     static ReplicatorMetabolismSystem()
     {
@@ -24,6 +25,9 @@ public class ReplicatorMetabolismSystem
         FermentationRuntimeBinding = GetRuntimeBindingOrFallback(
             MetabolismType.Fermentation,
             new MetabolismReactionRuntimeBinding(MetabolismType.Fermentation, ResourceType.OrganicC, default, ResourceType.H2, ResourceType.CO2));
+        MethanogenesisRuntimeBinding = GetRuntimeBindingOrFallback(
+            MetabolismType.Methanogenesis,
+            new MetabolismReactionRuntimeBinding(MetabolismType.Methanogenesis, ResourceType.CO2, ResourceType.H2, ResourceType.CH4, default));
     }
 
     public struct Settings
@@ -362,43 +366,17 @@ public class ReplicatorMetabolismSystem
             }
             else if (metabolism == MetabolismType.Methanogenesis)
             {
-                float co2Need = Mathf.Max(0f, settings.MethanogenesisCO2PerTick);
-                float h2Need = Mathf.Max(0f, settings.MethanogenesisH2PerTick);
-                float co2Available = GetAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.CO2, cellIndex);
-                float h2Available = GetAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, ResourceType.H2, cellIndex);
-                float pulledRatio = Mathf.Clamp01(Mathf.Min(co2Need <= Mathf.Epsilon ? 1f : co2Available / co2Need, h2Need <= Mathf.Epsilon ? 1f : h2Available / h2Need));
-                bool lackCo2 = false;
-                bool lackH2 = false;
-                bool lackStoredC = false;
-
-                if (pulledRatio > 0f)
-                {
-                    float co2Consumed = co2Need * pulledRatio;
-                    float h2Consumed = h2Need * pulledRatio;
-                    float assimilation = Mathf.Clamp01(settings.MethanogenesisAssimilationFraction);
-                    float desiredStore = co2Consumed * assimilation;
-                    float storeCapacity = Mathf.Max(0f, maxStore - populationState.OrganicCStore[i]);
-                    float storedOrganicC = Mathf.Min(desiredStore, storeCapacity);
-                    float methanizedCarbon = Mathf.Max(0f, co2Consumed - storedOrganicC);
-
-                    AddAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, metabolism, ResourceType.CO2, cellIndex, -co2Consumed);
-                    AddAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, metabolism, ResourceType.H2, cellIndex, -h2Consumed);
-
-                    if (storedOrganicC > 0f)
-                        populationState.OrganicCStore[i] = Mathf.Clamp(populationState.OrganicCStore[i] + storedOrganicC, 0f, maxStore);
-
-                    if (methanizedCarbon > 0f)
-                        AddAgentResourceAtCurrentLayer(populationState, i, planetResourceMap, metabolism, ResourceType.CH4, cellIndex, methanizedCarbon);
-
-                    // Keep methanogenesis energy tied only to the carbon that is actually converted to CH4.
-                    populationState.Energy[i] += Mathf.Max(0f, settings.MethanogenesisEnergyPerTick) * (methanizedCarbon / Mathf.Max(0.0001f, co2Need)) * performance;
-                    lackStoredC = storeCapacity <= Mathf.Epsilon && desiredStore > 0f;
-                }
-                else
-                {
-                    lackCo2 = co2Need > 0f && co2Available <= Mathf.Epsilon;
-                    lackH2 = h2Need > 0f && h2Available <= Mathf.Epsilon;
-                }
+                ProcessMethanogenesisReactionBacked(
+                    populationState,
+                    i,
+                    planetResourceMap,
+                    settings,
+                    cellIndex,
+                    performance,
+                    maxStore,
+                    out bool lackCo2,
+                    out bool lackH2,
+                    out bool lackStoredC);
 
                 populationState.StarveCo2Seconds[i] = UpdateStarveTimer(populationState.StarveCo2Seconds[i], lackCo2, dtTick);
                 populationState.StarveH2Seconds[i] = UpdateStarveTimer(populationState.StarveH2Seconds[i], lackH2, dtTick);
@@ -706,6 +684,61 @@ public class ReplicatorMetabolismSystem
             populationState.Energy[index] += Mathf.Max(0f, settings.FermentationEnergyPerTick) * (fermentedOrganicC / Mathf.Max(0.0001f, cNeed)) * performance;
         }
 
+        lackStoredC = storeCapacity <= Mathf.Epsilon && desiredStore > 0f;
+    }
+
+    private static void ProcessMethanogenesisReactionBacked(
+        ReplicatorPopulationState populationState,
+        int index,
+        PlanetResourceMap planetResourceMap,
+        Settings settings,
+        int cellIndex,
+        float performance,
+        float maxStore,
+        out bool lackCo2,
+        out bool lackH2,
+        out bool lackStoredC)
+    {
+        float co2Need = Mathf.Max(0f, settings.MethanogenesisCO2PerTick);
+        float h2Need = Mathf.Max(0f, settings.MethanogenesisH2PerTick);
+        ResourceType co2Resource = MethanogenesisRuntimeBinding.PrimaryInput0;
+        ResourceType h2Resource = MethanogenesisRuntimeBinding.PrimaryInput1;
+        ResourceType ch4Resource = MethanogenesisRuntimeBinding.PrimaryOutput0;
+
+        float co2Available = GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, co2Resource, cellIndex);
+        float h2Available = GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, h2Resource, cellIndex);
+        float co2Ratio = co2Need <= Mathf.Epsilon ? 1f : co2Available / co2Need;
+        float h2Ratio = h2Need <= Mathf.Epsilon ? 1f : h2Available / h2Need;
+        float pulledRatio = Mathf.Clamp01(Mathf.Min(co2Ratio, h2Ratio));
+        lackCo2 = false;
+        lackH2 = false;
+        lackStoredC = false;
+
+        if (pulledRatio <= 0f)
+        {
+            lackCo2 = co2Need > 0f && co2Available <= Mathf.Epsilon;
+            lackH2 = h2Need > 0f && h2Available <= Mathf.Epsilon;
+            return;
+        }
+
+        float co2Consumed = co2Need * pulledRatio;
+        float h2Consumed = h2Need * pulledRatio;
+        float assimilation = Mathf.Clamp01(settings.MethanogenesisAssimilationFraction);
+        float desiredStore = co2Consumed * assimilation;
+        float storeCapacity = Mathf.Max(0f, maxStore - populationState.OrganicCStore[index]);
+        float storedOrganicC = Mathf.Min(desiredStore, storeCapacity);
+        float methanizedCarbon = Mathf.Max(0f, co2Consumed - storedOrganicC);
+
+        AddAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, MetabolismType.Methanogenesis, co2Resource, cellIndex, -co2Consumed);
+        AddAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, MetabolismType.Methanogenesis, h2Resource, cellIndex, -h2Consumed);
+
+        if (storedOrganicC > 0f)
+            populationState.OrganicCStore[index] = Mathf.Clamp(populationState.OrganicCStore[index] + storedOrganicC, 0f, maxStore);
+
+        if (methanizedCarbon > 0f)
+            AddAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, MetabolismType.Methanogenesis, ch4Resource, cellIndex, methanizedCarbon);
+
+        populationState.Energy[index] += Mathf.Max(0f, settings.MethanogenesisEnergyPerTick) * (methanizedCarbon / Mathf.Max(0.0001f, co2Need)) * performance;
         lackStoredC = storeCapacity <= Mathf.Epsilon && desiredStore > 0f;
     }
 
