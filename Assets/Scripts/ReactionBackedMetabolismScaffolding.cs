@@ -107,6 +107,30 @@ public readonly struct ReactionPackageDefinition
     }
 }
 
+
+public readonly struct MetabolismReactionRuntimeBinding
+{
+    public readonly MetabolismType Metabolism;
+    public readonly ResourceType PrimaryInput0;
+    public readonly ResourceType PrimaryInput1;
+    public readonly ResourceType PrimaryOutput0;
+    public readonly ResourceType PrimaryOutput1;
+
+    public MetabolismReactionRuntimeBinding(
+        MetabolismType metabolism,
+        ResourceType primaryInput0,
+        ResourceType primaryInput1,
+        ResourceType primaryOutput0,
+        ResourceType primaryOutput1)
+    {
+        Metabolism = metabolism;
+        PrimaryInput0 = primaryInput0;
+        PrimaryInput1 = primaryInput1;
+        PrimaryOutput0 = primaryOutput0;
+        PrimaryOutput1 = primaryOutput1;
+    }
+}
+
 public readonly struct ReactionExecutionContext
 {
     public readonly int AgentIndex;
@@ -269,6 +293,7 @@ public static class ReactionDefinitionRegistry
 
     private static readonly MetabolismReactionBinding[] MetabolismBindings = BuildBindings(PackageDefinitions);
     private static readonly int[] PackageIndexByMetabolism = BuildPackageIndexLookup(PackageDefinitions);
+    private static readonly MetabolismReactionRuntimeBinding[] RuntimeBindings = BuildRuntimeBindings(PackageDefinitions);
 
     // Debug/editor-facing view only; do not enumerate in per-agent hot loops.
     public static ReactionPackageDefinition[] Packages => PackageDefinitions;
@@ -288,6 +313,20 @@ public static class ReactionDefinitionRegistry
         }
 
         package = default;
+        return false;
+    }
+
+    public static bool TryGetRuntimeBinding(MetabolismType metabolism, out MetabolismReactionRuntimeBinding binding)
+    {
+        int metabolismIndex = (int)metabolism;
+        if ((uint)metabolismIndex < (uint)RuntimeBindings.Length)
+        {
+            binding = RuntimeBindings[metabolismIndex];
+            if (binding.Metabolism == metabolism)
+                return true;
+        }
+
+        binding = default;
         return false;
     }
 
@@ -335,6 +374,103 @@ public static class ReactionDefinitionRegistry
         }
 
         return lookup;
+    }
+
+    private static MetabolismReactionRuntimeBinding[] BuildRuntimeBindings(ReactionPackageDefinition[] packages)
+    {
+        int metabolismCount = Enum.GetValues(typeof(MetabolismType)).Length;
+        var bindings = new MetabolismReactionRuntimeBinding[metabolismCount];
+
+        for (int i = 0; i < packages.Length; i++)
+        {
+            ReactionPackageDefinition package = packages[i];
+            if ((uint)package.Metabolism >= (uint)bindings.Length)
+                continue;
+
+            bindings[(int)package.Metabolism] = ResolveRuntimeBinding(package);
+        }
+
+        return bindings;
+    }
+
+    private static MetabolismReactionRuntimeBinding ResolveRuntimeBinding(ReactionPackageDefinition package)
+    {
+        switch (package.Metabolism)
+        {
+            case MetabolismType.Hydrogenotrophy:
+            {
+                ResourceType co2 = ResourceType.CO2;
+                ResourceType h2 = ResourceType.H2;
+                if (TryGetPrimaryReaction(package, out ReactionDefinition reaction) && reaction.Inputs != null && reaction.Inputs.Length >= 2)
+                {
+                    co2 = reaction.Inputs[0].Resource;
+                    h2 = reaction.Inputs[1].Resource;
+                }
+                return new MetabolismReactionRuntimeBinding(package.Metabolism, co2, h2, default, default);
+            }
+            case MetabolismType.SulfurChemosynthesis:
+            {
+                ResourceType co2 = ResourceType.CO2;
+                ResourceType h2s = ResourceType.H2S;
+                ResourceType sulfur = ResourceType.S0;
+                if (TryGetPrimaryReaction(package, out ReactionDefinition reaction))
+                {
+                    if (reaction.Inputs != null && reaction.Inputs.Length >= 2)
+                    {
+                        co2 = reaction.Inputs[0].Resource;
+                        h2s = reaction.Inputs[1].Resource;
+                    }
+                    if (reaction.Outputs != null && reaction.Outputs.Length >= 2)
+                        sulfur = reaction.Outputs[1].Resource;
+                }
+                return new MetabolismReactionRuntimeBinding(package.Metabolism, co2, h2s, sulfur, default);
+            }
+            case MetabolismType.Fermentation:
+            {
+                ResourceType organicC = ResourceType.OrganicC;
+                ResourceType h2 = ResourceType.H2;
+                ResourceType co2 = ResourceType.CO2;
+                if (TryGetPrimaryReaction(package, out ReactionDefinition reaction))
+                {
+                    if (reaction.Inputs != null && reaction.Inputs.Length >= 1)
+                        organicC = reaction.Inputs[0].Resource;
+                    if (reaction.Outputs != null)
+                    {
+                        bool foundH2 = false;
+                        bool foundCo2 = false;
+                        for (int i = 0; i < reaction.Outputs.Length; i++)
+                        {
+                            ResourceType output = reaction.Outputs[i].Resource;
+                            if (!foundH2 && output == ResourceType.H2)
+                            {
+                                h2 = output;
+                                foundH2 = true;
+                            }
+                            else if (!foundCo2 && output == ResourceType.CO2)
+                            {
+                                co2 = output;
+                                foundCo2 = true;
+                            }
+                        }
+                    }
+                }
+                return new MetabolismReactionRuntimeBinding(package.Metabolism, organicC, default, h2, co2);
+            }
+            default:
+                return new MetabolismReactionRuntimeBinding(package.Metabolism, default, default, default, default);
+        }
+    }
+
+    private static bool TryGetPrimaryReaction(ReactionPackageDefinition package, out ReactionDefinition reaction)
+    {
+        if (package.OrderedReactions != null && package.OrderedReactions.Length > 0)
+        {
+            reaction = package.OrderedReactions[0];
+            return true;
+        }
+
+        reaction = default;
+        return false;
     }
 
     private static ReactionStoichiometryTerm In(ResourceType type, float value) => new ReactionStoichiometryTerm(type, value);
