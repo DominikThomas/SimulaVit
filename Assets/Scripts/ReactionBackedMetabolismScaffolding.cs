@@ -266,7 +266,9 @@ public static class ReactionDefinitionRegistry
             {
                 Define(ReactionId.Fermentation,
                     inputs: new[] { In(ResourceType.OrganicC, 1f) },
-                    outputs: new[] { Out(ResourceType.CO2, 0.5f), Out(ResourceType.CH4, 0.1f) },
+                    // Scaffold resource identities should mirror legacy Fermentation runtime behavior.
+                    // Coefficients remain non-authoritative during Phase 1 scaffolding.
+                    outputs: new[] { Out(ResourceType.CO2, 0.5f), Out(ResourceType.H2, 0.1f) },
                     baseEnergyDelta: 0.4f)
             }),
         new ReactionPackageDefinition(
