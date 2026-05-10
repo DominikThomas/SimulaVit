@@ -115,7 +115,6 @@ public readonly struct MetabolismReactionRuntimeBinding
     public readonly ResourceType PrimaryInput1;
     public readonly ResourceType PrimaryOutput0;
     public readonly ResourceType PrimaryOutput1;
-    public readonly ResourceType SecondaryInput0;
     public readonly ResourceType SecondaryOutput0;
     public readonly ResourceType SecondaryOutput1;
     public readonly ResourceType SecondaryOutput2;
@@ -126,7 +125,6 @@ public readonly struct MetabolismReactionRuntimeBinding
         ResourceType primaryInput1,
         ResourceType primaryOutput0,
         ResourceType primaryOutput1,
-        ResourceType secondaryInput0 = default,
         ResourceType secondaryOutput0 = default,
         ResourceType secondaryOutput1 = default,
         ResourceType secondaryOutput2 = default)
@@ -136,7 +134,6 @@ public readonly struct MetabolismReactionRuntimeBinding
         PrimaryInput1 = primaryInput1;
         PrimaryOutput0 = primaryOutput0;
         PrimaryOutput1 = primaryOutput1;
-        SecondaryInput0 = secondaryInput0;
         SecondaryOutput0 = secondaryOutput0;
         SecondaryOutput1 = secondaryOutput1;
         SecondaryOutput2 = secondaryOutput2;
@@ -519,7 +516,6 @@ public static class ReactionDefinitionRegistry
                     darkAerobicInput,
                     lightOutput,
                     darkAerobicOutput,
-                    ResourceType.OrganicCStore,
                     darkAnoxicOutput0,
                     darkAnoxicOutput1,
                     darkAnoxicOutput2);

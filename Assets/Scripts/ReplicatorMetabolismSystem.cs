@@ -5,7 +5,7 @@ using Unity.Profiling;
 
 public class ReplicatorMetabolismSystem
 {
-    private const bool EnableHydrogenotrophyParityValidation = false;
+    private static readonly bool EnableHydrogenotrophyParityValidation = false;
     private static readonly ProfilerMarker MetabolismHotLoopMarker = new ProfilerMarker("ReplicatorMetabolismSystem.HotLoop");
     private static readonly ProfilerMarker RemoveDeadAgentsMarker = new ProfilerMarker("ReplicatorMetabolismSystem.RemoveDeadAgents");
 
@@ -27,7 +27,7 @@ public class ReplicatorMetabolismSystem
             new MetabolismReactionRuntimeBinding(MetabolismType.Hydrogenotrophy, ResourceType.CO2, ResourceType.H2, default, default));
         PhotosynthesisRuntimeBinding = GetRuntimeBindingOrFallback(
             MetabolismType.Photosynthesis,
-            new MetabolismReactionRuntimeBinding(MetabolismType.Photosynthesis, ResourceType.CO2, ResourceType.O2, ResourceType.O2, ResourceType.CO2, ResourceType.OrganicCStore, ResourceType.CO2, ResourceType.H2, ResourceType.DissolvedOrganicLeak));
+            new MetabolismReactionRuntimeBinding(MetabolismType.Photosynthesis, ResourceType.CO2, ResourceType.O2, ResourceType.O2, ResourceType.CO2, ResourceType.CO2, ResourceType.H2, ResourceType.DissolvedOrganicLeak));
         SaprotrophyRuntimeBinding = GetRuntimeBindingOrFallback(
             MetabolismType.Saprotrophy,
             new MetabolismReactionRuntimeBinding(MetabolismType.Saprotrophy, ResourceType.OrganicC, ResourceType.O2, ResourceType.CO2, default));
