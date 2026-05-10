@@ -11,6 +11,7 @@ public class ReplicatorMetabolismSystem
 
     private static readonly MetabolismReactionRuntimeBinding SulfurChemosynthesisRuntimeBinding;
     private static readonly MetabolismReactionRuntimeBinding HydrogenotrophyRuntimeBinding;
+    private static readonly MetabolismReactionRuntimeBinding PhotosynthesisRuntimeBinding;
     private static readonly MetabolismReactionRuntimeBinding SaprotrophyRuntimeBinding;
     private static readonly MetabolismReactionRuntimeBinding FermentationRuntimeBinding;
     private static readonly MetabolismReactionRuntimeBinding MethanogenesisRuntimeBinding;
@@ -24,6 +25,9 @@ public class ReplicatorMetabolismSystem
         HydrogenotrophyRuntimeBinding = GetRuntimeBindingOrFallback(
             MetabolismType.Hydrogenotrophy,
             new MetabolismReactionRuntimeBinding(MetabolismType.Hydrogenotrophy, ResourceType.CO2, ResourceType.H2, default, default));
+        PhotosynthesisRuntimeBinding = GetRuntimeBindingOrFallback(
+            MetabolismType.Photosynthesis,
+            new MetabolismReactionRuntimeBinding(MetabolismType.Photosynthesis, ResourceType.CO2, ResourceType.O2, ResourceType.O2, ResourceType.CO2, ResourceType.OrganicCStore, ResourceType.CO2, ResourceType.H2, ResourceType.DissolvedOrganicLeak));
         SaprotrophyRuntimeBinding = GetRuntimeBindingOrFallback(
             MetabolismType.Saprotrophy,
             new MetabolismReactionRuntimeBinding(MetabolismType.Saprotrophy, ResourceType.OrganicC, ResourceType.O2, ResourceType.CO2, default));
@@ -862,7 +866,7 @@ public class ReplicatorMetabolismSystem
         bool lackO2 = false;
         bool lackStoredC = false;
 
-        if (TryPhotosynthesisEnergyGain(populationState, index, cellIndex, planetResourceMap, settings, photosynthesisLight, performance))
+        if (TryPhotosynthesisEnergyGain(populationState, index, cellIndex, planetResourceMap, settings, photosynthesisLight, performance, PhotosynthesisRuntimeBinding))
         {
             debugSnapshot.PhotosynthLightModeCount++;
         }
@@ -871,11 +875,11 @@ public class ReplicatorMetabolismSystem
             if (photosynthesisLight > 0f)
             {
                 float co2Need = Mathf.Max(0f, settings.PhotosynthesisCo2PerTickAtFullInsolation) * photosynthesisLight;
-                float co2Available = GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, ResourceType.CO2, cellIndex);
+                float co2Available = GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, PhotosynthesisRuntimeBinding.PrimaryInput0, cellIndex);
                 lackCo2 = co2Need > 0f && co2Available <= Mathf.Epsilon;
             }
 
-            float gainedAerobic = TryPhotosynthAerobicDarkRespiration(populationState, index, cellIndex, planetResourceMap, settings, o2PerC, energyPerC, performance, out lackStoredC, out lackO2);
+            float gainedAerobic = TryPhotosynthAerobicDarkRespiration(populationState, index, cellIndex, planetResourceMap, settings, o2PerC, energyPerC, performance, PhotosynthesisRuntimeBinding, out lackStoredC, out lackO2);
             if (gainedAerobic > 0f)
             {
                 debugSnapshot.PhotosynthDarkAerobicModeCount++;
@@ -893,7 +897,8 @@ public class ReplicatorMetabolismSystem
                     out float fallbackUsed,
                     out float fallbackEnergy,
                     out float fallbackCO2,
-                    out float fallbackH2);
+                    out float fallbackH2,
+                    PhotosynthesisRuntimeBinding);
 
                 if (usedFallback)
                 {
@@ -925,7 +930,7 @@ public class ReplicatorMetabolismSystem
                 lackStoredC = true;
             }
 
-            if (GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, ResourceType.O2, cellIndex) <= Mathf.Epsilon)
+            if (GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, PhotosynthesisRuntimeBinding.PrimaryInput1, cellIndex) <= Mathf.Epsilon)
             {
                 bool fallbackPossible = settings.PhotosynthDarkAnoxicEnabled && populationState.OrganicCStore[index] > Mathf.Epsilon;
                 lackO2 = !fallbackPossible;
@@ -948,7 +953,8 @@ public class ReplicatorMetabolismSystem
         PlanetResourceMap planetResourceMap,
         Settings settings,
         float insolation,
-        float performance)
+        float performance,
+        MetabolismReactionRuntimeBinding runtimeBinding)
     {
         if (insolation <= 0f)
         {
@@ -956,15 +962,15 @@ public class ReplicatorMetabolismSystem
         }
 
         float co2Need = Mathf.Max(0f, settings.PhotosynthesisCo2PerTickAtFullInsolation) * insolation;
-        float co2Available = GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, ResourceType.CO2, cellIndex);
+        float co2Available = GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, runtimeBinding.PrimaryInput0, cellIndex);
         float co2Consumed = Mathf.Min(co2Need, co2Available);
         if (co2Consumed <= 0f)
         {
             return false;
         }
 
-        AddAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, MetabolismType.Photosynthesis, ResourceType.CO2, cellIndex, -co2Consumed);
-        AddAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, MetabolismType.Photosynthesis, ResourceType.O2, cellIndex, co2Consumed);
+        AddAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, MetabolismType.Photosynthesis, runtimeBinding.PrimaryInput0, cellIndex, -co2Consumed);
+        AddAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, MetabolismType.Photosynthesis, runtimeBinding.PrimaryOutput0, cellIndex, co2Consumed);
 
         float producedEnergy = co2Consumed * Mathf.Max(0f, settings.PhotosynthesisEnergyPerCo2) * performance;
         populationState.Energy[index] += producedEnergy;
@@ -987,11 +993,12 @@ public class ReplicatorMetabolismSystem
         float o2PerC,
         float energyPerC,
         float performance,
+        MetabolismReactionRuntimeBinding runtimeBinding,
         out bool lackStoredC,
         out bool lackO2)
     {
         float desiredResp = Mathf.Max(0f, settings.NightRespirationCPerTick);
-        float o2Available = GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, ResourceType.O2, cellIndex);
+        float o2Available = GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, runtimeBinding.PrimaryInput1, cellIndex);
         bool hasStore = populationState.OrganicCStore[index] > 0f;
         lackStoredC = !hasStore && desiredResp > 0f;
         lackO2 = hasStore && desiredResp > 0f && o2Available <= Mathf.Epsilon;
@@ -1033,7 +1040,8 @@ public class ReplicatorMetabolismSystem
         out float organicCUsed,
         out float energyGenerated,
         out float co2Released,
-        out float h2Released)
+        out float h2Released,
+        MetabolismReactionRuntimeBinding runtimeBinding)
     {
         organicCUsed = 0f;
         energyGenerated = 0f;
@@ -1045,7 +1053,7 @@ public class ReplicatorMetabolismSystem
             return false;
         }
 
-        if (GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, ResourceType.O2, cellIndex) > Mathf.Epsilon)
+        if (GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, runtimeBinding.PrimaryInput1, cellIndex) > Mathf.Epsilon)
         {
             return false;
         }
@@ -1080,19 +1088,19 @@ public class ReplicatorMetabolismSystem
         co2Released = organicCUsed * Mathf.Clamp01(settings.PhotosynthDarkAnoxicCO2ReleaseFraction);
         if (co2Released > 0f)
         {
-            AddAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, MetabolismType.Photosynthesis, ResourceType.CO2, cellIndex, co2Released);
+            AddAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, MetabolismType.Photosynthesis, runtimeBinding.SecondaryOutput0, cellIndex, co2Released);
         }
 
         h2Released = organicCUsed * Mathf.Clamp01(settings.PhotosynthDarkAnoxicH2ReleaseFraction);
         if (h2Released > 0f)
         {
-            AddAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, MetabolismType.Photosynthesis, ResourceType.H2, cellIndex, h2Released);
+            AddAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, MetabolismType.Photosynthesis, runtimeBinding.SecondaryOutput1, cellIndex, h2Released);
         }
 
         float dissolvedOrganicLeak = organicCUsed * Mathf.Clamp01(settings.PhotosynthDarkAnoxicOrganicLeakFraction);
         if (dissolvedOrganicLeak > 0f)
         {
-            AddAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, MetabolismType.Photosynthesis, ResourceType.DissolvedOrganicLeak, cellIndex, dissolvedOrganicLeak);
+            AddAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, MetabolismType.Photosynthesis, runtimeBinding.SecondaryOutput2, cellIndex, dissolvedOrganicLeak);
         }
 
         return true;
