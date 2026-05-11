@@ -115,19 +115,28 @@ public readonly struct MetabolismReactionRuntimeBinding
     public readonly ResourceType PrimaryInput1;
     public readonly ResourceType PrimaryOutput0;
     public readonly ResourceType PrimaryOutput1;
+    public readonly ResourceType SecondaryOutput0;
+    public readonly ResourceType SecondaryOutput1;
+    public readonly ResourceType SecondaryOutput2;
 
     public MetabolismReactionRuntimeBinding(
         MetabolismType metabolism,
         ResourceType primaryInput0,
         ResourceType primaryInput1,
         ResourceType primaryOutput0,
-        ResourceType primaryOutput1)
+        ResourceType primaryOutput1,
+        ResourceType secondaryOutput0 = default,
+        ResourceType secondaryOutput1 = default,
+        ResourceType secondaryOutput2 = default)
     {
         Metabolism = metabolism;
         PrimaryInput0 = primaryInput0;
         PrimaryInput1 = primaryInput1;
         PrimaryOutput0 = primaryOutput0;
         PrimaryOutput1 = primaryOutput1;
+        SecondaryOutput0 = secondaryOutput0;
+        SecondaryOutput1 = secondaryOutput1;
+        SecondaryOutput2 = secondaryOutput2;
     }
 }
 
@@ -426,6 +435,90 @@ public static class ReactionDefinitionRegistry
                         sulfur = reaction.Outputs[1].Resource;
                 }
                 return new MetabolismReactionRuntimeBinding(package.Metabolism, co2, h2s, sulfur, default);
+            }
+            case MetabolismType.Photosynthesis:
+            {
+                ResourceType lightInput = ResourceType.CO2;
+                ResourceType lightOutput = ResourceType.O2;
+                ResourceType darkAerobicInput = ResourceType.O2;
+                ResourceType darkAerobicOutput = ResourceType.CO2;
+                ResourceType darkAnoxicOutput0 = ResourceType.CO2;
+                ResourceType darkAnoxicOutput1 = ResourceType.H2;
+                ResourceType darkAnoxicOutput2 = ResourceType.DissolvedOrganicLeak;
+
+                ReactionDefinition[] reactions = package.OrderedReactions;
+                if (reactions != null && reactions.Length > 0)
+                {
+                    ReactionDefinition light = reactions[0];
+                    if (light.Inputs != null && light.Inputs.Length >= 1)
+                        lightInput = light.Inputs[0].Resource;
+                    if (light.Outputs != null)
+                    {
+                        for (int i = 0; i < light.Outputs.Length; i++)
+                        {
+                            if (light.Outputs[i].Resource == ResourceType.O2)
+                            {
+                                lightOutput = light.Outputs[i].Resource;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (reactions.Length > 1)
+                    {
+                        ReactionDefinition darkAerobic = reactions[1];
+                        if (darkAerobic.Inputs != null)
+                        {
+                            for (int i = 0; i < darkAerobic.Inputs.Length; i++)
+                            {
+                                if (darkAerobic.Inputs[i].Resource == ResourceType.O2)
+                                {
+                                    darkAerobicInput = darkAerobic.Inputs[i].Resource;
+                                    break;
+                                }
+                            }
+                        }
+                        if (darkAerobic.Outputs != null)
+                        {
+                            for (int i = 0; i < darkAerobic.Outputs.Length; i++)
+                            {
+                                if (darkAerobic.Outputs[i].Resource == ResourceType.CO2)
+                                {
+                                    darkAerobicOutput = darkAerobic.Outputs[i].Resource;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    if (reactions.Length > 2)
+                    {
+                        ReactionDefinition darkAnoxic = reactions[2];
+                        if (darkAnoxic.Outputs != null)
+                        {
+                            for (int i = 0; i < darkAnoxic.Outputs.Length; i++)
+                            {
+                                ResourceType output = darkAnoxic.Outputs[i].Resource;
+                                if (output == ResourceType.CO2)
+                                    darkAnoxicOutput0 = output;
+                                else if (output == ResourceType.H2)
+                                    darkAnoxicOutput1 = output;
+                                else if (output == ResourceType.DissolvedOrganicLeak)
+                                    darkAnoxicOutput2 = output;
+                            }
+                        }
+                    }
+                }
+
+                return new MetabolismReactionRuntimeBinding(
+                    package.Metabolism,
+                    lightInput,
+                    darkAerobicInput,
+                    lightOutput,
+                    darkAerobicOutput,
+                    darkAnoxicOutput0,
+                    darkAnoxicOutput1,
+                    darkAnoxicOutput2);
             }
             case MetabolismType.Saprotrophy:
             {
