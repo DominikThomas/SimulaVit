@@ -9,6 +9,15 @@ public class SunSkyRotator : MonoBehaviour
     public Vector3 orbitAxis = Vector3.up;
     public bool keepOrbitOnEquator = true;
 
+    [Header("Seasons")]
+    public bool enableSeasons = false;
+    [Range(0f, 90f)] public float axisTiltDegrees = 23.5f;
+    [Min(1f)] public float yearLengthInDays = 100f;
+    [Tooltip("Offset added to seasonal phase in radians.")]
+    public float seasonalPhaseOffset = 0f;
+    [Tooltip("When enabled, seasonal phase 0 starts at +axisTilt (northern summer).")]
+    public bool northernSummerAtPhaseZero = false;
+
     [Header("Sun Visual")]
     public float sunDistance = 250f;
     public float sunScale = 8f;
@@ -80,13 +89,31 @@ public class SunSkyRotator : MonoBehaviour
         float dt = GetSimulationDeltaTime();
         Vector3 axis = GetOrbitAxis();
 
+        // Daily angle drives day/night progression and remains tied to simulation delta time.
         accumulatedOrbitAngle += orbitDegreesPerSecond * dt;
         Quaternion orbitRotation = Quaternion.AngleAxis(accumulatedOrbitAngle, axis);
 
         if (keepOrbitOnEquator)
         {
             Vector3 orbitForward = orbitRotation * initialOrbitForward;
-            transform.rotation = Quaternion.LookRotation(orbitForward, axis);
+
+            // Seasonal phase advances over a configurable simulation year (dayLength * yearLengthInDays).
+            float declinationDegrees = GetSeasonalDeclinationDegrees();
+
+            // Declination is the apparent north/south latitude of the sun path (axis tilt model).
+            Vector3 east = Vector3.Cross(axis, orbitForward);
+            if (east.sqrMagnitude < 0.0001f)
+            {
+                east = Vector3.Cross(axis, Vector3.right);
+                if (east.sqrMagnitude < 0.0001f)
+                {
+                    east = Vector3.Cross(axis, Vector3.forward);
+                }
+            }
+
+            Quaternion declinationRotation = Quaternion.AngleAxis(-declinationDegrees, east.normalized);
+            Vector3 tiltedForward = declinationRotation * orbitForward;
+            transform.rotation = Quaternion.LookRotation(tiltedForward, axis);
         }
         else
         {
@@ -178,6 +205,46 @@ public class SunSkyRotator : MonoBehaviour
         }
 
         return Mathf.Max(0f, replicatorManager.FrameSimulationDeltaTime);
+    }
+
+    float GetDayLengthSeconds()
+    {
+        return orbitDegreesPerSecond > 0.0001f ? 360f / orbitDegreesPerSecond : float.PositiveInfinity;
+    }
+
+    float GetYearLengthSeconds()
+    {
+        // Year duration is explicitly derived from the current day length.
+        float dayLengthSeconds = GetDayLengthSeconds();
+        return dayLengthSeconds * Mathf.Max(1f, yearLengthInDays);
+    }
+
+    float GetSeasonalDeclinationDegrees()
+    {
+        if (!enableSeasons)
+        {
+            return 0f;
+        }
+
+        float yearLengthSeconds = GetYearLengthSeconds();
+        if (!float.IsFinite(yearLengthSeconds) || yearLengthSeconds <= 0f)
+        {
+            return 0f;
+        }
+
+        // Seasonal phase is based on simulation time only (deterministic, pause-aware).
+        float yearPhase01 = Mathf.Repeat(accumulatedOrbitAngle / 360f, yearLengthInDays) / Mathf.Max(1f, yearLengthInDays);
+        float phaseRadians = (yearPhase01 * Mathf.PI * 2f) + seasonalPhaseOffset;
+        float sine = Mathf.Sin(phaseRadians);
+
+        if (northernSummerAtPhaseZero)
+        {
+            // Shift sin to cos so phase 0 starts at +tilt for northern summer.
+            sine = Mathf.Cos(phaseRadians);
+        }
+
+        // Declination oscillates smoothly between +axisTilt and -axisTilt.
+        return Mathf.Clamp(axisTiltDegrees, 0f, 90f) * sine;
     }
 
     void ResolvePlanetRadius()
