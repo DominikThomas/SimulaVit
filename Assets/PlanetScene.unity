@@ -418,6 +418,11 @@ MonoBehaviour:
   orbitDegreesPerSecond: 0.75
   orbitAxis: {x: 0, y: 1, z: 0}
   keepOrbitOnEquator: 1
+  enableSeasons: 1
+  axisTiltDegrees: 25
+  yearLengthInDays: 100
+  seasonalPhaseOffset: 0
+  northernSummerAtPhaseZero: 1
   sunDistance: 250
   sunScale: 8
   sunColor: {r: 1, g: 0.9, b: 0.6, a: 1}
@@ -833,8 +838,8 @@ MonoBehaviour:
   m_TargetGraphic: {fileID: 1049548737}
   m_HandleRect: {fileID: 1049548736}
   m_Direction: 2
-  m_Value: 1
-  m_Size: 1
+  m_Value: 0
+  m_Size: 0.47368407
   m_NumberOfSteps: 0
   m_OnValueChanged:
     m_PersistentCalls:
