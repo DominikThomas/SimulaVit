@@ -12,11 +12,12 @@ public class PlanetTemperatureIceVisuals : MonoBehaviour
     public bool enableTemperatureLandIce = true;
     [Min(50f)] public float landIceThresholdKelvin = 273.15f;
     [Min(0.01f)] public float landIceFadeKelvin = 3f;
-    [Range(32, 2048)] public int landIceMaskResolutionX = 512;
-    [Range(16, 1024)] public int landIceMaskResolutionY = 256;
-    [Min(0.05f)] public float iceMaskUpdateIntervalSeconds = 1.5f;
+    [Min(0.05f)] public float iceVisualUpdateIntervalSeconds = 1.5f;
     public Color landIceColor = new Color(0.88f, 0.93f, 0.98f, 1f);
     [Range(0f, 2f)] public float landIceStrength = 1f;
+
+    [Header("Land Ice Debug")]
+    public bool forceVertexIcePreview = false;
 
     [Header("Sea Ice Scaffold (Visual Only)")]
     public bool enableTemperatureSeaIce = false;
@@ -24,24 +25,24 @@ public class PlanetTemperatureIceVisuals : MonoBehaviour
     [Min(0.01f)] public float seaIceFadeKelvin = 3f;
     [Range(1.0001f, 1.05f)] public float seaIceRadiusMultiplier = 1.002f;
 
-    private Texture2D landIceMaskTexture;
-    private Color32[] landIcePixels;
     private Material planetMaterial;
+    private MeshFilter meshFilter;
+    private Mesh planetMesh;
+    private Vector3[] meshVertices;
+    private Color[] meshVertexColors;
 
     private double lastSimulationTime = double.NegativeInfinity;
     private double nextUpdateSimulationTime;
-    private int lastMaskWidth;
-    private int lastMaskHeight;
 
-    private static readonly int IceMaskId = Shader.PropertyToID("_IceMask");
     private static readonly int IceColorId = Shader.PropertyToID("_IceColor");
     private static readonly int IceStrengthId = Shader.PropertyToID("_IceStrength");
+    private static readonly int ForceVertexIcePreviewId = Shader.PropertyToID("_ForceVertexIcePreview");
 
     private void Awake()
     {
         ResolveReferences();
-        TryBindPlanetMaterial();
-        EnsureLandIceTexture();
+        TryBindPlanetVisuals();
+        EnsureMeshBuffers();
         PushStaticMaterialParams();
         RefreshNow();
     }
@@ -49,8 +50,8 @@ public class PlanetTemperatureIceVisuals : MonoBehaviour
     private void OnEnable()
     {
         ResolveReferences();
-        TryBindPlanetMaterial();
-        EnsureLandIceTexture();
+        TryBindPlanetVisuals();
+        EnsureMeshBuffers();
         PushStaticMaterialParams();
         RefreshNow();
     }
@@ -83,22 +84,21 @@ public class PlanetTemperatureIceVisuals : MonoBehaviour
 
     private void OnValidate()
     {
-        landIceMaskResolutionX = Mathf.Clamp(landIceMaskResolutionX, 32, 2048);
-        landIceMaskResolutionY = Mathf.Clamp(landIceMaskResolutionY, 16, 1024);
         landIceFadeKelvin = Mathf.Max(0.01f, landIceFadeKelvin);
         seaIceFadeKelvin = Mathf.Max(0.01f, seaIceFadeKelvin);
-        iceMaskUpdateIntervalSeconds = Mathf.Max(0.05f, iceMaskUpdateIntervalSeconds);
+        iceVisualUpdateIntervalSeconds = Mathf.Max(0.05f, iceVisualUpdateIntervalSeconds);
 
         if (!Application.isPlaying)
         {
             return;
         }
 
-        EnsureLandIceTexture();
+        TryBindPlanetVisuals();
+        EnsureMeshBuffers();
         PushStaticMaterialParams();
     }
 
-    [ContextMenu("Refresh Ice Mask Now")]
+    [ContextMenu("Refresh Vertex Ice Now")]
     public void RefreshNow()
     {
         ResolveReferences();
@@ -107,12 +107,13 @@ public class PlanetTemperatureIceVisuals : MonoBehaviour
             return;
         }
 
-        EnsureLandIceTexture();
+        TryBindPlanetVisuals();
+        EnsureMeshBuffers();
         PushStaticMaterialParams();
-        UpdateLandIceMask();
+        UpdateLandIceVertexColors();
 
         lastSimulationTime = GetSimulationTimeSeconds();
-        nextUpdateSimulationTime = lastSimulationTime + iceMaskUpdateIntervalSeconds;
+        nextUpdateSimulationTime = lastSimulationTime + iceVisualUpdateIntervalSeconds;
     }
 
     private void ResolveReferences()
@@ -137,7 +138,7 @@ public class PlanetTemperatureIceVisuals : MonoBehaviour
         }
     }
 
-    private void TryBindPlanetMaterial()
+    private void TryBindPlanetVisuals()
     {
         if (planetGenerator == null)
         {
@@ -146,34 +147,39 @@ public class PlanetTemperatureIceVisuals : MonoBehaviour
 
         MeshRenderer renderer = planetGenerator.GetComponent<MeshRenderer>();
         planetMaterial = renderer != null ? renderer.sharedMaterial : null;
+
+        meshFilter = planetGenerator.GetComponent<MeshFilter>();
     }
 
-    private void EnsureLandIceTexture()
+    private void EnsureMeshBuffers()
     {
-        if (landIceMaskTexture != null && lastMaskWidth == landIceMaskResolutionX && lastMaskHeight == landIceMaskResolutionY)
+        if (meshFilter == null)
         {
             return;
         }
 
-        if (landIceMaskTexture != null)
+        if (planetMesh == null)
         {
-            Destroy(landIceMaskTexture);
+            planetMesh = meshFilter.mesh;
         }
 
-        landIceMaskTexture = new Texture2D(landIceMaskResolutionX, landIceMaskResolutionY, TextureFormat.R8, false, true)
+        if (planetMesh == null)
         {
-            name = "Planet Land Ice Mask Runtime",
-            wrapMode = TextureWrapMode.Clamp,
-            filterMode = FilterMode.Bilinear
-        };
+            return;
+        }
 
-        lastMaskWidth = landIceMaskResolutionX;
-        lastMaskHeight = landIceMaskResolutionY;
-        landIcePixels = new Color32[lastMaskWidth * lastMaskHeight];
-
-        if (planetMaterial != null)
+        if (meshVertices == null || meshVertices.Length != planetMesh.vertexCount)
         {
-            planetMaterial.SetTexture(IceMaskId, landIceMaskTexture);
+            meshVertices = planetMesh.vertices;
+        }
+
+        if (meshVertexColors == null || meshVertexColors.Length != planetMesh.vertexCount)
+        {
+            meshVertexColors = new Color[planetMesh.vertexCount];
+            for (int i = 0; i < meshVertexColors.Length; i++)
+            {
+                meshVertexColors[i] = new Color(0f, 0f, 0f, 0f);
+            }
         }
     }
 
@@ -181,7 +187,7 @@ public class PlanetTemperatureIceVisuals : MonoBehaviour
     {
         if (planetMaterial == null)
         {
-            TryBindPlanetMaterial();
+            TryBindPlanetVisuals();
             if (planetMaterial == null)
             {
                 return;
@@ -190,15 +196,12 @@ public class PlanetTemperatureIceVisuals : MonoBehaviour
 
         planetMaterial.SetColor(IceColorId, landIceColor);
         planetMaterial.SetFloat(IceStrengthId, landIceStrength);
-        if (landIceMaskTexture != null)
-        {
-            planetMaterial.SetTexture(IceMaskId, landIceMaskTexture);
-        }
+        planetMaterial.SetFloat(ForceVertexIcePreviewId, forceVertexIcePreview ? 1f : 0f);
     }
 
-    private void UpdateLandIceMask()
+    private void UpdateLandIceVertexColors()
     {
-        if (landIceMaskTexture == null || landIcePixels == null)
+        if (planetMesh == null || meshVertices == null || meshVertexColors == null)
         {
             return;
         }
@@ -206,39 +209,25 @@ public class PlanetTemperatureIceVisuals : MonoBehaviour
         float threshold = landIceThresholdKelvin;
         float fade = Mathf.Max(0.01f, landIceFadeKelvin);
 
-        for (int y = 0; y < lastMaskHeight; y++)
+        for (int i = 0; i < meshVertices.Length; i++)
         {
-            float v = (y + 0.5f) / lastMaskHeight;
-            float phi = (1f - v) * Mathf.PI;
-            float sinPhi = Mathf.Sin(phi);
-            float cosPhi = Mathf.Cos(phi);
+            Vector3 dir = meshVertices[i].normalized;
+            float iceValue = 0f;
 
-            for (int x = 0; x < lastMaskWidth; x++)
+            if (!planetGenerator.IsOceanAtDirection(dir))
             {
-                float u = (x + 0.5f) / lastMaskWidth;
-                float theta = u * Mathf.PI * 2f;
-
-                Vector3 dir = new Vector3(
-                    sinPhi * Mathf.Cos(theta),
-                    cosPhi,
-                    sinPhi * Mathf.Sin(theta)).normalized;
-
-                float iceValue = 0f;
-                if (!planetGenerator.IsOceanAtDirection(dir))
-                {
-                    int cell = planetResourceMap.GetCellIndexFromDirection(dir);
-                    float tempKelvin = planetResourceMap.GetTemperature(dir, cell);
-                    float t = Mathf.InverseLerp(threshold + fade, threshold - fade, tempKelvin);
-                    iceValue = Mathf.Clamp01(t);
-                }
-
-                byte b = (byte)Mathf.RoundToInt(iceValue * 255f);
-                landIcePixels[(y * lastMaskWidth) + x] = new Color32(b, b, b, 255);
+                int cell = planetResourceMap.GetCellIndexFromDirection(dir);
+                float tempKelvin = planetResourceMap.GetTemperature(dir, cell);
+                iceValue = Mathf.Clamp01(Mathf.InverseLerp(threshold + fade, threshold - fade, tempKelvin));
             }
+
+            Color c = meshVertexColors[i];
+            c.a = iceValue;
+            c.r = iceValue;
+            meshVertexColors[i] = c;
         }
 
-        landIceMaskTexture.SetPixelData(landIcePixels, 0);
-        landIceMaskTexture.Apply(false, false);
+        planetMesh.colors = meshVertexColors;
     }
 
     private double GetSimulationTimeSeconds()
@@ -249,14 +238,5 @@ public class PlanetTemperatureIceVisuals : MonoBehaviour
         }
 
         return replicatorManager.SimulationTimeSeconds;
-    }
-
-    private void OnDestroy()
-    {
-        if (landIceMaskTexture != null)
-        {
-            Destroy(landIceMaskTexture);
-            landIceMaskTexture = null;
-        }
     }
 }
