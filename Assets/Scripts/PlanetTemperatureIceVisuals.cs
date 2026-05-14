@@ -17,6 +17,7 @@ public class PlanetTemperatureIceVisuals : MonoBehaviour
     [Min(0.05f)] public float iceMaskUpdateIntervalSeconds = 1.5f;
     public Color landIceColor = new Color(0.88f, 0.93f, 0.98f, 1f);
     [Range(0f, 2f)] public float landIceStrength = 1f;
+    public bool forceIceMaskPreview = false;
 
     [Header("Sea Ice Scaffold (Visual Only)")]
     public bool enableTemperatureSeaIce = false;
@@ -36,6 +37,7 @@ public class PlanetTemperatureIceVisuals : MonoBehaviour
     private static readonly int IceMaskId = Shader.PropertyToID("_IceMask");
     private static readonly int IceColorId = Shader.PropertyToID("_IceColor");
     private static readonly int IceStrengthId = Shader.PropertyToID("_IceStrength");
+    private static readonly int ForceIceMaskPreviewId = Shader.PropertyToID("_ForceIceMaskPreview");
 
     private void Awake()
     {
@@ -190,6 +192,7 @@ public class PlanetTemperatureIceVisuals : MonoBehaviour
 
         planetMaterial.SetColor(IceColorId, landIceColor);
         planetMaterial.SetFloat(IceStrengthId, landIceStrength);
+        planetMaterial.SetFloat(ForceIceMaskPreviewId, forceIceMaskPreview ? 1f : 0f);
         if (landIceMaskTexture != null)
         {
             planetMaterial.SetTexture(IceMaskId, landIceMaskTexture);
@@ -209,19 +212,11 @@ public class PlanetTemperatureIceVisuals : MonoBehaviour
         for (int y = 0; y < lastMaskHeight; y++)
         {
             float v = (y + 0.5f) / lastMaskHeight;
-            float phi = (1f - v) * Mathf.PI;
-            float sinPhi = Mathf.Sin(phi);
-            float cosPhi = Mathf.Cos(phi);
 
             for (int x = 0; x < lastMaskWidth; x++)
             {
                 float u = (x + 0.5f) / lastMaskWidth;
-                float theta = u * Mathf.PI * 2f;
-
-                Vector3 dir = new Vector3(
-                    sinPhi * Mathf.Cos(theta),
-                    cosPhi,
-                    sinPhi * Mathf.Sin(theta)).normalized;
+                Vector3 dir = SphericalUvToDirection(u, v);
 
                 float iceValue = 0f;
                 if (!planetGenerator.IsOceanAtDirection(dir))
@@ -239,6 +234,18 @@ public class PlanetTemperatureIceVisuals : MonoBehaviour
 
         landIceMaskTexture.SetPixelData(landIcePixels, 0);
         landIceMaskTexture.Apply(false, false);
+    }
+
+    private static Vector3 SphericalUvToDirection(float u, float v)
+    {
+        float phi = (1f - v) * Mathf.PI;
+        float theta = u * Mathf.PI * 2f;
+        float sinPhi = Mathf.Sin(phi);
+        float cosPhi = Mathf.Cos(phi);
+        return new Vector3(
+            sinPhi * Mathf.Cos(theta),
+            cosPhi,
+            sinPhi * Mathf.Sin(theta)).normalized;
     }
 
     private double GetSimulationTimeSeconds()
