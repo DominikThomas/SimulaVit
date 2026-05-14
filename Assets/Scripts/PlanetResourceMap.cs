@@ -209,6 +209,7 @@ public class PlanetResourceMap : MonoBehaviour
     public bool updateOceanColorFromDissolvedFe2Plus = true;
     public Color ironRichOceanColor = new Color(0.22f, 0.55f, 0.38f, 1f);
     public Color oxygenatedOceanColor = new Color(0.18f, 0.40f, 0.75f, 1f);
+    [Range(0f, 1f)] public float oceanAlpha = 0.35f;
     [Range(0.01f, 10f)] public float oceanColorLerpSpeed = 2f;
 
     private Material oceanMaterialInstance;
@@ -2825,7 +2826,9 @@ public class PlanetResourceMap : MonoBehaviour
     private Color GetTargetOceanColor()
     {
         float fe2Remaining = Mathf.Clamp01(debugDissolvedFe2PlusRemainingFraction);
-        return Color.Lerp(oxygenatedOceanColor, ironRichOceanColor, fe2Remaining);
+        Color color = Color.Lerp(oxygenatedOceanColor, ironRichOceanColor, fe2Remaining);
+        color.a = Mathf.Clamp01(oceanAlpha);
+        return color;
     }
 
     private void UpdateOceanVisuals()
@@ -2844,6 +2847,8 @@ public class PlanetResourceMap : MonoBehaviour
     {
         if (oceanMaterialInstance == null)
             return;
+
+        color.a = Mathf.Clamp01(oceanAlpha);
 
         if (oceanMaterialInstance.HasProperty(BaseColorId))
             oceanMaterialInstance.SetColor(BaseColorId, color);

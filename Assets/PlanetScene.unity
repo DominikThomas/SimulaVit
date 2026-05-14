@@ -774,12 +774,11 @@ MonoBehaviour:
   replicatorManager: {fileID: 1064713443}
   enableTemperatureLandIce: 1
   landIceThresholdKelvin: 273.15
-  landIceFadeKelvin: 3
-  landIceMaskResolutionX: 512
-  landIceMaskResolutionY: 256
-  iceMaskUpdateIntervalSeconds: 1
+  landIceFadeKelvin: 6
+  iceVisualUpdateIntervalSeconds: 1.5
   landIceColor: {r: 0.88, g: 0.93, b: 0.98, a: 1}
-  landIceStrength: 0
+  landIceStrength: 1
+  forceVertexIcePreview: 0
   enableTemperatureSeaIce: 0
   seaIceThresholdKelvin: 269.15
   seaIceFadeKelvin: 3
@@ -1512,8 +1511,9 @@ MonoBehaviour:
   updateOceanColorFromDissolvedFe2Plus: 1
   ironRichOceanColor: {r: 0.22, g: 0.55, b: 0.38, a: 1}
   oxygenatedOceanColor: {r: 0.18, g: 0.4, b: 0.75, a: 1}
+  oceanAlpha: 0.9
   oceanColorLerpSpeed: 2
-  baseTempKelvin: 279.15
+  baseTempKelvin: 273.15
   insolationTempGain: 35
   ventTempGain: 200
   oceanTempDamping: 0.5
