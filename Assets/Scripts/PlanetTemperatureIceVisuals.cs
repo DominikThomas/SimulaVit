@@ -10,8 +10,11 @@ public class PlanetTemperatureIceVisuals : MonoBehaviour
 
     [Header("Land Ice Visuals")]
     public bool enableTemperatureLandIce = true;
+    public bool useIceThermalInertia = true;
     [Min(50f)] public float landIceThresholdKelvin = 273.15f;
     [Min(0.01f)] public float landIceFadeKelvin = 3f;
+    [Min(0.01f)] public float landIceThermalTimescaleDays = 2f;
+    [Min(0.01f)] public float oceanIceThermalTimescaleDays = 4f;
     [Min(0.05f)] public float iceVisualUpdateIntervalSeconds = 1.5f;
     public Color landIceColor = new Color(0.88f, 0.93f, 0.98f, 1f);
     [Range(0f, 2f)] public float landIceStrength = 1f;
@@ -30,6 +33,8 @@ public class PlanetTemperatureIceVisuals : MonoBehaviour
     private Mesh planetMesh;
     private Vector3[] meshVertices;
     private Color[] meshVertexColors;
+    private float[] smoothedLandVertexTemperaturesKelvin;
+    private bool hasInitializedSmoothedTemperatures;
 
     private double lastSimulationTime = double.NegativeInfinity;
     private double nextUpdateSimulationTime;
@@ -87,6 +92,8 @@ public class PlanetTemperatureIceVisuals : MonoBehaviour
         landIceFadeKelvin = Mathf.Max(0.01f, landIceFadeKelvin);
         seaIceFadeKelvin = Mathf.Max(0.01f, seaIceFadeKelvin);
         iceVisualUpdateIntervalSeconds = Mathf.Max(0.05f, iceVisualUpdateIntervalSeconds);
+        landIceThermalTimescaleDays = Mathf.Max(0.01f, landIceThermalTimescaleDays);
+        oceanIceThermalTimescaleDays = Mathf.Max(0.01f, oceanIceThermalTimescaleDays);
 
         if (!Application.isPlaying)
         {
@@ -110,9 +117,18 @@ public class PlanetTemperatureIceVisuals : MonoBehaviour
         TryBindPlanetVisuals();
         EnsureMeshBuffers();
         PushStaticMaterialParams();
-        UpdateLandIceVertexColors();
 
-        lastSimulationTime = GetSimulationTimeSeconds();
+        double currentSimulationTime = GetSimulationTimeSeconds();
+        float simulationDeltaSeconds = 0f;
+        if (double.IsFinite(lastSimulationTime) && double.IsFinite(currentSimulationTime))
+        {
+            simulationDeltaSeconds = (float)System.Math.Max(0.0, currentSimulationTime - lastSimulationTime);
+        }
+
+        bool canAdvanceThermalInertia = simulationDeltaSeconds > 0f;
+        UpdateLandIceVertexColors(simulationDeltaSeconds, canAdvanceThermalInertia);
+
+        lastSimulationTime = currentSimulationTime;
         nextUpdateSimulationTime = lastSimulationTime + iceVisualUpdateIntervalSeconds;
     }
 
@@ -181,6 +197,12 @@ public class PlanetTemperatureIceVisuals : MonoBehaviour
                 meshVertexColors[i] = new Color(0f, 0f, 0f, 0f);
             }
         }
+
+        if (smoothedLandVertexTemperaturesKelvin == null || smoothedLandVertexTemperaturesKelvin.Length != planetMesh.vertexCount)
+        {
+            smoothedLandVertexTemperaturesKelvin = new float[planetMesh.vertexCount];
+            hasInitializedSmoothedTemperatures = false;
+        }
     }
 
     private void PushStaticMaterialParams()
@@ -199,15 +221,23 @@ public class PlanetTemperatureIceVisuals : MonoBehaviour
         planetMaterial.SetFloat(ForceVertexIcePreviewId, forceVertexIcePreview ? 1f : 0f);
     }
 
-    private void UpdateLandIceVertexColors()
+    private void UpdateLandIceVertexColors(float simulationDeltaSeconds, bool canAdvanceThermalInertia)
     {
         if (planetMesh == null || meshVertices == null || meshVertexColors == null)
         {
             return;
         }
 
+        if (!hasInitializedSmoothedTemperatures)
+        {
+            InitializeSmoothedTemperaturesFromCurrent();
+        }
+
         float threshold = landIceThresholdKelvin;
         float fade = Mathf.Max(0.01f, landIceFadeKelvin);
+        float timescaleSeconds = Mathf.Max(0.01f, landIceThermalTimescaleDays) * 86400f;
+        bool applyInertia = useIceThermalInertia && canAdvanceThermalInertia;
+        float blend = applyInertia ? 1f - Mathf.Exp(-simulationDeltaSeconds / timescaleSeconds) : 0f;
 
         for (int i = 0; i < meshVertices.Length; i++)
         {
@@ -217,8 +247,20 @@ public class PlanetTemperatureIceVisuals : MonoBehaviour
             if (!planetGenerator.IsOceanAtDirection(dir))
             {
                 int cell = planetResourceMap.GetCellIndexFromDirection(dir);
-                float tempKelvin = planetResourceMap.GetTemperature(dir, cell);
-                iceValue = Mathf.Clamp01(Mathf.InverseLerp(threshold + fade, threshold - fade, tempKelvin));
+                float instantTempKelvin = planetResourceMap.GetTemperature(dir, cell);
+                float smoothedTempKelvin = smoothedLandVertexTemperaturesKelvin[i];
+
+                if (useIceThermalInertia)
+                {
+                    smoothedTempKelvin = Mathf.Lerp(smoothedTempKelvin, instantTempKelvin, blend);
+                }
+                else
+                {
+                    smoothedTempKelvin = instantTempKelvin;
+                }
+
+                smoothedLandVertexTemperaturesKelvin[i] = smoothedTempKelvin;
+                iceValue = Mathf.Clamp01(Mathf.InverseLerp(threshold + fade, threshold - fade, smoothedTempKelvin));
             }
 
             Color c = meshVertexColors[i];
@@ -228,6 +270,23 @@ public class PlanetTemperatureIceVisuals : MonoBehaviour
         }
 
         planetMesh.colors = meshVertexColors;
+    }
+
+    private void InitializeSmoothedTemperaturesFromCurrent()
+    {
+        if (meshVertices == null || smoothedLandVertexTemperaturesKelvin == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < meshVertices.Length; i++)
+        {
+            Vector3 dir = meshVertices[i].normalized;
+            int cell = planetResourceMap.GetCellIndexFromDirection(dir);
+            smoothedLandVertexTemperaturesKelvin[i] = planetResourceMap.GetTemperature(dir, cell);
+        }
+
+        hasInitializedSmoothedTemperatures = true;
     }
 
     private double GetSimulationTimeSeconds()
