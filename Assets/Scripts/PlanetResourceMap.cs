@@ -223,6 +223,15 @@ public class PlanetResourceMap : MonoBehaviour
     public float insolationTempGain = 35f; // +35 K at full sun
     public float ventTempGain = 120f; // +120 K at strong vent core
     [Range(0f, 1f)] public float oceanTempDamping = 0.5f;
+    public bool enableSurfaceThermalInertia = false;
+    [Min(0.01f)] public float landThermalTimescaleDays = 1.5f;
+    [Min(0.01f)] public float oceanThermalTimescaleDays = 8f;
+    [Min(0.05f)] public float thermalUpdateIntervalSeconds = 0.5f;
+    public bool enableSimpleAlbedo = false;
+    [Range(0f, 1f)] public float bareLandAlbedo = 0.28f;
+    [Range(0f, 1f)] public float oceanAlbedo = 0.10f;
+    [Range(0f, 1f)] public float iceAlbedo = 0.62f;
+    [Range(0f, 1f)] public float albedoTemperatureInfluence = 0.35f;
 
     [Header("Temperature - Vent Heat Gradient")]
     public bool enableVentHeatGradient = true;
@@ -399,6 +408,7 @@ public class PlanetResourceMap : MonoBehaviour
     public float[] toxicProteolyticWaste;
     public float[] dissolvedOrganicLeak;
     private float[] ventHeat;
+    private float[] surfaceTemperatureKelvin;
     private float[] ventHeatTmp;
     private float[] h2sMixTmp;
     private float[] h2MixTmp;
@@ -417,6 +427,9 @@ public class PlanetResourceMap : MonoBehaviour
     private float[] oceanLayerTemperatureOffsets;
     private float ventTimer;
     private float atmosphereTimer;
+    private float thermalTimer;
+    private double lastThermalSimulationTime = double.NegativeInfinity;
+    private bool surfaceTemperatureInitialized;
     private float ventSourceStrengthNormalization = 1f;
 
     private const int NeighborCount = 6;
@@ -473,8 +486,14 @@ public class PlanetResourceMap : MonoBehaviour
         float simulationDeltaTime = Time.deltaTime;
         if (replicatorManager != null)
         {
-            simulationDeltaTime *= Mathf.Max(0f, replicatorManager.SimulationSpeedMultiplier);
+            simulationDeltaTime = Mathf.Max(0f, replicatorManager.SimulationDeltaTime);
+            if (simulationDeltaTime <= 0f)
+            {
+                simulationDeltaTime = Time.deltaTime * Mathf.Max(0f, replicatorManager.SimulationSpeedMultiplier);
+            }
         }
+
+        UpdateSurfaceTemperatureInertia(simulationDeltaTime);
 
         if (enableVentReplenishment)
         {
@@ -509,6 +528,42 @@ public class PlanetResourceMap : MonoBehaviour
         }
 
         UpdateOceanVisuals();
+    }
+
+    private void UpdateSurfaceTemperatureInertia(float simulationDeltaTime)
+    {
+        if (!enableSurfaceThermalInertia || !isInitialized || surfaceTemperatureKelvin == null || cellDirections == null)
+        {
+            return;
+        }
+
+        if (simulationDeltaTime <= 0f)
+        {
+            return;
+        }
+
+        thermalTimer += simulationDeltaTime;
+        float thermalTick = Mathf.Max(0.05f, thermalUpdateIntervalSeconds);
+        while (thermalTimer >= thermalTick)
+        {
+            thermalTimer -= thermalTick;
+            AdvanceSurfaceTemperatureInertia(thermalTick);
+        }
+    }
+
+    private void AdvanceSurfaceTemperatureInertia(float deltaSeconds)
+    {
+        float landTimescaleSeconds = Mathf.Max(0.01f, landThermalTimescaleDays) * 86400f;
+        float oceanTimescaleSeconds = Mathf.Max(0.01f, oceanThermalTimescaleDays) * 86400f;
+
+        for (int cell = 0; cell < cellDirections.Length; cell++)
+        {
+            bool underwater = IsOceanCell(cell);
+            float timescale = underwater ? oceanTimescaleSeconds : landTimescaleSeconds;
+            float blend = 1f - Mathf.Exp(-deltaSeconds / Mathf.Max(0.01f, timescale));
+            float targetKelvin = ComputeInstantaneousTemperature(cellDirections[cell], cell);
+            surfaceTemperatureKelvin[cell] = Mathf.Lerp(surfaceTemperatureKelvin[cell], targetKelvin, blend);
+        }
     }
 
     public float Get(ResourceType t, int cell, AggregateCompatibilityCallsite callsite = AggregateCompatibilityCallsite.UnknownLegacy)
@@ -975,16 +1030,27 @@ public class PlanetResourceMap : MonoBehaviour
     public float GetTemperature(Vector3 dir, int cellIndex = -1)
     {
         Vector3 surfaceDir = ResolveSurfaceDirection(dir);
-        float insolation = Mathf.Clamp01(GetInsolation(surfaceDir));
-
         if (cellIndex < 0 && isInitialized && resolution > 0)
         {
             cellIndex = GetCellIndexFromDirection(surfaceDir);
         }
 
+        if (enableSurfaceThermalInertia && surfaceTemperatureInitialized && surfaceTemperatureKelvin != null && cellIndex >= 0 && cellIndex < surfaceTemperatureKelvin.Length)
+        {
+            return surfaceTemperatureKelvin[cellIndex];
+        }
+
+        return ComputeInstantaneousTemperature(surfaceDir, cellIndex);
+    }
+
+    private float ComputeInstantaneousTemperature(Vector3 dir, int cellIndex)
+    {
+        Vector3 surfaceDir = ResolveSurfaceDirection(dir);
+        float insolation = Mathf.Clamp01(GetInsolation(surfaceDir));
+
         bool underwater = IsOceanCell(cellIndex);
         float insolationDamping = underwater ? Mathf.Clamp01(oceanTempDamping) : 1f;
-        float insolationTerm = Mathf.Max(0f, insolationTempGain) * insolation * insolationDamping;
+        float insolationTerm = Mathf.Max(0f, insolationTempGain) * insolation * insolationDamping * GetAlbedoAbsorptionFactor(cellIndex);
 
         float ventTerm = 0f;
         if (ventHeat != null && cellIndex >= 0 && cellIndex < ventHeat.Length)
@@ -1015,6 +1081,26 @@ public class PlanetResourceMap : MonoBehaviour
         }
         float tempMax = underwater ? Mathf.Max(minTempKelvin + 1f, maxOceanTempKelvin) : Mathf.Max(minTempKelvin + 1f, maxLandTempKelvin);
         return Mathf.Clamp(tempKelvin, minTempKelvin, tempMax);
+    }
+
+    private float GetAlbedoAbsorptionFactor(int cellIndex)
+    {
+        if (!enableSimpleAlbedo)
+        {
+            return 1f;
+        }
+
+        bool underwater = IsOceanCell(cellIndex);
+        float baseAlbedo = underwater ? oceanAlbedo : bareLandAlbedo;
+
+        if (!underwater)
+        {
+            float approxIce01 = Mathf.Clamp01(Mathf.InverseLerp(273.15f + 3f, 273.15f - 3f, baseTempKelvin));
+            baseAlbedo = Mathf.Lerp(baseAlbedo, iceAlbedo, approxIce01);
+        }
+
+        float absorption = 1f - Mathf.Clamp01(baseAlbedo);
+        return Mathf.Lerp(1f, absorption, Mathf.Clamp01(albedoTemperatureInfluence));
     }
 
     public void GetTemperatureStats(out float meanKelvin, out float minKelvin, out float maxKelvin)
@@ -1053,6 +1139,23 @@ public class PlanetResourceMap : MonoBehaviour
         }
     }
 
+    private void InitializeSurfaceTemperatureFromInstantaneous()
+    {
+        if (surfaceTemperatureKelvin == null || cellDirections == null)
+        {
+            return;
+        }
+
+        for (int cell = 0; cell < cellDirections.Length; cell++)
+        {
+            surfaceTemperatureKelvin[cell] = ComputeInstantaneousTemperature(cellDirections[cell], cell);
+        }
+
+        thermalTimer = 0f;
+        lastThermalSimulationTime = replicatorManager != null ? replicatorManager.SimulationTimeSeconds : Time.timeSinceLevelLoadAsDouble;
+        surfaceTemperatureInitialized = true;
+    }
+
     private void InitializeIfNeeded()
     {
         if (planetGenerator == null)
@@ -1086,6 +1189,7 @@ public class PlanetResourceMap : MonoBehaviour
         ventMask = new byte[cellCount];
         ventStrength = new float[cellCount];
         ventHeat = new float[cellCount];
+        surfaceTemperatureKelvin = new float[cellCount];
         ventHeatTmp = new float[cellCount];
         h2sMixTmp = new float[cellCount];
         h2MixTmp = new float[cellCount];
@@ -1282,6 +1386,7 @@ public class PlanetResourceMap : MonoBehaviour
         isInitialized = true;
         BuildVentHeatNeighbors();
         RebuildVentHeatField();
+        InitializeSurfaceTemperatureFromInstantaneous();
         InitializeLayeredOceanState();
 
         int total = cellCount;
