@@ -10,8 +10,12 @@ public class PlanetTemperatureIceVisuals : MonoBehaviour
 
     [Header("Land Ice Visuals")]
     public bool enableTemperatureLandIce = true;
+    [System.Obsolete("Deprecated: thermal inertia now belongs in PlanetResourceMap.")]
+    public bool useIceThermalInertia = false;
     [Min(50f)] public float landIceThresholdKelvin = 273.15f;
     [Min(0.01f)] public float landIceFadeKelvin = 3f;
+    [Min(0.01f)] public float landIceThermalTimescaleDays = 2f;
+    [Min(0.01f)] public float oceanIceThermalTimescaleDays = 4f;
     [Min(0.05f)] public float iceVisualUpdateIntervalSeconds = 1.5f;
     public Color landIceColor = new Color(0.88f, 0.93f, 0.98f, 1f);
     [Range(0f, 2f)] public float landIceStrength = 1f;
@@ -110,6 +114,7 @@ public class PlanetTemperatureIceVisuals : MonoBehaviour
         TryBindPlanetVisuals();
         EnsureMeshBuffers();
         PushStaticMaterialParams();
+
         UpdateLandIceVertexColors();
 
         lastSimulationTime = GetSimulationTimeSeconds();
@@ -181,6 +186,7 @@ public class PlanetTemperatureIceVisuals : MonoBehaviour
                 meshVertexColors[i] = new Color(0f, 0f, 0f, 0f);
             }
         }
+
     }
 
     private void PushStaticMaterialParams()
