@@ -207,7 +207,7 @@ public class SunSkyRotator : MonoBehaviour
         return Mathf.Max(0f, replicatorManager.FrameSimulationDeltaTime);
     }
 
-    float GetDayLengthSeconds()
+    public float GetDayLengthSeconds()
     {
         return orbitDegreesPerSecond > 0.0001f ? 360f / orbitDegreesPerSecond : float.PositiveInfinity;
     }

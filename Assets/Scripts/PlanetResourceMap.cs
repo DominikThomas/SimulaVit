@@ -553,8 +553,8 @@ public class PlanetResourceMap : MonoBehaviour
 
     private void AdvanceSurfaceTemperatureInertia(float deltaSeconds)
     {
-        float landTimescaleSeconds = Mathf.Max(0.01f, landThermalTimescaleDays) * 86400f;
-        float oceanTimescaleSeconds = Mathf.Max(0.01f, oceanThermalTimescaleDays) * 86400f;
+        float landTimescaleSeconds = Mathf.Max(0.01f, landThermalTimescaleDays) * sunSkyRotator.GetDayLengthSeconds();
+        float oceanTimescaleSeconds = Mathf.Max(0.01f, oceanThermalTimescaleDays) * sunSkyRotator.GetDayLengthSeconds();
 
         for (int cell = 0; cell < cellDirections.Length; cell++)
         {
