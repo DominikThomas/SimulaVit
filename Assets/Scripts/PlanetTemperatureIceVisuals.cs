@@ -17,17 +17,6 @@ public class PlanetTemperatureIceVisuals : MonoBehaviour
     public Color landIceColor = new Color(0.88f, 0.93f, 0.98f, 1f);
     [Range(0f, 2f)] public float landIceStrength = 1f;
 
-    [Header("Deprecated (Unused)")]
-    [FormerlySerializedAs("useIceThermalInertia")]
-    [SerializeField, HideInInspector, System.Obsolete("Deprecated and unused. Thermal inertia is controlled by PlanetResourceMap.")]
-    private bool deprecatedUseIceThermalInertia;
-    [FormerlySerializedAs("landIceThermalTimescaleDays")]
-    [SerializeField, HideInInspector, System.Obsolete("Deprecated and unused. Thermal inertia is controlled by PlanetResourceMap.")]
-    private float deprecatedLandIceThermalTimescaleDays = 2f;
-    [FormerlySerializedAs("oceanIceThermalTimescaleDays")]
-    [SerializeField, HideInInspector, System.Obsolete("Deprecated and unused. Thermal inertia is controlled by PlanetResourceMap.")]
-    private float deprecatedOceanIceThermalTimescaleDays = 4f;
-
     [Header("Land Ice Debug")]
     public bool forceVertexIcePreview = false;
 
