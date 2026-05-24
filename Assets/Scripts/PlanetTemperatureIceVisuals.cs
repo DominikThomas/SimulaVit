@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Serialization;
 
 [DisallowMultipleComponent]
 public class PlanetTemperatureIceVisuals : MonoBehaviour
@@ -10,20 +11,27 @@ public class PlanetTemperatureIceVisuals : MonoBehaviour
 
     [Header("Land Ice Visuals")]
     public bool enableTemperatureLandIce = true;
-    [System.Obsolete("Deprecated: thermal inertia now belongs in PlanetResourceMap.")]
-    public bool useIceThermalInertia = false;
     [Min(50f)] public float landIceThresholdKelvin = 273.15f;
     [Min(0.01f)] public float landIceFadeKelvin = 3f;
-    [Min(0.01f)] public float landIceThermalTimescaleDays = 2f;
-    [Min(0.01f)] public float oceanIceThermalTimescaleDays = 4f;
     [Min(0.05f)] public float iceVisualUpdateIntervalSeconds = 1.5f;
     public Color landIceColor = new Color(0.88f, 0.93f, 0.98f, 1f);
     [Range(0f, 2f)] public float landIceStrength = 1f;
 
+    [Header("Deprecated (Unused)")]
+    [FormerlySerializedAs("useIceThermalInertia")]
+    [SerializeField, HideInInspector, System.Obsolete("Deprecated and unused. Thermal inertia is controlled by PlanetResourceMap.")]
+    private bool deprecatedUseIceThermalInertia;
+    [FormerlySerializedAs("landIceThermalTimescaleDays")]
+    [SerializeField, HideInInspector, System.Obsolete("Deprecated and unused. Thermal inertia is controlled by PlanetResourceMap.")]
+    private float deprecatedLandIceThermalTimescaleDays = 2f;
+    [FormerlySerializedAs("oceanIceThermalTimescaleDays")]
+    [SerializeField, HideInInspector, System.Obsolete("Deprecated and unused. Thermal inertia is controlled by PlanetResourceMap.")]
+    private float deprecatedOceanIceThermalTimescaleDays = 4f;
+
     [Header("Land Ice Debug")]
     public bool forceVertexIcePreview = false;
 
-    [Header("Sea Ice Scaffold (Visual Only)")]
+    [Header("Sea Ice Scaffold (visual only / future)")]
     public bool enableTemperatureSeaIce = false;
     [Min(50f)] public float seaIceThresholdKelvin = 269.15f;
     [Min(0.01f)] public float seaIceFadeKelvin = 3f;
