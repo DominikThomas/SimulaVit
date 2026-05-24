@@ -420,7 +420,7 @@ MonoBehaviour:
   keepOrbitOnEquator: 1
   enableSeasons: 1
   axisTiltDegrees: 49.4
-  yearLengthInDays: 8
+  yearLengthInDays: 30
   seasonalPhaseOffset: 0
   northernSummerAtPhaseZero: 1
   sunDistance: 250
@@ -773,8 +773,11 @@ MonoBehaviour:
   planetResourceMap: {fileID: 1222684993}
   replicatorManager: {fileID: 1064713443}
   enableTemperatureLandIce: 1
+  useIceThermalInertia: 0
   landIceThresholdKelvin: 273.15
-  landIceFadeKelvin: 6
+  landIceFadeKelvin: 4
+  landIceThermalTimescaleDays: 0.025
+  oceanIceThermalTimescaleDays: 4
   iceVisualUpdateIntervalSeconds: 1.5
   landIceColor: {r: 0.88, g: 0.93, b: 0.98, a: 1}
   landIceStrength: 1
@@ -1513,10 +1516,19 @@ MonoBehaviour:
   oxygenatedOceanColor: {r: 0.18, g: 0.4, b: 0.75, a: 1}
   oceanAlpha: 0.9
   oceanColorLerpSpeed: 2
-  baseTempKelvin: 273.15
+  baseTempKelvin: 268.15
   insolationTempGain: 35
   ventTempGain: 200
   oceanTempDamping: 0.5
+  enableSurfaceThermalInertia: 1
+  landThermalTimescaleDays: 0.1
+  oceanThermalTimescaleDays: 1
+  thermalUpdateIntervalSeconds: 0.2
+  enableSimpleAlbedo: 0
+  bareLandAlbedo: 0.28
+  oceanAlbedo: 0.1
+  iceAlbedo: 0.62
+  albedoTemperatureInfluence: 0.35
   enableVentHeatGradient: 1
   ventHeatBlurPasses: 3
   ventHeatSpread: 0.4
