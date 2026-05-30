@@ -22,6 +22,13 @@ public enum ResourceType
     DissolvedFe2Plus = 13
 }
 
+public enum ThermalStartupMode
+{
+    Instantaneous = 0,
+    DailyAverage = 1,
+    WarmStartAboveFreezing = 2
+}
+
 [DisallowMultipleComponent]
 public class PlanetResourceMap : MonoBehaviour
 {
@@ -232,6 +239,12 @@ public class PlanetResourceMap : MonoBehaviour
     [Range(0f, 1f)] public float oceanAlbedo = 0.10f;
     [Range(0f, 1f)] public float iceAlbedo = 0.62f;
     [Range(0f, 1f)] public float albedoTemperatureInfluence = 0.35f;
+    [Header("Temperature - Startup Initialization")]
+    public ThermalStartupMode thermalStartupMode = ThermalStartupMode.DailyAverage;
+    [Min(1)] public int thermalStartupDaySamples = 12;
+    [Min(50f)] public float thermalStartupLandIceThresholdKelvin = 273.15f;
+    [Min(0f)] public float thermalStartupIceSafetyMarginKelvin = 2f;
+    public bool logThermalStartupStats = false;
 
     [Header("Temperature - Vent Heat Gradient")]
     public bool enableVentHeatGradient = true;
@@ -1045,8 +1058,13 @@ public class PlanetResourceMap : MonoBehaviour
 
     private float ComputeInstantaneousTemperature(Vector3 dir, int cellIndex)
     {
+        return ComputeInstantaneousTemperature(dir, cellIndex, GetSunDirection());
+    }
+
+    private float ComputeInstantaneousTemperature(Vector3 dir, int cellIndex, Vector3 sunDirection)
+    {
         Vector3 surfaceDir = ResolveSurfaceDirection(dir);
-        float insolation = Mathf.Clamp01(GetInsolation(surfaceDir));
+        float insolation = Mathf.Max(0f, Vector3.Dot(surfaceDir, sunDirection.normalized));
 
         bool underwater = IsOceanCell(cellIndex);
         float insolationDamping = underwater ? Mathf.Clamp01(oceanTempDamping) : 1f;
@@ -1154,6 +1172,81 @@ public class PlanetResourceMap : MonoBehaviour
         thermalTimer = 0f;
         lastThermalSimulationTime = replicatorManager != null ? replicatorManager.SimulationTimeSeconds : Time.timeSinceLevelLoadAsDouble;
         surfaceTemperatureInitialized = true;
+    }
+
+    private void InitializeSurfaceTemperatureForStartup()
+    {
+        if (surfaceTemperatureKelvin == null || cellDirections == null)
+        {
+            return;
+        }
+
+        ThermalStartupMode modeToUse = thermalStartupMode;
+        int sampleCount = Mathf.Max(1, thermalStartupDaySamples);
+        bool canSampleDay = modeToUse != ThermalStartupMode.Instantaneous && sunSkyRotator != null;
+
+        if (!canSampleDay && modeToUse != ThermalStartupMode.Instantaneous)
+        {
+            modeToUse = ThermalStartupMode.Instantaneous;
+        }
+
+        float iceWarmFloorKelvin = thermalStartupLandIceThresholdKelvin + Mathf.Max(0f, thermalStartupIceSafetyMarginKelvin);
+        float sum = 0f;
+        float min = float.MaxValue;
+        float max = float.MinValue;
+
+        for (int cell = 0; cell < cellDirections.Length; cell++)
+        {
+            Vector3 dir = cellDirections[cell];
+            float initializedKelvin;
+            bool underwater = IsOceanCell(cell);
+
+            if (modeToUse == ThermalStartupMode.DailyAverage || modeToUse == ThermalStartupMode.WarmStartAboveFreezing)
+            {
+                initializedKelvin = ComputeDailyAverageTemperature(dir, cell, sampleCount);
+
+                if (modeToUse == ThermalStartupMode.WarmStartAboveFreezing && !underwater)
+                {
+                    if (initializedKelvin > thermalStartupLandIceThresholdKelvin)
+                    {
+                        initializedKelvin = Mathf.Max(initializedKelvin, iceWarmFloorKelvin);
+                    }
+                }
+            }
+            else
+            {
+                initializedKelvin = ComputeInstantaneousTemperature(dir, cell);
+            }
+
+            surfaceTemperatureKelvin[cell] = initializedKelvin;
+            sum += initializedKelvin;
+            min = Mathf.Min(min, initializedKelvin);
+            max = Mathf.Max(max, initializedKelvin);
+        }
+
+        thermalTimer = 0f;
+        lastThermalSimulationTime = replicatorManager != null ? replicatorManager.SimulationTimeSeconds : Time.timeSinceLevelLoadAsDouble;
+        surfaceTemperatureInitialized = true;
+
+        if (logThermalStartupStats)
+        {
+            float mean = cellDirections.Length > 0 ? sum / cellDirections.Length : baseTempKelvin;
+            Debug.Log($"Thermal startup init mode={modeToUse}, samples={sampleCount}, mean={mean:F2}K, min={min:F2}K, max={max:F2}K", this);
+        }
+    }
+
+    private float ComputeDailyAverageTemperature(Vector3 surfaceDir, int cellIndex, int sampleCount)
+    {
+        float sum = 0f;
+        float step = 1f / sampleCount;
+        for (int i = 0; i < sampleCount; i++)
+        {
+            float phase01 = (i + 0.5f) * step;
+            Vector3 sampledSunDir = sunSkyRotator.GetSunDirectionForDayPhase01(phase01);
+            sum += ComputeInstantaneousTemperature(surfaceDir, cellIndex, sampledSunDir);
+        }
+
+        return sum / sampleCount;
     }
 
     private void InitializeIfNeeded()
@@ -1386,7 +1479,7 @@ public class PlanetResourceMap : MonoBehaviour
         isInitialized = true;
         BuildVentHeatNeighbors();
         RebuildVentHeatField();
-        InitializeSurfaceTemperatureFromInstantaneous();
+        InitializeSurfaceTemperatureForStartup();
         InitializeLayeredOceanState();
 
         int total = cellCount;

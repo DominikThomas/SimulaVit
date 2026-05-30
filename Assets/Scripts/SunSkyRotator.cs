@@ -212,6 +212,46 @@ public class SunSkyRotator : MonoBehaviour
         return orbitDegreesPerSecond > 0.0001f ? 360f / orbitDegreesPerSecond : float.PositiveInfinity;
     }
 
+    public Vector3 GetSunDirectionForDayPhase01(float dayPhase01)
+    {
+        if (initialRotation == default)
+        {
+            initialRotation = transform.rotation;
+        }
+
+        if (initialOrbitForward.sqrMagnitude < 0.0001f)
+        {
+            CacheInitialOrbitForward();
+        }
+
+        Vector3 axis = GetOrbitAxis();
+        float normalizedPhase = Mathf.Repeat(dayPhase01, 1f);
+        float orbitAngle = normalizedPhase * 360f;
+        Quaternion orbitRotation = Quaternion.AngleAxis(orbitAngle, axis);
+
+        if (keepOrbitOnEquator)
+        {
+            Vector3 orbitForward = orbitRotation * initialOrbitForward;
+            float declinationDegrees = GetSeasonalDeclinationDegrees();
+            Vector3 east = Vector3.Cross(axis, orbitForward);
+            if (east.sqrMagnitude < 0.0001f)
+            {
+                east = Vector3.Cross(axis, Vector3.right);
+                if (east.sqrMagnitude < 0.0001f)
+                {
+                    east = Vector3.Cross(axis, Vector3.forward);
+                }
+            }
+
+            Quaternion declinationRotation = Quaternion.AngleAxis(-declinationDegrees, east.normalized);
+            Vector3 tiltedForward = declinationRotation * orbitForward;
+            return tiltedForward.normalized;
+        }
+
+        Quaternion rotation = orbitRotation * initialRotation;
+        return (rotation * Vector3.forward).normalized;
+    }
+
     float GetYearLengthSeconds()
     {
         // Year duration is explicitly derived from the current day length.
