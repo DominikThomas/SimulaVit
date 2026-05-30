@@ -196,6 +196,16 @@ public class PlanetResourceMap : MonoBehaviour
     public float debugGlobalO2;
     public float debugGlobalCH4;
 
+    [Header("Simulation Time Diagnostics")]
+    [Tooltip("Simulation-time delta consumed by PlanetResourceMap this Unity frame. Resource and thermal timers should use this, not wall-clock delta.")]
+    public float debugSimulationDeltaTimeUsedByPlanetResourceMap;
+    [Tooltip("Last simulation-time delta accumulated into the vent timer.")]
+    public float debugLastVentDeltaTime;
+    [Tooltip("Current simulation-time accumulation toward the next vent tick.")]
+    public float debugVentTimer;
+    [Tooltip("Total H2 injected by the most recent vent tick before caps/clamps.")]
+    public float debugVentH2AddedLastTick;
+
     [Header("Ocean Dissolved Chemistry")]
     [Tooltip("Legacy per-cell baseline at reference resolution/radius; converted into a resolution-independent total dissolved Fe2+ ocean inventory.")]
     public float initialDissolvedFe2PlusPerOceanCell = 8f;
@@ -234,6 +244,21 @@ public class PlanetResourceMap : MonoBehaviour
     [Min(0.01f)] public float landThermalTimescaleDays = 1.5f;
     [Min(0.01f)] public float oceanThermalTimescaleDays = 8f;
     [Min(0.05f)] public float thermalUpdateIntervalSeconds = 0.5f;
+    [Tooltip("Fallback simulation seconds per thermal day when the sun/day rotator reports an infinite day length (for example orbitDegreesPerSecond = 0 in fixed-sun tests).")]
+    [Min(0.01f)] public float thermalFallbackDayLengthSeconds = 480f;
+    [Tooltip("When enabled, PlanetResourceMap insolation/thermal calculations use fixedSunDirectionForThermalTest instead of the scene light. Useful for permanent day/night hemisphere tests.")]
+    public bool enableFixedSunDirectionForThermalTest = false;
+    public Vector3 fixedSunDirectionForThermalTest = Vector3.forward;
+    [Header("Temperature - Thermal Diagnostics")]
+    public float debugThermalLastDeltaSeconds;
+    public int debugThermalUpdatedCells;
+    public float debugThermalMeanTargetTemp;
+    public float debugThermalMeanStoredTemp;
+    public float debugThermalMeanAbsDifference;
+    public float debugThermalDaySideTargetTemp;
+    public float debugThermalDaySideStoredTemp;
+    public float debugThermalNightSideTargetTemp;
+    public float debugThermalNightSideStoredTemp;
     public bool enableSimpleAlbedo = false;
     [Range(0f, 1f)] public float bareLandAlbedo = 0.28f;
     [Range(0f, 1f)] public float oceanAlbedo = 0.10f;
@@ -491,19 +516,15 @@ public class PlanetResourceMap : MonoBehaviour
             replicatorManager = FindFirstObjectByType<ReplicatorManager>();
         }
 
-        if (replicatorManager != null && !replicatorManager.ShouldAdvanceSimulation)
-        {
-            return;
-        }
+        float simulationDeltaTime = GetAuthoritativeSimulationDeltaTime();
+        debugSimulationDeltaTimeUsedByPlanetResourceMap = simulationDeltaTime;
 
-        float simulationDeltaTime = Time.deltaTime;
-        if (replicatorManager != null)
+        if (simulationDeltaTime <= 0f)
         {
-            simulationDeltaTime = Mathf.Max(0f, replicatorManager.SimulationDeltaTime);
-            if (simulationDeltaTime <= 0f)
-            {
-                simulationDeltaTime = Time.deltaTime * Mathf.Max(0f, replicatorManager.SimulationSpeedMultiplier);
-            }
+            debugLastVentDeltaTime = 0f;
+            debugThermalLastDeltaSeconds = 0f;
+            UpdateOceanVisuals();
+            return;
         }
 
         UpdateSurfaceTemperatureInertia(simulationDeltaTime);
@@ -511,11 +532,15 @@ public class PlanetResourceMap : MonoBehaviour
         if (enableVentReplenishment)
         {
             float ventTick = Mathf.Max(0.0001f, ventTickSeconds);
+            debugLastVentDeltaTime = simulationDeltaTime;
+            debugVentH2AddedLastTick = 0f;
             ventTimer += simulationDeltaTime;
+            debugVentTimer = ventTimer;
 
             while (ventTimer >= ventTick)
             {
                 ventTimer -= ventTick;
+                debugVentTimer = ventTimer;
                 ApplyVentReplenishment();
             }
         }
@@ -540,7 +565,31 @@ public class PlanetResourceMap : MonoBehaviour
             }
         }
 
+        debugVentTimer = ventTimer;
         UpdateOceanVisuals();
+    }
+
+    private float GetAuthoritativeSimulationDeltaTime()
+    {
+        if (replicatorManager == null)
+        {
+            return Mathf.Max(0f, Time.unscaledDeltaTime);
+        }
+
+        if (replicatorManager.SimulationSpeedMultiplier <= 0f || !replicatorManager.ShouldAdvanceSimulation)
+        {
+            return 0f;
+        }
+
+        float frameSimulationDelta = Mathf.Max(0f, replicatorManager.FrameSimulationDeltaTime);
+        if (frameSimulationDelta > 0f)
+        {
+            return frameSimulationDelta;
+        }
+
+        // PlanetResourceMap may update before ReplicatorManager has run its pipeline for this frame.
+        // Fall back to an explicitly speed-scaled unscaled frame delta rather than raw wall-clock Time.deltaTime.
+        return Mathf.Max(0f, Time.unscaledDeltaTime) * Mathf.Max(0f, replicatorManager.SimulationSpeedMultiplier);
     }
 
     private void UpdateSurfaceTemperatureInertia(float simulationDeltaTime)
@@ -566,17 +615,75 @@ public class PlanetResourceMap : MonoBehaviour
 
     private void AdvanceSurfaceTemperatureInertia(float deltaSeconds)
     {
-        float landTimescaleSeconds = Mathf.Max(0.01f, landThermalTimescaleDays) * sunSkyRotator.GetDayLengthSeconds();
-        float oceanTimescaleSeconds = Mathf.Max(0.01f, oceanThermalTimescaleDays) * sunSkyRotator.GetDayLengthSeconds();
+        float dayLengthSeconds = GetThermalDayLengthSeconds();
+        float landTimescaleSeconds = Mathf.Max(0.01f, landThermalTimescaleDays) * dayLengthSeconds;
+        float oceanTimescaleSeconds = Mathf.Max(0.01f, oceanThermalTimescaleDays) * dayLengthSeconds;
+        Vector3 sunDirection = GetSunDirection();
+
+        float targetSum = 0f;
+        float storedSum = 0f;
+        float absDiffSum = 0f;
+        int updatedCells = 0;
+        float bestDayDot = float.NegativeInfinity;
+        float bestNightDot = float.PositiveInfinity;
 
         for (int cell = 0; cell < cellDirections.Length; cell++)
         {
             bool underwater = IsOceanCell(cell);
             float timescale = underwater ? oceanTimescaleSeconds : landTimescaleSeconds;
             float blend = 1f - Mathf.Exp(-deltaSeconds / Mathf.Max(0.01f, timescale));
-            float targetKelvin = ComputeInstantaneousTemperature(cellDirections[cell], cell);
-            surfaceTemperatureKelvin[cell] = Mathf.Lerp(surfaceTemperatureKelvin[cell], targetKelvin, blend);
+            float targetKelvin = ComputeInstantaneousTemperature(cellDirections[cell], cell, sunDirection);
+            float storedKelvin = Mathf.Lerp(surfaceTemperatureKelvin[cell], targetKelvin, blend);
+            surfaceTemperatureKelvin[cell] = storedKelvin;
+
+            targetSum += targetKelvin;
+            storedSum += storedKelvin;
+            absDiffSum += Mathf.Abs(targetKelvin - storedKelvin);
+            updatedCells++;
+
+            float sunDot = Vector3.Dot(cellDirections[cell], sunDirection);
+            if (sunDot > bestDayDot)
+            {
+                bestDayDot = sunDot;
+                debugThermalDaySideTargetTemp = targetKelvin;
+                debugThermalDaySideStoredTemp = storedKelvin;
+            }
+
+            if (sunDot < bestNightDot)
+            {
+                bestNightDot = sunDot;
+                debugThermalNightSideTargetTemp = targetKelvin;
+                debugThermalNightSideStoredTemp = storedKelvin;
+            }
         }
+
+        debugThermalLastDeltaSeconds = deltaSeconds;
+        debugThermalUpdatedCells = updatedCells;
+        if (updatedCells > 0)
+        {
+            float inv = 1f / updatedCells;
+            debugThermalMeanTargetTemp = targetSum * inv;
+            debugThermalMeanStoredTemp = storedSum * inv;
+            debugThermalMeanAbsDifference = absDiffSum * inv;
+        }
+
+        lastThermalSimulationTime = replicatorManager != null ? replicatorManager.SimulationTimeSeconds : Time.timeSinceLevelLoadAsDouble;
+    }
+
+    private float GetThermalDayLengthSeconds()
+    {
+        float dayLengthSeconds = float.PositiveInfinity;
+        if (sunSkyRotator != null)
+        {
+            dayLengthSeconds = sunSkyRotator.GetDayLengthSeconds();
+        }
+
+        if (!float.IsFinite(dayLengthSeconds) || dayLengthSeconds <= 0f)
+        {
+            dayLengthSeconds = thermalFallbackDayLengthSeconds;
+        }
+
+        return Mathf.Max(0.01f, dayLengthSeconds);
     }
 
     public float Get(ResourceType t, int cell, AggregateCompatibilityCallsite callsite = AggregateCompatibilityCallsite.UnknownLegacy)
@@ -2779,7 +2886,7 @@ public class PlanetResourceMap : MonoBehaviour
         float h2sPerTick = Mathf.Max(0f, ventH2SPerTick);
         float h2PerTick = Mathf.Max(0f, ventH2PerTick);
         float dissolvedFe2PlusPerTick = Mathf.Max(0f, ventDissolvedFe2PlusPerTick);
-        if (Mathf.Approximately(h2sPerTick, 0f) && Mathf.Approximately(h2PerTick, 0f) && Mathf.Approximately(dissolvedFe2PlusPerTick, 0f))
+        if (Mathf.Approximately(h2sPerTick, 0f) && Mathf.Approximately(h2PerTick, 0f) && Mathf.Approximately(ventCO2PerTick, 0f) && Mathf.Approximately(dissolvedFe2PlusPerTick, 0f))
         {
             return;
         }
@@ -2814,17 +2921,20 @@ public class PlanetResourceMap : MonoBehaviour
                 continue;
             }
 
+            float h2Added = h2PerTick * cellVentStrength * sourceScale;
+            debugVentH2AddedLastTick += h2Added;
+
             if (enableLayeredOcean && IsOceanCell(cell))
             {
                 InjectVentProductToBottomLayer(ResourceType.H2S, cell, h2sPerTick * cellVentStrength * sourceScale);
-                InjectVentProductToBottomLayer(ResourceType.H2, cell, h2PerTick * cellVentStrength * sourceScale);
+                InjectVentProductToBottomLayer(ResourceType.H2, cell, h2Added);
                 InjectVentProductToBottomLayer(ResourceType.CO2, cell, Mathf.Max(0f, ventCO2PerTick) * cellVentStrength * sourceScale);
                 InjectVentProductToBottomLayer(ResourceType.DissolvedFe2Plus, cell, dissolvedFe2PlusPerTick * cellVentStrength * sourceScale);
             }
             else
             {
                 Add(ResourceType.H2S, cell, h2sPerTick * cellVentStrength * sourceScale, AggregateCompatibilityCallsite.AtmosphereVents);
-                Add(ResourceType.H2, cell, h2PerTick * cellVentStrength * sourceScale, AggregateCompatibilityCallsite.AtmosphereVents);
+                Add(ResourceType.H2, cell, h2Added, AggregateCompatibilityCallsite.AtmosphereVents);
                 Add(ResourceType.CO2, cell, Mathf.Max(0f, ventCO2PerTick) * cellVentStrength * sourceScale, AggregateCompatibilityCallsite.AtmosphereVents);
                 Add(ResourceType.DissolvedFe2Plus, cell, dissolvedFe2PlusPerTick * cellVentStrength * sourceScale, AggregateCompatibilityCallsite.AtmosphereVents);
             }
@@ -3379,6 +3489,11 @@ public class PlanetResourceMap : MonoBehaviour
 
     private Vector3 GetSunDirection()
     {
+        if (enableFixedSunDirectionForThermalTest && fixedSunDirectionForThermalTest.sqrMagnitude > 0.0001f)
+        {
+            return fixedSunDirectionForThermalTest.normalized;
+        }
+
         ResolveSunReferences();
 
         if (sunLight != null && sunLight.type == LightType.Directional)
