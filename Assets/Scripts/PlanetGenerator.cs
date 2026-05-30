@@ -149,6 +149,26 @@ public class PlanetGenerator : MonoBehaviour
             RandomizeGenerationSettings();
         }
 
+        RegeneratePlanet();
+    }
+
+    public void ApplyStartupSeed(int seed, bool randomSeedEnabled)
+    {
+        useRandomSeed = randomSeedEnabled;
+        randomSeed = seed;
+
+        // The generator's terrain is driven by noiseOffset. Derive that offset from
+        // the startup seed so a chosen seed consistently changes the generated planet
+        // without changing the existing terrain/noise algorithm.
+        System.Random seededRandom = new System.Random(seed);
+        noiseOffset = new Vector3(
+            (float)(seededRandom.NextDouble() * 2000.0 - 1000.0),
+            (float)(seededRandom.NextDouble() * 2000.0 - 1000.0),
+            (float)(seededRandom.NextDouble() * 2000.0 - 1000.0));
+    }
+
+    public void RegeneratePlanet()
+    {
         GeneratePlanet();
     }
 

@@ -29,6 +29,8 @@ public class ReplicatorManager : MonoBehaviour
     [Header("Population")]
     public int initialSpawnCount = 100;
     public int maxPopulation = 50000;
+    [Tooltip("When disabled, the manager initializes references but waits for an external startup controller to spawn the initial population.")]
+    public bool autoStartOnSceneLoad = true;
 
     public Color baseAgentColor = Color.cyan;
 
@@ -330,6 +332,7 @@ public class ReplicatorManager : MonoBehaviour
     [Range(0.00001f, 0.1f)] public float debugSessileMovementEpsilon = 0.001f;
 
     public int RuntimeSimulationStepsPerFrame => runtimeSimulationStepsPerFrame;
+    public int ConfiguredSimulationStepsPerFrame => runtimeSimulationStepsPerFrame;
     public int SimulationStepsPerFrame => simulationPipeline != null ? simulationPipeline.SimulationStepsPerFrame : runtimeSimulationStepsPerFrame;
     public float SimulationSpeedMultiplier => simulationPipeline != null ? simulationPipeline.SimulationSpeedMultiplier : runtimeSimulationStepsPerFrame;
     public float SimulationDeltaTime => simulationPipeline != null ? simulationPipeline.SimulationDeltaTime : 0f;
@@ -502,19 +505,57 @@ public class ReplicatorManager : MonoBehaviour
 
     void Start()
     {
+        InitializeForSimulation(autoStartOnSceneLoad);
+    }
+
+    public bool InitializeForSimulation(bool spawnInitialPopulation)
+    {
         ResolvePlanetResourceMapReference();
 
         if (replicatorMesh == null || replicatorMaterial == null || planetGenerator == null || planetResourceMap == null)
         {
             Debug.LogError("ReplicatorManager is missing required references (mesh/material/planetGenerator/planetResourceMap). Assign PlanetResourceMap in Inspector. It can also be auto-added to the PlanetGenerator object if one exists in scene.", this);
             enabled = false;
-            return;
+            return false;
         }
 
+        enabled = true;
         isInitialized = true;
         EnsureDeathCauseCounters();
 
-        for (int i = 0; i < initialSpawnCount; i++) SpawnAgentAtRandomLocation();
+        if (spawnInitialPopulation)
+        {
+            SpawnInitialPopulation();
+        }
+
+        return true;
+    }
+
+    public void SpawnInitialPopulation()
+    {
+        ClearPopulation();
+
+        for (int i = 0; i < initialSpawnCount; i++)
+        {
+            SpawnAgentAtRandomLocation();
+        }
+    }
+
+    public void ClearPopulation()
+    {
+        agents.Clear();
+        populationState.EnsureMatchesAgentCount(agents);
+        preyAgentsBySpatialBin.Clear();
+        spontaneousHydrogenSpawnCandidateCells.Clear();
+        spontaneousSpawnCandidateCacheLastRefreshStep = -1;
+        predatorPresenceCacheStep = -1;
+        activeSteeringPresenceCacheStep = -1;
+        simulationStepCount = 0;
+        steeringRecomputeCounter = 0;
+        metabolismTickTimer = 0f;
+        currentStepDeltaTime = 0f;
+        simulationTimeSeconds = 0d;
+        ResetScentDebugState();
     }
 
     void Update()

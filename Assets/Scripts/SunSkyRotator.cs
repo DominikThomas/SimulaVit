@@ -84,6 +84,29 @@ public class SunSkyRotator : MonoBehaviour
         UpdateSunVisualAppearance();
     }
 
+
+    public void ApplyStartupTiming(float axisTilt, float dayLengthSeconds, float yearLengthDays)
+    {
+        axisTiltDegrees = Mathf.Clamp(axisTilt, 0f, 90f);
+        yearLengthInDays = Mathf.Max(1f, yearLengthDays);
+
+        if (dayLengthSeconds > 0f)
+        {
+            orbitDegreesPerSecond = 360f / dayLengthSeconds;
+        }
+
+        ResetOrbitPhase();
+    }
+
+    public void ResetOrbitPhase()
+    {
+        accumulatedOrbitAngle = 0f;
+        transform.rotation = initialRotation;
+        CacheInitialOrbitForward();
+        UpdateSunVisualPosition();
+        UpdateSunVisualAppearance();
+    }
+
     void Update()
     {
         float dt = GetSimulationDeltaTime();

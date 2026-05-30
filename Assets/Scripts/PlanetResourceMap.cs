@@ -1356,7 +1356,7 @@ public class PlanetResourceMap : MonoBehaviour
         return sum / sampleCount;
     }
 
-    private void InitializeIfNeeded()
+    public void InitializeIfNeeded()
     {
         if (planetGenerator == null)
         {
@@ -1628,6 +1628,23 @@ public class PlanetResourceMap : MonoBehaviour
         UpdateOceanChemistryDebugStats();
         LogInitializationInventoryDebug(cellCount, CountDomainCells(oceanMask, true));
         Debug.Log($"Initialized {VentCount} vents", this);
+    }
+
+    public void ReinitializeResources()
+    {
+        isInitialized = false;
+        surfaceTemperatureInitialized = false;
+        ventTimer = 0f;
+        atmosphereTimer = 0f;
+        thermalTimer = 0f;
+        debugVentTimer = 0f;
+        debugLastVentDeltaTime = 0f;
+        debugVentH2AddedLastTick = 0f;
+        debugSimulationDeltaTimeUsedByPlanetResourceMap = 0f;
+        initialDissolvedFe2PlusTotal = 0f;
+
+        InitializeIfNeeded();
+        InitializeOceanVisuals();
     }
 
     private void ConfigureOceanDissolvedSpecies(int cellCount)
