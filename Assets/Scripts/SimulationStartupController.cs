@@ -1,5 +1,8 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
+using System.Text;
 using UnityEngine;
 
 [DefaultExecutionOrder(-2000)]
@@ -27,10 +30,17 @@ public class SimulationStartupController : MonoBehaviour
     private const float VentCO2MaxPerTick = 1f;
     private const int InitialSpawnMin = 0;
     private const int InitialSpawnMax = 10000;
+    private const int SavedStartupConfigVersion = 1;
 
     [Header("Startup Config")]
     [SerializeField] private SimulationStartupConfig defaults = new SimulationStartupConfig();
     [SerializeField] private SimulationStartupConfig currentConfig = new SimulationStartupConfig();
+
+    [Header("Startup Config Persistence")]
+    [SerializeField] private bool loadSavedStartupConfig = true;
+    [SerializeField] private bool saveStartupConfigOnStart = true;
+    [SerializeField] private bool logAppliedStartupConfig = true;
+    [SerializeField] private string savedConfigFileName = "startup_config.json";
 
     [Header("References")]
     [SerializeField] private PlanetGenerator planetGenerator;
@@ -86,6 +96,7 @@ public class SimulationStartupController : MonoBehaviour
         ResolveReferences();
         CaptureSceneDefaults();
         ResetDefaults();
+        LoadSavedStartupConfigIfEnabled();
         PrepareDeferredStartup();
     }
 
@@ -163,6 +174,16 @@ public class SimulationStartupController : MonoBehaviour
         }
     }
 
+    private void LoadSavedStartupConfigIfEnabled()
+    {
+        if (!loadSavedStartupConfig)
+        {
+            return;
+        }
+
+        LoadSavedStartupConfig();
+    }
+
     private void PrepareDeferredStartup()
     {
         Time.timeScale = 1f;
@@ -182,7 +203,7 @@ public class SimulationStartupController : MonoBehaviour
     public void RandomizeSeed()
     {
         currentConfig.useRandomSeed = true;
-        currentConfig.planetSeed = System.Environment.TickCount ^ System.Guid.NewGuid().GetHashCode();
+        currentConfig.planetSeed = GenerateConcreteSeed();
     }
 
     public void ResetDefaults()
@@ -215,6 +236,17 @@ public class SimulationStartupController : MonoBehaviour
         yield return null;
 
         ApplyConfig(currentConfig);
+
+        if (saveStartupConfigOnStart)
+        {
+            SaveStartupConfig(currentConfig);
+        }
+
+        if (logAppliedStartupConfig)
+        {
+            LogStartupConfigApplied(currentConfig, keepPaused);
+        }
+
         yield return null;
 
         if (replicatorManager != null)
@@ -246,12 +278,19 @@ public class SimulationStartupController : MonoBehaviour
             return;
         }
 
+        bool requestedRandomSeed = config.useRandomSeed;
+        int seed = requestedRandomSeed ? GenerateConcreteSeed() : config.planetSeed;
+        config.planetSeed = seed;
+
         if (planetGenerator != null)
         {
-            int seed = config.useRandomSeed ? (System.Environment.TickCount ^ System.Guid.NewGuid().GetHashCode()) : config.planetSeed;
-            config.planetSeed = seed;
-            planetGenerator.ApplyStartupSeed(seed, config.useRandomSeed);
+            planetGenerator.ApplyStartupSeed(seed, requestedRandomSeed);
             planetGenerator.RegeneratePlanet();
+        }
+
+        if (requestedRandomSeed)
+        {
+            config.useRandomSeed = false;
         }
 
         if (sunSkyRotator != null)
@@ -277,6 +316,255 @@ public class SimulationStartupController : MonoBehaviour
         {
             replicatorManager.initialSpawnCount = Mathf.Max(0, config.initialSpawnCount);
             replicatorManager.ClearPopulation();
+        }
+    }
+
+
+    private int GenerateConcreteSeed()
+    {
+        return Environment.TickCount ^ Guid.NewGuid().GetHashCode();
+    }
+
+    private string SavedStartupConfigPath => Path.Combine(Application.persistentDataPath, string.IsNullOrWhiteSpace(savedConfigFileName) ? "startup_config.json" : savedConfigFileName);
+
+    [ContextMenu("Clear Saved Startup Config")]
+    public void ClearSavedStartupConfig()
+    {
+        string path = SavedStartupConfigPath;
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+                Debug.Log($"[SimulationStartupController] Cleared saved startup config: {path}");
+            }
+            else
+            {
+                Debug.Log($"[SimulationStartupController] No saved startup config to clear: {path}");
+            }
+        }
+        catch (Exception exception)
+        {
+            Debug.LogWarning($"[SimulationStartupController] Failed to clear saved startup config at {path}: {exception.Message}");
+        }
+    }
+
+    [ContextMenu("Save Current Startup Config")]
+    public void SaveCurrentStartupConfig()
+    {
+        SaveStartupConfig(currentConfig);
+    }
+
+    [ContextMenu("Load Saved Startup Config")]
+    public void LoadSavedStartupConfigFromContextMenu()
+    {
+        if (LoadSavedStartupConfig())
+        {
+            RefreshStartupPanels();
+        }
+    }
+
+    private bool LoadSavedStartupConfig()
+    {
+        string path = SavedStartupConfigPath;
+        if (!File.Exists(path))
+        {
+            if (logAppliedStartupConfig)
+            {
+                Debug.Log($"[SimulationStartupController] No saved startup config found at: {path}");
+            }
+            return false;
+        }
+
+        try
+        {
+            string json = File.ReadAllText(path);
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                Debug.LogWarning($"[SimulationStartupController] Saved startup config is empty at {path}. Falling back to scene defaults.");
+                return false;
+            }
+
+            SavedStartupConfig savedConfig = SavedStartupConfig.FromDefaults(defaults);
+            JsonUtility.FromJsonOverwrite(json, savedConfig);
+            currentConfig = savedConfig.ToConfig(defaults);
+            ClampLoadedConfig(currentConfig);
+
+            if (logAppliedStartupConfig)
+            {
+                Debug.Log($"[SimulationStartupController] Loaded saved startup config from: {path}");
+            }
+
+            return true;
+        }
+        catch (Exception exception)
+        {
+            Debug.LogWarning($"[SimulationStartupController] Failed to load saved startup config at {path}. Falling back to scene defaults. {exception.Message}");
+            return false;
+        }
+    }
+
+    private void SaveStartupConfig(SimulationStartupConfig config)
+    {
+        if (config == null)
+        {
+            return;
+        }
+
+        string path = SavedStartupConfigPath;
+        try
+        {
+            string directory = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            SavedStartupConfig savedConfig = SavedStartupConfig.FromConfig(config);
+            string json = JsonUtility.ToJson(savedConfig, true);
+            File.WriteAllText(path, json);
+
+            if (logAppliedStartupConfig)
+            {
+                Debug.Log($"[SimulationStartupController] Saved startup config to: {path}");
+            }
+        }
+        catch (Exception exception)
+        {
+            Debug.LogWarning($"[SimulationStartupController] Failed to save startup config at {path}: {exception.Message}");
+        }
+    }
+
+    private void ClampLoadedConfig(SimulationStartupConfig config)
+    {
+        if (config == null)
+        {
+            return;
+        }
+
+        config.axisTiltDegrees = Mathf.Clamp(config.axisTiltDegrees, AxisTiltMinDegrees, AxisTiltMaxDegrees);
+        config.dayLengthSeconds = Mathf.Clamp(config.dayLengthSeconds, DayLengthMinSeconds, DayLengthMaxSeconds);
+        config.yearLengthInDays = Mathf.Clamp(config.yearLengthInDays, YearLengthMinDays, YearLengthMaxDays);
+        config.baseTempKelvin = Mathf.Clamp(config.baseTempKelvin, BaseTempMinKelvin, BaseTempMaxKelvin);
+        config.insolationTempGain = Mathf.Clamp(config.insolationTempGain, InsolationGainMin, InsolationGainMax);
+        config.initialCO2 = Mathf.Clamp(config.initialCO2, InitialAtmosphereMin, InitialCO2Max);
+        config.initialO2 = Mathf.Clamp(config.initialO2, InitialAtmosphereMin, InitialO2Max);
+        config.initialCH4 = Mathf.Clamp(config.initialCH4, InitialAtmosphereMin, InitialCH4Max);
+        config.initialDissolvedFe2Plus = Mathf.Clamp(config.initialDissolvedFe2Plus, InitialFe2Min, InitialFe2Max);
+        config.ventH2PerTick = Mathf.Clamp(config.ventH2PerTick, VentPerTickMin, VentH2MaxPerTick);
+        config.ventH2SPerTick = Mathf.Clamp(config.ventH2SPerTick, VentPerTickMin, VentH2SMaxPerTick);
+        config.ventCO2PerTick = Mathf.Clamp(config.ventCO2PerTick, VentPerTickMin, VentCO2MaxPerTick);
+        config.initialSpawnCount = Mathf.Clamp(config.initialSpawnCount, InitialSpawnMin, InitialSpawnMax);
+    }
+
+    private void RefreshStartupPanels()
+    {
+        foreach (SimulationStartupPanel panel in FindObjectsByType<SimulationStartupPanel>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+        {
+            panel.RefreshFromConfig();
+        }
+    }
+
+    private void LogStartupConfigApplied(SimulationStartupConfig config, bool startPaused)
+    {
+        if (config == null)
+        {
+            return;
+        }
+
+        StringBuilder builder = new StringBuilder();
+        builder.AppendLine("[Startup Config Applied]");
+        builder.AppendLine($"Planet Seed: {config.planetSeed}");
+        builder.AppendLine($"Use Random Seed: {config.useRandomSeed}");
+        builder.AppendLine($"Axis Tilt Degrees: {config.axisTiltDegrees:0.###}");
+        builder.AppendLine($"Day Length Seconds: {config.dayLengthSeconds:0.###}");
+        builder.AppendLine($"Year Length In Days: {config.yearLengthInDays:0.###}");
+        builder.AppendLine($"Base Temp Kelvin: {config.baseTempKelvin:0.###}");
+        builder.AppendLine($"Insolation Temp Gain: {config.insolationTempGain:0.###}");
+        builder.AppendLine($"Initial CO2: {config.initialCO2:0.###}");
+        builder.AppendLine($"Initial O2: {config.initialO2:0.###}");
+        builder.AppendLine($"Initial CH4: {config.initialCH4:0.###}");
+        builder.AppendLine($"Initial Dissolved Fe2+: {config.initialDissolvedFe2Plus:0.###}");
+        builder.AppendLine($"Vent H2 Per Tick: {config.ventH2PerTick:0.####}");
+        builder.AppendLine($"Vent H2S Per Tick: {config.ventH2SPerTick:0.####}");
+        builder.AppendLine($"Vent CO2 Per Tick: {config.ventCO2PerTick:0.####}");
+        builder.AppendLine($"Initial Spawn Count: {config.initialSpawnCount}");
+        builder.AppendLine($"Start Paused: {startPaused}");
+        builder.AppendLine($"Saved Config Path: {SavedStartupConfigPath}");
+        Debug.Log(builder.ToString());
+    }
+
+    [Serializable]
+    private class SavedStartupConfig
+    {
+        public int version = SavedStartupConfigVersion;
+        public int planetSeed;
+        public bool useRandomSeed;
+        public float axisTiltDegrees;
+        public float dayLengthSeconds;
+        public float yearLengthInDays;
+        public float baseTempKelvin;
+        public float insolationTempGain;
+        public float initialCO2;
+        public float initialO2;
+        public float initialCH4;
+        public float initialDissolvedFe2Plus;
+        public float ventH2PerTick;
+        public float ventH2SPerTick;
+        public float ventCO2PerTick;
+        public int initialSpawnCount;
+        public bool startPaused;
+
+        public static SavedStartupConfig FromDefaults(SimulationStartupConfig defaults)
+        {
+            return FromConfig(defaults ?? new SimulationStartupConfig());
+        }
+
+        public static SavedStartupConfig FromConfig(SimulationStartupConfig config)
+        {
+            config ??= new SimulationStartupConfig();
+            return new SavedStartupConfig
+            {
+                version = SavedStartupConfigVersion,
+                planetSeed = config.planetSeed,
+                useRandomSeed = config.useRandomSeed,
+                axisTiltDegrees = config.axisTiltDegrees,
+                dayLengthSeconds = config.dayLengthSeconds,
+                yearLengthInDays = config.yearLengthInDays,
+                baseTempKelvin = config.baseTempKelvin,
+                insolationTempGain = config.insolationTempGain,
+                initialCO2 = config.initialCO2,
+                initialO2 = config.initialO2,
+                initialCH4 = config.initialCH4,
+                initialDissolvedFe2Plus = config.initialDissolvedFe2Plus,
+                ventH2PerTick = config.ventH2PerTick,
+                ventH2SPerTick = config.ventH2SPerTick,
+                ventCO2PerTick = config.ventCO2PerTick,
+                initialSpawnCount = config.initialSpawnCount,
+                startPaused = config.startPaused
+            };
+        }
+
+        public SimulationStartupConfig ToConfig(SimulationStartupConfig fallback)
+        {
+            SimulationStartupConfig config = (fallback ?? new SimulationStartupConfig()).Clone();
+            config.planetSeed = planetSeed;
+            config.useRandomSeed = useRandomSeed;
+            config.axisTiltDegrees = axisTiltDegrees;
+            config.dayLengthSeconds = dayLengthSeconds;
+            config.yearLengthInDays = yearLengthInDays;
+            config.baseTempKelvin = baseTempKelvin;
+            config.insolationTempGain = insolationTempGain;
+            config.initialCO2 = initialCO2;
+            config.initialO2 = initialO2;
+            config.initialCH4 = initialCH4;
+            config.initialDissolvedFe2Plus = initialDissolvedFe2Plus;
+            config.ventH2PerTick = ventH2PerTick;
+            config.ventH2SPerTick = ventH2SPerTick;
+            config.ventCO2PerTick = ventCO2PerTick;
+            config.initialSpawnCount = initialSpawnCount;
+            config.startPaused = startPaused;
+            return config;
         }
     }
 
