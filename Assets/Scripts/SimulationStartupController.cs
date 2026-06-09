@@ -27,6 +27,7 @@ public class SimulationStartupController : MonoBehaviour
     [SerializeField] private float setupGuiWidth = 520f;
     [SerializeField] private float setupGuiTopPadding = 70f;
 
+    private Vector2 setupGuiScrollPosition;
     private int resumeStepsPerFrame = 1;
     private bool startupComplete;
     private bool applyingConfig;
@@ -259,64 +260,78 @@ public class SimulationStartupController : MonoBehaviour
 
         GUI.Box(new Rect(0f, 0f, Screen.width, Screen.height), GUIContent.none, boxStyle);
 
-        float width = Mathf.Min(setupGuiWidth, Screen.width - 40f);
+        float width = Mathf.Max(1f, Mathf.Min(setupGuiWidth, Screen.width - 40f));
         float x = (Screen.width - width) * 0.5f;
-        float y = setupGuiTopPadding;
         float line = 28f;
         float gap = 8f;
+        float visibleTopPadding = Mathf.Clamp(setupGuiTopPadding, 0f, Mathf.Max(0f, Screen.height - 100f));
+        float scrollHeight = Mathf.Max(100f, Screen.height - visibleTopPadding - 20f);
+        Rect setupRect = new Rect(x, visibleTopPadding, width, scrollHeight);
 
-        GUI.Label(new Rect(x, y, width, 34f), "Planet Simulation Setup", titleStyle);
+        GUILayout.BeginArea(setupRect);
+        setupGuiScrollPosition = GUILayout.BeginScrollView(setupGuiScrollPosition, GUILayout.Width(width), GUILayout.Height(scrollHeight));
+
+        float contentWidth = Mathf.Max(1f, width - 20f);
+        float contentHeight = 44f + ((line + gap) * 15f) + (gap * 2f) + 42f + 30f + 6f;
+        Rect contentRect = GUILayoutUtility.GetRect(contentWidth, contentHeight, GUILayout.Width(contentWidth), GUILayout.Height(contentHeight));
+        float controlX = contentRect.x;
+        float y = contentRect.y;
+
+        GUI.Label(new Rect(controlX, y, contentWidth, 34f), "Planet Simulation Setup", titleStyle);
         y += 44f;
 
-        DrawBool(new Rect(x, y, width, line), "Use Random Seed", ref currentConfig.useRandomSeed);
+        DrawBool(new Rect(controlX, y, contentWidth, line), "Use Random Seed", ref currentConfig.useRandomSeed);
         y += line + gap;
-        DrawInt(new Rect(x, y, width, line), "Planet Seed", ref currentConfig.planetSeed, !currentConfig.useRandomSeed);
+        DrawInt(new Rect(controlX, y, contentWidth, line), "Planet Seed", ref currentConfig.planetSeed, !currentConfig.useRandomSeed);
         y += line + gap;
-        DrawFloat(new Rect(x, y, width, line), "Axis Tilt", ref currentConfig.axisTiltDegrees, 0f, 90f);
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Axis Tilt", ref currentConfig.axisTiltDegrees, 0f, 90f);
         y += line + gap;
-        DrawFloat(new Rect(x, y, width, line), "Day Length (sec)", ref currentConfig.dayLengthSeconds, 1f, 3600f);
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Day Length (sec)", ref currentConfig.dayLengthSeconds, 1f, 3600f);
         y += line + gap;
-        DrawFloat(new Rect(x, y, width, line), "Year Length (days)", ref currentConfig.yearLengthInDays, 1f, 1000f);
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Year Length (days)", ref currentConfig.yearLengthInDays, 1f, 1000f);
         y += line + gap;
-        DrawFloat(new Rect(x, y, width, line), "Base Temp (K)", ref currentConfig.baseTempKelvin, 150f, 450f);
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Base Temp (K)", ref currentConfig.baseTempKelvin, 150f, 450f);
         y += line + gap;
-        DrawFloat(new Rect(x, y, width, line), "Insolation Gain", ref currentConfig.insolationTempGain, 0f, 120f);
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Insolation Gain", ref currentConfig.insolationTempGain, 0f, 120f);
         y += line + gap;
-        DrawFloat(new Rect(x, y, width, line), "Initial CO2", ref currentConfig.initialCO2, 0f, 5f);
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Initial CO2", ref currentConfig.initialCO2, 0f, 5f);
         y += line + gap;
-        DrawFloat(new Rect(x, y, width, line), "Initial O2", ref currentConfig.initialO2, 0f, 1f);
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Initial O2", ref currentConfig.initialO2, 0f, 1f);
         y += line + gap;
-        DrawFloat(new Rect(x, y, width, line), "Initial CH4", ref currentConfig.initialCH4, 0f, 1f);
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Initial CH4", ref currentConfig.initialCH4, 0f, 1f);
         y += line + gap;
-        DrawFloat(new Rect(x, y, width, line), "Initial Fe2+", ref currentConfig.initialDissolvedFe2Plus, 0f, 25f);
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Initial Fe2+", ref currentConfig.initialDissolvedFe2Plus, 0f, 25f);
         y += line + gap;
-        DrawFloat(new Rect(x, y, width, line), "Vent H2 / Tick", ref currentConfig.ventH2PerTick, 0f, 0.05f);
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Vent H2 / Tick", ref currentConfig.ventH2PerTick, 0f, 0.05f);
         y += line + gap;
-        DrawFloat(new Rect(x, y, width, line), "Vent H2S / Tick", ref currentConfig.ventH2SPerTick, 0f, 0.05f);
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Vent H2S / Tick", ref currentConfig.ventH2SPerTick, 0f, 0.05f);
         y += line + gap;
-        DrawFloat(new Rect(x, y, width, line), "Vent CO2 / Tick", ref currentConfig.ventCO2PerTick, 0f, 0.05f);
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Vent CO2 / Tick", ref currentConfig.ventCO2PerTick, 0f, 0.05f);
         y += line + gap;
-        DrawInt(new Rect(x, y, width, line), "Initial Spawn Count", ref currentConfig.initialSpawnCount, true, 0, 10000);
+        DrawInt(new Rect(controlX, y, contentWidth, line), "Initial Spawn Count", ref currentConfig.initialSpawnCount, true, 0, 10000);
         y += line + (gap * 2f);
 
-        float buttonWidth = (width - gap) * 0.5f;
-        if (GUI.Button(new Rect(x, y, buttonWidth, 34f), "Start Simulation", buttonStyle))
+        float buttonWidth = (contentWidth - gap) * 0.5f;
+        if (GUI.Button(new Rect(controlX, y, buttonWidth, 34f), "Start Simulation", buttonStyle))
         {
             StartSimulation();
         }
-        if (GUI.Button(new Rect(x + buttonWidth + gap, y, buttonWidth, 34f), "Start Paused", buttonStyle))
+        if (GUI.Button(new Rect(controlX + buttonWidth + gap, y, buttonWidth, 34f), "Start Paused", buttonStyle))
         {
             StartSimulationPaused();
         }
         y += 42f;
-        if (GUI.Button(new Rect(x, y, buttonWidth, 30f), "Randomize Seed", buttonStyle))
+        if (GUI.Button(new Rect(controlX, y, buttonWidth, 30f), "Randomize Seed", buttonStyle))
         {
             RandomizeSeed();
         }
-        if (GUI.Button(new Rect(x + buttonWidth + gap, y, buttonWidth, 30f), "Reset Defaults", buttonStyle))
+        if (GUI.Button(new Rect(controlX + buttonWidth + gap, y, buttonWidth, 30f), "Reset Defaults", buttonStyle))
         {
             ResetDefaults();
         }
+
+        GUILayout.EndScrollView();
+        GUILayout.EndArea();
     }
 
     private void DrawBool(Rect rect, string label, ref bool value)
