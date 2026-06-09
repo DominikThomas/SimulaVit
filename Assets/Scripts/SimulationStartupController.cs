@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 
 [DefaultExecutionOrder(-2000)]
@@ -37,13 +38,24 @@ public class SimulationStartupController : MonoBehaviour
     [SerializeField] private ReplicatorManager replicatorManager;
     [SerializeField] private SunSkyRotator sunSkyRotator;
     [SerializeField] private ReplicatorSimulationPipeline simulationPipeline;
+    [Tooltip("Overlay used as the persistent setup curtain. If empty, the loading overlay is reused when possible.")]
+    [SerializeField] private StartupFadeOverlay setupCurtainOrOverlay;
+    [Tooltip("Overlay shown while applying startup config/regenerating and faded out when the world is ready.")]
     [SerializeField] private StartupFadeOverlay loadingOverlay;
 
     [Header("Screen Roots")]
     [Tooltip("Optional prefab/UI root to show while editing startup settings. If empty, the built-in IMGUI setup panel is used.")]
     [SerializeField] private GameObject startupScreenRoot;
-    [Tooltip("Optional runtime HUD objects that should be hidden during setup and restored after startup.")]
+    [Tooltip("Hide assigned runtime HUD roots during setup, then restore their exact previous active states after startup.")]
+    [SerializeField] private bool hideRuntimeHudDuringSetup = true;
+    [Tooltip("Optional runtime HUD objects that should be hidden during setup and restored after startup. Leave empty to auto-detect common HUD roots and rely on the global setup state for OnGUI HUDs.")]
     [SerializeField] private GameObject[] runtimeHudRoots;
+    [Tooltip("Keep a full-screen curtain/overlay visible during setup so the world is covered while controls remain interactive.")]
+    [SerializeField] private bool coverWorldDuringSetup = true;
+    [Tooltip("Optional world/planet visual roots to disable during setup and restore exactly after startup. Prefer the overlay curtain unless a camera/background still leaks through.")]
+    [SerializeField] private GameObject[] worldRootsToHideDuringSetup;
+    [Tooltip("Disable assigned worldRootsToHideDuringSetup during setup. Usually unnecessary when coverWorldDuringSetup is enabled.")]
+    [SerializeField] private bool hideWorldRootsDuringSetup;
 
     [Header("Built-in Setup UI")]
     [SerializeField] private bool useBuiltInSetupGui = true;
@@ -58,6 +70,13 @@ public class SimulationStartupController : MonoBehaviour
     private GUIStyle labelStyle;
     private GUIStyle boxStyle;
     private GUIStyle buttonStyle;
+    private readonly Dictionary<GameObject, bool> runtimeHudRootStates = new Dictionary<GameObject, bool>();
+    private readonly Dictionary<GameObject, bool> worldRootStates = new Dictionary<GameObject, bool>();
+    private bool warnedAboutHudRoots;
+    private bool warnedAboutMissingOverlay;
+
+    public static bool IsSetupActive { get; private set; }
+    public static bool IsStartupBlockingHud => IsSetupActive;
 
     public SimulationStartupConfig CurrentConfig => currentConfig;
     public bool StartupComplete => startupComplete;
@@ -76,11 +95,22 @@ public class SimulationStartupController : MonoBehaviour
         PrepareDeferredStartup();
         ShowSetupScreen(true);
 
-        if (loadingOverlay != null)
+        if (coverWorldDuringSetup && setupCurtainOrOverlay == null)
         {
-            loadingOverlay.ShowImmediate("Preparing setup...");
-            yield return null;
-            loadingOverlay.FadeOut(0.35f);
+            LogMissingSetupOverlayWarning();
+        }
+
+        yield return null;
+    }
+
+    private void OnDisable()
+    {
+        RestoreWorldRoots();
+        RestoreRuntimeHud();
+
+        if (!startupComplete)
+        {
+            IsSetupActive = false;
         }
     }
 
@@ -92,6 +122,8 @@ public class SimulationStartupController : MonoBehaviour
         sunSkyRotator ??= FindFirstObjectByType<SunSkyRotator>();
         simulationPipeline ??= FindFirstObjectByType<ReplicatorSimulationPipeline>();
         loadingOverlay ??= FindFirstObjectByType<StartupFadeOverlay>();
+        setupCurtainOrOverlay ??= loadingOverlay;
+        loadingOverlay ??= setupCurtainOrOverlay;
     }
 
     private void CaptureSceneDefaults()
@@ -179,7 +211,7 @@ public class SimulationStartupController : MonoBehaviour
 
         applyingConfig = true;
         ShowSetupScreen(false);
-        loadingOverlay?.ShowImmediate("Generating planet...");
+        loadingOverlay?.ShowLoading("Generating planet...");
         yield return null;
 
         ApplyConfig(currentConfig);
@@ -201,7 +233,9 @@ public class SimulationStartupController : MonoBehaviour
 
         startupComplete = true;
         applyingConfig = false;
-        ShowRuntimeHud(true);
+        RestoreWorldRoots();
+        RestoreRuntimeHud();
+        IsSetupActive = false;
         loadingOverlay?.FadeOut(0.5f);
     }
 
@@ -248,33 +282,185 @@ public class SimulationStartupController : MonoBehaviour
 
     private void ShowSetupScreen(bool show)
     {
+        IsSetupActive = (show || applyingConfig) && !startupComplete;
+
         if (startupScreenRoot != null)
         {
             startupScreenRoot.SetActive(show);
         }
 
-        ShowRuntimeHud(!show && startupComplete);
+        if (show)
+        {
+            HideRuntimeHudForSetup();
+            HideWorldForSetup();
+
+            if (coverWorldDuringSetup)
+            {
+                if (setupCurtainOrOverlay != null)
+                {
+                    setupCurtainOrOverlay.ShowSetupCurtain("Planet Simulation Setup");
+                }
+                else
+                {
+                    LogMissingSetupOverlayWarning();
+                }
+            }
+        }
+        else if (applyingConfig)
+        {
+            // Keep HUD/world hidden while the loading overlay covers regeneration.
+            HideRuntimeHudForSetup();
+            HideWorldForSetup();
+        }
+        else if (startupComplete)
+        {
+            RestoreWorldRoots();
+            RestoreRuntimeHud();
+        }
     }
 
-    private void ShowRuntimeHud(bool show)
+    private void HideRuntimeHudForSetup()
     {
-        if (runtimeHudRoots == null)
+        if (!hideRuntimeHudDuringSetup)
         {
             return;
         }
 
-        foreach (GameObject root in runtimeHudRoots)
+        GameObject[] roots = GetRuntimeHudRoots();
+        if (roots.Length == 0)
         {
-            if (root != null)
+            if (!warnedAboutHudRoots)
             {
-                root.SetActive(show);
+                Debug.LogWarning("[SimulationStartupController] No runtimeHudRoots assigned or auto-detected. OnGUI HUDs will still be suppressed by SimulationStartupController.IsSetupActive, but GameObject-based HUDs may remain visible until assigned.");
+                warnedAboutHudRoots = true;
+            }
+            return;
+        }
+
+        SetRootsActive(roots, false, runtimeHudRootStates);
+    }
+
+    private void RestoreRuntimeHud()
+    {
+        RestoreRootStates(runtimeHudRootStates);
+    }
+
+    private void HideWorldForSetup()
+    {
+        if (hideWorldRootsDuringSetup)
+        {
+            SetRootsActive(worldRootsToHideDuringSetup, false, worldRootStates);
+        }
+    }
+
+    private void RestoreWorldRoots()
+    {
+        RestoreRootStates(worldRootStates);
+    }
+
+    private GameObject[] GetRuntimeHudRoots()
+    {
+        if (runtimeHudRoots != null && runtimeHudRoots.Length > 0)
+        {
+            return runtimeHudRoots;
+        }
+
+        List<GameObject> detectedRoots = new List<GameObject>();
+
+        foreach (PlanetCellInspectorPanel inspectorPanel in FindObjectsByType<PlanetCellInspectorPanel>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
+        {
+            AddDetectedHudRoot(detectedRoots, inspectorPanel.gameObject);
+        }
+
+        foreach (Canvas canvas in FindObjectsByType<Canvas>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
+        {
+            if (canvas == null || canvas.gameObject == startupScreenRoot || canvas.GetComponentInChildren<StartupFadeOverlay>(true) != null)
+            {
+                continue;
+            }
+
+            string name = canvas.gameObject.name;
+            if (name.IndexOf("HUD", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+                name.IndexOf("Hud", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+                name.IndexOf("Inspector", System.StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                AddDetectedHudRoot(detectedRoots, canvas.gameObject);
             }
         }
+
+        return detectedRoots.ToArray();
+    }
+
+    private void AddDetectedHudRoot(List<GameObject> roots, GameObject candidate)
+    {
+        if (candidate == null || candidate == gameObject || candidate == startupScreenRoot || roots.Contains(candidate))
+        {
+            return;
+        }
+
+        if (startupScreenRoot != null && candidate.transform.IsChildOf(startupScreenRoot.transform))
+        {
+            return;
+        }
+
+        roots.Add(candidate);
+    }
+
+    private void SetRootsActive(GameObject[] roots, bool active, Dictionary<GameObject, bool> previousStates)
+    {
+        if (roots == null)
+        {
+            return;
+        }
+
+        foreach (GameObject root in roots)
+        {
+            if (root == null || root == gameObject || root == startupScreenRoot)
+            {
+                continue;
+            }
+
+            if (startupScreenRoot != null && root.transform.IsChildOf(startupScreenRoot.transform))
+            {
+                continue;
+            }
+
+            if (!previousStates.ContainsKey(root))
+            {
+                previousStates[root] = root.activeSelf;
+            }
+
+            root.SetActive(active);
+        }
+    }
+
+    private void RestoreRootStates(Dictionary<GameObject, bool> previousStates)
+    {
+        foreach (KeyValuePair<GameObject, bool> state in previousStates)
+        {
+            if (state.Key != null)
+            {
+                state.Key.SetActive(state.Value);
+            }
+        }
+
+        previousStates.Clear();
+    }
+
+    private void LogMissingSetupOverlayWarning()
+    {
+        if (warnedAboutMissingOverlay)
+        {
+            return;
+        }
+
+        Debug.LogWarning("[SimulationStartupController] coverWorldDuringSetup is enabled, but no StartupFadeOverlay is assigned. The built-in setup GUI will still work, but the planet/world may be visible behind setup until a setup curtain overlay is assigned.");
+        warnedAboutMissingOverlay = true;
     }
 
     private void OnGUI()
     {
-        if (startupComplete || !useBuiltInSetupGui || startupScreenRoot != null)
+        if (startupComplete || applyingConfig || !useBuiltInSetupGui || startupScreenRoot != null)
         {
             return;
         }

@@ -52,6 +52,11 @@ public class SimulationSpeedController : MonoBehaviour
 
     private void OnGUI()
     {
+        if (SimulationStartupController.IsStartupBlockingHud)
+        {
+            return;
+        }
+
         UpdateGuiScale();
         EnsureGuiStyles();
 

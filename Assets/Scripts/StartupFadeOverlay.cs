@@ -7,6 +7,7 @@ public class StartupFadeOverlay : MonoBehaviour
     [SerializeField] private CanvasGroup canvasGroup;
     [SerializeField] private TMP_Text messageText;
     [SerializeField, Min(0f)] private float defaultFadeSeconds = 0.5f;
+    [SerializeField] private bool blockRaycastsDuringLoading = true;
 
     private Coroutine fadeRoutine;
 
@@ -22,6 +23,21 @@ public class StartupFadeOverlay : MonoBehaviour
 
     public void ShowImmediate(string message = "Generating planet...")
     {
+        Show(message, true, blockRaycastsDuringLoading);
+    }
+
+    public void ShowSetupCurtain(string message = "Planet Simulation Setup")
+    {
+        Show(message, false, false);
+    }
+
+    public void ShowLoading(string message = "Generating planet...")
+    {
+        Show(message, true, blockRaycastsDuringLoading);
+    }
+
+    private void Show(string message, bool interactable, bool blocksRaycasts)
+    {
         if (fadeRoutine != null)
         {
             StopCoroutine(fadeRoutine);
@@ -36,8 +52,8 @@ public class StartupFadeOverlay : MonoBehaviour
         if (canvasGroup != null)
         {
             canvasGroup.alpha = 1f;
-            canvasGroup.blocksRaycasts = true;
-            canvasGroup.interactable = true;
+            canvasGroup.blocksRaycasts = blocksRaycasts;
+            canvasGroup.interactable = interactable;
         }
     }
 

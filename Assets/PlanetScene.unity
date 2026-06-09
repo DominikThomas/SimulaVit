@@ -187,9 +187,14 @@ MonoBehaviour:
   replicatorManager: {fileID: 1064713443}
   sunSkyRotator: {fileID: 313342988}
   simulationPipeline: {fileID: 1064713445}
+  setupCurtainOrOverlay: {fileID: 209742446}
   loadingOverlay: {fileID: 209742446}
   startupScreenRoot: {fileID: 0}
+  hideRuntimeHudDuringSetup: 1
   runtimeHudRoots: []
+  coverWorldDuringSetup: 1
+  worldRootsToHideDuringSetup: []
+  hideWorldRootsDuringSetup: 0
   useBuiltInSetupGui: 1
   setupGuiWidth: 620
   setupGuiTopPadding: 20
@@ -456,6 +461,7 @@ MonoBehaviour:
   canvasGroup: {fileID: 209742447}
   messageText: {fileID: 0}
   defaultFadeSeconds: 5
+  blockRaycastsDuringLoading: 1
 --- !u!225 &209742447
 CanvasGroup:
   m_ObjectHideFlags: 0
