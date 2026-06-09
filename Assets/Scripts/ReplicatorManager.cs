@@ -603,7 +603,7 @@ public class ReplicatorManager : MonoBehaviour
 
     void OnGUI()
     {
-        if (!showSimulationHud || !isInitialized)
+        if (!showSimulationHud || !isInitialized || SimulationStartupController.IsStartupBlockingHud)
         {
             return;
         }
