@@ -4,6 +4,29 @@ using UnityEngine;
 [DefaultExecutionOrder(-2000)]
 public class SimulationStartupController : MonoBehaviour
 {
+    private const float AxisTiltMinDegrees = 0f;
+    private const float AxisTiltMaxDegrees = 90f;
+    private const float DayLengthMinSeconds = 10f;
+    private const float DayLengthMaxSeconds = 2000f;
+    private const float YearLengthMinDays = 1f;
+    private const float YearLengthMaxDays = 500f;
+    private const float BaseTempMinKelvin = 200f;
+    private const float BaseTempMaxKelvin = 330f;
+    private const float InsolationGainMin = 0f;
+    private const float InsolationGainMax = 120f;
+    private const float InitialAtmosphereMin = 0f;
+    private const float InitialCO2Max = 20f;
+    private const float InitialO2Max = 10f;
+    private const float InitialCH4Max = 10f;
+    private const float InitialFe2Min = 0f;
+    private const float InitialFe2Max = 20f;
+    private const float VentPerTickMin = 0f;
+    private const float VentH2MaxPerTick = 0.25f;
+    private const float VentH2SMaxPerTick = 0.25f;
+    private const float VentCO2MaxPerTick = 1f;
+    private const int InitialSpawnMin = 0;
+    private const int InitialSpawnMax = 10000;
+
     [Header("Startup Config")]
     [SerializeField] private SimulationStartupConfig defaults = new SimulationStartupConfig();
     [SerializeField] private SimulationStartupConfig currentConfig = new SimulationStartupConfig();
@@ -284,31 +307,31 @@ public class SimulationStartupController : MonoBehaviour
         y += line + gap;
         DrawInt(new Rect(controlX, y, contentWidth, line), "Planet Seed", ref currentConfig.planetSeed, !currentConfig.useRandomSeed);
         y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Axis Tilt", ref currentConfig.axisTiltDegrees, 0f, 90f);
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Axis Tilt (deg)", ref currentConfig.axisTiltDegrees, AxisTiltMinDegrees, AxisTiltMaxDegrees);
         y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Day Length (sec)", ref currentConfig.dayLengthSeconds, 1f, 3600f);
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Day Length (sec)", ref currentConfig.dayLengthSeconds, DayLengthMinSeconds, DayLengthMaxSeconds);
         y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Year Length (days)", ref currentConfig.yearLengthInDays, 1f, 1000f);
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Year Length (days)", ref currentConfig.yearLengthInDays, YearLengthMinDays, YearLengthMaxDays);
         y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Base Temp (K)", ref currentConfig.baseTempKelvin, 150f, 450f);
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Base Temp (K)", ref currentConfig.baseTempKelvin, BaseTempMinKelvin, BaseTempMaxKelvin);
         y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Insolation Gain", ref currentConfig.insolationTempGain, 0f, 120f);
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Insolation Gain", ref currentConfig.insolationTempGain, InsolationGainMin, InsolationGainMax);
         y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Initial CO2", ref currentConfig.initialCO2, 0f, 5f);
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Initial CO2", ref currentConfig.initialCO2, InitialAtmosphereMin, InitialCO2Max);
         y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Initial O2", ref currentConfig.initialO2, 0f, 1f);
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Initial O2", ref currentConfig.initialO2, InitialAtmosphereMin, InitialO2Max);
         y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Initial CH4", ref currentConfig.initialCH4, 0f, 1f);
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Initial CH4", ref currentConfig.initialCH4, InitialAtmosphereMin, InitialCH4Max);
         y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Initial Fe2+", ref currentConfig.initialDissolvedFe2Plus, 0f, 25f);
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Initial Fe2+", ref currentConfig.initialDissolvedFe2Plus, InitialFe2Min, InitialFe2Max);
         y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Vent H2 / Tick", ref currentConfig.ventH2PerTick, 0f, 0.05f);
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Vent H2 / Tick", ref currentConfig.ventH2PerTick, VentPerTickMin, VentH2MaxPerTick);
         y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Vent H2S / Tick", ref currentConfig.ventH2SPerTick, 0f, 0.05f);
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Vent H2S / Tick", ref currentConfig.ventH2SPerTick, VentPerTickMin, VentH2SMaxPerTick);
         y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Vent CO2 / Tick", ref currentConfig.ventCO2PerTick, 0f, 0.05f);
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Vent CO2 / Tick", ref currentConfig.ventCO2PerTick, VentPerTickMin, VentCO2MaxPerTick);
         y += line + gap;
-        DrawInt(new Rect(controlX, y, contentWidth, line), "Initial Spawn Count", ref currentConfig.initialSpawnCount, true, 0, 10000);
+        DrawInt(new Rect(controlX, y, contentWidth, line), "Initial Spawn Count", ref currentConfig.initialSpawnCount, true, InitialSpawnMin, InitialSpawnMax);
         y += line + (gap * 2f);
 
         float buttonWidth = (contentWidth - gap) * 0.5f;
@@ -342,28 +365,73 @@ public class SimulationStartupController : MonoBehaviour
 
     private void DrawFloat(Rect rect, string label, ref float value, float min, float max)
     {
-        GUI.Label(new Rect(rect.x, rect.y, rect.width * 0.45f, rect.height), $"{label}: {value:0.###}", labelStyle);
-        value = GUI.HorizontalSlider(new Rect(rect.x + rect.width * 0.48f, rect.y + 8f, rect.width * 0.52f, rect.height), value, min, max);
+        float clampedValue = Mathf.Clamp(value, min, max);
+        if (!Mathf.Approximately(value, clampedValue))
+        {
+            value = clampedValue;
+        }
+
+        GUI.Label(new Rect(rect.x, rect.y, rect.width * 0.42f, rect.height), $"{label}: {value:0.###} [{min:0.###}-{max:0.###}]", labelStyle);
+
+        Rect sliderRect = new Rect(rect.x + rect.width * 0.44f, rect.y + 8f, rect.width * 0.34f, rect.height);
+        float sliderValue = GUI.HorizontalSlider(sliderRect, value, min, max);
+        if (!Mathf.Approximately(value, sliderValue))
+        {
+            value = sliderValue;
+        }
+
+        Rect fieldRect = new Rect(rect.x + rect.width * 0.80f, rect.y, rect.width * 0.20f, rect.height);
+        string next = GUI.TextField(fieldRect, value.ToString("0.####"));
+        if (float.TryParse(next, out float parsed))
+        {
+            value = Mathf.Clamp(parsed, min, max);
+        }
     }
 
     private void DrawInt(Rect rect, string label, ref int value, bool enabled, int min = int.MinValue, int max = int.MaxValue)
     {
         bool oldEnabled = GUI.enabled;
         GUI.enabled = enabled;
-        GUI.Label(new Rect(rect.x, rect.y, rect.width * 0.45f, rect.height), $"{label}: {value}", labelStyle);
+        GUI.Label(new Rect(rect.x, rect.y, rect.width * 0.42f, rect.height), FormatIntLabel(label, value, min, max), labelStyle);
+
+        Rect controlRect = new Rect(rect.x + rect.width * 0.44f, rect.y, rect.width * 0.56f, rect.height);
         if (min != int.MinValue || max != int.MaxValue)
         {
-            value = Mathf.RoundToInt(GUI.HorizontalSlider(new Rect(rect.x + rect.width * 0.48f, rect.y + 8f, rect.width * 0.52f, rect.height), value, min, max));
+            int clampedValue = Mathf.Clamp(value, min, max);
+            if (value != clampedValue)
+            {
+                value = clampedValue;
+            }
+
+            Rect sliderRect = new Rect(controlRect.x, rect.y + 8f, rect.width * 0.34f, rect.height);
+            value = Mathf.RoundToInt(GUI.HorizontalSlider(sliderRect, value, min, max));
+
+            Rect fieldRect = new Rect(rect.x + rect.width * 0.80f, rect.y, rect.width * 0.20f, rect.height);
+            string next = GUI.TextField(fieldRect, value.ToString());
+            if (int.TryParse(next, out int parsed))
+            {
+                value = Mathf.Clamp(parsed, min, max);
+            }
         }
         else
         {
-            string next = GUI.TextField(new Rect(rect.x + rect.width * 0.48f, rect.y, rect.width * 0.52f, rect.height), value.ToString());
+            string next = GUI.TextField(controlRect, value.ToString());
             if (int.TryParse(next, out int parsed))
             {
                 value = parsed;
             }
         }
         GUI.enabled = oldEnabled;
+    }
+
+    private static string FormatIntLabel(string label, int value, int min, int max)
+    {
+        if (min != int.MinValue || max != int.MaxValue)
+        {
+            return $"{label}: {value} [{min}-{max}]";
+        }
+
+        return $"{label}: {value}";
     }
 
     private void EnsureStyles()
