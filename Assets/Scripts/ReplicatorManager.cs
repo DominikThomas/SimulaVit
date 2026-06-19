@@ -344,6 +344,95 @@ public class ReplicatorManager : MonoBehaviour
     public double SimulationTimeSeconds => simulationPipeline != null ? simulationPipeline.SimulationTimeSeconds : simulationTimeSeconds;
     public bool IsInitializedForSimulation => isInitialized;
 
+
+    public int SimulationStepCount => simulationStepCount;
+
+    public SimulationClockSnapshot CaptureClockSnapshot()
+    {
+        return new SimulationClockSnapshot
+        {
+            simulationTimeSeconds = SimulationTimeSeconds,
+            simulationStepCount = simulationStepCount,
+            simulationStepsPerFrame = SimulationStepsPerFrame,
+            simulationSpeedMultiplier = SimulationSpeedMultiplier,
+            frameDeltaTime = 0f, // TODO: prefer ReplicatorSimulationPipeline.CaptureClockSnapshot when the pipeline is available.
+            simulationDeltaTime = SimulationDeltaTime,
+            frameSimulationDeltaTime = FrameSimulationDeltaTime,
+            shouldAdvanceSimulation = ShouldAdvanceSimulation,
+            pauseDetected = PauseDetected
+        };
+    }
+
+    public ReplicatorPopulationSnapshot CapturePopulationSnapshot()
+    {
+        populationState.EnsureMatchesAgentCount(agents);
+        ReplicatorPopulationSnapshot snapshot = new ReplicatorPopulationSnapshot
+        {
+            count = populationState.Count,
+            replicators = new List<ReplicatorSnapshot>(populationState.Count)
+        };
+
+        for (int i = 0; i < populationState.Count; i++)
+        {
+            Replicator companion = i < agents.Count ? agents[i] : null;
+            Replicator.Traits traits = companion != null ? companion.traits : new Replicator.Traits(false, false, false, 1f);
+
+            snapshot.replicators.Add(new ReplicatorSnapshot
+            {
+                position = new SerializableVector3(populationState.Position[i]),
+                rotation = new SerializableQuaternion(populationState.Rotation[i]),
+                currentDirection = new SerializableVector3(populationState.CurrentDirection[i]),
+                moveDirection = new SerializableVector3(populationState.MoveDirection[i]),
+                desiredMoveDirection = new SerializableVector3(populationState.DesiredMoveDirection[i]),
+                velocity = new SerializableVector3(populationState.Velocity[i]),
+                energy = populationState.Energy[i],
+                age = populationState.Age[i],
+                organicCStore = populationState.OrganicCStore[i],
+                speedFactor = populationState.SpeedFactor[i],
+                attackCooldown = populationState.AttackCooldown[i],
+                fearCooldown = populationState.FearCooldown[i],
+                metabolism = populationState.Metabolism[i].ToString(),
+                locomotion = populationState.Locomotion[i].ToString(),
+                optimalTempMin = populationState.OptimalTempMin[i],
+                optimalTempMax = populationState.OptimalTempMax[i],
+                lethalTempMargin = populationState.LethalTempMargin[i],
+                starveCo2Seconds = populationState.StarveCo2Seconds[i],
+                starveH2sSeconds = populationState.StarveH2sSeconds[i],
+                starveH2Seconds = populationState.StarveH2Seconds[i],
+                starveLightSeconds = populationState.StarveLightSeconds[i],
+                starveOrganicCFoodSeconds = populationState.StarveOrganicCFoodSeconds[i],
+                starveO2Seconds = populationState.StarveO2Seconds[i],
+                starveCh4Seconds = populationState.StarveCh4Seconds[i],
+                starveStoredCSeconds = populationState.StarveStoredCSeconds[i],
+                o2ToxicSeconds = populationState.O2ToxicSeconds[i],
+                o2ComfortMax = populationState.O2ComfortMax[i],
+                o2StressMax = populationState.O2StressMax[i],
+                canReplicate = populationState.CanReplicate[i],
+                lastHabitatValue = populationState.LastHabitatValue[i],
+                tumbleProbability = populationState.TumbleProbability[i],
+                nextSenseTime = populationState.NextSenseTime[i],
+                movementSeed = populationState.MovementSeed[i],
+                size = populationState.Size[i],
+                color = new SerializableColor(populationState.Color[i]),
+                currentOceanLayerIndex = populationState.CurrentOceanLayerIndex[i],
+                preferredOceanLayerIndex = populationState.PreferredOceanLayerIndex[i],
+                // Companion-only fields are captured from Replicator until they are mirrored into ReplicatorPopulationState.
+                maxLifespan = companion != null ? companion.maxLifespan : 0f,
+                traits = new ReplicatorTraitsSnapshot
+                {
+                    spawnOnlyInSea = traits.spawnOnlyInSea,
+                    replicateOnlyInSea = traits.replicateOnlyInSea,
+                    moveOnlyInSea = traits.moveOnlyInSea,
+                    surfaceMoveSpeedMultiplier = traits.surfaceMoveSpeedMultiplier
+                },
+                biomassTarget = companion != null ? companion.biomassTarget : 0f,
+                locomotionSkill = companion != null ? companion.locomotionSkill : 0f
+            });
+        }
+
+        return snapshot;
+    }
+
     public void SetSimulationTiming(int stepsPerFrame)
     {
         runtimeSimulationStepsPerFrame = Mathf.Max(0, stepsPerFrame);
@@ -453,6 +542,11 @@ public class ReplicatorManager : MonoBehaviour
         {
             simulationPipeline.SetSimulationStepsPerFrame(runtimeSimulationStepsPerFrame);
             simulationPipeline.enabled = false;
+        }
+
+        if (GetComponent<SimulationSaveLoadService>() == null)
+        {
+            gameObject.AddComponent<SimulationSaveLoadService>();
         }
     }
 

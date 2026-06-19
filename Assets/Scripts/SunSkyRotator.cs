@@ -107,6 +107,27 @@ public class SunSkyRotator : MonoBehaviour
         UpdateSunVisualAppearance();
     }
 
+
+    public SunSkySnapshot CaptureSnapshot()
+    {
+        return new SunSkySnapshot
+        {
+            available = true,
+            rotation = new SerializableQuaternion(transform.rotation),
+            orbitDegreesPerSecond = orbitDegreesPerSecond,
+            orbitAxis = new SerializableVector3(orbitAxis),
+            keepOrbitOnEquator = keepOrbitOnEquator,
+            enableSeasons = enableSeasons,
+            axisTiltDegrees = axisTiltDegrees,
+            yearLengthInDays = yearLengthInDays,
+            seasonalPhaseOffset = seasonalPhaseOffset,
+            northernSummerAtPhaseZero = northernSummerAtPhaseZero,
+            accumulatedOrbitAngle = accumulatedOrbitAngle,
+            sunColor = new SerializableColor(sunColor),
+            sunEmissionIntensity = sunEmissionIntensity
+        };
+    }
+
     void Update()
     {
         float dt = GetSimulationDeltaTime();

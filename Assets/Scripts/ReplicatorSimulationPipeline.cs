@@ -107,6 +107,23 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
         simulationSpeedMultiplier = simulationStepsPerFrame;
     }
 
+
+    public SimulationClockSnapshot CaptureClockSnapshot()
+    {
+        return new SimulationClockSnapshot
+        {
+            simulationTimeSeconds = simulationTimeSeconds,
+            simulationStepCount = replicatorManager != null ? replicatorManager.SimulationStepCount : 0,
+            simulationStepsPerFrame = simulationStepsPerFrame,
+            simulationSpeedMultiplier = simulationSpeedMultiplier,
+            frameDeltaTime = frameDeltaTime,
+            simulationDeltaTime = simulationDeltaTime,
+            frameSimulationDeltaTime = frameSimulationDeltaTime,
+            shouldAdvanceSimulation = shouldAdvanceSimulation,
+            pauseDetected = pauseDetected
+        };
+    }
+
     public void RunFrame()
     {
         if (replicatorManager == null || !replicatorManager.IsInitializedForSimulation)

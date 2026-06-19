@@ -481,6 +481,156 @@ public class PlanetResourceMap : MonoBehaviour
         : (planetGenerator != null ? planetGenerator.resolution : resolution));
     public int SimulationCellCount => PlanetGridIndexing.GetCellCount(SimulationResolution);
 
+
+    public PlanetResourceMapSnapshot CaptureSnapshotSummary()
+    {
+        PlanetResourceMapSnapshot snapshot = new PlanetResourceMapSnapshot
+        {
+            available = true,
+            initialized = isInitialized,
+            simulationResolution = SimulationResolution,
+            cellCount = SimulationCellCount,
+            layeredOceanEnabled = enableLayeredOcean,
+            maxOceanLayers = MaxOceanLayers,
+            oceanCellCount = CountOceanCells(),
+            activeLayerCountHistogram = BuildActiveLayerCountHistogram(),
+            arrayLengths = new ResourceArrayLengthSnapshot
+            {
+                co2 = GetLength(co2),
+                o2 = GetLength(o2),
+                organicC = GetLength(organicC),
+                h2s = GetLength(h2s),
+                h2 = GetLength(h2),
+                ch4 = GetLength(ch4),
+                s0 = GetLength(s0),
+                dissolvedFe2Plus = GetLength(GetLayeredOrAggregateArray(ResourceType.DissolvedFe2Plus)),
+                surfaceTemperatureKelvin = GetLength(surfaceTemperatureKelvin)
+            },
+            resourceSums = new ResourceSumsSnapshot
+            {
+                co2 = SumResource(ResourceType.CO2),
+                o2 = SumResource(ResourceType.O2),
+                organicC = SumResource(ResourceType.OrganicC),
+                h2s = SumResource(ResourceType.H2S),
+                h2 = SumResource(ResourceType.H2),
+                ch4 = SumResource(ResourceType.CH4),
+                s0 = SumResource(ResourceType.S0),
+                dissolvedFe2Plus = SumResource(ResourceType.DissolvedFe2Plus)
+            },
+            temperature = CaptureTemperatureSummary(),
+            timers = new ResourceTimerSnapshot
+            {
+                ventTimer = ventTimer,
+                atmosphereTimer = atmosphereTimer,
+                thermalTimer = thermalTimer,
+                lastThermalSimulationTime = lastThermalSimulationTime,
+                debugSimulationDeltaTimeUsedByPlanetResourceMap = debugSimulationDeltaTimeUsedByPlanetResourceMap,
+                debugLastVentDeltaTime = debugLastVentDeltaTime,
+                debugVentTimer = debugVentTimer
+            }
+        };
+
+        return snapshot;
+    }
+
+    private static int GetLength(float[] values)
+    {
+        return values != null ? values.Length : 0;
+    }
+
+    private float[] GetLayeredOrAggregateArray(ResourceType resourceType)
+    {
+        float[] layered = GetLayeredOceanArray(resourceType);
+        return layered ?? GetArray(resourceType);
+    }
+
+    private double SumResource(ResourceType resourceType)
+    {
+        float[] values = GetLayeredOrAggregateArray(resourceType);
+        if (values == null)
+        {
+            return 0d;
+        }
+
+        double sum = 0d;
+        for (int i = 0; i < values.Length; i++)
+        {
+            sum += values[i];
+        }
+
+        return sum;
+    }
+
+    private TemperatureSummarySnapshot CaptureTemperatureSummary()
+    {
+        if (surfaceTemperatureKelvin == null || surfaceTemperatureKelvin.Length == 0)
+        {
+            return new TemperatureSummarySnapshot { available = false };
+        }
+
+        float min = float.PositiveInfinity;
+        float max = float.NegativeInfinity;
+        double sum = 0d;
+        int count = 0;
+        for (int i = 0; i < surfaceTemperatureKelvin.Length; i++)
+        {
+            float value = surfaceTemperatureKelvin[i];
+            if (float.IsNaN(value) || float.IsInfinity(value))
+            {
+                continue;
+            }
+
+            min = Mathf.Min(min, value);
+            max = Mathf.Max(max, value);
+            sum += value;
+            count++;
+        }
+
+        return new TemperatureSummarySnapshot
+        {
+            available = count > 0,
+            minKelvin = count > 0 ? min : 0f,
+            maxKelvin = count > 0 ? max : 0f,
+            meanKelvin = count > 0 ? (float)(sum / count) : 0f
+        };
+    }
+
+    private int CountOceanCells()
+    {
+        if (oceanMask == null)
+        {
+            return 0;
+        }
+
+        int count = 0;
+        for (int i = 0; i < oceanMask.Length; i++)
+        {
+            if (oceanMask[i] != 0)
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    private int[] BuildActiveLayerCountHistogram()
+    {
+        int[] histogram = new int[MaxOceanLayers + 1];
+        if (oceanActiveLayerCounts == null)
+        {
+            return histogram;
+        }
+
+        for (int i = 0; i < oceanActiveLayerCounts.Length; i++)
+        {
+            int layerCount = Mathf.Clamp(oceanActiveLayerCounts[i], 0, MaxOceanLayers);
+            histogram[layerCount]++;
+        }
+
+        return histogram;
+    }
+
     private void Awake()
     {
         if (planetGenerator == null)
