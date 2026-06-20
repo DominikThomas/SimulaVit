@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using System.IO.Compression;
+using System.Text;
 using UnityEngine;
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
@@ -17,6 +19,9 @@ public class SimulationSaveLoadService : MonoBehaviour
     [Header("Debug Save")]
     [SerializeField] private bool enableKeyboardQuickSave = true;
     [SerializeField] private bool useTimestampedFileNames = true;
+    [Tooltip("Optional compatibility/debug export for old milestone-1 uncompressed .simv.json saves. The default save format is compressed JSON (.simv.json.gz).")]
+    [SerializeField] private bool alsoWriteUncompressedDebugJson = false;
+    [SerializeField] private bool prettyPrintUncompressedDebugJson = true;
 
     private void Awake()
     {
@@ -49,14 +54,25 @@ public class SimulationSaveLoadService : MonoBehaviour
         Directory.CreateDirectory(saveDirectory);
 
         string fileName = useTimestampedFileNames
-            ? $"simv-{DateTime.UtcNow:yyyyMMdd-HHmmss}.simv.json"
-            : "quicksave.simv.json";
+            ? $"simv-{DateTime.UtcNow:yyyyMMdd-HHmmss}.simv.json.gz"
+            : "quicksave.simv.json.gz";
         string fullPath = Path.Combine(saveDirectory, fileName);
 
-        string json = JsonUtility.ToJson(saveFile, true);
-        File.WriteAllText(fullPath, json);
+        // Compatibility note: old .simv.json debug saves were uncompressed milestone-1 saves.
+        // The default save format is now compressed JSON (.simv.json.gz) with the same DTO structure.
+        string json = JsonUtility.ToJson(saveFile, false);
+        long uncompressedJsonBytes = Encoding.UTF8.GetByteCount(json);
+        WriteCompressedJsonAtomic(fullPath, json);
 
-        Debug.Log(BuildDiagnosticLog(fullPath, saveFile), this);
+        if (alsoWriteUncompressedDebugJson)
+        {
+            string debugJsonPath = Path.Combine(saveDirectory, Path.GetFileNameWithoutExtension(fullPath));
+            string debugJson = prettyPrintUncompressedDebugJson ? JsonUtility.ToJson(saveFile, true) : json;
+            WriteTextAtomic(debugJsonPath, debugJson);
+        }
+
+        FileInfo compressedFile = new FileInfo(fullPath);
+        Debug.Log(BuildDiagnosticLog(fullPath, compressedFile.Length, uncompressedJsonBytes, saveFile), this);
         return fullPath;
     }
 
@@ -118,22 +134,87 @@ public class SimulationSaveLoadService : MonoBehaviour
         };
     }
 
-    private string BuildDiagnosticLog(string path, SimulationSaveFile saveFile)
+    private static void WriteCompressedJsonAtomic(string path, string json)
+    {
+        string tempPath = path + ".tmp";
+
+        try
+        {
+            using (FileStream fileStream = File.Create(tempPath))
+            using (GZipStream gzipStream = new GZipStream(fileStream, CompressionLevel.Optimal))
+            using (StreamWriter writer = new StreamWriter(gzipStream, Encoding.UTF8))
+            {
+                writer.Write(json);
+            }
+
+            ReplaceFile(tempPath, path);
+        }
+        catch
+        {
+            if (File.Exists(tempPath))
+            {
+                File.Delete(tempPath);
+            }
+
+            throw;
+        }
+    }
+
+    private static void WriteTextAtomic(string path, string text)
+    {
+        string tempPath = path + ".tmp";
+
+        try
+        {
+            File.WriteAllText(tempPath, text, Encoding.UTF8);
+            ReplaceFile(tempPath, path);
+        }
+        catch
+        {
+            if (File.Exists(tempPath))
+            {
+                File.Delete(tempPath);
+            }
+
+            throw;
+        }
+    }
+
+    private static void ReplaceFile(string tempPath, string finalPath)
+    {
+        if (File.Exists(finalPath))
+        {
+            File.Replace(tempPath, finalPath, null);
+        }
+        else
+        {
+            File.Move(tempPath, finalPath);
+        }
+    }
+
+    private string BuildDiagnosticLog(string path, long compressedBytes, long uncompressedJsonBytes, SimulationSaveFile saveFile)
     {
         TemperatureSummarySnapshot temp = saveFile.resourceMap != null ? saveFile.resourceMap.temperature : null;
         ResourceSumsSnapshot sums = saveFile.resourceMap != null ? saveFile.resourceMap.resourceSums : null;
         return "Saved simulation snapshot:\n" +
             $"Path: {path}\n" +
+            $"Compressed size: {BytesToMegabytes(compressedBytes):F3} MB\n" +
+            $"Uncompressed JSON size estimate: {BytesToMegabytes(uncompressedJsonBytes):F3} MB\n" +
+            $"Replicators: {(saveFile.population != null ? saveFile.population.count : 0)}\n" +
             $"Schema: {saveFile.schemaVersion}\n" +
             $"Simulation time: {(saveFile.clock != null ? saveFile.clock.simulationTimeSeconds : 0d):F3}\n" +
             $"Step count: {(saveFile.clock != null ? saveFile.clock.simulationStepCount : 0)}\n" +
-            $"Replicators: {(saveFile.population != null ? saveFile.population.count : 0)}\n" +
             $"Resource cells: {(saveFile.resourceMap != null ? saveFile.resourceMap.cellCount : 0)}\n" +
             $"Layered ocean: {saveFile.resourceMap != null && saveFile.resourceMap.layeredOceanEnabled}\n" +
             $"O2 sum: {(sums != null ? sums.o2 : 0d):F6}\n" +
             $"CO2 sum: {(sums != null ? sums.co2 : 0d):F6}\n" +
             $"OrganicC sum: {(sums != null ? sums.organicC : 0d):F6}\n" +
             $"Temperature min/max/mean: {(temp != null ? temp.minKelvin : 0f):F2}/{(temp != null ? temp.maxKelvin : 0f):F2}/{(temp != null ? temp.meanKelvin : 0f):F2}";
+    }
+
+    private static double BytesToMegabytes(long bytes)
+    {
+        return bytes / (1024d * 1024d);
     }
 
     private void ResolveReferences()
