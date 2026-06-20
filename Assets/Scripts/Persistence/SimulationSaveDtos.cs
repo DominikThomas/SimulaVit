@@ -214,6 +214,11 @@ public struct SerializableVector3
         y = value.y;
         z = value.z;
     }
+
+    public Vector3 ToVector3()
+    {
+        return new Vector3(x, y, z);
+    }
 }
 
 [Serializable]
@@ -231,6 +236,11 @@ public struct SerializableQuaternion
         z = value.z;
         w = value.w;
     }
+
+    public Quaternion ToQuaternion()
+    {
+        return new Quaternion(x, y, z, w);
+    }
 }
 
 [Serializable]
@@ -247,5 +257,10 @@ public struct SerializableColor
         g = value.g;
         b = value.b;
         a = value.a;
+    }
+
+    public Color ToColor()
+    {
+        return new Color(r, g, b, a);
     }
 }

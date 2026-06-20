@@ -182,6 +182,10 @@ MonoBehaviour:
     ventCO2PerTick: 0
     initialSpawnCount: 100
     startPaused: 0
+  loadSavedStartupConfig: 1
+  saveStartupConfigOnStart: 1
+  logAppliedStartupConfig: 1
+  savedConfigFileName: startup_config.json
   planetGenerator: {fileID: 382753102}
   planetResourceMap: {fileID: 1222684993}
   replicatorManager: {fileID: 1064713443}

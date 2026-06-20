@@ -433,6 +433,76 @@ public class ReplicatorManager : MonoBehaviour
         return snapshot;
     }
 
+    public void ApplyClockSnapshot(SimulationClockSnapshot snapshot)
+    {
+        if (snapshot == null)
+        {
+            return;
+        }
+
+        simulationTimeSeconds = System.Math.Max(0d, snapshot.simulationTimeSeconds);
+        simulationStepCount = Mathf.Max(0, snapshot.simulationStepCount);
+        runtimeSimulationStepsPerFrame = Mathf.Max(0, snapshot.simulationStepsPerFrame);
+        metabolismTickTimer = 0f;
+        currentStepDeltaTime = 0f;
+        if (simulationPipeline != null && simulationPipeline.SimulationTimeSeconds != simulationTimeSeconds)
+        {
+            simulationPipeline.SetSimulationStepsPerFrame(runtimeSimulationStepsPerFrame);
+        }
+    }
+
+    public bool ApplyPopulationSnapshot(ReplicatorPopulationSnapshot snapshot)
+    {
+        if (snapshot == null || snapshot.replicators == null || snapshot.count != snapshot.replicators.Count)
+        {
+            Debug.LogError("Cannot apply population snapshot: missing snapshot data or count mismatch.", this);
+            return false;
+        }
+
+        List<Replicator> loadedAgents = new List<Replicator>(snapshot.replicators.Count);
+        for (int i = 0; i < snapshot.replicators.Count; i++)
+        {
+            Replicator loaded = Replicator.CreateFromSnapshot(snapshot.replicators[i]);
+            if (loaded == null)
+            {
+                Debug.LogError($"Cannot apply population snapshot: replicator {i} could not be rebuilt.", this);
+                return false;
+            }
+
+            loadedAgents.Add(loaded);
+        }
+
+        agents.Clear();
+        populationState.EnsureMatchesAgentCount(agents);
+
+        for (int i = 0; i < loadedAgents.Count; i++)
+        {
+            agents.Add(loadedAgents[i]);
+            populationState.AddAgentFromReplicatorData(loadedAgents[i]);
+        }
+
+        RebuildTransientPopulationCachesAfterLoad();
+        return true;
+    }
+
+    private void RebuildTransientPopulationCachesAfterLoad()
+    {
+        preyAgentsBySpatialBin.Clear();
+        spontaneousHydrogenSpawnCandidateCells.Clear();
+        spontaneousSpawnCandidateCacheLastRefreshStep = -1;
+        predatorPresenceCacheStep = -1;
+        activeSteeringPresenceCacheStep = -1;
+        steeringRecomputeCounter = 0;
+        nextScentUpdateTime = 0f;
+        ResetScentDebugState();
+        UpdateMetabolismCounts();
+        // TODO: add explicit render-buffer invalidation if ReplicatorRenderSystem starts retaining GPU-side per-agent caches.
+        if (enableRendering)
+        {
+            RenderAgents();
+        }
+    }
+
     public void SetSimulationTiming(int stepsPerFrame)
     {
         runtimeSimulationStepsPerFrame = Mathf.Max(0, stepsPerFrame);
