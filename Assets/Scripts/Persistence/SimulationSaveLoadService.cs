@@ -1,6 +1,9 @@
 using System;
 using System.IO;
 using UnityEngine;
+#if ENABLE_INPUT_SYSTEM
+using UnityEngine.InputSystem;
+#endif
 
 public class SimulationSaveLoadService : MonoBehaviour
 {
@@ -12,7 +15,6 @@ public class SimulationSaveLoadService : MonoBehaviour
     [SerializeField] private PlanetGenerator planetGenerator;
 
     [Header("Debug Save")]
-    [SerializeField] private KeyCode quickSaveKey = KeyCode.F5;
     [SerializeField] private bool enableKeyboardQuickSave = true;
     [SerializeField] private bool useTimestampedFileNames = true;
 
@@ -23,10 +25,13 @@ public class SimulationSaveLoadService : MonoBehaviour
 
     private void Update()
     {
-        if (enableKeyboardQuickSave && Input.GetKeyDown(quickSaveKey))
+#if ENABLE_INPUT_SYSTEM
+        // Temporary debug hotkey for snapshot validation; a real UI Save button will be added later.
+        if (enableKeyboardQuickSave && Keyboard.current != null && Keyboard.current.f5Key.wasPressedThisFrame)
         {
             SaveSnapshot();
         }
+#endif
     }
 
     [ContextMenu("Debug Save Simulation Snapshot")]
