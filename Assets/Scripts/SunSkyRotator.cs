@@ -64,6 +64,8 @@ public class SunSkyRotator : MonoBehaviour
 
     private Material originalSkybox;
     private Material runtimeSkybox;
+    private float initialSkyboxRotation;
+    private float currentSkyboxRotation;
 
     private GameObject generatedSunObject;
     private Material runtimeSunMaterial;
@@ -102,6 +104,8 @@ public class SunSkyRotator : MonoBehaviour
     {
         accumulatedOrbitAngle = 0f;
         transform.rotation = initialRotation;
+        currentSkyboxRotation = initialSkyboxRotation;
+        ApplySkyboxRotation(currentSkyboxRotation);
         CacheInitialOrbitForward();
         UpdateSunVisualPosition();
         UpdateSunVisualAppearance();
@@ -124,8 +128,13 @@ public class SunSkyRotator : MonoBehaviour
             accumulatedOrbitAngle = snapshot.accumulatedOrbitAngle;
             sunColor = snapshot.sunColor.ToColor();
             sunEmissionIntensity = snapshot.sunEmissionIntensity;
+            currentSkyboxRotation = snapshot.skyboxSnapshotAvailable
+                ? snapshot.skyboxRotation
+                : CalculateSkyboxRotationForOrbitAngle(accumulatedOrbitAngle);
+            ApplySkyboxRotation(currentSkyboxRotation);
             UpdateSunVisualPosition();
             UpdateSunVisualAppearance();
+            DynamicGI.UpdateEnvironment();
             return true;
         }
 
@@ -133,8 +142,11 @@ public class SunSkyRotator : MonoBehaviour
         {
             accumulatedOrbitAngle = (float)(clockSnapshot.simulationTimeSeconds * orbitDegreesPerSecond);
             transform.rotation = Quaternion.AngleAxis(accumulatedOrbitAngle, GetOrbitAxis()) * initialRotation;
+            currentSkyboxRotation = CalculateSkyboxRotationForOrbitAngle(accumulatedOrbitAngle);
+            ApplySkyboxRotation(currentSkyboxRotation);
             UpdateSunVisualPosition();
             UpdateSunVisualAppearance();
+            DynamicGI.UpdateEnvironment();
             Debug.LogWarning("Sun/sky save snapshot unavailable; reconstructed orbit phase from simulation time.", this);
             return false;
         }
@@ -157,6 +169,8 @@ public class SunSkyRotator : MonoBehaviour
             seasonalPhaseOffset = seasonalPhaseOffset,
             northernSummerAtPhaseZero = northernSummerAtPhaseZero,
             accumulatedOrbitAngle = accumulatedOrbitAngle,
+            skyboxSnapshotAvailable = runtimeSkybox != null && runtimeSkybox.HasFloat("_Rotation"),
+            skyboxRotation = GetCurrentSkyboxRotation(),
             sunColor = new SerializableColor(sunColor),
             sunEmissionIntensity = sunEmissionIntensity
         };
@@ -200,8 +214,8 @@ public class SunSkyRotator : MonoBehaviour
 
         if (rotateSkybox && runtimeSkybox != null && runtimeSkybox.HasFloat("_Rotation"))
         {
-            float current = runtimeSkybox.GetFloat("_Rotation");
-            runtimeSkybox.SetFloat("_Rotation", current + orbitDegreesPerSecond * skyboxRotationMultiplier * dt);
+            currentSkyboxRotation += orbitDegreesPerSecond * skyboxRotationMultiplier * dt;
+            ApplySkyboxRotation(currentSkyboxRotation);
         }
 
         UpdateSunVisualPosition();
@@ -383,7 +397,37 @@ public class SunSkyRotator : MonoBehaviour
         if (source == null) return;
 
         runtimeSkybox = new Material(source);
+        if (runtimeSkybox.HasFloat("_Rotation"))
+        {
+            initialSkyboxRotation = runtimeSkybox.GetFloat("_Rotation");
+            currentSkyboxRotation = initialSkyboxRotation;
+        }
         RenderSettings.skybox = runtimeSkybox;
+    }
+
+    float GetCurrentSkyboxRotation()
+    {
+        if (runtimeSkybox != null && runtimeSkybox.HasFloat("_Rotation"))
+        {
+            currentSkyboxRotation = runtimeSkybox.GetFloat("_Rotation");
+        }
+
+        return currentSkyboxRotation;
+    }
+
+    float CalculateSkyboxRotationForOrbitAngle(float orbitAngle)
+    {
+        return initialSkyboxRotation + orbitAngle * skyboxRotationMultiplier;
+    }
+
+    void ApplySkyboxRotation(float rotation)
+    {
+        currentSkyboxRotation = rotation;
+
+        if (runtimeSkybox != null && runtimeSkybox.HasFloat("_Rotation"))
+        {
+            runtimeSkybox.SetFloat("_Rotation", currentSkyboxRotation);
+        }
     }
 
     void CreateSunVisual()

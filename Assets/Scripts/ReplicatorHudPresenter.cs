@@ -30,6 +30,7 @@ public class ReplicatorHudPresenter
 
     private float guiScale = 1f;
     private float masterVolume = 1f;
+    private string menuStatusMessage;
 
     private const float ReferenceHeight = 1080f;
     private const float MinGuiScale = 1f;
@@ -347,7 +348,7 @@ public class ReplicatorHudPresenter
         }
 
         float width = 360f;
-        float height = 240f;
+        float height = 350f;
 
         Rect rect = new Rect(
             (scaledScreenWidth - width) * 0.5f,
@@ -387,11 +388,63 @@ public class ReplicatorHudPresenter
 
         y += 46f;
 
+        if (GUI.Button(new Rect(x, y, contentWidth, 36f), "Save Simulation", buttonStyle))
+        {
+            SimulationSaveLoadService saveLoadService = ResolveSaveLoadService();
+            if (saveLoadService != null)
+            {
+                string path = saveLoadService.SaveLatestManualSnapshot();
+                menuStatusMessage = string.IsNullOrEmpty(path) ? "Save failed. See console." : $"Saved: {System.IO.Path.GetFileName(path)}";
+            }
+            else
+            {
+                menuStatusMessage = "Save service not found.";
+                Debug.LogWarning("Save Simulation was clicked, but no SimulationSaveLoadService was found.");
+            }
+        }
+
+        y += 46f;
+
+        if (GUI.Button(new Rect(x, y, contentWidth, 36f), "Load Latest Save", buttonStyle))
+        {
+            SimulationSaveLoadService saveLoadService = ResolveSaveLoadService();
+            if (saveLoadService != null)
+            {
+                saveLoadService.LoadLatestManualSnapshot();
+                menuStatusMessage = "Load requested. See console for summary.";
+            }
+            else
+            {
+                menuStatusMessage = "Save service not found.";
+                Debug.LogWarning("Load Latest Save was clicked, but no SimulationSaveLoadService was found.");
+            }
+        }
+
+        y += 46f;
+
         if (GUI.Button(new Rect(x, y, contentWidth, 36f), "Exit Application", buttonStyle))
         {
             SetPauseState(false);
             QuitGame();
         }
+
+        if (!string.IsNullOrEmpty(menuStatusMessage))
+        {
+            y += 42f;
+            GUI.Label(new Rect(x, y, contentWidth, 40f), menuStatusMessage, hudStyle);
+        }
+    }
+
+    private static SimulationSaveLoadService ResolveSaveLoadService()
+    {
+        SimulationSaveLoadService service = UnityEngine.Object.FindFirstObjectByType<SimulationSaveLoadService>();
+        if (service != null)
+        {
+            return service;
+        }
+
+        ReplicatorManager manager = UnityEngine.Object.FindFirstObjectByType<ReplicatorManager>();
+        return manager != null ? manager.gameObject.AddComponent<SimulationSaveLoadService>() : null;
     }
 
     private void DrawPortraitHud(
