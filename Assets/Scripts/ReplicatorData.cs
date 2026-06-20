@@ -149,6 +149,79 @@ public class Replicator
         lastDeathCauseCandidate = DeathCause.Unknown;
     }
 
+    public static Replicator CreateFromSnapshot(ReplicatorSnapshot snapshot)
+    {
+        if (snapshot == null)
+        {
+            return null;
+        }
+
+        MetabolismType metabolism;
+        if (!System.Enum.TryParse(snapshot.metabolism, out metabolism))
+        {
+            metabolism = MetabolismType.Hydrogenotrophy;
+        }
+
+        LocomotionType locomotion;
+        if (!System.Enum.TryParse(snapshot.locomotion, out locomotion))
+        {
+            locomotion = LocomotionType.PassiveDrift;
+        }
+
+        Replicator.Traits traits = snapshot.traits != null
+            ? new Replicator.Traits(
+                snapshot.traits.spawnOnlyInSea,
+                snapshot.traits.replicateOnlyInSea,
+                snapshot.traits.moveOnlyInSea,
+                snapshot.traits.surfaceMoveSpeedMultiplier)
+            : new Replicator.Traits(false, false, false, 1f);
+
+        Replicator agent = new Replicator(
+            snapshot.position.ToVector3(),
+            snapshot.rotation.ToQuaternion(),
+            snapshot.maxLifespan,
+            snapshot.color.ToColor(),
+            traits,
+            snapshot.movementSeed,
+            metabolism,
+            locomotion,
+            snapshot.locomotionSkill);
+
+        agent.currentDirection = snapshot.currentDirection.ToVector3();
+        agent.moveDirection = snapshot.moveDirection.ToVector3();
+        agent.desiredMoveDir = snapshot.desiredMoveDirection.ToVector3();
+        agent.velocity = snapshot.velocity.ToVector3();
+        agent.energy = snapshot.energy;
+        agent.age = snapshot.age;
+        agent.organicCStore = snapshot.organicCStore;
+        agent.speedFactor = snapshot.speedFactor;
+        agent.attackCooldown = snapshot.attackCooldown;
+        agent.fearCooldown = snapshot.fearCooldown;
+        agent.optimalTempMin = snapshot.optimalTempMin;
+        agent.optimalTempMax = snapshot.optimalTempMax;
+        agent.lethalTempMargin = snapshot.lethalTempMargin;
+        agent.starveCo2Seconds = snapshot.starveCo2Seconds;
+        agent.starveH2sSeconds = snapshot.starveH2sSeconds;
+        agent.starveH2Seconds = snapshot.starveH2Seconds;
+        agent.starveLightSeconds = snapshot.starveLightSeconds;
+        agent.starveOrganicCFoodSeconds = snapshot.starveOrganicCFoodSeconds;
+        agent.starveO2Seconds = snapshot.starveO2Seconds;
+        agent.starveCh4Seconds = snapshot.starveCh4Seconds;
+        agent.starveStoredCSeconds = snapshot.starveStoredCSeconds;
+        agent.o2ToxicSeconds = snapshot.o2ToxicSeconds;
+        agent.o2ComfortMax = snapshot.o2ComfortMax;
+        agent.o2StressMax = snapshot.o2StressMax;
+        agent.canReplicate = snapshot.canReplicate;
+        agent.lastHabitatValue = snapshot.lastHabitatValue;
+        agent.tumbleProbability = snapshot.tumbleProbability;
+        agent.nextSenseTime = snapshot.nextSenseTime;
+        agent.size = snapshot.size;
+        agent.currentOceanLayerIndex = snapshot.currentOceanLayerIndex;
+        agent.preferredOceanLayerIndex = snapshot.preferredOceanLayerIndex;
+        agent.biomassTarget = snapshot.biomassTarget;
+        return agent;
+    }
+
     private static int GetDefaultPreferredOceanLayerIndex(MetabolismType metabolism, LocomotionType locomotion)
     {
         switch (metabolism)

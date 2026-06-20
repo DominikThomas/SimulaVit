@@ -108,6 +108,22 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
     }
 
 
+    public void ApplyClockSnapshot(SimulationClockSnapshot snapshot)
+    {
+        if (snapshot == null)
+        {
+            return;
+        }
+
+        simulationTimeSeconds = System.Math.Max(0d, snapshot.simulationTimeSeconds);
+        simulationStepsPerFrame = Mathf.Max(0, snapshot.simulationStepsPerFrame);
+        simulationSpeedMultiplier = simulationStepsPerFrame;
+        pauseDetected = snapshot.pauseDetected;
+        discardNextFrameDelta = true;
+        ResetFrameTiming();
+        replicatorManager?.ApplyClockSnapshot(snapshot);
+    }
+
     public SimulationClockSnapshot CaptureClockSnapshot()
     {
         return new SimulationClockSnapshot

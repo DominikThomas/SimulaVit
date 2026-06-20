@@ -18,6 +18,7 @@ public class SimulationSaveLoadService : MonoBehaviour
 
     [Header("Debug Save")]
     [SerializeField] private bool enableKeyboardQuickSave = true;
+    [SerializeField] private bool enableKeyboardQuickLoad = true;
     [SerializeField] private bool useTimestampedFileNames = true;
     [Tooltip("Optional compatibility/debug export for old milestone-1 uncompressed .simv.json saves. The default save format is compressed JSON (.simv.json.gz).")]
     [SerializeField] private bool alsoWriteUncompressedDebugJson = false;
@@ -32,9 +33,17 @@ public class SimulationSaveLoadService : MonoBehaviour
     {
 #if ENABLE_INPUT_SYSTEM
         // Temporary debug hotkey for snapshot validation; a real UI Save button will be added later.
-        if (enableKeyboardQuickSave && Keyboard.current != null && Keyboard.current.f5Key.wasPressedThisFrame)
+        if (Keyboard.current != null)
         {
-            SaveSnapshot();
+            if (enableKeyboardQuickSave && Keyboard.current.f5Key.wasPressedThisFrame)
+            {
+                SaveSnapshot();
+            }
+
+            if (enableKeyboardQuickLoad && Keyboard.current.f9Key.wasPressedThisFrame)
+            {
+                LoadLatestDebugSnapshot();
+            }
         }
 #endif
     }
@@ -43,6 +52,88 @@ public class SimulationSaveLoadService : MonoBehaviour
     public void SaveSnapshotFromContextMenu()
     {
         SaveSnapshot();
+    }
+
+    [ContextMenu("Debug Load Latest Simulation Snapshot")]
+    public void LoadLatestDebugSnapshot()
+    {
+        ResolveReferences();
+        string path = FindLatestCompressedSavePath();
+        if (string.IsNullOrEmpty(path))
+        {
+            Debug.LogWarning($"No compressed simulation save files found in {Path.Combine(Application.persistentDataPath, "Saves")}. Expected *.simv.json.gz.", this);
+            return;
+        }
+
+        LoadSnapshot(path);
+    }
+
+    public bool LoadSnapshot(string path)
+    {
+        ResolveReferences();
+        SimulationSaveFile saveFile;
+        try
+        {
+            saveFile = ReadCompressedJson(path);
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError($"Failed to read simulation snapshot '{path}': {ex.Message}", this);
+            return false;
+        }
+
+        if (!ValidateSaveFile(saveFile, out string validationError))
+        {
+            Debug.LogError($"Simulation snapshot load aborted: {validationError}", this);
+            return false;
+        }
+
+        if (replicatorManager == null)
+        {
+            Debug.LogError("Simulation snapshot load aborted: no ReplicatorManager is available to receive the population snapshot.", this);
+            return false;
+        }
+
+        bool pipelineWasEnabled = simulationPipeline != null && simulationPipeline.enabled;
+        if (simulationPipeline != null)
+        {
+            simulationPipeline.enabled = false;
+        }
+
+        bool sunRestored = false;
+        try
+        {
+            if (simulationPipeline != null)
+            {
+                simulationPipeline.ApplyClockSnapshot(saveFile.clock);
+            }
+            else if (replicatorManager != null)
+            {
+                replicatorManager.ApplyClockSnapshot(saveFile.clock);
+            }
+
+            sunRestored = sunSkyRotator != null && sunSkyRotator.ApplySnapshot(saveFile.sun, saveFile.clock);
+
+            if (saveFile.resourceMap != null)
+            {
+                Debug.Log($"Resource-map snapshot read for diagnostics only (not restored in this milestone). Cells: {saveFile.resourceMap.cellCount}, layered ocean: {saveFile.resourceMap.layeredOceanEnabled}.", this);
+            }
+
+            if (!replicatorManager.ApplyPopulationSnapshot(saveFile.population))
+            {
+                return false;
+            }
+        }
+        finally
+        {
+            if (simulationPipeline != null)
+            {
+                simulationPipeline.enabled = pipelineWasEnabled;
+            }
+        }
+
+        Debug.Log(BuildLoadDiagnosticLog(path, saveFile, sunRestored), this);
+        return true;
     }
 
     public string SaveSnapshot()
@@ -134,6 +225,87 @@ public class SimulationSaveLoadService : MonoBehaviour
         };
     }
 
+    private static SimulationSaveFile ReadCompressedJson(string path)
+    {
+        using (FileStream fileStream = File.OpenRead(path))
+        using (GZipStream gzipStream = new GZipStream(fileStream, System.IO.Compression.CompressionMode.Decompress))
+        using (StreamReader reader = new StreamReader(gzipStream, Encoding.UTF8))
+        {
+            string json = reader.ReadToEnd();
+            return JsonUtility.FromJson<SimulationSaveFile>(json);
+        }
+    }
+
+    private static string FindLatestCompressedSavePath()
+    {
+        string saveDirectory = Path.Combine(Application.persistentDataPath, "Saves");
+        if (!Directory.Exists(saveDirectory))
+        {
+            return null;
+        }
+
+        FileInfo latest = null;
+        foreach (string file in Directory.GetFiles(saveDirectory, "*.simv.json.gz"))
+        {
+            FileInfo info = new FileInfo(file);
+            if (latest == null || info.LastWriteTimeUtc > latest.LastWriteTimeUtc)
+            {
+                latest = info;
+            }
+        }
+
+        return latest != null ? latest.FullName : null;
+    }
+
+    private static bool ValidateSaveFile(SimulationSaveFile saveFile, out string error)
+    {
+        if (saveFile == null)
+        {
+            error = "save file JSON could not be deserialized.";
+            return false;
+        }
+
+        if (saveFile.schemaVersion < 1 || saveFile.schemaVersion > SimulationSaveFile.CurrentSchemaVersion)
+        {
+            error = $"unsupported schema version {saveFile.schemaVersion}.";
+            return false;
+        }
+
+        if (saveFile.population == null || saveFile.population.replicators == null)
+        {
+            error = "population snapshot is missing.";
+            return false;
+        }
+
+        if (saveFile.population.count != saveFile.population.replicators.Count)
+        {
+            error = $"population count mismatch: count={saveFile.population.count}, records={saveFile.population.replicators.Count}.";
+            return false;
+        }
+
+        if (saveFile.clock == null)
+        {
+            saveFile.clock = new SimulationClockSnapshot();
+            Debug.LogWarning("Simulation snapshot has no clock; using zero-time fallback.");
+        }
+
+        error = null;
+        return true;
+    }
+
+    private string BuildLoadDiagnosticLog(string path, SimulationSaveFile saveFile, bool sunRestored)
+    {
+        return "Loaded simulation snapshot:\n" +
+            $"Path: {path}\n" +
+            $"Schema: {saveFile.schemaVersion}\n" +
+            $"Saved UTC: {saveFile.savedUtc}\n" +
+            $"Simulation time: {(saveFile.clock != null ? saveFile.clock.simulationTimeSeconds : 0d):F3}\n" +
+            $"Step count: {(saveFile.clock != null ? saveFile.clock.simulationStepCount : 0)}\n" +
+            $"Replicators loaded: {(saveFile.population != null ? saveFile.population.count : 0)}\n" +
+            $"Sun phase restored: {sunRestored}\n" +
+            "Resource map restored: false, diagnostics only in this milestone";
+    }
+
     private static void WriteCompressedJsonAtomic(string path, string json)
     {
         string tempPath = path + ".tmp";
@@ -141,7 +313,7 @@ public class SimulationSaveLoadService : MonoBehaviour
         try
         {
             using (FileStream fileStream = File.Create(tempPath))
-            using (GZipStream gzipStream = new GZipStream(fileStream, CompressionLevel.Optimal))
+            using (GZipStream gzipStream = new GZipStream(fileStream, System.IO.Compression.CompressionLevel.Optimal))
             using (StreamWriter writer = new StreamWriter(gzipStream, Encoding.UTF8))
             {
                 writer.Write(json);

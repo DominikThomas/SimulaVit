@@ -108,6 +108,40 @@ public class SunSkyRotator : MonoBehaviour
     }
 
 
+    public bool ApplySnapshot(SunSkySnapshot snapshot, SimulationClockSnapshot clockSnapshot = null)
+    {
+        if (snapshot != null && snapshot.available)
+        {
+            transform.rotation = snapshot.rotation.ToQuaternion();
+            orbitDegreesPerSecond = snapshot.orbitDegreesPerSecond;
+            orbitAxis = snapshot.orbitAxis.ToVector3();
+            keepOrbitOnEquator = snapshot.keepOrbitOnEquator;
+            enableSeasons = snapshot.enableSeasons;
+            axisTiltDegrees = snapshot.axisTiltDegrees;
+            yearLengthInDays = Mathf.Max(1f, snapshot.yearLengthInDays);
+            seasonalPhaseOffset = snapshot.seasonalPhaseOffset;
+            northernSummerAtPhaseZero = snapshot.northernSummerAtPhaseZero;
+            accumulatedOrbitAngle = snapshot.accumulatedOrbitAngle;
+            sunColor = snapshot.sunColor.ToColor();
+            sunEmissionIntensity = snapshot.sunEmissionIntensity;
+            UpdateSunVisualPosition();
+            UpdateSunVisualAppearance();
+            return true;
+        }
+
+        if (clockSnapshot != null && orbitDegreesPerSecond > 0f)
+        {
+            accumulatedOrbitAngle = (float)(clockSnapshot.simulationTimeSeconds * orbitDegreesPerSecond);
+            transform.rotation = Quaternion.AngleAxis(accumulatedOrbitAngle, GetOrbitAxis()) * initialRotation;
+            UpdateSunVisualPosition();
+            UpdateSunVisualAppearance();
+            Debug.LogWarning("Sun/sky save snapshot unavailable; reconstructed orbit phase from simulation time.", this);
+            return false;
+        }
+
+        return false;
+    }
+
     public SunSkySnapshot CaptureSnapshot()
     {
         return new SunSkySnapshot
