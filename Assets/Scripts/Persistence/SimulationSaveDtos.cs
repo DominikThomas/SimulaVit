@@ -47,6 +47,8 @@ public class SunSkySnapshot
     public float seasonalPhaseOffset;
     public bool northernSummerAtPhaseZero;
     public float accumulatedOrbitAngle;
+    public bool skyboxSnapshotAvailable;
+    public float skyboxRotation;
     public SerializableColor sunColor;
     public float sunEmissionIntensity;
 }

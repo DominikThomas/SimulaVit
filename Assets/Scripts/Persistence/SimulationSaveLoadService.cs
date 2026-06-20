@@ -54,6 +54,16 @@ public class SimulationSaveLoadService : MonoBehaviour
         SaveSnapshot();
     }
 
+    public string SaveLatestManualSnapshot()
+    {
+        return SaveSnapshot();
+    }
+
+    public void LoadLatestManualSnapshot()
+    {
+        LoadLatestDebugSnapshot();
+    }
+
     [ContextMenu("Debug Load Latest Simulation Snapshot")]
     public void LoadLatestDebugSnapshot()
     {
