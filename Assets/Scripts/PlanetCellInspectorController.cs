@@ -115,6 +115,24 @@ public class PlanetCellInspectorController : MonoBehaviour
         PresentSnapshot(snapshot, selectedDirection);
     }
 
+    public void ClearSelection()
+    {
+        hasSelection = false;
+        selectedCellIndex = -1;
+        selectedDirection = default;
+        refreshTimer = 0f;
+
+        if (inspectorPanel != null)
+        {
+            inspectorPanel.Hide();
+        }
+
+        if (selectionMarker != null)
+        {
+            selectionMarker.Hide();
+        }
+    }
+
     private void PresentSnapshot(PlanetResourceMap.CellInspectionSnapshot snapshot, Vector3 direction)
     {
         if (inspectorPanel != null)

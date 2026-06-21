@@ -126,6 +126,13 @@ public class SimulationSpeedController : MonoBehaviour
         GUI.matrix = oldMatrix;
     }
 
+    public void RefreshFromSimulationTiming()
+    {
+        replicatorManager ??= FindFirstObjectByType<ReplicatorManager>();
+        int authoritativeStepsPerFrame = replicatorManager != null ? replicatorManager.SimulationStepsPerFrame : 1;
+        selectedOptionIndex = FindClosestSpeedOptionIndex(authoritativeStepsPerFrame);
+    }
+
     private void ApplySelectedSpeed()
     {
         if (speedOptions == null || speedOptions.Length == 0)
@@ -139,6 +146,28 @@ public class SimulationSpeedController : MonoBehaviour
         Time.timeScale = 1f;
         replicatorManager ??= FindFirstObjectByType<ReplicatorManager>();
         replicatorManager?.SetSimulationTiming(active.simulationStepsPerFrame);
+    }
+
+    private int FindClosestSpeedOptionIndex(int simulationStepsPerFrame)
+    {
+        if (speedOptions == null || speedOptions.Length == 0)
+        {
+            return 0;
+        }
+
+        int closestIndex = 0;
+        int smallestDelta = Mathf.Abs(speedOptions[0].simulationStepsPerFrame - simulationStepsPerFrame);
+        for (int i = 1; i < speedOptions.Length; i++)
+        {
+            int delta = Mathf.Abs(speedOptions[i].simulationStepsPerFrame - simulationStepsPerFrame);
+            if (delta < smallestDelta)
+            {
+                closestIndex = i;
+                smallestDelta = delta;
+            }
+        }
+
+        return closestIndex;
     }
 
     private void UpdateGuiScale()

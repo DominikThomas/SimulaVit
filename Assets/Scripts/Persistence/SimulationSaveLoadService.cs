@@ -15,6 +15,8 @@ public class SimulationSaveLoadService : MonoBehaviour
     [SerializeField] private SunSkyRotator sunSkyRotator;
     [SerializeField] private PlanetResourceMap planetResourceMap;
     [SerializeField] private PlanetGenerator planetGenerator;
+    [SerializeField] private SimulationSpeedController simulationSpeedController;
+    [SerializeField] private PlanetCellInspectorController planetCellInspectorController;
 
     [Header("Debug Save")]
     [SerializeField] private bool enableKeyboardQuickSave = true;
@@ -133,6 +135,8 @@ public class SimulationSaveLoadService : MonoBehaviour
             {
                 return false;
             }
+
+            ResetSimulationSpeedAfterLoad();
         }
         finally
         {
@@ -142,8 +146,34 @@ public class SimulationSaveLoadService : MonoBehaviour
             }
         }
 
+        RefreshUiAfterLoad();
         Debug.Log(BuildLoadDiagnosticLog(path, saveFile, sunRestored), this);
         return true;
+    }
+
+    private void ResetSimulationSpeedAfterLoad()
+    {
+        const int defaultStepsPerFrame = 1;
+
+        if (replicatorManager != null)
+        {
+            replicatorManager.SetSimulationTiming(defaultStepsPerFrame);
+            return;
+        }
+
+        if (simulationPipeline != null)
+        {
+            simulationPipeline.SetSimulationStepsPerFrame(defaultStepsPerFrame);
+        }
+    }
+
+    private void RefreshUiAfterLoad()
+    {
+        simulationSpeedController ??= FindFirstObjectByType<SimulationSpeedController>();
+        simulationSpeedController?.RefreshFromSimulationTiming();
+
+        planetCellInspectorController ??= FindFirstObjectByType<PlanetCellInspectorController>();
+        planetCellInspectorController?.ClearSelection();
     }
 
     public string SaveSnapshot()
@@ -155,7 +185,7 @@ public class SimulationSaveLoadService : MonoBehaviour
         Directory.CreateDirectory(saveDirectory);
 
         string fileName = useTimestampedFileNames
-            ? $"simv-{DateTime.UtcNow:yyyyMMdd-HHmmss}.simv.json.gz"
+            ? $"simv-{DateTime.Now:yyyyMMdd-HHmmss}.simv.json.gz"
             : "quicksave.simv.json.gz";
         string fullPath = Path.Combine(saveDirectory, fileName);
 
@@ -406,5 +436,7 @@ public class SimulationSaveLoadService : MonoBehaviour
         if (sunSkyRotator == null) sunSkyRotator = FindFirstObjectByType<SunSkyRotator>();
         if (planetResourceMap == null) planetResourceMap = FindFirstObjectByType<PlanetResourceMap>();
         if (planetGenerator == null) planetGenerator = FindFirstObjectByType<PlanetGenerator>();
+        if (simulationSpeedController == null) simulationSpeedController = FindFirstObjectByType<SimulationSpeedController>();
+        if (planetCellInspectorController == null) planetCellInspectorController = FindFirstObjectByType<PlanetCellInspectorController>();
     }
 }
