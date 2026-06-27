@@ -84,6 +84,15 @@ public class CameraRotation : MonoBehaviour
 
     private void Update()
     {
+        if (SimulationStartupController.IsStartupBlockingHud)
+        {
+            orbitActivateRequested = false;
+            isOrbiting = false;
+            isTouchOrbiting = false;
+            lookInput = Vector2.zero;
+            return;
+        }
+
         if (orbitActivateRequested)
         {
             orbitActivateRequested = false;

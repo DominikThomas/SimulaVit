@@ -4,6 +4,9 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using UnityEngine;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 [DefaultExecutionOrder(-2000)]
 public class SimulationStartupController : MonoBehaviour
@@ -48,6 +51,7 @@ public class SimulationStartupController : MonoBehaviour
     [SerializeField] private ReplicatorManager replicatorManager;
     [SerializeField] private SunSkyRotator sunSkyRotator;
     [SerializeField] private ReplicatorSimulationPipeline simulationPipeline;
+    [SerializeField] private SimulationSaveLoadService saveLoadService;
     [Tooltip("Overlay used as the persistent setup curtain. If empty, the loading overlay is reused when possible.")]
     [SerializeField] private StartupFadeOverlay setupCurtainOrOverlay;
     [Tooltip("Overlay shown while applying startup config/regenerating and faded out when the world is ready.")]
@@ -67,12 +71,18 @@ public class SimulationStartupController : MonoBehaviour
     [Tooltip("Disable assigned worldRootsToHideDuringSetup during setup. Usually unnecessary when coverWorldDuringSetup is enabled.")]
     [SerializeField] private bool hideWorldRootsDuringSetup;
 
-    [Header("Built-in Setup UI")]
+    [Header("Built-in Start Screen UI")]
     [SerializeField] private bool useBuiltInSetupGui = true;
     [SerializeField] private float setupGuiWidth = 520f;
     [SerializeField] private float setupGuiTopPadding = 70f;
 
+    private enum BuiltInScreenMode { MainMenu, SavePicker }
+
     private Vector2 setupGuiScrollPosition;
+    private Vector2 savePickerScrollPosition;
+    private BuiltInScreenMode builtInScreenMode;
+    private IReadOnlyList<SimulationSaveLoadService.SaveFileInfo> cachedSaveFiles = Array.Empty<SimulationSaveLoadService.SaveFileInfo>();
+    private string startScreenStatusMessage;
     private int resumeStepsPerFrame = 1;
     private bool startupComplete;
     private bool applyingConfig;
@@ -132,6 +142,7 @@ public class SimulationStartupController : MonoBehaviour
         replicatorManager ??= FindFirstObjectByType<ReplicatorManager>();
         sunSkyRotator ??= FindFirstObjectByType<SunSkyRotator>();
         simulationPipeline ??= FindFirstObjectByType<ReplicatorSimulationPipeline>();
+        saveLoadService ??= FindFirstObjectByType<SimulationSaveLoadService>();
         loadingOverlay ??= FindFirstObjectByType<StartupFadeOverlay>();
         setupCurtainOrOverlay ??= loadingOverlay;
         loadingOverlay ??= setupCurtainOrOverlay;
@@ -200,6 +211,79 @@ public class SimulationStartupController : MonoBehaviour
         }
     }
 
+
+    public void QuickLoadFromStartScreen()
+    {
+        ResolveReferences();
+        if (saveLoadService != null && saveLoadService.LoadLatestSave())
+        {
+            CompleteStartupAfterLoadedGame();
+        }
+        else
+        {
+            startScreenStatusMessage = "No save files found or latest save failed to load.";
+        }
+    }
+
+    public void ShowSavePicker()
+    {
+        builtInScreenMode = BuiltInScreenMode.SavePicker;
+        RefreshSavePicker();
+    }
+
+    public void RefreshSavePicker()
+    {
+        ResolveReferences();
+        cachedSaveFiles = saveLoadService != null
+            ? saveLoadService.ListSaveFiles()
+            : Array.Empty<SimulationSaveLoadService.SaveFileInfo>();
+        startScreenStatusMessage = cachedSaveFiles.Count == 0 ? "No save files found." : null;
+    }
+
+    public void BackToStartMenu()
+    {
+        builtInScreenMode = BuiltInScreenMode.MainMenu;
+        startScreenStatusMessage = null;
+    }
+
+    public void LoadSaveFromStartScreen(string path)
+    {
+        ResolveReferences();
+        if (saveLoadService != null && saveLoadService.LoadSnapshotFromPath(path))
+        {
+            CompleteStartupAfterLoadedGame();
+        }
+        else
+        {
+            startScreenStatusMessage = $"Failed to load save: {System.IO.Path.GetFileName(path)}";
+            Debug.LogError($"[SimulationStartupController] Failed to load selected save: {path}", this);
+        }
+    }
+
+    public void ExitApplication()
+    {
+#if UNITY_EDITOR
+        EditorApplication.isPlaying = false;
+#else
+        Application.Quit();
+#endif
+    }
+
+    private void CompleteStartupAfterLoadedGame()
+    {
+        builtInScreenMode = BuiltInScreenMode.MainMenu;
+        startupComplete = true;
+        applyingConfig = false;
+        RestoreWorldRoots();
+        RestoreRuntimeHud();
+        IsSetupActive = false;
+        loadingOverlay?.FadeOut(0.25f);
+        replicatorManager?.SetSimulationTiming(1);
+        simulationPipeline?.SetSimulationStepsPerFrame(1);
+        FindFirstObjectByType<SimulationSpeedController>()?.RefreshFromSimulationTiming();
+        FindFirstObjectByType<PlanetCellInspectorController>()?.ClearSelection();
+    }
+
     public void RandomizeSeed()
     {
         currentConfig.useRandomSeed = true;
@@ -262,6 +346,7 @@ public class SimulationStartupController : MonoBehaviour
         int targetSteps = keepPaused ? 0 : Mathf.Max(1, resumeStepsPerFrame);
         replicatorManager?.SetSimulationTiming(targetSteps);
         simulationPipeline?.SetSimulationStepsPerFrame(targetSteps);
+        FindFirstObjectByType<SimulationSpeedController>()?.RefreshFromSimulationTiming();
 
         startupComplete = true;
         applyingConfig = false;
@@ -754,81 +839,68 @@ public class SimulationStartupController : MonoBehaviour
         }
 
         EnsureStyles();
-
         GUI.Box(new Rect(0f, 0f, Screen.width, Screen.height), GUIContent.none, boxStyle);
 
-        float width = Mathf.Max(1f, Mathf.Min(setupGuiWidth, Screen.width - 40f));
-        float x = (Screen.width - width) * 0.5f;
-        float line = 28f;
-        float gap = 8f;
-        float visibleTopPadding = Mathf.Clamp(setupGuiTopPadding, 0f, Mathf.Max(0f, Screen.height - 100f));
-        float scrollHeight = Mathf.Max(100f, Screen.height - visibleTopPadding - 20f);
-        Rect setupRect = new Rect(x, visibleTopPadding, width, scrollHeight);
-
-        GUILayout.BeginArea(setupRect);
-        setupGuiScrollPosition = GUILayout.BeginScrollView(setupGuiScrollPosition, GUILayout.Width(width), GUILayout.Height(scrollHeight));
-
-        float contentWidth = Mathf.Max(1f, width - 20f);
-        float contentHeight = 44f + ((line + gap) * 15f) + (gap * 2f) + 42f + 30f + 6f;
-        Rect contentRect = GUILayoutUtility.GetRect(contentWidth, contentHeight, GUILayout.Width(contentWidth), GUILayout.Height(contentHeight));
-        float controlX = contentRect.x;
-        float y = contentRect.y;
-
-        GUI.Label(new Rect(controlX, y, contentWidth, 34f), "Planet Simulation Setup", titleStyle);
-        y += 44f;
-
-        DrawBool(new Rect(controlX, y, contentWidth, line), "Use Random Seed", ref currentConfig.useRandomSeed);
-        y += line + gap;
-        DrawInt(new Rect(controlX, y, contentWidth, line), "Planet Seed", ref currentConfig.planetSeed, !currentConfig.useRandomSeed);
-        y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Axis Tilt (deg)", ref currentConfig.axisTiltDegrees, AxisTiltMinDegrees, AxisTiltMaxDegrees);
-        y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Day Length (sec)", ref currentConfig.dayLengthSeconds, DayLengthMinSeconds, DayLengthMaxSeconds);
-        y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Year Length (days)", ref currentConfig.yearLengthInDays, YearLengthMinDays, YearLengthMaxDays);
-        y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Base Temp (K)", ref currentConfig.baseTempKelvin, BaseTempMinKelvin, BaseTempMaxKelvin);
-        y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Insolation Gain", ref currentConfig.insolationTempGain, InsolationGainMin, InsolationGainMax);
-        y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Initial CO2", ref currentConfig.initialCO2, InitialAtmosphereMin, InitialCO2Max);
-        y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Initial O2", ref currentConfig.initialO2, InitialAtmosphereMin, InitialO2Max);
-        y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Initial CH4", ref currentConfig.initialCH4, InitialAtmosphereMin, InitialCH4Max);
-        y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Initial Fe2+", ref currentConfig.initialDissolvedFe2Plus, InitialFe2Min, InitialFe2Max);
-        y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Vent H2 / Tick", ref currentConfig.ventH2PerTick, VentPerTickMin, VentH2MaxPerTick);
-        y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Vent H2S / Tick", ref currentConfig.ventH2SPerTick, VentPerTickMin, VentH2SMaxPerTick);
-        y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Vent CO2 / Tick", ref currentConfig.ventCO2PerTick, VentPerTickMin, VentCO2MaxPerTick);
-        y += line + gap;
-        DrawInt(new Rect(controlX, y, contentWidth, line), "Initial Spawn Count", ref currentConfig.initialSpawnCount, true, InitialSpawnMin, InitialSpawnMax);
-        y += line + (gap * 2f);
-
-        float buttonWidth = (contentWidth - gap) * 0.5f;
-        if (GUI.Button(new Rect(controlX, y, buttonWidth, 34f), "Start Simulation", buttonStyle))
+        if (builtInScreenMode == BuiltInScreenMode.SavePicker)
         {
-            StartSimulation();
+            DrawBuiltInSavePicker();
         }
-        if (GUI.Button(new Rect(controlX + buttonWidth + gap, y, buttonWidth, 34f), "Start Paused", buttonStyle))
+        else
         {
-            StartSimulationPaused();
+            DrawBuiltInStartMenu();
         }
-        y += 42f;
-        if (GUI.Button(new Rect(controlX, y, buttonWidth, 30f), "Randomize Seed", buttonStyle))
-        {
-            RandomizeSeed();
-        }
-        if (GUI.Button(new Rect(controlX + buttonWidth + gap, y, buttonWidth, 30f), "Reset Defaults", buttonStyle))
-        {
-            ResetDefaults();
-        }
+    }
 
+    private void DrawBuiltInStartMenu()
+    {
+        float width = Mathf.Max(1f, Mathf.Min(420f, Screen.width - 40f));
+        float height = 330f;
+        Rect rect = new Rect((Screen.width - width) * 0.5f, (Screen.height - height) * 0.5f, width, height);
+        GUILayout.BeginArea(rect);
+        GUILayout.Label("SimulaVit", titleStyle, GUILayout.Height(52f));
+        GUILayout.Space(16f);
+        if (GUILayout.Button("New Game", buttonStyle, GUILayout.Height(42f))) StartSimulation();
+        if (GUILayout.Button("Quick Load", buttonStyle, GUILayout.Height(42f))) QuickLoadFromStartScreen();
+        if (GUILayout.Button("Load Game", buttonStyle, GUILayout.Height(42f))) ShowSavePicker();
+        if (GUILayout.Button("Exit", buttonStyle, GUILayout.Height(42f))) ExitApplication();
+        if (!string.IsNullOrWhiteSpace(startScreenStatusMessage))
+        {
+            GUILayout.Space(12f);
+            GUILayout.Label(startScreenStatusMessage, labelStyle);
+        }
+        GUILayout.EndArea();
+    }
+
+    private void DrawBuiltInSavePicker()
+    {
+        float width = Mathf.Max(1f, Mathf.Min(720f, Screen.width - 40f));
+        float height = Mathf.Max(260f, Mathf.Min(560f, Screen.height - 80f));
+        Rect rect = new Rect((Screen.width - width) * 0.5f, (Screen.height - height) * 0.5f, width, height);
+        GUILayout.BeginArea(rect);
+        GUILayout.Label("Load Game", titleStyle, GUILayout.Height(42f));
+        GUILayout.BeginHorizontal();
+        if (GUILayout.Button("Back", buttonStyle, GUILayout.Height(34f))) BackToStartMenu();
+        if (GUILayout.Button("Refresh", buttonStyle, GUILayout.Height(34f))) RefreshSavePicker();
+        GUILayout.EndHorizontal();
+        GUILayout.Space(8f);
+
+        if (!string.IsNullOrWhiteSpace(startScreenStatusMessage)) GUILayout.Label(startScreenStatusMessage, labelStyle);
+
+        savePickerScrollPosition = GUILayout.BeginScrollView(savePickerScrollPosition, GUILayout.Height(height - 120f));
+        foreach (SimulationSaveLoadService.SaveFileInfo save in cachedSaveFiles)
+        {
+            string row = $"{save.FileName}  •  {FormatBytes(save.SizeBytes)}  •  {save.LastWriteTimeLocal:yyyy-MM-dd HH:mm:ss}";
+            if (GUILayout.Button(row, buttonStyle, GUILayout.Height(34f))) LoadSaveFromStartScreen(save.Path);
+        }
         GUILayout.EndScrollView();
         GUILayout.EndArea();
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes >= 1024L * 1024L) return $"{bytes / (1024d * 1024d):0.##} MB";
+        if (bytes >= 1024L) return $"{bytes / 1024d:0.##} KB";
+        return $"{bytes} B";
     }
 
     private void DrawBool(Rect rect, string label, ref bool value)

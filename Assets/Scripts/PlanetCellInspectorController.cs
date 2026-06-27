@@ -44,6 +44,11 @@ public class PlanetCellInspectorController : MonoBehaviour
 
     private void Update()
     {
+        if (SimulationStartupController.IsStartupBlockingHud)
+        {
+            return;
+        }
+
         if (targetCamera == null || planetGenerator == null || planetResourceMap == null)
         {
             return;
