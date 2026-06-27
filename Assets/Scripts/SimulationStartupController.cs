@@ -76,11 +76,11 @@ public class SimulationStartupController : MonoBehaviour
     [SerializeField] private float setupGuiWidth = 520f;
     [SerializeField] private float setupGuiTopPadding = 70f;
 
-    private enum BuiltInScreenMode { MainMenu, SavePicker }
+    private enum StartupUiState { MainMenu, ConfigScreen, SavePicker }
 
     private Vector2 setupGuiScrollPosition;
     private Vector2 savePickerScrollPosition;
-    private BuiltInScreenMode builtInScreenMode;
+    private StartupUiState startupUiState;
     private IReadOnlyList<SimulationSaveLoadService.SaveFileInfo> cachedSaveFiles = Array.Empty<SimulationSaveLoadService.SaveFileInfo>();
     private string startScreenStatusMessage;
     private int resumeStepsPerFrame = 1;
@@ -114,7 +114,7 @@ public class SimulationStartupController : MonoBehaviour
     {
         ResolveReferences();
         PrepareDeferredStartup();
-        ShowSetupScreen(true);
+        ShowMainMenu();
 
         if (coverWorldDuringSetup && setupCurtainOrOverlay == null)
         {
@@ -212,6 +212,45 @@ public class SimulationStartupController : MonoBehaviour
     }
 
 
+
+    public void ShowConfigScreenFromMainMenu()
+    {
+        startupUiState = StartupUiState.ConfigScreen;
+        startScreenStatusMessage = null;
+        ShowSetupScreen(true);
+        RefreshStartupPanels();
+    }
+
+    private void ShowMainMenu()
+    {
+        startupUiState = StartupUiState.MainMenu;
+        startScreenStatusMessage = null;
+        IsSetupActive = !startupComplete;
+
+        if (startupScreenRoot != null)
+        {
+            startupScreenRoot.SetActive(false);
+        }
+
+        if (!startupComplete)
+        {
+            HideRuntimeHudForSetup();
+            HideWorldForSetup();
+
+            if (coverWorldDuringSetup)
+            {
+                if (setupCurtainOrOverlay != null)
+                {
+                    setupCurtainOrOverlay.ShowSetupCurtain("SimulaVit");
+                }
+                else
+                {
+                    LogMissingSetupOverlayWarning();
+                }
+            }
+        }
+    }
+
     public void QuickLoadFromStartScreen()
     {
         ResolveReferences();
@@ -227,7 +266,12 @@ public class SimulationStartupController : MonoBehaviour
 
     public void ShowSavePicker()
     {
-        builtInScreenMode = BuiltInScreenMode.SavePicker;
+        startupUiState = StartupUiState.SavePicker;
+        IsSetupActive = !startupComplete;
+        if (startupScreenRoot != null)
+        {
+            startupScreenRoot.SetActive(false);
+        }
         RefreshSavePicker();
     }
 
@@ -242,8 +286,7 @@ public class SimulationStartupController : MonoBehaviour
 
     public void BackToStartMenu()
     {
-        builtInScreenMode = BuiltInScreenMode.MainMenu;
-        startScreenStatusMessage = null;
+        ShowMainMenu();
     }
 
     public void LoadSaveFromStartScreen(string path)
@@ -271,7 +314,7 @@ public class SimulationStartupController : MonoBehaviour
 
     private void CompleteStartupAfterLoadedGame()
     {
-        builtInScreenMode = BuiltInScreenMode.MainMenu;
+        startupUiState = StartupUiState.MainMenu;
         startupComplete = true;
         applyingConfig = false;
         RestoreWorldRoots();
@@ -833,7 +876,7 @@ public class SimulationStartupController : MonoBehaviour
 
     private void OnGUI()
     {
-        if (startupComplete || applyingConfig || !useBuiltInSetupGui || startupScreenRoot != null)
+        if (startupComplete || applyingConfig || !useBuiltInSetupGui)
         {
             return;
         }
@@ -841,9 +884,16 @@ public class SimulationStartupController : MonoBehaviour
         EnsureStyles();
         GUI.Box(new Rect(0f, 0f, Screen.width, Screen.height), GUIContent.none, boxStyle);
 
-        if (builtInScreenMode == BuiltInScreenMode.SavePicker)
+        if (startupUiState == StartupUiState.SavePicker)
         {
             DrawBuiltInSavePicker();
+        }
+        else if (startupUiState == StartupUiState.ConfigScreen)
+        {
+            if (startupScreenRoot == null)
+            {
+                DrawBuiltInConfigScreen();
+            }
         }
         else
         {
@@ -859,7 +909,7 @@ public class SimulationStartupController : MonoBehaviour
         GUILayout.BeginArea(rect);
         GUILayout.Label("SimulaVit", titleStyle, GUILayout.Height(52f));
         GUILayout.Space(16f);
-        if (GUILayout.Button("New Game", buttonStyle, GUILayout.Height(42f))) StartSimulation();
+        if (GUILayout.Button("New Game", buttonStyle, GUILayout.Height(42f))) ShowConfigScreenFromMainMenu();
         if (GUILayout.Button("Quick Load", buttonStyle, GUILayout.Height(42f))) QuickLoadFromStartScreen();
         if (GUILayout.Button("Load Game", buttonStyle, GUILayout.Height(42f))) ShowSavePicker();
         if (GUILayout.Button("Exit", buttonStyle, GUILayout.Height(42f))) ExitApplication();
@@ -868,6 +918,87 @@ public class SimulationStartupController : MonoBehaviour
             GUILayout.Space(12f);
             GUILayout.Label(startScreenStatusMessage, labelStyle);
         }
+        GUILayout.EndArea();
+    }
+
+    private void DrawBuiltInConfigScreen()
+    {
+        float width = Mathf.Max(1f, Mathf.Min(setupGuiWidth, Screen.width - 40f));
+        float x = (Screen.width - width) * 0.5f;
+        float line = 28f;
+        float gap = 8f;
+        float visibleTopPadding = Mathf.Clamp(setupGuiTopPadding, 0f, Mathf.Max(0f, Screen.height - 100f));
+        float scrollHeight = Mathf.Max(100f, Screen.height - visibleTopPadding - 20f);
+        Rect setupRect = new Rect(x, visibleTopPadding, width, scrollHeight);
+
+        GUILayout.BeginArea(setupRect);
+        setupGuiScrollPosition = GUILayout.BeginScrollView(setupGuiScrollPosition, GUILayout.Width(width), GUILayout.Height(scrollHeight));
+
+        float contentWidth = Mathf.Max(1f, width - 20f);
+        float contentHeight = 44f + ((line + gap) * 15f) + (gap * 2f) + 42f + 30f + 44f;
+        Rect contentRect = GUILayoutUtility.GetRect(contentWidth, contentHeight, GUILayout.Width(contentWidth), GUILayout.Height(contentHeight));
+        float controlX = contentRect.x;
+        float y = contentRect.y;
+
+        GUI.Label(new Rect(controlX, y, contentWidth, 34f), "Planet Simulation Setup", titleStyle);
+        y += 44f;
+
+        DrawBool(new Rect(controlX, y, contentWidth, line), "Use Random Seed", ref currentConfig.useRandomSeed);
+        y += line + gap;
+        DrawInt(new Rect(controlX, y, contentWidth, line), "Planet Seed", ref currentConfig.planetSeed, !currentConfig.useRandomSeed);
+        y += line + gap;
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Axis Tilt (deg)", ref currentConfig.axisTiltDegrees, AxisTiltMinDegrees, AxisTiltMaxDegrees);
+        y += line + gap;
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Day Length (sec)", ref currentConfig.dayLengthSeconds, DayLengthMinSeconds, DayLengthMaxSeconds);
+        y += line + gap;
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Year Length (days)", ref currentConfig.yearLengthInDays, YearLengthMinDays, YearLengthMaxDays);
+        y += line + gap;
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Base Temp (K)", ref currentConfig.baseTempKelvin, BaseTempMinKelvin, BaseTempMaxKelvin);
+        y += line + gap;
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Insolation Gain", ref currentConfig.insolationTempGain, InsolationGainMin, InsolationGainMax);
+        y += line + gap;
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Initial CO2", ref currentConfig.initialCO2, InitialAtmosphereMin, InitialCO2Max);
+        y += line + gap;
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Initial O2", ref currentConfig.initialO2, InitialAtmosphereMin, InitialO2Max);
+        y += line + gap;
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Initial CH4", ref currentConfig.initialCH4, InitialAtmosphereMin, InitialCH4Max);
+        y += line + gap;
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Initial Fe2+", ref currentConfig.initialDissolvedFe2Plus, InitialFe2Min, InitialFe2Max);
+        y += line + gap;
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Vent H2 / Tick", ref currentConfig.ventH2PerTick, VentPerTickMin, VentH2MaxPerTick);
+        y += line + gap;
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Vent H2S / Tick", ref currentConfig.ventH2SPerTick, VentPerTickMin, VentH2SMaxPerTick);
+        y += line + gap;
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Vent CO2 / Tick", ref currentConfig.ventCO2PerTick, VentPerTickMin, VentCO2MaxPerTick);
+        y += line + gap;
+        DrawInt(new Rect(controlX, y, contentWidth, line), "Initial Spawn Count", ref currentConfig.initialSpawnCount, true, InitialSpawnMin, InitialSpawnMax);
+        y += line + (gap * 2f);
+
+        float buttonWidth = (contentWidth - gap) * 0.5f;
+        if (GUI.Button(new Rect(controlX, y, buttonWidth, 34f), "Start Simulation", buttonStyle))
+        {
+            StartSimulation();
+        }
+        if (GUI.Button(new Rect(controlX + buttonWidth + gap, y, buttonWidth, 34f), "Start Paused", buttonStyle))
+        {
+            StartSimulationPaused();
+        }
+        y += 42f;
+        if (GUI.Button(new Rect(controlX, y, buttonWidth, 30f), "Randomize Seed", buttonStyle))
+        {
+            RandomizeSeed();
+        }
+        if (GUI.Button(new Rect(controlX + buttonWidth + gap, y, buttonWidth, 30f), "Reset Defaults", buttonStyle))
+        {
+            ResetDefaults();
+        }
+        y += 38f;
+        if (GUI.Button(new Rect(controlX, y, contentWidth, 30f), "Back", buttonStyle))
+        {
+            BackToStartMenu();
+        }
+
+        GUILayout.EndScrollView();
         GUILayout.EndArea();
     }
 

@@ -31,6 +31,7 @@ public class SimulationStartupPanel : MonoBehaviour
     [SerializeField] private Button startPausedButton;
     [SerializeField] private Button randomizeSeedButton;
     [SerializeField] private Button resetDefaultsButton;
+    [SerializeField] private Button backButton;
 
     private void Awake()
     {
@@ -49,6 +50,7 @@ public class SimulationStartupPanel : MonoBehaviour
         if (startPausedButton != null) startPausedButton.onClick.RemoveListener(StartSimulationPaused);
         if (randomizeSeedButton != null) randomizeSeedButton.onClick.RemoveListener(RandomizeSeed);
         if (resetDefaultsButton != null) resetDefaultsButton.onClick.RemoveListener(ResetDefaults);
+        if (backButton != null) backButton.onClick.RemoveListener(BackToMainMenu);
         if (axisTiltSlider != null) axisTiltSlider.onValueChanged.RemoveListener(OnAxisTiltChanged);
     }
 
@@ -58,6 +60,7 @@ public class SimulationStartupPanel : MonoBehaviour
         if (startPausedButton != null) startPausedButton.onClick.AddListener(StartSimulationPaused);
         if (randomizeSeedButton != null) randomizeSeedButton.onClick.AddListener(RandomizeSeed);
         if (resetDefaultsButton != null) resetDefaultsButton.onClick.AddListener(ResetDefaults);
+        if (backButton != null) backButton.onClick.AddListener(BackToMainMenu);
         if (axisTiltSlider != null) axisTiltSlider.onValueChanged.AddListener(OnAxisTiltChanged);
     }
 
@@ -134,6 +137,11 @@ public class SimulationStartupPanel : MonoBehaviour
     {
         controller?.ResetDefaults();
         RefreshFromConfig();
+    }
+
+    private void BackToMainMenu()
+    {
+        controller?.BackToStartMenu();
     }
 
     private void OnAxisTiltChanged(float value)
