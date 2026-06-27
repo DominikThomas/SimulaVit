@@ -1,6 +1,8 @@
 using System;
 using System.IO;
+using System.Collections.Generic;
 using System.IO.Compression;
+using System.Linq;
 using System.Text;
 using UnityEngine;
 #if ENABLE_INPUT_SYSTEM
@@ -9,6 +11,26 @@ using UnityEngine.InputSystem;
 
 public class SimulationSaveLoadService : MonoBehaviour
 {
+    public const string CompressedSaveSearchPattern = "*.simv.json.gz";
+
+    public readonly struct SaveFileInfo
+    {
+        public SaveFileInfo(string path, string fileName, DateTime lastWriteTimeLocal, DateTime lastWriteTimeUtc, long sizeBytes)
+        {
+            Path = path;
+            FileName = fileName;
+            LastWriteTimeLocal = lastWriteTimeLocal;
+            LastWriteTimeUtc = lastWriteTimeUtc;
+            SizeBytes = sizeBytes;
+        }
+
+        public string Path { get; }
+        public string FileName { get; }
+        public DateTime LastWriteTimeLocal { get; }
+        public DateTime LastWriteTimeUtc { get; }
+        public long SizeBytes { get; }
+    }
+
     [Header("Capture References")]
     [SerializeField] private ReplicatorManager replicatorManager;
     [SerializeField] private ReplicatorSimulationPipeline simulationPipeline;
@@ -66,18 +88,47 @@ public class SimulationSaveLoadService : MonoBehaviour
         LoadLatestDebugSnapshot();
     }
 
+    public string SavesDirectory => Path.Combine(Application.persistentDataPath, "Saves");
+
     [ContextMenu("Debug Load Latest Simulation Snapshot")]
     public void LoadLatestDebugSnapshot()
+    {
+        LoadLatestSave();
+    }
+
+    public bool LoadLatestSave()
     {
         ResolveReferences();
         string path = FindLatestCompressedSavePath();
         if (string.IsNullOrEmpty(path))
         {
-            Debug.LogWarning($"No compressed simulation save files found in {Path.Combine(Application.persistentDataPath, "Saves")}. Expected *.simv.json.gz.", this);
-            return;
+            Debug.LogWarning($"No compressed simulation save files found in {SavesDirectory}. Expected {CompressedSaveSearchPattern}.", this);
+            return false;
         }
 
-        LoadSnapshot(path);
+        return LoadSnapshotFromPath(path);
+    }
+
+    public IReadOnlyList<SaveFileInfo> ListSaveFiles()
+    {
+        string saveDirectory = SavesDirectory;
+        if (!Directory.Exists(saveDirectory))
+        {
+            return Array.Empty<SaveFileInfo>();
+        }
+
+        return Directory.GetFiles(saveDirectory, CompressedSaveSearchPattern)
+            .Where(file => !file.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase))
+            .Select(file => new FileInfo(file))
+            .Where(info => info.Exists)
+            .OrderByDescending(info => info.LastWriteTimeUtc)
+            .Select(info => new SaveFileInfo(info.FullName, info.Name, info.LastWriteTime, info.LastWriteTimeUtc, info.Length))
+            .ToArray();
+    }
+
+    public bool LoadSnapshotFromPath(string path)
+    {
+        return LoadSnapshot(path);
     }
 
     public bool LoadSnapshot(string path)
@@ -181,7 +232,7 @@ public class SimulationSaveLoadService : MonoBehaviour
         ResolveReferences();
 
         SimulationSaveFile saveFile = BuildSaveFile();
-        string saveDirectory = Path.Combine(Application.persistentDataPath, "Saves");
+        string saveDirectory = SavesDirectory;
         Directory.CreateDirectory(saveDirectory);
 
         string fileName = useTimestampedFileNames
@@ -276,25 +327,10 @@ public class SimulationSaveLoadService : MonoBehaviour
         }
     }
 
-    private static string FindLatestCompressedSavePath()
+    private string FindLatestCompressedSavePath()
     {
-        string saveDirectory = Path.Combine(Application.persistentDataPath, "Saves");
-        if (!Directory.Exists(saveDirectory))
-        {
-            return null;
-        }
-
-        FileInfo latest = null;
-        foreach (string file in Directory.GetFiles(saveDirectory, "*.simv.json.gz"))
-        {
-            FileInfo info = new FileInfo(file);
-            if (latest == null || info.LastWriteTimeUtc > latest.LastWriteTimeUtc)
-            {
-                latest = info;
-            }
-        }
-
-        return latest != null ? latest.FullName : null;
+        IReadOnlyList<SaveFileInfo> saves = ListSaveFiles();
+        return saves.Count > 0 ? saves[0].Path : null;
     }
 
     private static bool ValidateSaveFile(SimulationSaveFile saveFile, out string error)
