@@ -94,6 +94,7 @@ public class SimulationStartupController : MonoBehaviour
     private readonly Dictionary<GameObject, bool> worldRootStates = new Dictionary<GameObject, bool>();
     private bool warnedAboutHudRoots;
     private bool warnedAboutMissingOverlay;
+    private bool returningToMainMenu;
 
     public static bool IsSetupActive { get; private set; }
     public static bool IsStartupBlockingHud => IsSetupActive;
@@ -225,14 +226,14 @@ public class SimulationStartupController : MonoBehaviour
     {
         startupUiState = StartupUiState.MainMenu;
         startScreenStatusMessage = null;
-        IsSetupActive = !startupComplete;
+        IsSetupActive = !startupComplete || returningToMainMenu;
 
         if (startupScreenRoot != null)
         {
             startupScreenRoot.SetActive(false);
         }
 
-        if (!startupComplete)
+        if (IsSetupActive)
         {
             HideRuntimeHudForSetup();
             HideWorldForSetup();
@@ -249,6 +250,23 @@ public class SimulationStartupController : MonoBehaviour
                 }
             }
         }
+    }
+
+    public void ExitToMainMenu()
+    {
+        ResolveReferences();
+        returningToMainMenu = true;
+        startupComplete = false;
+        applyingConfig = false;
+        startScreenStatusMessage = null;
+
+        Time.timeScale = 1f;
+        replicatorManager?.SetSimulationTiming(0);
+        simulationPipeline?.SetSimulationStepsPerFrame(0);
+        FindFirstObjectByType<SimulationSpeedController>()?.RefreshFromSimulationTiming();
+        FindFirstObjectByType<PlanetCellInspectorController>()?.ClearSelection();
+
+        ShowMainMenu();
     }
 
     public void QuickLoadFromStartScreen()
@@ -316,6 +334,7 @@ public class SimulationStartupController : MonoBehaviour
     {
         startupUiState = StartupUiState.MainMenu;
         startupComplete = true;
+        returningToMainMenu = false;
         applyingConfig = false;
         RestoreWorldRoots();
         RestoreRuntimeHud();
@@ -392,6 +411,7 @@ public class SimulationStartupController : MonoBehaviour
         FindFirstObjectByType<SimulationSpeedController>()?.RefreshFromSimulationTiming();
 
         startupComplete = true;
+        returningToMainMenu = false;
         applyingConfig = false;
         RestoreWorldRoots();
         RestoreRuntimeHud();
@@ -698,7 +718,7 @@ public class SimulationStartupController : MonoBehaviour
 
     private void ShowSetupScreen(bool show)
     {
-        IsSetupActive = (show || applyingConfig) && !startupComplete;
+        IsSetupActive = ((show || applyingConfig) && !startupComplete) || returningToMainMenu;
 
         if (startupScreenRoot != null)
         {
@@ -876,7 +896,7 @@ public class SimulationStartupController : MonoBehaviour
 
     private void OnGUI()
     {
-        if (startupComplete || applyingConfig || !useBuiltInSetupGui)
+        if ((startupComplete && !returningToMainMenu) || applyingConfig || !useBuiltInSetupGui)
         {
             return;
         }
