@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 public class ReplicatorHudPresenter
 {
@@ -31,6 +32,7 @@ public class ReplicatorHudPresenter
     private float guiScale = 1f;
     private float masterVolume = 1f;
     private string menuStatusMessage;
+    private int lastEscapeToggleFrame = -1;
 
     private const float ReferenceHeight = 1080f;
     private const float MinGuiScale = 1f;
@@ -51,8 +53,11 @@ public class ReplicatorHudPresenter
     {
         EnsureInitialized();
 
-        if (Event.current.type == EventType.KeyDown && Event.current.keyCode == KeyCode.Escape)
+        if (Keyboard.current != null
+            && Keyboard.current.escapeKey.wasPressedThisFrame
+            && lastEscapeToggleFrame != Time.frameCount)
         {
+            lastEscapeToggleFrame = Time.frameCount;
             showMenu = !showMenu;
             SetPauseState(showMenu);
         }
@@ -348,7 +353,7 @@ public class ReplicatorHudPresenter
         }
 
         float width = 360f;
-        float height = 350f;
+        float height = 398f;
 
         Rect rect = new Rect(
             (scaledScreenWidth - width) * 0.5f,
@@ -417,6 +422,25 @@ public class ReplicatorHudPresenter
             {
                 menuStatusMessage = "Save service not found.";
                 Debug.LogWarning("Load Latest Save was clicked, but no SimulationSaveLoadService was found.");
+            }
+        }
+
+        y += 46f;
+
+        if (GUI.Button(new Rect(x, y, contentWidth, 36f), "Exit to Main Menu", buttonStyle))
+        {
+            showMenu = false;
+            SetPauseState(false);
+
+            SimulationStartupController startupController = UnityEngine.Object.FindFirstObjectByType<SimulationStartupController>();
+            if (startupController != null)
+            {
+                startupController.ExitToMainMenu();
+            }
+            else
+            {
+                menuStatusMessage = "Startup controller not found.";
+                Debug.LogWarning("Exit to Main Menu was clicked, but no SimulationStartupController was found.");
             }
         }
 
