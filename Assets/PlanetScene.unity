@@ -191,6 +191,7 @@ MonoBehaviour:
   replicatorManager: {fileID: 1064713443}
   sunSkyRotator: {fileID: 313342988}
   simulationPipeline: {fileID: 1064713445}
+  saveLoadService: {fileID: 0}
   setupCurtainOrOverlay: {fileID: 209742446}
   loadingOverlay: {fileID: 209742446}
   startupScreenRoot: {fileID: 0}
@@ -1068,8 +1069,8 @@ MonoBehaviour:
   m_TargetGraphic: {fileID: 1049548737}
   m_HandleRect: {fileID: 1049548736}
   m_Direction: 2
-  m_Value: 1
-  m_Size: 1
+  m_Value: 0
+  m_Size: 0.4736841
   m_NumberOfSteps: 0
   m_OnValueChanged:
     m_PersistentCalls:
@@ -1499,13 +1500,13 @@ MonoBehaviour:
   predatorAttackRange: 0.25
   predatorAttackCooldownSeconds: 1
   predatorBiteOrganicC: 0.4
-  predatorBiteEnergy: 0
+  predatorBiteEnergy: 0.5
   predatorKillEnergyThreshold: 0.01
   predatorAssimilationFraction: 0.6
   predatorAdjacentLayerSearchDepth: 0
   predatorEnergyPerC: 0.3
   predatorBasalCostMultiplier: 1.5
-  predatorMoveSpeedMultiplier: 0.8
+  predatorMoveSpeedMultiplier: 1.3
   predatorSpawnColorStrength: 1
   enableFear: 1
   fearRadius: 0.6
@@ -51583,7 +51584,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 1}
   m_AnchorMax: {x: 1, y: 1}
-  m_AnchoredPosition: {x: 0, y: 0}
+  m_AnchoredPosition: {x: 0, y: -0.000061035156}
   m_SizeDelta: {x: 0, y: 500}
   m_Pivot: {x: 0, y: 1}
 --- !u!114 &1582151553

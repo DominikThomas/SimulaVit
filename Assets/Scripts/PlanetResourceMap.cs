@@ -517,6 +517,8 @@ public class PlanetResourceMap : MonoBehaviour
                 s0 = SumResource(ResourceType.S0),
                 dissolvedFe2Plus = SumResource(ResourceType.DissolvedFe2Plus)
             },
+            dissolvedFe2Plus = CopyAuthoritativeDissolvedFe2PlusArray(),
+            dissolvedFe2PlusDiagnostics = CaptureDissolvedFe2PlusDiagnostics(),
             temperature = CaptureTemperatureSummary(),
             timers = new ResourceTimerSnapshot
             {
@@ -531,6 +533,112 @@ public class PlanetResourceMap : MonoBehaviour
         };
 
         return snapshot;
+    }
+
+    public bool ApplyDissolvedFe2Snapshot(PlanetResourceMapSnapshot snapshot)
+    {
+        InitializeIfNeeded();
+
+        if (snapshot == null || !snapshot.available)
+        {
+            Debug.LogWarning("Dissolved Fe2+ not present in save; keeping generated/default values.", this);
+            return false;
+        }
+
+        if (snapshot.dissolvedFe2Plus == null || snapshot.dissolvedFe2Plus.Length == 0)
+        {
+            Debug.LogWarning("Dissolved Fe2+ not present in save; keeping generated/default values.", this);
+            return false;
+        }
+
+        float[] target = GetLayeredOrAggregateArray(ResourceType.DissolvedFe2Plus);
+        if (target == null)
+        {
+            Debug.LogWarning("Dissolved Fe2+ restore skipped: live resource array is not initialized; keeping generated/default values.", this);
+            return false;
+        }
+
+        int currentResolution = SimulationResolution;
+        int currentCellCount = SimulationCellCount;
+        if (snapshot.simulationResolution > 0 && snapshot.simulationResolution != currentResolution)
+        {
+            Debug.LogWarning($"Dissolved Fe2+ restore skipped: save resolution {snapshot.simulationResolution} does not match current resolution {currentResolution}; keeping generated/default values.", this);
+            return false;
+        }
+
+        if (snapshot.cellCount > 0 && snapshot.cellCount != currentCellCount)
+        {
+            Debug.LogWarning($"Dissolved Fe2+ restore skipped: save cell count {snapshot.cellCount} does not match current cell count {currentCellCount}; keeping generated/default values.", this);
+            return false;
+        }
+
+        if (snapshot.dissolvedFe2Plus.Length != target.Length)
+        {
+            Debug.LogWarning($"Dissolved Fe2+ restore skipped: save array length {snapshot.dissolvedFe2Plus.Length} does not match live array length {target.Length}; keeping generated/default values.", this);
+            return false;
+        }
+
+        System.Array.Copy(snapshot.dissolvedFe2Plus, target, target.Length);
+        if (GetLayeredOceanArray(ResourceType.DissolvedFe2Plus) == target)
+        {
+            SyncLegacyOceanResourceFromLayers(ResourceType.DissolvedFe2Plus);
+        }
+
+        UpdateOceanChemistryDebugStats();
+        ResourceArrayDiagnosticsSnapshot stats = BuildArrayDiagnostics(target);
+        Debug.Log($"Dissolved Fe2+ restored: true\nDissolved Fe2+ length: {stats.arrayLength}\nDissolved Fe2+ sum/min/max after apply: {stats.sum:F6}/{stats.min:F6}/{stats.max:F6}", this);
+        return true;
+    }
+
+    public ResourceArrayDiagnosticsSnapshot CaptureDissolvedFe2PlusDiagnostics()
+    {
+        return BuildArrayDiagnostics(GetLayeredOrAggregateArray(ResourceType.DissolvedFe2Plus));
+    }
+
+    private float[] CopyAuthoritativeDissolvedFe2PlusArray()
+    {
+        float[] source = GetLayeredOrAggregateArray(ResourceType.DissolvedFe2Plus);
+        return source != null ? (float[])source.Clone() : null;
+    }
+
+    private ResourceArrayDiagnosticsSnapshot BuildArrayDiagnostics(float[] values)
+    {
+        ResourceArrayDiagnosticsSnapshot diagnostics = new ResourceArrayDiagnosticsSnapshot
+        {
+            present = values != null,
+            simulationResolution = SimulationResolution,
+            cellCount = SimulationCellCount,
+            arrayLength = GetLength(values),
+            min = 0f,
+            max = 0f,
+            sum = 0d
+        };
+
+        if (values == null || values.Length == 0)
+        {
+            return diagnostics;
+        }
+
+        float min = float.PositiveInfinity;
+        float max = float.NegativeInfinity;
+        double sum = 0d;
+        for (int i = 0; i < values.Length; i++)
+        {
+            float value = values[i];
+            if (float.IsNaN(value) || float.IsInfinity(value))
+            {
+                continue;
+            }
+
+            min = Mathf.Min(min, value);
+            max = Mathf.Max(max, value);
+            sum += value;
+        }
+
+        diagnostics.sum = sum;
+        diagnostics.min = float.IsPositiveInfinity(min) ? 0f : min;
+        diagnostics.max = float.IsNegativeInfinity(max) ? 0f : max;
+        return diagnostics;
     }
 
     private static int GetLength(float[] values)
