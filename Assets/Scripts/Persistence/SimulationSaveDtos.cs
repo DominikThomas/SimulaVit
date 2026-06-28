@@ -5,7 +5,7 @@ using UnityEngine;
 [Serializable]
 public class SimulationSaveFile
 {
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
 
     public int schemaVersion = CurrentSchemaVersion;
     public string applicationVersion;
@@ -75,8 +75,22 @@ public class PlanetResourceMapSnapshot
     public int[] activeLayerCountHistogram;
     public ResourceArrayLengthSnapshot arrayLengths;
     public ResourceSumsSnapshot resourceSums;
+    public float[] dissolvedFe2Plus;
+    public ResourceArrayDiagnosticsSnapshot dissolvedFe2PlusDiagnostics;
     public TemperatureSummarySnapshot temperature;
     public ResourceTimerSnapshot timers;
+}
+
+[Serializable]
+public class ResourceArrayDiagnosticsSnapshot
+{
+    public bool present;
+    public int simulationResolution;
+    public int cellCount;
+    public int arrayLength;
+    public double sum;
+    public float min;
+    public float max;
 }
 
 [Serializable]

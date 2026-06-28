@@ -164,6 +164,7 @@ public class SimulationSaveLoadService : MonoBehaviour
         }
 
         bool sunRestored = false;
+        bool dissolvedFe2Restored = false;
         try
         {
             if (simulationPipeline != null)
@@ -177,9 +178,17 @@ public class SimulationSaveLoadService : MonoBehaviour
 
             sunRestored = sunSkyRotator != null && sunSkyRotator.ApplySnapshot(saveFile.sun, saveFile.clock);
 
-            if (saveFile.resourceMap != null)
+            if (planetResourceMap != null)
             {
-                Debug.Log($"Resource-map snapshot read for diagnostics only (not restored in this milestone). Cells: {saveFile.resourceMap.cellCount}, layered ocean: {saveFile.resourceMap.layeredOceanEnabled}.", this);
+                dissolvedFe2Restored = planetResourceMap.ApplyDissolvedFe2Snapshot(saveFile.resourceMap);
+            }
+            else if (saveFile.resourceMap != null && saveFile.resourceMap.dissolvedFe2Plus != null && saveFile.resourceMap.dissolvedFe2Plus.Length > 0)
+            {
+                Debug.LogWarning("Dissolved Fe2+ restore skipped: no PlanetResourceMap is available to receive the snapshot.", this);
+            }
+            else
+            {
+                Debug.LogWarning("Dissolved Fe2+ not present in save; keeping generated/default values.", this);
             }
 
             if (!replicatorManager.ApplyPopulationSnapshot(saveFile.population))
@@ -198,7 +207,7 @@ public class SimulationSaveLoadService : MonoBehaviour
         }
 
         RefreshUiAfterLoad();
-        Debug.Log(BuildLoadDiagnosticLog(path, saveFile, sunRestored), this);
+        Debug.Log(BuildLoadDiagnosticLog(path, saveFile, sunRestored, dissolvedFe2Restored), this);
         return true;
     }
 
@@ -369,8 +378,12 @@ public class SimulationSaveLoadService : MonoBehaviour
         return true;
     }
 
-    private string BuildLoadDiagnosticLog(string path, SimulationSaveFile saveFile, bool sunRestored)
+    private string BuildLoadDiagnosticLog(string path, SimulationSaveFile saveFile, bool sunRestored, bool dissolvedFe2Restored)
     {
+        ResourceArrayDiagnosticsSnapshot fe2 = planetResourceMap != null
+            ? planetResourceMap.CaptureDissolvedFe2PlusDiagnostics()
+            : saveFile.resourceMap != null ? saveFile.resourceMap.dissolvedFe2PlusDiagnostics : null;
+
         return "Loaded simulation snapshot:\n" +
             $"Path: {path}\n" +
             $"Schema: {saveFile.schemaVersion}\n" +
@@ -379,7 +392,10 @@ public class SimulationSaveLoadService : MonoBehaviour
             $"Step count: {(saveFile.clock != null ? saveFile.clock.simulationStepCount : 0)}\n" +
             $"Replicators loaded: {(saveFile.population != null ? saveFile.population.count : 0)}\n" +
             $"Sun phase restored: {sunRestored}\n" +
-            "Resource map restored: false, diagnostics only in this milestone";
+            $"Resource map restored: {dissolvedFe2Restored} (Dissolved Fe2+ only)\n" +
+            $"Dissolved Fe2+ restored: {dissolvedFe2Restored}\n" +
+            $"Dissolved Fe2+ length: {(fe2 != null ? fe2.arrayLength : 0)}\n" +
+            $"Dissolved Fe2+ sum/min/max after apply: {(fe2 != null ? fe2.sum : 0d):F6}/{(fe2 != null ? fe2.min : 0f):F6}/{(fe2 != null ? fe2.max : 0f):F6}";
     }
 
     private static void WriteCompressedJsonAtomic(string path, string json)
@@ -444,6 +460,7 @@ public class SimulationSaveLoadService : MonoBehaviour
     {
         TemperatureSummarySnapshot temp = saveFile.resourceMap != null ? saveFile.resourceMap.temperature : null;
         ResourceSumsSnapshot sums = saveFile.resourceMap != null ? saveFile.resourceMap.resourceSums : null;
+        ResourceArrayDiagnosticsSnapshot fe2 = saveFile.resourceMap != null ? saveFile.resourceMap.dissolvedFe2PlusDiagnostics : null;
         return "Saved simulation snapshot:\n" +
             $"Path: {path}\n" +
             $"Compressed size: {BytesToMegabytes(compressedBytes):F3} MB\n" +
@@ -457,6 +474,9 @@ public class SimulationSaveLoadService : MonoBehaviour
             $"O2 sum: {(sums != null ? sums.o2 : 0d):F6}\n" +
             $"CO2 sum: {(sums != null ? sums.co2 : 0d):F6}\n" +
             $"OrganicC sum: {(sums != null ? sums.organicC : 0d):F6}\n" +
+            $"Dissolved Fe2+ saved: {fe2 != null && fe2.present}\n" +
+            $"Dissolved Fe2+ length: {(fe2 != null ? fe2.arrayLength : 0)}\n" +
+            $"Dissolved Fe2+ sum/min/max: {(fe2 != null ? fe2.sum : 0d):F6}/{(fe2 != null ? fe2.min : 0f):F6}/{(fe2 != null ? fe2.max : 0f):F6}\n" +
             $"Temperature min/max/mean: {(temp != null ? temp.minKelvin : 0f):F2}/{(temp != null ? temp.maxKelvin : 0f):F2}/{(temp != null ? temp.meanKelvin : 0f):F2}";
     }
 
