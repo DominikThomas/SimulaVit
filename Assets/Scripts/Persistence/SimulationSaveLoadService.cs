@@ -164,7 +164,7 @@ public class SimulationSaveLoadService : MonoBehaviour
         }
 
         bool sunRestored = false;
-        bool dissolvedFe2Restored = false;
+        bool resourceMapRestored = false;
         try
         {
             if (simulationPipeline != null)
@@ -180,15 +180,15 @@ public class SimulationSaveLoadService : MonoBehaviour
 
             if (planetResourceMap != null)
             {
-                dissolvedFe2Restored = planetResourceMap.ApplyDissolvedFe2Snapshot(saveFile.resourceMap);
+                resourceMapRestored = planetResourceMap.ApplyMutableResourceSnapshot(saveFile.resourceMap);
             }
-            else if (saveFile.resourceMap != null && saveFile.resourceMap.dissolvedFe2Plus != null && saveFile.resourceMap.dissolvedFe2Plus.Length > 0)
+            else if (saveFile.resourceMap != null)
             {
-                Debug.LogWarning("Dissolved Fe2+ restore skipped: no PlanetResourceMap is available to receive the snapshot.", this);
+                Debug.LogWarning("Mutable planet resource restore skipped: no PlanetResourceMap is available to receive the snapshot.", this);
             }
             else
             {
-                Debug.LogWarning("Dissolved Fe2+ not present in save; keeping generated/default values.", this);
+                Debug.LogWarning("Mutable planet resources not present in save; keeping generated/default values.", this);
             }
 
             if (!replicatorManager.ApplyPopulationSnapshot(saveFile.population))
@@ -207,7 +207,7 @@ public class SimulationSaveLoadService : MonoBehaviour
         }
 
         RefreshUiAfterLoad();
-        Debug.Log(BuildLoadDiagnosticLog(path, saveFile, sunRestored, dissolvedFe2Restored), this);
+        Debug.Log(BuildLoadDiagnosticLog(path, saveFile, sunRestored, resourceMapRestored), this);
         return true;
     }
 
@@ -378,7 +378,7 @@ public class SimulationSaveLoadService : MonoBehaviour
         return true;
     }
 
-    private string BuildLoadDiagnosticLog(string path, SimulationSaveFile saveFile, bool sunRestored, bool dissolvedFe2Restored)
+    private string BuildLoadDiagnosticLog(string path, SimulationSaveFile saveFile, bool sunRestored, bool resourceMapRestored)
     {
         ResourceArrayDiagnosticsSnapshot fe2 = planetResourceMap != null
             ? planetResourceMap.CaptureDissolvedFe2PlusDiagnostics()
@@ -392,8 +392,8 @@ public class SimulationSaveLoadService : MonoBehaviour
             $"Step count: {(saveFile.clock != null ? saveFile.clock.simulationStepCount : 0)}\n" +
             $"Replicators loaded: {(saveFile.population != null ? saveFile.population.count : 0)}\n" +
             $"Sun phase restored: {sunRestored}\n" +
-            $"Resource map restored: {dissolvedFe2Restored} (Dissolved Fe2+ only)\n" +
-            $"Dissolved Fe2+ restored: {dissolvedFe2Restored}\n" +
+            $"Resource map restored: {resourceMapRestored} (mutable resource arrays)\n" +
+            $"Dissolved Fe2+ restored: {resourceMapRestored}\n" +
             $"Dissolved Fe2+ length: {(fe2 != null ? fe2.arrayLength : 0)}\n" +
             $"Dissolved Fe2+ sum/min/max after apply: {(fe2 != null ? fe2.sum : 0d):F6}/{(fe2 != null ? fe2.min : 0f):F6}/{(fe2 != null ? fe2.max : 0f):F6}";
     }
@@ -460,7 +460,8 @@ public class SimulationSaveLoadService : MonoBehaviour
     {
         TemperatureSummarySnapshot temp = saveFile.resourceMap != null ? saveFile.resourceMap.temperature : null;
         ResourceSumsSnapshot sums = saveFile.resourceMap != null ? saveFile.resourceMap.resourceSums : null;
-        ResourceArrayDiagnosticsSnapshot fe2 = saveFile.resourceMap != null ? saveFile.resourceMap.dissolvedFe2PlusDiagnostics : null;
+        PlanetResourceMapSnapshot resources = saveFile.resourceMap;
+        ResourceArrayDiagnosticsSnapshot fe2 = resources != null ? resources.dissolvedFe2PlusDiagnostics : null;
         return "Saved simulation snapshot:\n" +
             $"Path: {path}\n" +
             $"Compressed size: {BytesToMegabytes(compressedBytes):F3} MB\n" +
@@ -477,7 +478,23 @@ public class SimulationSaveLoadService : MonoBehaviour
             $"Dissolved Fe2+ saved: {fe2 != null && fe2.present}\n" +
             $"Dissolved Fe2+ length: {(fe2 != null ? fe2.arrayLength : 0)}\n" +
             $"Dissolved Fe2+ sum/min/max: {(fe2 != null ? fe2.sum : 0d):F6}/{(fe2 != null ? fe2.min : 0f):F6}/{(fe2 != null ? fe2.max : 0f):F6}\n" +
-            $"Temperature min/max/mean: {(temp != null ? temp.minKelvin : 0f):F2}/{(temp != null ? temp.maxKelvin : 0f):F2}/{(temp != null ? temp.meanKelvin : 0f):F2}";
+            $"Temperature min/max/mean: {(temp != null ? temp.minKelvin : 0f):F2}/{(temp != null ? temp.maxKelvin : 0f):F2}/{(temp != null ? temp.meanKelvin : 0f):F2}\n" +
+            "Mutable planet resources saved:\n" +
+            BuildSavedResourceDiagnostics("CO2", resources != null ? resources.co2Diagnostics : null) + "\n" +
+            BuildSavedResourceDiagnostics("O2", resources != null ? resources.o2Diagnostics : null) + "\n" +
+            BuildSavedResourceDiagnostics("OrganicC", resources != null ? resources.organicCDiagnostics : null) + "\n" +
+            BuildSavedResourceDiagnostics("H2S", resources != null ? resources.h2sDiagnostics : null) + "\n" +
+            BuildSavedResourceDiagnostics("H2", resources != null ? resources.h2Diagnostics : null) + "\n" +
+            BuildSavedResourceDiagnostics("CH4", resources != null ? resources.ch4Diagnostics : null) + "\n" +
+            BuildSavedResourceDiagnostics("S0", resources != null ? resources.s0Diagnostics : null) + "\n" +
+            BuildSavedResourceDiagnostics("Fe2+", resources != null ? resources.dissolvedFe2PlusDiagnostics : null) + "\n" +
+            BuildSavedResourceDiagnostics("Temperature", resources != null ? resources.surfaceTemperatureDiagnostics : null);
+    }
+
+    private static string BuildSavedResourceDiagnostics(string name, ResourceArrayDiagnosticsSnapshot diagnostics)
+    {
+        bool present = diagnostics != null && diagnostics.present;
+        return $"{name}: {present} length={(diagnostics != null ? diagnostics.arrayLength : 0)} sum={(diagnostics != null ? diagnostics.sum : 0d):F6} min={(diagnostics != null ? diagnostics.min : 0f):F6} max={(diagnostics != null ? diagnostics.max : 0f):F6}";
     }
 
     private static double BytesToMegabytes(long bytes)

@@ -488,6 +488,8 @@ public class PlanetResourceMap : MonoBehaviour
         {
             available = true,
             initialized = isInitialized,
+            resourceName = nameof(PlanetResourceMap),
+            resourceSnapshotVersion = 1,
             simulationResolution = SimulationResolution,
             cellCount = SimulationCellCount,
             layeredOceanEnabled = enableLayeredOcean,
@@ -517,8 +519,28 @@ public class PlanetResourceMap : MonoBehaviour
                 s0 = SumResource(ResourceType.S0),
                 dissolvedFe2Plus = SumResource(ResourceType.DissolvedFe2Plus)
             },
+            co2 = CopyAuthoritativeResourceArray(ResourceType.CO2),
+            o2 = CopyAuthoritativeResourceArray(ResourceType.O2),
+            organicC = CopyAuthoritativeResourceArray(ResourceType.OrganicC),
+            h2s = CopyAuthoritativeResourceArray(ResourceType.H2S),
+            h2 = CopyAuthoritativeResourceArray(ResourceType.H2),
+            ch4 = CopyAuthoritativeResourceArray(ResourceType.CH4),
+            s0 = CopyAuthoritativeResourceArray(ResourceType.S0),
             dissolvedFe2Plus = CopyAuthoritativeDissolvedFe2PlusArray(),
+            surfaceTemperatureKelvin = enableSurfaceThermalInertia ? CopySurfaceTemperatureArray() : null,
+            dissolvedOrganicLeak = CopyAuthoritativeResourceArray(ResourceType.DissolvedOrganicLeak),
+            toxicProteolyticWaste = CopyAuthoritativeResourceArray(ResourceType.ToxicProteolyticWaste),
+            co2Diagnostics = CaptureResourceDiagnostics(ResourceType.CO2),
+            o2Diagnostics = CaptureResourceDiagnostics(ResourceType.O2),
+            organicCDiagnostics = CaptureResourceDiagnostics(ResourceType.OrganicC),
+            h2sDiagnostics = CaptureResourceDiagnostics(ResourceType.H2S),
+            h2Diagnostics = CaptureResourceDiagnostics(ResourceType.H2),
+            ch4Diagnostics = CaptureResourceDiagnostics(ResourceType.CH4),
+            s0Diagnostics = CaptureResourceDiagnostics(ResourceType.S0),
             dissolvedFe2PlusDiagnostics = CaptureDissolvedFe2PlusDiagnostics(),
+            surfaceTemperatureDiagnostics = enableSurfaceThermalInertia ? BuildArrayDiagnostics(surfaceTemperatureKelvin) : new ResourceArrayDiagnosticsSnapshot { present = false, simulationResolution = SimulationResolution, cellCount = SimulationCellCount },
+            dissolvedOrganicLeakDiagnostics = CaptureResourceDiagnostics(ResourceType.DissolvedOrganicLeak),
+            toxicProteolyticWasteDiagnostics = CaptureResourceDiagnostics(ResourceType.ToxicProteolyticWaste),
             temperature = CaptureTemperatureSummary(),
             timers = new ResourceTimerSnapshot
             {
@@ -533,6 +555,110 @@ public class PlanetResourceMap : MonoBehaviour
         };
 
         return snapshot;
+    }
+
+
+    public bool ApplyMutableResourceSnapshot(PlanetResourceMapSnapshot snapshot)
+    {
+        InitializeIfNeeded();
+
+        if (snapshot == null || !snapshot.available)
+        {
+            Debug.LogWarning("Mutable planet resources not present in save; keeping generated/default values.", this);
+            return false;
+        }
+
+        int currentResolution = SimulationResolution;
+        int currentCellCount = SimulationCellCount;
+        if (snapshot.simulationResolution > 0 && snapshot.simulationResolution != currentResolution)
+        {
+            Debug.LogWarning($"Mutable planet resource restore skipped: save resolution {snapshot.simulationResolution} does not match current resolution {currentResolution}; keeping generated/default values.", this);
+            return false;
+        }
+
+        if (snapshot.cellCount > 0 && snapshot.cellCount != currentCellCount)
+        {
+            Debug.LogWarning($"Mutable planet resource restore skipped: save cell count {snapshot.cellCount} does not match current cell count {currentCellCount}; keeping generated/default values.", this);
+            return false;
+        }
+
+        List<string> statuses = new List<string>();
+        bool anyRestored = false;
+        anyRestored |= TryApplyMutableArray("CO2", snapshot.co2, GetLayeredOrAggregateArray(ResourceType.CO2), statuses);
+        anyRestored |= TryApplyMutableArray("O2", snapshot.o2, GetLayeredOrAggregateArray(ResourceType.O2), statuses);
+        anyRestored |= TryApplyMutableArray("OrganicC", snapshot.organicC, GetLayeredOrAggregateArray(ResourceType.OrganicC), statuses);
+        anyRestored |= TryApplyMutableArray("H2S", snapshot.h2s, GetLayeredOrAggregateArray(ResourceType.H2S), statuses);
+        anyRestored |= TryApplyMutableArray("H2", snapshot.h2, GetLayeredOrAggregateArray(ResourceType.H2), statuses);
+        anyRestored |= TryApplyMutableArray("CH4", snapshot.ch4, GetLayeredOrAggregateArray(ResourceType.CH4), statuses);
+        anyRestored |= TryApplyMutableArray("S0", snapshot.s0, GetLayeredOrAggregateArray(ResourceType.S0), statuses);
+        anyRestored |= TryApplyMutableArray("Fe2+", snapshot.dissolvedFe2Plus, GetLayeredOrAggregateArray(ResourceType.DissolvedFe2Plus), statuses);
+
+        if (enableSurfaceThermalInertia)
+        {
+            anyRestored |= TryApplyMutableArray("Temperature", snapshot.surfaceTemperatureKelvin, surfaceTemperatureKelvin, statuses);
+            if (snapshot.surfaceTemperatureKelvin != null && snapshot.surfaceTemperatureKelvin.Length == GetLength(surfaceTemperatureKelvin))
+            {
+                surfaceTemperatureInitialized = true;
+            }
+        }
+        else
+        {
+            statuses.Add("Temperature: not mutable (thermal inertia disabled)");
+        }
+
+        anyRestored |= TryApplyMutableArray("DissolvedOrganicLeak", snapshot.dissolvedOrganicLeak, GetLayeredOrAggregateArray(ResourceType.DissolvedOrganicLeak), statuses);
+        anyRestored |= TryApplyMutableArray("ToxicProteolyticWaste", snapshot.toxicProteolyticWaste, GetLayeredOrAggregateArray(ResourceType.ToxicProteolyticWaste), statuses);
+
+        if (snapshot.timers != null)
+        {
+            ventTimer = Mathf.Max(0f, snapshot.timers.ventTimer);
+            atmosphereTimer = Mathf.Max(0f, snapshot.timers.atmosphereTimer);
+            thermalTimer = Mathf.Max(0f, snapshot.timers.thermalTimer);
+            lastThermalSimulationTime = snapshot.timers.lastThermalSimulationTime;
+            debugSimulationDeltaTimeUsedByPlanetResourceMap = snapshot.timers.debugSimulationDeltaTimeUsedByPlanetResourceMap;
+            debugLastVentDeltaTime = snapshot.timers.debugLastVentDeltaTime;
+            debugVentTimer = ventTimer;
+            statuses.Add("Timers: restored");
+        }
+        else
+        {
+            statuses.Add("Timers: missing");
+        }
+
+        SyncLegacyOceanFromLayeredArrays();
+        UpdateAtmosphereDebugMeans();
+        UpdateOceanChemistryDebugStats();
+
+        Debug.Log("Mutable planet resources restored:\n" + string.Join("\n", statuses), this);
+        return anyRestored;
+    }
+
+    private bool TryApplyMutableArray(string resourceName, float[] saved, float[] target, List<string> statuses)
+    {
+        if (saved == null || saved.Length == 0)
+        {
+            statuses.Add($"{resourceName}: missing");
+            return false;
+        }
+
+        if (target == null)
+        {
+            statuses.Add($"{resourceName}: invalid (live array missing)");
+            Debug.LogWarning($"{resourceName} restore skipped: live resource array is not initialized; keeping generated/default values.", this);
+            return false;
+        }
+
+        if (saved.Length != target.Length)
+        {
+            statuses.Add($"{resourceName}: invalid (save length {saved.Length}, live length {target.Length})");
+            Debug.LogWarning($"{resourceName} restore skipped: save array length {saved.Length} does not match live array length {target.Length}; keeping generated/default values.", this);
+            return false;
+        }
+
+        System.Array.Copy(saved, target, target.Length);
+        ResourceArrayDiagnosticsSnapshot stats = BuildArrayDiagnostics(target);
+        statuses.Add($"{resourceName}: restored length={stats.arrayLength} sum={stats.sum:F6} min={stats.min:F6} max={stats.max:F6}");
+        return true;
     }
 
     public bool ApplyDissolvedFe2Snapshot(PlanetResourceMapSnapshot snapshot)
@@ -597,8 +723,23 @@ public class PlanetResourceMap : MonoBehaviour
 
     private float[] CopyAuthoritativeDissolvedFe2PlusArray()
     {
-        float[] source = GetLayeredOrAggregateArray(ResourceType.DissolvedFe2Plus);
+        return CopyAuthoritativeResourceArray(ResourceType.DissolvedFe2Plus);
+    }
+
+    private float[] CopyAuthoritativeResourceArray(ResourceType resourceType)
+    {
+        float[] source = GetLayeredOrAggregateArray(resourceType);
         return source != null ? (float[])source.Clone() : null;
+    }
+
+    private float[] CopySurfaceTemperatureArray()
+    {
+        return surfaceTemperatureKelvin != null ? (float[])surfaceTemperatureKelvin.Clone() : null;
+    }
+
+    private ResourceArrayDiagnosticsSnapshot CaptureResourceDiagnostics(ResourceType resourceType)
+    {
+        return BuildArrayDiagnostics(GetLayeredOrAggregateArray(resourceType));
     }
 
     private ResourceArrayDiagnosticsSnapshot BuildArrayDiagnostics(float[] values)

@@ -67,6 +67,8 @@ public class PlanetResourceMapSnapshot
 {
     public bool available;
     public bool initialized;
+    public string resourceName;
+    public int resourceSnapshotVersion;
     public int simulationResolution;
     public int cellCount;
     public bool layeredOceanEnabled;
@@ -75,8 +77,30 @@ public class PlanetResourceMapSnapshot
     public int[] activeLayerCountHistogram;
     public ResourceArrayLengthSnapshot arrayLengths;
     public ResourceSumsSnapshot resourceSums;
+    // Mutable authoritative simulation/resource-grid arrays only. These are lower-resolution
+    // PlanetResourceMap arrays (or lower-resolution ocean-layer arrays), not visual mesh/terrain data.
+    public float[] co2;
+    public float[] o2;
+    public float[] organicC;
+    public float[] h2s;
+    public float[] h2;
+    public float[] ch4;
+    public float[] s0;
     public float[] dissolvedFe2Plus;
+    public float[] surfaceTemperatureKelvin;
+    public float[] dissolvedOrganicLeak;
+    public float[] toxicProteolyticWaste;
+    public ResourceArrayDiagnosticsSnapshot co2Diagnostics;
+    public ResourceArrayDiagnosticsSnapshot o2Diagnostics;
+    public ResourceArrayDiagnosticsSnapshot organicCDiagnostics;
+    public ResourceArrayDiagnosticsSnapshot h2sDiagnostics;
+    public ResourceArrayDiagnosticsSnapshot h2Diagnostics;
+    public ResourceArrayDiagnosticsSnapshot ch4Diagnostics;
+    public ResourceArrayDiagnosticsSnapshot s0Diagnostics;
     public ResourceArrayDiagnosticsSnapshot dissolvedFe2PlusDiagnostics;
+    public ResourceArrayDiagnosticsSnapshot surfaceTemperatureDiagnostics;
+    public ResourceArrayDiagnosticsSnapshot dissolvedOrganicLeakDiagnostics;
+    public ResourceArrayDiagnosticsSnapshot toxicProteolyticWasteDiagnostics;
     public TemperatureSummarySnapshot temperature;
     public ResourceTimerSnapshot timers;
 }
