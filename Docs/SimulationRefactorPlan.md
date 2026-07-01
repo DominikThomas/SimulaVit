@@ -1,3 +1,8 @@
+Status: Partially implemented
+Last reviewed: 2026-06-28
+Current summary: Many ReplicatorManager extraction targets now exist as separate systems, while ReplicatorManager remains the orchestration and compatibility hub. PlanetResourceMap has gained layered/state/persistence APIs but most proposed PlanetResourceMap subsystem extractions remain future work.
+See also: Docs/PROJECT_STATUS_AND_NEXT_STEPS.md
+
 # Incremental Refactor Plan: `ReplicatorManager` and `PlanetResourceMap`
 
 # Simulation Refactor Plan

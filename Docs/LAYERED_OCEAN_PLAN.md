@@ -1,3 +1,8 @@
+Status: Implemented
+Last reviewed: 2026-06-28
+Current summary: Layered ocean is the authoritative ocean resource path for core simulation, movement/radius placement, steering, predation, metabolism reads/writes, light/heating, organic-carbon transport, and persistence. Compatibility bridges remain intentional migration/diagnostic safeguards.
+See also: Docs/PROJECT_STATUS_AND_NEXT_STEPS.md
+
 # Layered Ocean Plan
 
 ## Current state

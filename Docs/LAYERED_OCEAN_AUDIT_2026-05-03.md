@@ -1,3 +1,8 @@
+Status: Implemented
+Last reviewed: 2026-06-28
+Current summary: The May audit largely matches current code. Persistence has since advanced: save/load captures and restores authoritative layered ocean arrays, including CO2/O2/OrganicC/H2/H2S/CH4/S0/Fe2+ and layered scent/leak/waste resources.
+See also: Docs/PROJECT_STATUS_AND_NEXT_STEPS.md
+
 # Layered Ocean Migration Audit (May 3, 2026)
 
 ## Scope
