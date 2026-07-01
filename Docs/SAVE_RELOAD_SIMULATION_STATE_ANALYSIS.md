@@ -1,3 +1,8 @@
+Status: Partially implemented
+Last reviewed: 2026-06-28
+Current summary: Save/load now has a versioned compressed JSON snapshot service that captures clock, sun, population hot state, companion-only traits, mutable resource arrays, surface temperature, timers, and layered ocean arrays. Remaining gaps are deterministic planet/scenario config completeness, RNG/exact one-step continuation, and formal validation coverage.
+See also: Docs/PROJECT_STATUS_AND_NEXT_STEPS.md
+
 # Save/Reload Simulation State Analysis
 
 ## Goal

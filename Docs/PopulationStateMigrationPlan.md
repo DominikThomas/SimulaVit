@@ -1,3 +1,8 @@
+Status: Partially superseded
+Last reviewed: 2026-06-28
+Current summary: The initial “List<Replicator> authoritative” migration premise is no longer current. ReplicatorPopulationState is now authoritative for hot per-agent fields; the companion Replicator list remains a compatibility/lifecycle/debug bridge and still owns a few slower trait fields until they are migrated or consistently snapshotted.
+See also: Docs/PROJECT_STATUS_AND_NEXT_STEPS.md
+
 # ReplicatorPopulationState migration (performance-oriented pre-DOTS step)
 
 ## 1) Hottest per-agent fields to move first

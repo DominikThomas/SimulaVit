@@ -1,3 +1,8 @@
+Status: Partially implemented / Future
+Last reviewed: 2026-06-28
+Current summary: Reaction-backed metabolism has scaffold/registry/runtime-binding support, and the metabolism hot loop consumes those bindings for resource identities, but execution is still branch-driven and stoichiometry/effects are not yet authoritative. Full reaction execution remains future work.
+See also: Docs/PROJECT_STATUS_AND_NEXT_STEPS.md
+
 # Reaction-Backed Metabolism Migration Plan
 
 ## 1. Motivation
