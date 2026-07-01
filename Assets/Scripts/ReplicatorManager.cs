@@ -19,6 +19,15 @@ public class ReplicatorManager : MonoBehaviour
     private static readonly ProfilerMarker PopulationStatePrepareForLocomotionMarker = new ProfilerMarker("ReplicatorManager.PopulationStatePrepareForLocomotion");
     private static readonly ProfilerMarker SteeringThrottleSkipMarker = new ProfilerMarker("ReplicatorManager.SteeringThrottleSkip");
 
+    private struct MetabolismMutationGateRequirements
+    {
+        public ResourceType[] RequiredResources;
+        public bool RequiresLight;
+        public bool RequiresLowO2;
+        public bool RequiresOrganicCStoreFallback;
+        public string Notes;
+    }
+
     [Header("Settings")]
     public Mesh replicatorMesh;
     public Material replicatorMaterial;
@@ -65,6 +74,16 @@ public class ReplicatorManager : MonoBehaviour
     public float minGlobalO2 = 0.01f;
     public float minLocalO2 = 0.1f;
     public float minLocalOrganicC = 0.001f;
+
+    [Header("Metabolism Mutation Habitat Gates")]
+    public float mutationGateMinH2S = 0.0005f;
+    public float mutationGateMinCO2 = 0.001f;
+    public float mutationGateMinH2 = 0.001f;
+    public float mutationGateMaxO2ForAnaerobes = 0.02f;
+    public float mutationGateMinO2ForAerobes = 0.01f;
+    public float mutationGateMinOrganicC = 0.001f;
+    public float mutationGateMinCH4 = 0.001f;
+    public float mutationGateMinLight = 0.05f;
 
     [Header("Energy -> Speed")]
     public float energyForFullSpeed = 0.5f;
@@ -2002,25 +2021,25 @@ public class ReplicatorManager : MonoBehaviour
                     && IsInsolatedLocation(parent.currentDirection)
                     && UnityEngine.Random.value < Mathf.Clamp01(hydrogenToPhotosynthesisMutationChance))
                 {
-                    childMetabolism = MetabolismType.Photosynthesis;
+                    TrySetGatedMetabolism(parent, MetabolismType.Photosynthesis, ref childMetabolism);
                 }
                 else if (UnityEngine.Random.value < Mathf.Clamp01(hydrogenToSulfurMutationChance))
                 {
-                    childMetabolism = MetabolismType.SulfurChemosynthesis;
+                    TrySetGatedMetabolism(parent, MetabolismType.SulfurChemosynthesis, ref childMetabolism);
                 }
                 else if (UnityEngine.Random.value < Mathf.Clamp01(hydrogenToFermentationMutationChance))
                 {
-                    childMetabolism = MetabolismType.Fermentation;
+                    TrySetGatedMetabolism(parent, MetabolismType.Fermentation, ref childMetabolism);
                 }
             }
             else if (parent.metabolism == MetabolismType.Fermentation
                 && UnityEngine.Random.value < Mathf.Clamp01(fermentationToMethanogenesisMutationChance))
             {
-                childMetabolism = MetabolismType.Methanogenesis;
+                TrySetGatedMetabolism(parent, MetabolismType.Methanogenesis, ref childMetabolism);
             }
             else if (allowReverseMetabolismMutation)
             {
-                childMetabolism = MetabolismType.Hydrogenotrophy;
+                TrySetGatedMetabolism(parent, MetabolismType.Hydrogenotrophy, ref childMetabolism);
             }
         }
 
@@ -2030,7 +2049,7 @@ public class ReplicatorManager : MonoBehaviour
             && UnityEngine.Random.value < Mathf.Clamp01(hydrogenToMethanotrophyMutationChance)
             && CanMutateToMethanotrophy(parent, out methanotrophyUnlockedByLocalOxygen))
         {
-            childMetabolism = MetabolismType.Methanotrophy;
+            TrySetGatedMetabolism(parent, MetabolismType.Methanotrophy, ref childMetabolism);
         }
 
         bool saprotrophyUnlockedByLocalOxygen = false;
@@ -2039,7 +2058,7 @@ public class ReplicatorManager : MonoBehaviour
             && UnityEngine.Random.value < Mathf.Clamp01(parent.metabolism == MetabolismType.Hydrogenotrophy ? hydrogenToSaprotrophyMutationChance : saprotrophyMutationChance)
             && CanMutateToSaprotrophy(parent, out saprotrophyUnlockedByLocalOxygen))
         {
-            childMetabolism = MetabolismType.Saprotrophy;
+            TrySetGatedMetabolism(parent, MetabolismType.Saprotrophy, ref childMetabolism);
         }
 
         if (enablePredators
@@ -2084,6 +2103,231 @@ public class ReplicatorManager : MonoBehaviour
     bool IsSaprotrophyUnlocked()
     {
         return planetGenerator != null && planetGenerator.SaprotrophyUnlocked;
+    }
+
+    void TrySetGatedMetabolism(Replicator parent, MetabolismType targetMetabolism, ref MetabolismType childMetabolism)
+    {
+        if (PassesMetabolismMutationGate(parent, targetMetabolism))
+        {
+            childMetabolism = targetMetabolism;
+        }
+    }
+
+    bool PassesMetabolismMutationGate(Replicator parent, MetabolismType targetMetabolism)
+    {
+        if (parent == null || planetResourceMap == null)
+        {
+            return false;
+        }
+
+        if (!GetMutationGateRequirements(targetMetabolism, out MetabolismMutationGateRequirements requirements))
+        {
+            // Predation is not resource-backed yet; keep existing Saprotrophy-parent/motility gates.
+            return targetMetabolism == MetabolismType.Predation;
+        }
+
+        int cellIndex = DirectionToSimulationCellIndex(parent.currentDirection.normalized);
+        if (cellIndex < 0)
+        {
+            return false;
+        }
+
+        int layerIndex = ResolveMutationGateLayer(parent, targetMetabolism, cellIndex);
+        if (requirements.RequiredResources != null)
+        {
+            for (int i = 0; i < requirements.RequiredResources.Length; i++)
+            {
+                ResourceType resource = requirements.RequiredResources[i];
+                if (resource == ResourceType.OrganicC && requirements.RequiresOrganicCStoreFallback && HasSufficientInheritedOrganicCStore(parent))
+                {
+                    continue;
+                }
+
+                if (!HasRequiredLocalResource(resource, cellIndex, layerIndex))
+                {
+                    return false;
+                }
+            }
+        }
+
+        if (requirements.RequiresLight && GetLocalMutationGateLight(parent.currentDirection.normalized, cellIndex, layerIndex) < Mathf.Max(0f, mutationGateMinLight))
+        {
+            return false;
+        }
+
+        if (requirements.RequiresLowO2)
+        {
+            float localO2 = GetLocalHabitatResource(ResourceType.O2, cellIndex, layerIndex, parent.preferredOceanLayerIndex);
+            if (localO2 > GetAreaNormalizedLocalThreshold(mutationGateMaxO2ForAnaerobes))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    bool GetMutationGateRequirements(MetabolismType targetMetabolism, out MetabolismMutationGateRequirements requirements)
+    {
+        TryGetReactionDerivedMutationGateRequirements(targetMetabolism, out requirements);
+
+        switch (targetMetabolism)
+        {
+            case MetabolismType.SulfurChemosynthesis:
+                requirements.RequiredResources = new[] { ResourceType.H2S, ResourceType.CO2 };
+                requirements.RequiresLight = false;
+                requirements.RequiresLowO2 = false;
+                requirements.Notes = "Explicit productive-input overlay; mutation gate ignores outputs.";
+                return true;
+            case MetabolismType.Fermentation:
+                requirements.RequiredResources = new[] { ResourceType.OrganicC };
+                requirements.RequiresLight = false;
+                requirements.RequiresLowO2 = false;
+                requirements.RequiresOrganicCStoreFallback = true;
+                requirements.Notes = "OrganicC can be local detritus or inherited stored carbon.";
+                return true;
+            case MetabolismType.Methanogenesis:
+                requirements.RequiredResources = new[] { ResourceType.CO2, ResourceType.H2 };
+                requirements.RequiresLight = false;
+                requirements.RequiresLowO2 = true;
+                requirements.Notes = "Anaerobic overlay prevents high-O2 methanogenesis mutation.";
+                return true;
+            case MetabolismType.Photosynthesis:
+                requirements.RequiredResources = new[] { ResourceType.CO2 };
+                requirements.RequiresLight = true;
+                requirements.RequiresLowO2 = false;
+                requirements.Notes = "Light-reaction overlay prevents dark-maintenance O2 from becoming a mutation input.";
+                return true;
+            case MetabolismType.Methanotrophy:
+                requirements.RequiredResources = new[] { ResourceType.CH4, ResourceType.O2 };
+                requirements.RequiresLight = false;
+                requirements.RequiresLowO2 = false;
+                return true;
+            case MetabolismType.Saprotrophy:
+                requirements.RequiredResources = new[] { ResourceType.OrganicC, ResourceType.O2 };
+                requirements.RequiresLight = false;
+                requirements.RequiresLowO2 = false;
+                return true;
+            case MetabolismType.Hydrogenotrophy:
+                requirements.RequiredResources = new[] { ResourceType.H2, ResourceType.CO2 };
+                requirements.RequiresLight = false;
+                requirements.RequiresLowO2 = false;
+                return true;
+            case MetabolismType.Predation:
+                // TODO: add prey-density gating when a cheap local prey/population density field is available.
+                requirements = default;
+                return false;
+            default:
+                return requirements.RequiredResources != null;
+        }
+    }
+
+    bool TryGetReactionDerivedMutationGateRequirements(MetabolismType targetMetabolism, out MetabolismMutationGateRequirements requirements)
+    {
+        requirements = default;
+        if (!ReactionDefinitionRegistry.TryGetPackage(targetMetabolism, out ReactionPackageDefinition package)
+            || package.OrderedReactions == null
+            || package.OrderedReactions.Length == 0)
+        {
+            return false;
+        }
+
+        ReactionDefinition productiveReaction = package.OrderedReactions[0];
+        var resources = new List<ResourceType>();
+        if (productiveReaction.Inputs != null)
+        {
+            for (int i = 0; i < productiveReaction.Inputs.Length; i++)
+            {
+                ResourceType resource = productiveReaction.Inputs[i].Resource;
+                if (!resources.Contains(resource))
+                {
+                    resources.Add(resource);
+                }
+            }
+        }
+
+        requirements.RequiredResources = resources.ToArray();
+        requirements.RequiresLight = (productiveReaction.ModifierFlags & ReactionModifierFlags.RequiresLight) != 0;
+        requirements.Notes = "Derived from first productive reaction input list.";
+        return requirements.RequiredResources.Length > 0 || requirements.RequiresLight;
+    }
+
+    bool HasRequiredLocalResource(ResourceType resource, int cellIndex, int layerIndex)
+    {
+        float threshold = GetMutationGateResourceThreshold(resource);
+        if (threshold <= 0f)
+        {
+            return true;
+        }
+
+        return GetLocalHabitatResource(resource, cellIndex, layerIndex) >= GetAreaNormalizedLocalThreshold(threshold);
+    }
+
+    float GetMutationGateResourceThreshold(ResourceType resource)
+    {
+        switch (resource)
+        {
+            case ResourceType.H2S: return mutationGateMinH2S;
+            case ResourceType.CO2: return mutationGateMinCO2;
+            case ResourceType.H2: return mutationGateMinH2;
+            case ResourceType.O2: return mutationGateMinO2ForAerobes;
+            case ResourceType.OrganicC: return mutationGateMinOrganicC;
+            case ResourceType.CH4: return mutationGateMinCH4;
+            default: return 0f;
+        }
+    }
+
+    bool HasSufficientInheritedOrganicCStore(Replicator parent)
+    {
+        if (parent == null)
+        {
+            return false;
+        }
+
+        float inheritedStore = Mathf.Max(0f, parent.organicCStore) * Mathf.Clamp01(divisionCarbonSplitToChild);
+        return inheritedStore >= Mathf.Max(0f, mutationGateMinOrganicC);
+    }
+
+    int ResolveMutationGateLayer(Replicator parent, MetabolismType targetMetabolism, int cellIndex)
+    {
+        if (planetResourceMap == null || cellIndex < 0 || !planetResourceMap.IsOceanCell(cellIndex))
+        {
+            return parent != null ? parent.currentOceanLayerIndex : -1;
+        }
+
+        if (targetMetabolism == MetabolismType.Photosynthesis)
+        {
+            int topLayer = planetResourceMap.GetOceanTopLayerIndex(cellIndex);
+            if (topLayer >= 0)
+            {
+                return topLayer;
+            }
+        }
+
+        if (targetMetabolism == MetabolismType.Hydrogenotrophy
+            || targetMetabolism == MetabolismType.SulfurChemosynthesis
+            || targetMetabolism == MetabolismType.Methanogenesis)
+        {
+            int bottomLayer = planetResourceMap.GetOceanBottomLayerIndex(cellIndex);
+            if (bottomLayer >= 0)
+            {
+                return bottomLayer;
+            }
+        }
+
+        int currentLayer = parent != null ? planetResourceMap.ClampOceanLayerIndex(cellIndex, parent.currentOceanLayerIndex) : -1;
+        return currentLayer >= 0 ? currentLayer : (parent != null ? parent.preferredOceanLayerIndex : -1);
+    }
+
+    float GetLocalMutationGateLight(Vector3 direction, int cellIndex, int layerIndex)
+    {
+        if (planetResourceMap == null)
+        {
+            return 0f;
+        }
+
+        float surfaceInsolation = planetResourceMap.GetInsolation(direction.normalized);
+        return planetResourceMap.GetLayeredLightForCell(cellIndex, layerIndex, surfaceInsolation);
     }
 
     bool CanMutateToPredation(Replicator parent)
@@ -2221,12 +2465,10 @@ public class ReplicatorManager : MonoBehaviour
             return false;
         }
 
-        const float minGlobalMethane = 0.01f;
         int cellIndex = DirectionToSimulationCellIndex(parent.currentDirection.normalized);
         int preferredLayerIndex = parent.preferredOceanLayerIndex;
 
         float globalO2 = planetResourceMap.debugGlobalO2;
-        float globalMethane = planetResourceMap.debugGlobalCH4;
         bool hasLocalO2 = IsOxygenLocallyAvailable(cellIndex, parent.currentOceanLayerIndex, preferredLayerIndex, minLocalO2);
         unlockedByLocalOxygen = globalO2 <= minGlobalO2 && hasLocalO2;
 
@@ -2237,7 +2479,7 @@ public class ReplicatorManager : MonoBehaviour
             Debug.Log($"[LocalO2Mutation] Methanotrophy mutation became eligible due to local O2 (global O2 {globalO2:0.0000} <= {minGlobalO2:0.0000}). Local O2: {localO2:0.0000}, threshold(area-normalized): {localO2Threshold:0.0000}");
         }
 
-        return hasLocalO2 && globalMethane > minGlobalMethane;
+        return hasLocalO2;
     }
 
     bool IsOxygenLocallyAvailable(int habitatCellIndex, int habitatOceanLayerIndex, int fallbackOceanLayerIndex, float minimumAmount)
