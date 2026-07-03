@@ -63,6 +63,18 @@ public sealed class ReplicatorTelemetrySnapshot
     public float DissolvedFe2RemainingFraction;
 
     public TemperatureDisplayUnit TemperatureDisplayUnit;
+
+    public int MetabolismGateTotalAttempts;
+    public int MetabolismGateAllowed;
+    public int MetabolismGateBlocked;
+    public int[] MetabolismGateAttemptsByTarget;
+    public int[] MetabolismGateAllowedByTarget;
+    public int[] MetabolismGateBlockedByTarget;
+    public int[] MetabolismGateBlockedByReason;
+    public MetabolismMutationGateBlockReason TopMutationGateBlockReason;
+    public int TopMutationGateBlockReasonCount;
+    public MetabolismType TopBlockedMutationGateTarget;
+    public int TopBlockedMutationGateTargetCount;
 }
 
 public class ReplicatorDebugTelemetry
@@ -90,6 +102,7 @@ public class ReplicatorDebugTelemetry
         Debug.Log($"{prefix} Atmosphere: CO2={snapshot.AtmosphereCO2:F3} O2={snapshot.AtmosphereO2:F3} CH4={snapshot.AtmosphereCH4:F3}");
         Debug.Log($"{prefix} Ocean: Fe2+=avg {snapshot.DissolvedFe2OceanMean:F3} total {snapshot.DissolvedFe2Total:F1} remaining {(snapshot.DissolvedFe2RemainingFraction * 100f):F1}%");
         Debug.Log($"{prefix} Resources: {FormatChemistrySummary(snapshot)}");
+        Debug.Log($"{prefix} Mutation gates: {FormatMutationGateSummary(snapshot)}");
         return true;
     }
 
@@ -189,6 +202,11 @@ public class ReplicatorDebugTelemetry
     private static string FormatDeathCauses(ReplicatorTelemetrySnapshot snapshot)
     {
         return $"Hydrogen[{FormatDeathCauseSummary(snapshot.HydrogenDeathCauseCounts)}] Sulfur[{FormatDeathCauseSummary(snapshot.ChemoDeathCauseCounts)}] Photo[{FormatDeathCauseSummary(snapshot.PhotoDeathCauseCounts)}] Sapro[{FormatDeathCauseSummary(snapshot.SaproDeathCauseCounts)}] Ferment[{FormatDeathCauseSummary(snapshot.FermentDeathCauseCounts)}] Methanogen[{FormatDeathCauseSummary(snapshot.MethanogenDeathCauseCounts)}] Methanotroph[{FormatDeathCauseSummary(snapshot.MethanotrophDeathCauseCounts)}] Predator[{FormatDeathCauseSummary(snapshot.PredatorDeathCauseCounts)}]";
+    }
+
+    private static string FormatMutationGateSummary(ReplicatorTelemetrySnapshot snapshot)
+    {
+        return $"attempts={snapshot.MetabolismGateTotalAttempts} allowed={snapshot.MetabolismGateAllowed} blocked={snapshot.MetabolismGateBlocked} | topBlockedReason={snapshot.TopMutationGateBlockReason}:{snapshot.TopMutationGateBlockReasonCount} | topBlockedTarget={snapshot.TopBlockedMutationGateTarget}:{snapshot.TopBlockedMutationGateTargetCount}";
     }
 
     private static string FormatChemistrySummary(ReplicatorTelemetrySnapshot snapshot)

@@ -25,7 +25,20 @@ public class ReplicatorManager : MonoBehaviour
         public bool RequiresLight;
         public bool RequiresLowO2;
         public bool RequiresOrganicCStoreFallback;
+        public bool HasReactionDefinition;
         public string Notes;
+    }
+
+    [Serializable]
+    private sealed class MetabolismMutationGateTelemetry
+    {
+        public int TotalAttempts;
+        public int Allowed;
+        public int Blocked;
+        public int[] AttemptsByTarget;
+        public int[] AllowedByTarget;
+        public int[] BlockedByTarget;
+        public int[] BlockedByReason;
     }
 
     [Header("Settings")]
@@ -543,6 +556,12 @@ public class ReplicatorManager : MonoBehaviour
     [SerializeField] private int methanotrophAgentCount;
     [SerializeField] private float averageOrganicCStore;
     [SerializeField] private int divisionEligibleAgentCount;
+    [Header("Metabolism Mutation Gate Telemetry")]
+    [SerializeField] private MetabolismMutationGateTelemetry metabolismMutationGateTelemetry = new MetabolismMutationGateTelemetry();
+    [SerializeField] private MetabolismType topBlockedMutationGateTarget;
+    [SerializeField] private int topBlockedMutationGateTargetCount;
+    [SerializeField] private MetabolismMutationGateBlockReason topMutationGateBlockReason;
+    [SerializeField] private int topMutationGateBlockReasonCount;
     private readonly ReplicatorHudPresenter hudPresenter = new ReplicatorHudPresenter();
     private readonly ReplicatorDebugTelemetry debugTelemetry = new ReplicatorDebugTelemetry();
     private bool isInitialized;
@@ -880,6 +899,7 @@ public class ReplicatorManager : MonoBehaviour
 
     private ReplicatorTelemetrySnapshot BuildTelemetrySnapshot()
     {
+        EnsureMetabolismMutationGateTelemetry();
         ReplicatorTelemetrySnapshot snapshot = new ReplicatorTelemetrySnapshot
         {
             SimulationTimestamp = GetSimulationTimeStamp(),
@@ -919,7 +939,18 @@ public class ReplicatorManager : MonoBehaviour
             MethanotrophDeathCauseCounts = methanotrophDeathCauseCounts,
             PredatorDeathCauseCounts = predatorDeathCauseCounts,
             TemperatureDisplayUnit = temperatureDisplayUnit,
-            IncludeVentPlumeDiagnostics = debugVentPlumeDiagnostics
+            IncludeVentPlumeDiagnostics = debugVentPlumeDiagnostics,
+            MetabolismGateTotalAttempts = metabolismMutationGateTelemetry.TotalAttempts,
+            MetabolismGateAllowed = metabolismMutationGateTelemetry.Allowed,
+            MetabolismGateBlocked = metabolismMutationGateTelemetry.Blocked,
+            MetabolismGateAttemptsByTarget = metabolismMutationGateTelemetry.AttemptsByTarget,
+            MetabolismGateAllowedByTarget = metabolismMutationGateTelemetry.AllowedByTarget,
+            MetabolismGateBlockedByTarget = metabolismMutationGateTelemetry.BlockedByTarget,
+            MetabolismGateBlockedByReason = metabolismMutationGateTelemetry.BlockedByReason,
+            TopMutationGateBlockReason = topMutationGateBlockReason,
+            TopMutationGateBlockReasonCount = topMutationGateBlockReasonCount,
+            TopBlockedMutationGateTarget = topBlockedMutationGateTarget,
+            TopBlockedMutationGateTargetCount = topBlockedMutationGateTargetCount
         };
 
         if (planetResourceMap != null)
@@ -2064,10 +2095,18 @@ public class ReplicatorManager : MonoBehaviour
         if (enablePredators
             && childMetabolism == MetabolismType.Saprotrophy
             && parent.metabolism == MetabolismType.Saprotrophy
-            && UnityEngine.Random.value < Mathf.Clamp01(predatorMutationChance)
-            && CanMutateToPredation(parent))
+            && UnityEngine.Random.value < Mathf.Clamp01(predatorMutationChance))
         {
-            childMetabolism = MetabolismType.Predation;
+            RecordMetabolismGateAttempt(MetabolismType.Predation);
+            if (CanMutateToPredation(parent))
+            {
+                childMetabolism = MetabolismType.Predation;
+                RecordMetabolismGateAllowed(MetabolismType.Predation);
+            }
+            else
+            {
+                RecordMetabolismGateBlocked(MetabolismType.Predation, MetabolismMutationGateBlockReason.PredationGateFailed);
+            }
         }
 
         LocomotionType childLocomotion = ResolveInheritedLocomotion(parent);
@@ -2107,28 +2146,45 @@ public class ReplicatorManager : MonoBehaviour
 
     void TrySetGatedMetabolism(Replicator parent, MetabolismType targetMetabolism, ref MetabolismType childMetabolism)
     {
-        if (PassesMetabolismMutationGate(parent, targetMetabolism))
+        RecordMetabolismGateAttempt(targetMetabolism);
+        if (PassesMetabolismMutationGate(parent, targetMetabolism, out MetabolismMutationGateBlockReason blockReason))
         {
             childMetabolism = targetMetabolism;
+            RecordMetabolismGateAllowed(targetMetabolism);
+        }
+        else
+        {
+            RecordMetabolismGateBlocked(targetMetabolism, blockReason);
         }
     }
 
-    bool PassesMetabolismMutationGate(Replicator parent, MetabolismType targetMetabolism)
+    bool PassesMetabolismMutationGate(Replicator parent, MetabolismType targetMetabolism, out MetabolismMutationGateBlockReason blockReason)
     {
+        blockReason = MetabolismMutationGateBlockReason.None;
         if (parent == null || planetResourceMap == null)
         {
+            blockReason = MetabolismMutationGateBlockReason.UnsupportedTransition;
             return false;
         }
 
         if (!GetMutationGateRequirements(targetMetabolism, out MetabolismMutationGateRequirements requirements))
         {
-            // Predation is not resource-backed yet; keep existing Saprotrophy-parent/motility gates.
-            return targetMetabolism == MetabolismType.Predation;
+            blockReason = targetMetabolism == MetabolismType.Predation
+                ? MetabolismMutationGateBlockReason.PredationGateUnavailable
+                : MetabolismMutationGateBlockReason.UnsupportedTransition;
+            return false;
+        }
+
+        if (!requirements.HasReactionDefinition)
+        {
+            blockReason = MetabolismMutationGateBlockReason.MissingReactionDefinition;
+            return false;
         }
 
         int cellIndex = DirectionToSimulationCellIndex(parent.currentDirection.normalized);
         if (cellIndex < 0)
         {
+            blockReason = MetabolismMutationGateBlockReason.UnsupportedTransition;
             return false;
         }
 
@@ -2145,6 +2201,7 @@ public class ReplicatorManager : MonoBehaviour
 
                 if (!HasRequiredLocalResource(resource, cellIndex, layerIndex))
                 {
+                    blockReason = GetMissingResourceBlockReason(resource);
                     return false;
                 }
             }
@@ -2152,6 +2209,7 @@ public class ReplicatorManager : MonoBehaviour
 
         if (requirements.RequiresLight && GetLocalMutationGateLight(parent.currentDirection.normalized, cellIndex, layerIndex) < Mathf.Max(0f, mutationGateMinLight))
         {
+            blockReason = MetabolismMutationGateBlockReason.MissingLight;
             return false;
         }
 
@@ -2160,11 +2218,109 @@ public class ReplicatorManager : MonoBehaviour
             float localO2 = GetLocalHabitatResource(ResourceType.O2, cellIndex, layerIndex, parent.preferredOceanLayerIndex);
             if (localO2 > GetAreaNormalizedLocalThreshold(mutationGateMaxO2ForAnaerobes))
             {
+                blockReason = MetabolismMutationGateBlockReason.TooMuchO2;
                 return false;
             }
         }
 
         return true;
+    }
+
+    void RecordMetabolismGateAttempt(MetabolismType target)
+    {
+        EnsureMetabolismMutationGateTelemetry();
+        metabolismMutationGateTelemetry.TotalAttempts++;
+        IncrementTelemetryCounter(metabolismMutationGateTelemetry.AttemptsByTarget, (int)target);
+    }
+
+    void RecordMetabolismGateAllowed(MetabolismType target)
+    {
+        EnsureMetabolismMutationGateTelemetry();
+        metabolismMutationGateTelemetry.Allowed++;
+        IncrementTelemetryCounter(metabolismMutationGateTelemetry.AllowedByTarget, (int)target);
+    }
+
+    void RecordMetabolismGateBlocked(MetabolismType target, MetabolismMutationGateBlockReason reason)
+    {
+        EnsureMetabolismMutationGateTelemetry();
+        metabolismMutationGateTelemetry.Blocked++;
+        IncrementTelemetryCounter(metabolismMutationGateTelemetry.BlockedByTarget, (int)target);
+        IncrementTelemetryCounter(metabolismMutationGateTelemetry.BlockedByReason, (int)reason);
+        RefreshTopMetabolismMutationGateCounters();
+    }
+
+    void EnsureMetabolismMutationGateTelemetry()
+    {
+        if (metabolismMutationGateTelemetry == null)
+        {
+            metabolismMutationGateTelemetry = new MetabolismMutationGateTelemetry();
+        }
+
+        int metabolismCount = Enum.GetValues(typeof(MetabolismType)).Length;
+        int reasonCount = Enum.GetValues(typeof(MetabolismMutationGateBlockReason)).Length;
+        EnsureTelemetryArray(ref metabolismMutationGateTelemetry.AttemptsByTarget, metabolismCount);
+        EnsureTelemetryArray(ref metabolismMutationGateTelemetry.AllowedByTarget, metabolismCount);
+        EnsureTelemetryArray(ref metabolismMutationGateTelemetry.BlockedByTarget, metabolismCount);
+        EnsureTelemetryArray(ref metabolismMutationGateTelemetry.BlockedByReason, reasonCount);
+    }
+
+    void RefreshTopMetabolismMutationGateCounters()
+    {
+        topBlockedMutationGateTargetCount = GetTopTelemetryCounter(metabolismMutationGateTelemetry.BlockedByTarget, out int targetIndex);
+        topBlockedMutationGateTarget = Enum.IsDefined(typeof(MetabolismType), targetIndex) ? (MetabolismType)targetIndex : default;
+        topMutationGateBlockReasonCount = GetTopTelemetryCounter(metabolismMutationGateTelemetry.BlockedByReason, out int reasonIndex);
+        topMutationGateBlockReason = Enum.IsDefined(typeof(MetabolismMutationGateBlockReason), reasonIndex) ? (MetabolismMutationGateBlockReason)reasonIndex : MetabolismMutationGateBlockReason.None;
+    }
+
+    static void EnsureTelemetryArray(ref int[] values, int length)
+    {
+        if (values == null || values.Length != length)
+        {
+            values = new int[length];
+        }
+    }
+
+    static void IncrementTelemetryCounter(int[] values, int index)
+    {
+        if (values != null && index >= 0 && index < values.Length)
+        {
+            values[index]++;
+        }
+    }
+
+    static int GetTopTelemetryCounter(int[] values, out int index)
+    {
+        index = 0;
+        int top = 0;
+        if (values == null)
+        {
+            return 0;
+        }
+
+        for (int i = 0; i < values.Length; i++)
+        {
+            if (values[i] > top)
+            {
+                top = values[i];
+                index = i;
+            }
+        }
+
+        return top;
+    }
+
+    static MetabolismMutationGateBlockReason GetMissingResourceBlockReason(ResourceType resource)
+    {
+        switch (resource)
+        {
+            case ResourceType.H2S: return MetabolismMutationGateBlockReason.MissingH2S;
+            case ResourceType.CO2: return MetabolismMutationGateBlockReason.MissingCO2;
+            case ResourceType.H2: return MetabolismMutationGateBlockReason.MissingH2;
+            case ResourceType.OrganicC: return MetabolismMutationGateBlockReason.MissingOrganicC;
+            case ResourceType.O2: return MetabolismMutationGateBlockReason.MissingO2;
+            case ResourceType.CH4: return MetabolismMutationGateBlockReason.MissingCH4;
+            default: return MetabolismMutationGateBlockReason.UnsupportedTransition;
+        }
     }
 
     bool GetMutationGateRequirements(MetabolismType targetMetabolism, out MetabolismMutationGateRequirements requirements)
@@ -2177,6 +2333,7 @@ public class ReplicatorManager : MonoBehaviour
                 requirements.RequiredResources = new[] { ResourceType.H2S, ResourceType.CO2 };
                 requirements.RequiresLight = false;
                 requirements.RequiresLowO2 = false;
+                requirements.HasReactionDefinition = true;
                 requirements.Notes = "Explicit productive-input overlay; mutation gate ignores outputs.";
                 return true;
             case MetabolismType.Fermentation:
@@ -2184,34 +2341,40 @@ public class ReplicatorManager : MonoBehaviour
                 requirements.RequiresLight = false;
                 requirements.RequiresLowO2 = false;
                 requirements.RequiresOrganicCStoreFallback = true;
+                requirements.HasReactionDefinition = true;
                 requirements.Notes = "OrganicC can be local detritus or inherited stored carbon.";
                 return true;
             case MetabolismType.Methanogenesis:
                 requirements.RequiredResources = new[] { ResourceType.CO2, ResourceType.H2 };
                 requirements.RequiresLight = false;
                 requirements.RequiresLowO2 = true;
+                requirements.HasReactionDefinition = true;
                 requirements.Notes = "Anaerobic overlay prevents high-O2 methanogenesis mutation.";
                 return true;
             case MetabolismType.Photosynthesis:
                 requirements.RequiredResources = new[] { ResourceType.CO2 };
                 requirements.RequiresLight = true;
                 requirements.RequiresLowO2 = false;
+                requirements.HasReactionDefinition = true;
                 requirements.Notes = "Light-reaction overlay prevents dark-maintenance O2 from becoming a mutation input.";
                 return true;
             case MetabolismType.Methanotrophy:
                 requirements.RequiredResources = new[] { ResourceType.CH4, ResourceType.O2 };
                 requirements.RequiresLight = false;
                 requirements.RequiresLowO2 = false;
+                requirements.HasReactionDefinition = true;
                 return true;
             case MetabolismType.Saprotrophy:
                 requirements.RequiredResources = new[] { ResourceType.OrganicC, ResourceType.O2 };
                 requirements.RequiresLight = false;
                 requirements.RequiresLowO2 = false;
+                requirements.HasReactionDefinition = true;
                 return true;
             case MetabolismType.Hydrogenotrophy:
                 requirements.RequiredResources = new[] { ResourceType.H2, ResourceType.CO2 };
                 requirements.RequiresLight = false;
                 requirements.RequiresLowO2 = false;
+                requirements.HasReactionDefinition = true;
                 return true;
             case MetabolismType.Predation:
                 // TODO: add prey-density gating when a cheap local prey/population density field is available.
@@ -2248,6 +2411,7 @@ public class ReplicatorManager : MonoBehaviour
 
         requirements.RequiredResources = resources.ToArray();
         requirements.RequiresLight = (productiveReaction.ModifierFlags & ReactionModifierFlags.RequiresLight) != 0;
+        requirements.HasReactionDefinition = true;
         requirements.Notes = "Derived from first productive reaction input list.";
         return requirements.RequiredResources.Length > 0 || requirements.RequiresLight;
     }
