@@ -294,3 +294,8 @@ graph TD
 * **Debug counters that would help:** per-transition mutation counters, denied-mutation counters by gate reason, per-metabolism layer histogram, parent→child layer transition histogram, per-metabolism O2 exposure histogram, and starvation-timer histograms before death.
 * **Single code addition that would most improve the evolution web:** add resource-gated mutation helpers for SulfurChemosynthesis, Fermentation, and Methanogenesis, then log success/failure counters. This would make early branches environment-backed without a large refactor.
 * **Single design decision before adding more metabolisms:** decide whether `MetabolismType` should remain coarse public identity with sub-reaction packages/traits beneath it, or whether each major pathway (anoxygenic sulfur phototrophy, photoferrotrophy, oxygenic photosynthesis, sulfate reduction, iron reduction) should become its own explicit `MetabolismType` and mutation node.
+
+
+## 12. Post-implementation note: reaction-derived mutation gates
+
+Reaction-derived mutation gates are now implemented for metabolism mutation attempts, with explicit overlays preserving the intended habitat checks for SulfurChemosynthesis, Fermentation, Methanogenesis, Photosynthesis, Saprotrophy, Methanotrophy, and Hydrogenotrophy. Telemetry from the first playtest confirms that gates are active without being over-restrictive: attempts are both allowed and blocked, with expected block reasons such as `MissingOrganicC`, `MissingH2S`, and `TooMuchO2`. Broad anaerobe O2 toxicity has still not been added; it remains the next recommended biological step for oxygen-crisis selection pressure.
