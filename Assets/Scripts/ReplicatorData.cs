@@ -12,6 +12,23 @@ public enum MetabolismType
     Methanotrophy
 }
 
+public enum MetabolismMutationGateBlockReason
+{
+    None,
+    MissingH2S,
+    MissingCO2,
+    MissingH2,
+    MissingOrganicC,
+    TooMuchO2,
+    MissingO2,
+    MissingCH4,
+    MissingLight,
+    MissingReactionDefinition,
+    UnsupportedTransition,
+    PredationGateUnavailable,
+    PredationGateFailed
+}
+
 public enum DeathCause
 {
     Unknown,

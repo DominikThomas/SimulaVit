@@ -67,3 +67,42 @@ Resource thresholds are area-normalized through the same local-threshold helper 
 - Count failed mutation attempts by target metabolism and failed requirement.
 - Track local resource/light values at successful mutation events.
 - Add a cheap local prey-density signal before tightening Predation mutation gates.
+
+## Mutation gate telemetry
+
+Mutation gate counters are implemented in `ReplicatorManager` next to the centralized gate helpers. The manager owns a serialized `MetabolismMutationGateTelemetry` object plus compact top-counter fields so the values can be inspected directly on the `ReplicatorManager` component during play mode. The same counters are also copied into `ReplicatorTelemetrySnapshot`, and the throttled metabolism debug log emits one aggregate line in the form `Mutation gates: attempts X allowed Y blocked Z ...`; it does not log per organism.
+
+Counters are lifetime counters for the current play/session state:
+
+- `TotalAttempts` increments whenever a reproduction mutation candidate reaches the centralized metabolism gate for a target metabolism.
+- `Allowed` increments when the gate passes and the child metabolism is changed to the target.
+- `Blocked` increments when the gate rejects the target.
+- `AttemptsByTarget`, `AllowedByTarget`, and `BlockedByTarget` are fixed-size arrays indexed by `MetabolismType` integer value.
+- `BlockedByReason` is a fixed-size array indexed by `MetabolismMutationGateBlockReason` integer value.
+- `topMutationGateBlockReason` / `topMutationGateBlockReasonCount` and `topBlockedMutationGateTarget` / `topBlockedMutationGateTargetCount` summarize the highest blocked reason and target for quick Inspector reads.
+
+Block reasons mean:
+
+- `None`: no block; used only as the default/success state.
+- `MissingH2S`: local hydrogen sulfide is below the sulfur chemosynthesis mutation threshold.
+- `MissingCO2`: local carbon dioxide is below the target metabolism's mutation threshold.
+- `MissingH2`: local hydrogen is below the target metabolism's mutation threshold.
+- `MissingOrganicC`: local organic carbon is below threshold, and fermentation's inherited-store fallback did not satisfy the gate.
+- `TooMuchO2`: local oxygen is above the anaerobe maximum, currently used by methanogenesis.
+- `MissingO2`: local oxygen is below the aerobic target threshold, currently used by saprotrophy and methanotrophy gates.
+- `MissingCH4`: local methane is below the methanotrophy threshold.
+- `MissingLight`: local layer light is below the photosynthesis threshold.
+- `MissingReactionDefinition`: the target had no reaction-derived definition available before explicit gate evaluation could classify it.
+- `UnsupportedTransition`: the target metabolism or local cell resolution could not be classified as a supported gate.
+- `PredationGateUnavailable`: predation has no reaction/resource-backed gate and remains handled by its existing parent/motility limitations.
+- `PredationGateFailed`: a predation mutation roll reached the preserved predation gate, but the existing predation requirements failed.
+
+### Playtest checklist
+
+- In dark deep layers, Photosynthesis mutation attempts should mostly block with `MissingLight`.
+- Away from vents, SulfurChemosynthesis mutation attempts should block with `MissingH2S`.
+- In low-organic early worlds, Fermentation and Saprotrophy mutation attempts should block with `MissingOrganicC`.
+- In oxic zones with no methane, Methanotrophy mutation attempts should block with `MissingCH4`.
+- In high-O2 zones, Methanogenesis mutation attempts should block with `TooMuchO2`.
+- Near vents with H2 + CO2 and low O2, Methanogenesis should be allowed when attempted.
+- Near lit CO2-rich layers, Photosynthesis should be allowed when attempted.
