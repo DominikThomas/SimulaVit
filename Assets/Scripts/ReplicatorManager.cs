@@ -89,13 +89,21 @@ public class ReplicatorManager : MonoBehaviour
     public float minLocalOrganicC = 0.001f;
 
     [Header("Metabolism Mutation Habitat Gates")]
+    [Tooltip("Minimum local H2S required before allowing sulfur chemosynthesis mutation attempts.")]
     public float mutationGateMinH2S = 0.0005f;
+    [Tooltip("Minimum local CO2 required for reaction-backed metabolism mutation attempts that consume CO2.")]
     public float mutationGateMinCO2 = 0.001f;
+    [Tooltip("Minimum local H2 required for reaction-backed metabolism mutation attempts that consume H2.")]
     public float mutationGateMinH2 = 0.001f;
+    [Tooltip("Maximum local O2 allowed for anaerobic metabolism mutation attempts such as methanogenesis. This is only a mutation gate, not O2 toxicity.")]
     public float mutationGateMaxO2ForAnaerobes = 0.02f;
+    [Tooltip("Minimum local O2 required for aerobic metabolism mutation attempts such as saprotrophy and methanotrophy.")]
     public float mutationGateMinO2ForAerobes = 0.01f;
+    [Tooltip("Minimum local OrganicC required for organic-carbon mutation gates; fermentation can also pass via inherited stored OrganicC.")]
     public float mutationGateMinOrganicC = 0.001f;
+    [Tooltip("Minimum local CH4 required before allowing methanotrophy mutation attempts.")]
     public float mutationGateMinCH4 = 0.001f;
+    [Tooltip("Minimum local layer light required before allowing photosynthesis mutation attempts.")]
     public float mutationGateMinLight = 0.05f;
 
     [Header("Energy -> Speed")]
@@ -2264,8 +2272,20 @@ public class ReplicatorManager : MonoBehaviour
         EnsureTelemetryArray(ref metabolismMutationGateTelemetry.BlockedByReason, reasonCount);
     }
 
+    [ContextMenu("Reset Metabolism Mutation Gate Telemetry")]
+    void ResetMetabolismMutationGateTelemetry()
+    {
+        metabolismMutationGateTelemetry = new MetabolismMutationGateTelemetry();
+        topBlockedMutationGateTarget = default;
+        topBlockedMutationGateTargetCount = 0;
+        topMutationGateBlockReason = MetabolismMutationGateBlockReason.None;
+        topMutationGateBlockReasonCount = 0;
+        EnsureMetabolismMutationGateTelemetry();
+    }
+
     void RefreshTopMetabolismMutationGateCounters()
     {
+        EnsureMetabolismMutationGateTelemetry();
         topBlockedMutationGateTargetCount = GetTopTelemetryCounter(metabolismMutationGateTelemetry.BlockedByTarget, out int targetIndex);
         topBlockedMutationGateTarget = Enum.IsDefined(typeof(MetabolismType), targetIndex) ? (MetabolismType)targetIndex : default;
         topMutationGateBlockReasonCount = GetTopTelemetryCounter(metabolismMutationGateTelemetry.BlockedByReason, out int reasonIndex);

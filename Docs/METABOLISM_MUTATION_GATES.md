@@ -43,7 +43,7 @@ Explicit overlays are applied after reaction-derived requirements so the mutatio
 
 ## Tunable thresholds
 
-Thresholds are serialized fields on `ReplicatorManager` under **Metabolism Mutation Habitat Gates**:
+Thresholds are serialized fields on `ReplicatorManager` under **Metabolism Mutation Habitat Gates**. The current final defaults for this validation pass are:
 
 - `mutationGateMinH2S = 0.0005`
 - `mutationGateMinCO2 = 0.001`
@@ -54,7 +54,7 @@ Thresholds are serialized fields on `ReplicatorManager` under **Metabolism Mutat
 - `mutationGateMinCH4 = 0.001`
 - `mutationGateMinLight = 0.05`
 
-Resource thresholds are area-normalized through the same local-threshold helper used by existing local O2/OrganicC mutation checks.
+Resource thresholds are area-normalized through the same local-threshold helper used by existing local O2/OrganicC mutation checks. Each field has an Inspector tooltip describing the resource or habitat condition it gates; `mutationGateMaxO2ForAnaerobes` remains a mutation viability gate only and is not O2 toxicity.
 
 ## Known limitations
 
@@ -72,6 +72,13 @@ Resource thresholds are area-normalized through the same local-threshold helper 
 
 Mutation gate counters are implemented in `ReplicatorManager` next to the centralized gate helpers. The manager owns a serialized `MetabolismMutationGateTelemetry` object plus compact top-counter fields so the values can be inspected directly on the `ReplicatorManager` component during play mode. The same counters are also copied into `ReplicatorTelemetrySnapshot`, and the throttled metabolism debug log emits one aggregate line in the form `Mutation gates: attempts X allowed Y blocked Z ...`; it does not log per organism.
 
+Inspect telemetry in any of these ways:
+
+- During play mode, select the object with `ReplicatorManager` and expand **Metabolism Mutation Gate Telemetry** in the Inspector.
+- Watch `metabolismMutationGateTelemetry` for total/allowed/blocked counts and per-enum arrays.
+- Watch `topMutationGateBlockReason` / `topMutationGateBlockReasonCount` and `topBlockedMutationGateTarget` / `topBlockedMutationGateTargetCount` for the leading block reason and target.
+- Read the aggregate line emitted by the throttled metabolism debug log: `Mutation gates: attempts=... allowed=... blocked=...`.
+
 Counters are lifetime counters for the current play/session state:
 
 - `TotalAttempts` increments whenever a reproduction mutation candidate reaches the centralized metabolism gate for a target metabolism.
@@ -80,6 +87,8 @@ Counters are lifetime counters for the current play/session state:
 - `AttemptsByTarget`, `AllowedByTarget`, and `BlockedByTarget` are fixed-size arrays indexed by `MetabolismType` integer value.
 - `BlockedByReason` is a fixed-size array indexed by `MetabolismMutationGateBlockReason` integer value.
 - `topMutationGateBlockReason` / `topMutationGateBlockReasonCount` and `topBlockedMutationGateTarget` / `topBlockedMutationGateTargetCount` summarize the highest blocked reason and target for quick Inspector reads.
+
+To reset telemetry during play mode, use the `ReplicatorManager` component context menu item **Reset Metabolism Mutation Gate Telemetry**. This replaces the telemetry object, clears top-counter fields, and rebuilds fixed-size arrays to the current enum lengths.
 
 Block reasons mean:
 
@@ -106,3 +115,8 @@ Block reasons mean:
 - In high-O2 zones, Methanogenesis mutation attempts should block with `TooMuchO2`.
 - Near vents with H2 + CO2 and low O2, Methanogenesis should be allowed when attempted.
 - Near lit CO2-rich layers, Photosynthesis should be allowed when attempted.
+
+
+## Validation playtest note
+
+The first telemetry playtest after enabling reaction-derived mutation gates showed the gates were active but not over-restrictive: mutation attempts were both allowed and blocked, many attempts remained allowed, Fermentation blocks appeared as `MissingOrganicC`, SulfurChemosynthesis blocks appeared as `MissingH2S`, and later Methanogenesis blocks appeared as `TooMuchO2`. O2 toxicity for anaerobes has not been implemented yet and remains the next biological selection-pressure step.
