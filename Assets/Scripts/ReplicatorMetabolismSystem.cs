@@ -87,6 +87,16 @@ public class ReplicatorMetabolismSystem
         public float ChemoRespirationCPerTick;
         public float PredatorBasalCostMultiplier;
         public float PredatorMoveSpeedMultiplier;
+        public bool AnaerobeO2ToxicityEnabled;
+        public float AnaerobeO2ComfortMax;
+        public float AnaerobeO2StressMax;
+        public float AnaerobeO2ToxicDeathSeconds;
+        public float AnaerobeO2StressEnergyMultiplier;
+        public float AnaerobeO2StressSpeedMultiplier;
+        public bool AnaerobeO2ToxicityAffectsHydrogenotrophy;
+        public bool AnaerobeO2ToxicityAffectsSulfurChemosynthesis;
+        public bool AnaerobeO2ToxicityAffectsFermentation;
+        public bool AnaerobeO2ToxicityAffectsMethanogenesis;
         public float MinSpeedFactor;
     }
 
@@ -111,6 +121,9 @@ public class ReplicatorMetabolismSystem
         public float PhotosynthDarkAnoxicEnergyGenerated;
         public float PhotosynthDarkAnoxicCO2Released;
         public float PhotosynthDarkAnoxicH2Released;
+        public int AnaerobeO2StressedCount;
+        public int AnaerobeO2KilledCount;
+        public float AnaerobeO2StressedLocalO2Sum;
     }
 
     public void MetabolismTick(
@@ -302,7 +315,6 @@ public class ReplicatorMetabolismSystem
                 populationState.StarveOrganicCFoodSeconds[i] = 0f;
                 populationState.StarveO2Seconds[i] = 0f;
                 populationState.StarveCh4Seconds[i] = 0f;
-                populationState.O2ToxicSeconds[i] = 0f;
                 populationState.StarveStoredCSeconds[i] = 0f;
             }
             else if (metabolism == MetabolismType.Fermentation)
@@ -326,7 +338,6 @@ public class ReplicatorMetabolismSystem
                 populationState.StarveLightSeconds[i] = 0f;
                 populationState.StarveO2Seconds[i] = 0f;
                 populationState.StarveCh4Seconds[i] = 0f;
-                populationState.O2ToxicSeconds[i] = 0f;
             }
             else if (metabolism == MetabolismType.Methanogenesis)
             {
@@ -350,7 +361,6 @@ public class ReplicatorMetabolismSystem
                 populationState.StarveOrganicCFoodSeconds[i] = 0f;
                 populationState.StarveO2Seconds[i] = 0f;
                 populationState.StarveCh4Seconds[i] = 0f;
-                populationState.O2ToxicSeconds[i] = 0f;
             }
             else if (metabolism == MetabolismType.Methanotrophy)
             {
@@ -398,7 +408,17 @@ public class ReplicatorMetabolismSystem
             if (metabolism != MetabolismType.Methanotrophy)
             {
                 populationState.StarveCh4Seconds[i] = 0f;
-                populationState.O2ToxicSeconds[i] = 0f;
+                if (!IsAnaerobicO2Sensitive(metabolism, settings))
+                {
+                    populationState.O2ToxicSeconds[i] = 0f;
+                }
+            }
+
+            if (ApplyAnaerobeO2Toxicity(populationState, i, planetResourceMap, settings, metabolism, cellIndex, dtTick, basalCost, ref metabolismStressMultiplier, ref speedCapMultiplier, ref debugSnapshot))
+            {
+                deadIndices.Add(i);
+                deadCauses.Add(DeathCause.O2_Toxicity);
+                continue;
             }
 
             float metabolismBasalCostMultiplier = metabolism == MetabolismType.Predation ? Mathf.Max(0f, settings.PredatorBasalCostMultiplier) : 1f;
@@ -1104,6 +1124,80 @@ public class ReplicatorMetabolismSystem
         }
 
         return true;
+    }
+
+    private static bool IsAnaerobicO2Sensitive(MetabolismType metabolism, Settings settings)
+    {
+        if (!settings.AnaerobeO2ToxicityEnabled)
+            return false;
+
+        switch (metabolism)
+        {
+            case MetabolismType.Methanogenesis:
+                return settings.AnaerobeO2ToxicityAffectsMethanogenesis;
+            case MetabolismType.Fermentation:
+                return settings.AnaerobeO2ToxicityAffectsFermentation;
+            case MetabolismType.Hydrogenotrophy:
+                return settings.AnaerobeO2ToxicityAffectsHydrogenotrophy;
+            case MetabolismType.SulfurChemosynthesis:
+                return settings.AnaerobeO2ToxicityAffectsSulfurChemosynthesis;
+            default:
+                return false;
+        }
+    }
+
+    private static bool ApplyAnaerobeO2Toxicity(
+        ReplicatorPopulationState populationState,
+        int index,
+        PlanetResourceMap planetResourceMap,
+        Settings settings,
+        MetabolismType metabolism,
+        int cellIndex,
+        float dtTick,
+        float basalCost,
+        ref float metabolismStressMultiplier,
+        ref float speedCapMultiplier,
+        ref DebugSnapshot debugSnapshot)
+    {
+        if (!IsAnaerobicO2Sensitive(metabolism, settings))
+            return false;
+
+        float localO2 = GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, ResourceType.O2, cellIndex);
+        float stress01 = ComputeO2ToxicityStress01(localO2, settings);
+        if (stress01 <= 0f)
+        {
+            populationState.O2ToxicSeconds[index] = Mathf.Max(0f, populationState.O2ToxicSeconds[index] - dtTick);
+            return false;
+        }
+
+        debugSnapshot.AnaerobeO2StressedCount++;
+        debugSnapshot.AnaerobeO2StressedLocalO2Sum += localO2;
+
+        float timerRate = Mathf.Lerp(0.35f, 1.5f, stress01);
+        populationState.O2ToxicSeconds[index] += dtTick * timerRate;
+        float oxygenStressCost = Mathf.Max(0f, basalCost) * Mathf.Max(0f, settings.AnaerobeO2StressEnergyMultiplier) * stress01;
+        populationState.Energy[index] -= oxygenStressCost;
+        metabolismStressMultiplier += Mathf.Max(0f, settings.AnaerobeO2StressEnergyMultiplier) * stress01;
+        speedCapMultiplier = Mathf.Min(speedCapMultiplier, Mathf.Lerp(1f, Mathf.Clamp01(settings.AnaerobeO2StressSpeedMultiplier), stress01));
+        populationState.CanReplicate[index] = false;
+
+        if (settings.AnaerobeO2ToxicDeathSeconds > 0f && populationState.O2ToxicSeconds[index] >= settings.AnaerobeO2ToxicDeathSeconds)
+        {
+            debugSnapshot.AnaerobeO2KilledCount++;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static float ComputeO2ToxicityStress01(float localO2, Settings settings)
+    {
+        float comfortMax = Mathf.Max(0f, settings.AnaerobeO2ComfortMax);
+        float stressMax = Mathf.Max(comfortMax + 0.0001f, settings.AnaerobeO2StressMax);
+        if (localO2 <= comfortMax)
+            return 0f;
+
+        return Mathf.Clamp01((localO2 - comfortMax) / (stressMax - comfortMax));
     }
 
     private static float UpdateStarveTimer(float current, bool deprived, float dt)
