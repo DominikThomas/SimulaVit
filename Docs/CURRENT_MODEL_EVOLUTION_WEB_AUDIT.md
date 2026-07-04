@@ -307,3 +307,7 @@ Runtime O2 toxicity now applies to existing O2-sensitive anaerobic metabolisms t
 ## Correction note: anaerobe O2 inhibition refactor
 
 The previous broad direct O2 toxicity path for existing anaerobes has been refactored into runtime metabolism/reaction inhibition. Methanogenesis is now strongly inhibited by O2 and should usually decline through energy failure or starvation rather than a direct exposure timer. Fermentation, Hydrogenotrophy, and SulfurChemosynthesis remain configurable and milder by default; sulfur chemosynthesis is intentionally not harshly killed in oxic water because sulfur metabolism needs a future split into aerobic and anaerobic variants. Bottom-layer oxygenation remains a separate transport/mixing issue and is not changed by this correction.
+
+### 2026-07-04 temperature metabolism-efficiency update
+
+Temperature now shapes fitness primarily through a smooth metabolism efficiency multiplier rather than hard death just outside an organism's preferred range. The existing temperature traits are preserved as the parameters of the efficiency curve, replication is slowed or stopped through reduced energy/carbon gain and a low-efficiency replication floor, and direct temperature death is reserved for broad extreme cold/heat. This parallels the O2 inhibition model by applying an environmental multiplier to useful reaction output while keeping lethal damage as an extreme-case path.
