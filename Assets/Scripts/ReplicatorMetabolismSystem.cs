@@ -103,6 +103,13 @@ public class ReplicatorMetabolismSystem
         public bool AnaerobeO2InhibitionAffectsSulfurChemosynthesis;
         public bool AnaerobeO2InhibitionAffectsFermentation;
         public bool AnaerobeO2InhibitionAffectsMethanogenesis;
+        public float TemperatureDormancyFloor;
+        public float TemperatureReplicationMinEfficiency;
+        public bool TemperatureDirectDamageEnabled;
+        public float ExtremeColdDeathTempKelvin;
+        public float ExtremeHeatDeathTempKelvin;
+        public float HeatDamageStartTempKelvin;
+        public float ColdDamageStartTempKelvin;
         public float MinSpeedFactor;
     }
 
@@ -132,6 +139,11 @@ public class ReplicatorMetabolismSystem
         public int AnaerobeO2KilledCount;
         public float AnaerobeO2StressedLocalO2Sum;
         public float AnaerobeO2InhibitionSum;
+        public float TemperatureEfficiencySum;
+        public int TemperatureEfficiencyCount;
+        public int TemperatureLimitedCount;
+        public int TemperatureHeatDamageCount;
+        public int TemperatureColdDormantCount;
     }
 
     public void MetabolismTick(
@@ -179,18 +191,19 @@ public class ReplicatorMetabolismSystem
             float max = populationState.OptimalTempMax[i];
             float lethalMargin = Mathf.Max(0.0001f, populationState.LethalTempMargin[i]);
 
-            float d = 0f;
+            float temperatureEfficiency = ComputeTemperatureEfficiency01(temp, min, max, lethalMargin, settings);
+            float stress = 1f - temperatureEfficiency;
+            float performance = temperatureEfficiency;
+            bool temperatureLimited = temperatureEfficiency < 0.5f;
+            bool coldDormant = temp < min && temperatureEfficiency <= Mathf.Max(0.05f, Mathf.Clamp01(settings.TemperatureDormancyFloor) + 0.01f);
+            bool heatDamage = settings.TemperatureDirectDamageEnabled && temp >= Mathf.Max(max, settings.HeatDamageStartTempKelvin);
+            bool lethalTemperature = IsDirectlyLethalTemperature(temp, min, max, lethalMargin, settings);
 
-            if (temp < min)
-                d = min - temp;
-            else if (temp > max)
-                d = temp - max;
-
-            bool insideOptimalBand = d <= 0f;
-            bool lethalTemperature = d > lethalMargin;
-
-            float stress = insideOptimalBand ? 0f : Mathf.Clamp01(d / lethalMargin);
-            float performance = insideOptimalBand ? 1f : Mathf.Lerp(0.7f, 0.1f, stress);
+            debugSnapshot.TemperatureEfficiencySum += temperatureEfficiency;
+            debugSnapshot.TemperatureEfficiencyCount++;
+            if (temperatureLimited) debugSnapshot.TemperatureLimitedCount++;
+            if (coldDormant) debugSnapshot.TemperatureColdDormantCount++;
+            if (heatDamage) debugSnapshot.TemperatureHeatDamageCount++;
 
             populationState.CanReplicate[i] = true;
             float metabolismStressMultiplier = 1f;
@@ -210,25 +223,30 @@ public class ReplicatorMetabolismSystem
             {
                 debugSnapshot.PhotoTempSum += temp;
                 debugSnapshot.PhotoTempCount++;
-                if (!insideOptimalBand) debugSnapshot.PhotoStressedCount++;
+                if (temperatureLimited) debugSnapshot.PhotoStressedCount++;
             }
             else if (metabolism == MetabolismType.Hydrogenotrophy)
             {
                 debugSnapshot.HydrogenTempSum += temp;
                 debugSnapshot.HydrogenTempCount++;
-                if (!insideOptimalBand) debugSnapshot.HydrogenStressedCount++;
+                if (temperatureLimited) debugSnapshot.HydrogenStressedCount++;
             }
             else if (metabolism == MetabolismType.Saprotrophy || metabolism == MetabolismType.Predation || metabolism == MetabolismType.Fermentation || metabolism == MetabolismType.Methanotrophy)
             {
                 debugSnapshot.SaproTempSum += temp;
                 debugSnapshot.SaproTempCount++;
-                if (!insideOptimalBand) debugSnapshot.SaproStressedCount++;
+                if (temperatureLimited) debugSnapshot.SaproStressedCount++;
             }
             else
             {
                 debugSnapshot.ChemoTempSum += temp;
                 debugSnapshot.ChemoTempCount++;
-                if (!insideOptimalBand) debugSnapshot.ChemoStressedCount++;
+                if (temperatureLimited) debugSnapshot.ChemoStressedCount++;
+            }
+
+            if (temperatureEfficiency < Mathf.Clamp01(settings.TemperatureReplicationMinEfficiency))
+            {
+                populationState.CanReplicate[i] = false;
             }
 
             if (lethalTemperature)
@@ -1151,6 +1169,39 @@ public class ReplicatorMetabolismSystem
         }
 
         return true;
+    }
+
+    public static float ComputeTemperatureEfficiency01(float localTempKelvin, float optimalTempMinKelvin, float optimalTempMaxKelvin, float lethalTempMarginKelvin, Settings settings)
+    {
+        float min = Mathf.Min(optimalTempMinKelvin, optimalTempMaxKelvin);
+        float max = Mathf.Max(optimalTempMinKelvin, optimalTempMaxKelvin);
+        if (localTempKelvin >= min && localTempKelvin <= max)
+            return 1f;
+
+        float coldWidth = Mathf.Max(0.0001f, Mathf.Max(0f, lethalTempMarginKelvin) * 1.5f);
+        float hotWidth = Mathf.Max(0.0001f, Mathf.Max(0f, lethalTempMarginKelvin) * 0.75f);
+        float distance = localTempKelvin < min ? (min - localTempKelvin) / coldWidth : (localTempKelvin - max) / hotWidth;
+        float t = Mathf.Clamp01(distance);
+        float efficiency = 1f - (t * t * (3f - 2f * t));
+        float floor = Mathf.Clamp01(settings.TemperatureDormancyFloor);
+        if (efficiency > 0f)
+            efficiency = Mathf.Max(floor, efficiency);
+        return Mathf.Clamp01(efficiency);
+    }
+
+    private static bool IsDirectlyLethalTemperature(float localTempKelvin, float optimalTempMinKelvin, float optimalTempMaxKelvin, float lethalTempMarginKelvin, Settings settings)
+    {
+        if (!settings.TemperatureDirectDamageEnabled)
+            return false;
+
+        float min = Mathf.Min(optimalTempMinKelvin, optimalTempMaxKelvin);
+        float max = Mathf.Max(optimalTempMinKelvin, optimalTempMaxKelvin);
+        float margin = Mathf.Max(0f, lethalTempMarginKelvin);
+        float coldDeath = settings.ExtremeColdDeathTempKelvin > 0f ? settings.ExtremeColdDeathTempKelvin : min - (margin * 2f);
+        float heatDeath = settings.ExtremeHeatDeathTempKelvin > 0f ? settings.ExtremeHeatDeathTempKelvin : max + (margin * 2f);
+        coldDeath = Mathf.Min(coldDeath, min - margin);
+        heatDeath = Mathf.Max(heatDeath, max + margin);
+        return localTempKelvin <= coldDeath || localTempKelvin >= heatDeath;
     }
 
     private static bool IsAnaerobicO2Sensitive(MetabolismType metabolism, Settings settings)

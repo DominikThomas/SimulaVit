@@ -266,6 +266,13 @@ public class ReplicatorManager : MonoBehaviour
     public Vector2 methanogenesisTempRange = new Vector2(305.15f, 355.15f);
     public Vector2 methanotrophyTempRange = new Vector2(280.15f, 320.15f);
     public float defaultLethalMargin = 20f; // Kelvin (~20 °C beyond optimal range before death)
+    [Range(0f, 1f)] public float temperatureDormancyFloor = 0.02f;
+    [Range(0f, 1f)] public float temperatureReplicationMinEfficiency = 0.15f;
+    public bool temperatureDirectDamageEnabled = true;
+    public float extremeColdDeathTempKelvin = 233.15f; // -40 °C
+    public float extremeHeatDeathTempKelvin = 423.15f; // 150 °C
+    public float heatDamageStartTempKelvin = 373.15f; // 100 °C debug/stress marker
+    public float coldDamageStartTempKelvin = 253.15f; // -20 °C debug/dormancy marker
     [Range(0f, 1f)] public float tempMutationChance = 0.02f;
     public float tempMutationScale = 2f; // Kelvin mutation scale
 
@@ -633,6 +640,10 @@ public class ReplicatorManager : MonoBehaviour
     [SerializeField] private int debugAnaerobeO2KilledCount;
     [SerializeField] private float debugAnaerobeO2AverageInhibition;
     [SerializeField] private float debugAnaerobeO2StressedAverageLocalO2;
+    [SerializeField] private float debugAverageTemperatureEfficiency;
+    [SerializeField] private int debugTemperatureLimitedCount;
+    [SerializeField] private int debugTemperatureHeatDamageCount;
+    [SerializeField] private int debugTemperatureColdDormantCount;
     private float nextChemoSpawnDebugLogTime;
     private int[] chemoDeathCauseCounts;
     private int[] hydrogenDeathCauseCounts;
@@ -964,6 +975,10 @@ public class ReplicatorManager : MonoBehaviour
             SaproTempSum = debugSaproTempSum,
             SaproTempCount = debugSaproTempCount,
             SaproTempStressedCount = debugSaproStressedCount,
+            AverageTemperatureEfficiency = debugAverageTemperatureEfficiency,
+            TemperatureLimitedCount = debugTemperatureLimitedCount,
+            TemperatureHeatDamageCount = debugTemperatureHeatDamageCount,
+            TemperatureColdDormantCount = debugTemperatureColdDormantCount,
             AverageOrganicCStore = averageOrganicCStore,
             DivisionEligibleCount = divisionEligibleAgentCount,
             PredationKillsWindow = predationKillsWindow,
@@ -1460,6 +1475,24 @@ public class ReplicatorManager : MonoBehaviour
             CreateSteeringSettings());
     }
 
+
+    float ComputeTemperatureFitness(Replicator agent, float temperature)
+    {
+        if (agent == null)
+            return 0f;
+
+        var settings = new ReplicatorMetabolismSystem.Settings
+        {
+            TemperatureDormancyFloor = temperatureDormancyFloor
+        };
+        return ReplicatorMetabolismSystem.ComputeTemperatureEfficiency01(
+            temperature,
+            agent.optimalTempMin,
+            agent.optimalTempMax,
+            agent.lethalTempMargin,
+            settings);
+    }
+
     float ComputeTemperatureFitnessForRange(float temperature, Vector2 range)
     {
         float min = Mathf.Min(range.x, range.y);
@@ -1927,6 +1960,13 @@ public class ReplicatorManager : MonoBehaviour
             AnaerobeO2InhibitionAffectsSulfurChemosynthesis = anaerobeO2InhibitionAffectsSulfurChemosynthesis,
             AnaerobeO2InhibitionAffectsFermentation = anaerobeO2InhibitionAffectsFermentation,
             AnaerobeO2InhibitionAffectsMethanogenesis = anaerobeO2InhibitionAffectsMethanogenesis,
+            TemperatureDormancyFloor = temperatureDormancyFloor,
+            TemperatureReplicationMinEfficiency = temperatureReplicationMinEfficiency,
+            TemperatureDirectDamageEnabled = temperatureDirectDamageEnabled,
+            ExtremeColdDeathTempKelvin = extremeColdDeathTempKelvin,
+            ExtremeHeatDeathTempKelvin = extremeHeatDeathTempKelvin,
+            HeatDamageStartTempKelvin = heatDamageStartTempKelvin,
+            ColdDamageStartTempKelvin = coldDamageStartTempKelvin,
             MinSpeedFactor = minSpeedFactor
         };
 
@@ -1971,6 +2011,12 @@ public class ReplicatorManager : MonoBehaviour
         debugAnaerobeO2StressedAverageLocalO2 = debugSnapshot.AnaerobeO2InhibitedCount > 0
             ? debugSnapshot.AnaerobeO2StressedLocalO2Sum / debugSnapshot.AnaerobeO2InhibitedCount
             : 0f;
+        debugAverageTemperatureEfficiency = debugSnapshot.TemperatureEfficiencyCount > 0
+            ? debugSnapshot.TemperatureEfficiencySum / debugSnapshot.TemperatureEfficiencyCount
+            : 0f;
+        debugTemperatureLimitedCount = debugSnapshot.TemperatureLimitedCount;
+        debugTemperatureHeatDamageCount = debugSnapshot.TemperatureHeatDamageCount;
+        debugTemperatureColdDormantCount = debugSnapshot.TemperatureColdDormantCount;
     }
 
 

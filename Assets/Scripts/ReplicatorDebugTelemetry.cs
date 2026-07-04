@@ -29,6 +29,10 @@ public sealed class ReplicatorTelemetrySnapshot
     public float SaproTempSum;
     public int SaproTempCount;
     public int SaproTempStressedCount;
+    public float AverageTemperatureEfficiency;
+    public int TemperatureLimitedCount;
+    public int TemperatureHeatDamageCount;
+    public int TemperatureColdDormantCount;
 
     public float AverageOrganicCStore;
     public int DivisionEligibleCount;
@@ -192,11 +196,15 @@ public class ReplicatorDebugTelemetry
     private static string FormatTemperatureSummary(ReplicatorTelemetrySnapshot snapshot)
     {
         return string.Format(
-            "Hydrogen {0} | Sulfur {1} | Photo {2} | Sapro {3}",
+            "Hydrogen {0} | Sulfur {1} | Photo {2} | Sapro {3} | efficiency avg={4:F2} limited<0.5={5} heatDamage={6} coldDormant={7}",
             FormatTemperatureDebug(snapshot.HydrogenTempSum, snapshot.HydrogenTempCount, snapshot.HydrogenTempStressedCount, snapshot.TemperatureDisplayUnit),
             FormatTemperatureDebug(snapshot.SulfurTempSum, snapshot.SulfurTempCount, snapshot.SulfurTempStressedCount, snapshot.TemperatureDisplayUnit),
             FormatTemperatureDebug(snapshot.PhotoTempSum, snapshot.PhotoTempCount, snapshot.PhotoTempStressedCount, snapshot.TemperatureDisplayUnit),
-            FormatTemperatureDebug(snapshot.SaproTempSum, snapshot.SaproTempCount, snapshot.SaproTempStressedCount, snapshot.TemperatureDisplayUnit));
+            FormatTemperatureDebug(snapshot.SaproTempSum, snapshot.SaproTempCount, snapshot.SaproTempStressedCount, snapshot.TemperatureDisplayUnit),
+            snapshot.AverageTemperatureEfficiency,
+            snapshot.TemperatureLimitedCount,
+            snapshot.TemperatureHeatDamageCount,
+            snapshot.TemperatureColdDormantCount);
     }
 
     private static string FormatDeathCauses(ReplicatorTelemetrySnapshot snapshot)

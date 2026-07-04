@@ -75,23 +75,13 @@ public class ReplicatorLifecycleSystem
 
             if (UnityEngine.Random.value < reproductionChance && hasEnergyForDivision && hasCarbonForDivision)
             {
-                int safeResolution = Mathf.Max(1, resolution);
-                Vector3 dir = populationState.Position[i].normalized;
-                int cellIndex = PlanetGridIndexing.DirectionToCellIndex(dir, safeResolution);
-                float temp = getTemperatureAtCell(dir, cellIndex);
-
-                float min = populationState.OptimalTempMin[i];
-                float max = populationState.OptimalTempMax[i];
-
-                bool insideOptimalBand = (temp >= min && temp <= max);
-
                 agent.currentDirection = populationState.CurrentDirection[i];
                 agent.currentOceanLayerIndex = populationState.CurrentOceanLayerIndex[i];
                 agent.preferredOceanLayerIndex = populationState.PreferredOceanLayerIndex[i];
                 agent.metabolism = populationState.Metabolism[i];
                 agent.locomotion = populationState.Locomotion[i];
 
-                if (insideOptimalBand && trySpawnChild(agent, out Replicator childAgent))
+                if (trySpawnChild(agent, out Replicator childAgent))
                 {
                     if (enableCarbonLimitedDivision)
                     {
