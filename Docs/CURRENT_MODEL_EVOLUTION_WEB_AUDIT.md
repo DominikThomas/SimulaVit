@@ -303,3 +303,7 @@ Reaction-derived mutation gates are now implemented for metabolism mutation atte
 ## Post-implementation note: anaerobe O2 toxicity
 
 Runtime O2 toxicity now applies to existing O2-sensitive anaerobic metabolisms through configurable `ReplicatorManager` thresholds and per-metabolism toggles. Methanogenesis, Fermentation, Hydrogenotrophy, and SulfurChemosynthesis can accumulate `O2ToxicSeconds`, receive metabolism/speed stress, suppress replication while stressed, and die with `DeathCause.O2_Toxicity` after sustained high local layered O2 exposure. Mutation gates remain separate and unchanged.
+
+## Correction note: anaerobe O2 inhibition refactor
+
+The previous broad direct O2 toxicity path for existing anaerobes has been refactored into runtime metabolism/reaction inhibition. Methanogenesis is now strongly inhibited by O2 and should usually decline through energy failure or starvation rather than a direct exposure timer. Fermentation, Hydrogenotrophy, and SulfurChemosynthesis remain configurable and milder by default; sulfur chemosynthesis is intentionally not harshly killed in oxic water because sulfur metabolism needs a future split into aerobic and anaerobic variants. Bottom-layer oxygenation remains a separate transport/mixing issue and is not changed by this correction.

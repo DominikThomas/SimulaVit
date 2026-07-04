@@ -98,23 +98,31 @@ public class ReplicatorManager : MonoBehaviour
     [Tooltip("Maximum local O2 allowed for anaerobic metabolism mutation attempts such as methanogenesis. This is only a mutation gate, not O2 toxicity.")]
     public float mutationGateMaxO2ForAnaerobes = 0.02f;
 
-    [Header("Anaerobe O2 Toxicity")]
-    [Tooltip("If enabled, existing anaerobic metabolisms accumulate stress and can die in oxic local layers.")]
-    public bool anaerobeO2ToxicityEnabled = true;
-    [Tooltip("Local layered O2 at or below this value is comfortable for O2-sensitive anaerobes.")]
+    [Header("Anaerobe O2 Inhibition")]
+    [Tooltip("If enabled, local O2 inhibits selected anaerobic metabolism reactions instead of directly killing organisms.")]
+    public bool anaerobeO2InhibitionEnabled = true;
+    [Tooltip("Local layered O2 at or below this value leaves O2-sensitive reactions at full efficiency.")]
     public float anaerobeO2ComfortMax = 0.02f;
-    [Tooltip("Local layered O2 at or above this value applies maximum anaerobe O2 stress.")]
+    [Tooltip("Local layered O2 at or above this value applies the configured minimum reaction efficiency.")]
     public float anaerobeO2StressMax = 0.12f;
-    [Tooltip("Accumulated toxic seconds required before an O2-sensitive anaerobe dies from O2 toxicity.")]
-    public float anaerobeO2ToxicDeathSeconds = 30f;
-    [Tooltip("Extra basal energy stress multiplier applied at maximum anaerobe O2 stress.")]
-    public float anaerobeO2StressEnergyMultiplier = 1.5f;
-    [Tooltip("Speed cap multiplier applied at maximum anaerobe O2 stress.")]
-    [Range(0f, 1f)] public float anaerobeO2StressSpeedMultiplier = 0.5f;
-    public bool anaerobeO2ToxicityAffectsHydrogenotrophy = true;
-    public bool anaerobeO2ToxicityAffectsSulfurChemosynthesis = true;
-    public bool anaerobeO2ToxicityAffectsFermentation = true;
-    public bool anaerobeO2ToxicityAffectsMethanogenesis = true;
+    [Range(0f, 1f)] public float anaerobeO2MinEfficiencyMethanogenesis = 0f;
+    [Range(0f, 1f)] public float anaerobeO2MinEfficiencyFermentation = 0.65f;
+    [Range(0f, 1f)] public float anaerobeO2MinEfficiencyHydrogenotrophy = 0.25f;
+    [Range(0f, 1f)] public float anaerobeO2MinEfficiencySulfurChemosynthesis = 0.6f;
+    [Tooltip("Replication is suppressed only when O2-inhibited reaction efficiency falls below this value.")]
+    [Range(0f, 1f)] public float anaerobeO2ReplicationMinEfficiency = 0.35f;
+    [Tooltip("Optional extreme oxidative damage timer. Disabled by default so most O2 pressure acts through failed metabolism/starvation.")]
+    public bool anaerobeO2DirectDamageEnabled = false;
+    [Tooltip("Local layered O2 required before optional direct oxidative damage accumulates.")]
+    public float anaerobeO2DirectDamageThreshold = 0.25f;
+    [Tooltip("Accumulated direct oxidative damage seconds required for O2_Toxicity death when direct damage is enabled.")]
+    public float anaerobeO2DirectDeathSeconds = 120f;
+    [Tooltip("Speed cap multiplier applied at maximum anaerobe O2 reaction inhibition.")]
+    [Range(0f, 1f)] public float anaerobeO2StressSpeedMultiplier = 0.75f;
+    public bool anaerobeO2InhibitionAffectsHydrogenotrophy = true;
+    public bool anaerobeO2InhibitionAffectsSulfurChemosynthesis = true;
+    public bool anaerobeO2InhibitionAffectsFermentation = true;
+    public bool anaerobeO2InhibitionAffectsMethanogenesis = true;
     [Tooltip("Minimum local O2 required for aerobic metabolism mutation attempts such as saprotrophy and methanotrophy.")]
     public float mutationGateMinO2ForAerobes = 0.01f;
     [Tooltip("Minimum local OrganicC required for organic-carbon mutation gates; fermentation can also pass via inherited stored OrganicC.")]
@@ -620,8 +628,10 @@ public class ReplicatorManager : MonoBehaviour
     [SerializeField] private float debugPhotosynthDarkAnoxicEnergyGeneratedPerTick;
     [SerializeField] private float debugPhotosynthDarkAnoxicCO2ReleasedPerTick;
     [SerializeField] private float debugPhotosynthDarkAnoxicH2ReleasedPerTick;
-    [SerializeField] private int debugAnaerobeO2StressedCount;
+    [SerializeField] private int debugAnaerobeO2InhibitedCount;
+    [SerializeField] private int debugAnaerobeO2DirectDamageCount;
     [SerializeField] private int debugAnaerobeO2KilledCount;
+    [SerializeField] private float debugAnaerobeO2AverageInhibition;
     [SerializeField] private float debugAnaerobeO2StressedAverageLocalO2;
     private float nextChemoSpawnDebugLogTime;
     private int[] chemoDeathCauseCounts;
@@ -1901,16 +1911,22 @@ public class ReplicatorManager : MonoBehaviour
             ChemoRespirationCPerTick = chemoRespirationCPerTick,
             PredatorBasalCostMultiplier = predatorBasalCostMultiplier,
             PredatorMoveSpeedMultiplier = predatorMoveSpeedMultiplier,
-            AnaerobeO2ToxicityEnabled = anaerobeO2ToxicityEnabled,
+            AnaerobeO2InhibitionEnabled = anaerobeO2InhibitionEnabled,
             AnaerobeO2ComfortMax = anaerobeO2ComfortMax,
             AnaerobeO2StressMax = anaerobeO2StressMax,
-            AnaerobeO2ToxicDeathSeconds = anaerobeO2ToxicDeathSeconds,
-            AnaerobeO2StressEnergyMultiplier = anaerobeO2StressEnergyMultiplier,
+            AnaerobeO2MinEfficiencyMethanogenesis = anaerobeO2MinEfficiencyMethanogenesis,
+            AnaerobeO2MinEfficiencyFermentation = anaerobeO2MinEfficiencyFermentation,
+            AnaerobeO2MinEfficiencyHydrogenotrophy = anaerobeO2MinEfficiencyHydrogenotrophy,
+            AnaerobeO2MinEfficiencySulfurChemosynthesis = anaerobeO2MinEfficiencySulfurChemosynthesis,
+            AnaerobeO2ReplicationMinEfficiency = anaerobeO2ReplicationMinEfficiency,
+            AnaerobeO2DirectDamageEnabled = anaerobeO2DirectDamageEnabled,
+            AnaerobeO2DirectDamageThreshold = anaerobeO2DirectDamageThreshold,
+            AnaerobeO2DirectDeathSeconds = anaerobeO2DirectDeathSeconds,
             AnaerobeO2StressSpeedMultiplier = anaerobeO2StressSpeedMultiplier,
-            AnaerobeO2ToxicityAffectsHydrogenotrophy = anaerobeO2ToxicityAffectsHydrogenotrophy,
-            AnaerobeO2ToxicityAffectsSulfurChemosynthesis = anaerobeO2ToxicityAffectsSulfurChemosynthesis,
-            AnaerobeO2ToxicityAffectsFermentation = anaerobeO2ToxicityAffectsFermentation,
-            AnaerobeO2ToxicityAffectsMethanogenesis = anaerobeO2ToxicityAffectsMethanogenesis,
+            AnaerobeO2InhibitionAffectsHydrogenotrophy = anaerobeO2InhibitionAffectsHydrogenotrophy,
+            AnaerobeO2InhibitionAffectsSulfurChemosynthesis = anaerobeO2InhibitionAffectsSulfurChemosynthesis,
+            AnaerobeO2InhibitionAffectsFermentation = anaerobeO2InhibitionAffectsFermentation,
+            AnaerobeO2InhibitionAffectsMethanogenesis = anaerobeO2InhibitionAffectsMethanogenesis,
             MinSpeedFactor = minSpeedFactor
         };
 
@@ -1946,10 +1962,14 @@ public class ReplicatorManager : MonoBehaviour
         debugPhotosynthDarkAnoxicEnergyGeneratedPerTick = debugSnapshot.PhotosynthDarkAnoxicEnergyGenerated / fallbackCount;
         debugPhotosynthDarkAnoxicCO2ReleasedPerTick = debugSnapshot.PhotosynthDarkAnoxicCO2Released / fallbackCount;
         debugPhotosynthDarkAnoxicH2ReleasedPerTick = debugSnapshot.PhotosynthDarkAnoxicH2Released / fallbackCount;
-        debugAnaerobeO2StressedCount = debugSnapshot.AnaerobeO2StressedCount;
+        debugAnaerobeO2InhibitedCount = debugSnapshot.AnaerobeO2InhibitedCount;
+        debugAnaerobeO2DirectDamageCount = debugSnapshot.AnaerobeO2DirectDamageCount;
         debugAnaerobeO2KilledCount = debugSnapshot.AnaerobeO2KilledCount;
-        debugAnaerobeO2StressedAverageLocalO2 = debugSnapshot.AnaerobeO2StressedCount > 0
-            ? debugSnapshot.AnaerobeO2StressedLocalO2Sum / debugSnapshot.AnaerobeO2StressedCount
+        debugAnaerobeO2AverageInhibition = debugSnapshot.AnaerobeO2InhibitedCount > 0
+            ? debugSnapshot.AnaerobeO2InhibitionSum / debugSnapshot.AnaerobeO2InhibitedCount
+            : 0f;
+        debugAnaerobeO2StressedAverageLocalO2 = debugSnapshot.AnaerobeO2InhibitedCount > 0
+            ? debugSnapshot.AnaerobeO2StressedLocalO2Sum / debugSnapshot.AnaerobeO2InhibitedCount
             : 0f;
     }
 

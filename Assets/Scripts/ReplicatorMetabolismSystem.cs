@@ -87,16 +87,22 @@ public class ReplicatorMetabolismSystem
         public float ChemoRespirationCPerTick;
         public float PredatorBasalCostMultiplier;
         public float PredatorMoveSpeedMultiplier;
-        public bool AnaerobeO2ToxicityEnabled;
+        public bool AnaerobeO2InhibitionEnabled;
         public float AnaerobeO2ComfortMax;
         public float AnaerobeO2StressMax;
-        public float AnaerobeO2ToxicDeathSeconds;
-        public float AnaerobeO2StressEnergyMultiplier;
+        public float AnaerobeO2MinEfficiencyMethanogenesis;
+        public float AnaerobeO2MinEfficiencyFermentation;
+        public float AnaerobeO2MinEfficiencyHydrogenotrophy;
+        public float AnaerobeO2MinEfficiencySulfurChemosynthesis;
+        public float AnaerobeO2ReplicationMinEfficiency;
+        public bool AnaerobeO2DirectDamageEnabled;
+        public float AnaerobeO2DirectDamageThreshold;
+        public float AnaerobeO2DirectDeathSeconds;
         public float AnaerobeO2StressSpeedMultiplier;
-        public bool AnaerobeO2ToxicityAffectsHydrogenotrophy;
-        public bool AnaerobeO2ToxicityAffectsSulfurChemosynthesis;
-        public bool AnaerobeO2ToxicityAffectsFermentation;
-        public bool AnaerobeO2ToxicityAffectsMethanogenesis;
+        public bool AnaerobeO2InhibitionAffectsHydrogenotrophy;
+        public bool AnaerobeO2InhibitionAffectsSulfurChemosynthesis;
+        public bool AnaerobeO2InhibitionAffectsFermentation;
+        public bool AnaerobeO2InhibitionAffectsMethanogenesis;
         public float MinSpeedFactor;
     }
 
@@ -121,9 +127,11 @@ public class ReplicatorMetabolismSystem
         public float PhotosynthDarkAnoxicEnergyGenerated;
         public float PhotosynthDarkAnoxicCO2Released;
         public float PhotosynthDarkAnoxicH2Released;
-        public int AnaerobeO2StressedCount;
+        public int AnaerobeO2InhibitedCount;
+        public int AnaerobeO2DirectDamageCount;
         public int AnaerobeO2KilledCount;
         public float AnaerobeO2StressedLocalO2Sum;
+        public float AnaerobeO2InhibitionSum;
     }
 
     public void MetabolismTick(
@@ -187,6 +195,16 @@ public class ReplicatorMetabolismSystem
             populationState.CanReplicate[i] = true;
             float metabolismStressMultiplier = 1f;
             float speedCapMultiplier = 1f;
+            float o2MetabolismEfficiency = ApplyAnaerobeO2Inhibition(
+                populationState,
+                i,
+                planetResourceMap,
+                settings,
+                metabolism,
+                cellIndex,
+                dtTick,
+                ref speedCapMultiplier,
+                ref debugSnapshot);
 
             if (metabolism == MetabolismType.Photosynthesis)
             {
@@ -307,6 +325,7 @@ public class ReplicatorMetabolismSystem
              settings,
              cellIndex,
              performance,
+             o2MetabolismEfficiency,
              dtTick,
              maxStore);
 
@@ -326,6 +345,7 @@ public class ReplicatorMetabolismSystem
                     settings,
                     cellIndex,
                     performance,
+                    o2MetabolismEfficiency,
                     maxStore,
                     out bool lackOrganicC,
                     out bool lackStoredC);
@@ -348,6 +368,7 @@ public class ReplicatorMetabolismSystem
                     settings,
                     cellIndex,
                     performance,
+                    o2MetabolismEfficiency,
                     maxStore,
                     out bool lackCo2,
                     out bool lackH2,
@@ -397,6 +418,7 @@ public class ReplicatorMetabolismSystem
                     settings,
                     cellIndex,
                     performance,
+                    o2MetabolismEfficiency,
                     dtTick,
                     maxStore);
 
@@ -414,8 +436,9 @@ public class ReplicatorMetabolismSystem
                 }
             }
 
-            if (ApplyAnaerobeO2Toxicity(populationState, i, planetResourceMap, settings, metabolism, cellIndex, dtTick, basalCost, ref metabolismStressMultiplier, ref speedCapMultiplier, ref debugSnapshot))
+            if (ShouldDieFromAnaerobeO2DirectDamage(populationState, i, settings, metabolism))
             {
+                debugSnapshot.AnaerobeO2KilledCount++;
                 deadIndices.Add(i);
                 deadCauses.Add(DeathCause.O2_Toxicity);
                 continue;
@@ -481,6 +504,7 @@ public class ReplicatorMetabolismSystem
         Settings settings,
         int cellIndex,
         float performance,
+        float o2Efficiency,
         float dtTick,
         float maxStore)
     {
@@ -495,7 +519,7 @@ public class ReplicatorMetabolismSystem
         float h2sAvailable = GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, h2sResource, cellIndex);
         float co2Ratio = co2Need <= Mathf.Epsilon ? 1f : co2Available / co2Need;
         float h2sRatio = h2sNeed <= Mathf.Epsilon ? 1f : h2sAvailable / h2sNeed;
-        float pulledRatio = Mathf.Clamp01(Mathf.Min(co2Ratio, h2sRatio));
+        float pulledRatio = Mathf.Clamp01(Mathf.Min(co2Ratio, h2sRatio)) * Mathf.Clamp01(o2Efficiency);
 
         bool lackCo2 = false;
         bool lackH2s = false;
@@ -624,6 +648,7 @@ public class ReplicatorMetabolismSystem
     Settings settings,
     int cellIndex,
     float performance,
+    float o2Efficiency,
     float dtTick,
     float maxStore)
     {
@@ -639,7 +664,7 @@ public class ReplicatorMetabolismSystem
         float h2Available = GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, h2Resource, cellIndex);
         float co2Ratio = co2Need <= Mathf.Epsilon ? 1f : co2Available / co2Need;
         float h2Ratio = h2Need <= Mathf.Epsilon ? 1f : h2Available / h2Need;
-        float pulledRatio = Mathf.Clamp01(Mathf.Min(co2Ratio, h2Ratio));
+        float pulledRatio = Mathf.Clamp01(Mathf.Min(co2Ratio, h2Ratio)) * Mathf.Clamp01(o2Efficiency);
 
         bool lackCo2 = false;
         bool lackH2 = false;
@@ -684,6 +709,7 @@ public class ReplicatorMetabolismSystem
         Settings settings,
         int cellIndex,
         float performance,
+        float o2Efficiency,
         float maxStore,
         out bool lackOrganicC,
         out bool lackStoredC)
@@ -691,7 +717,7 @@ public class ReplicatorMetabolismSystem
         float cNeed = Mathf.Max(0f, settings.FermentationOrganicCPerTick);
         ResourceType organicCResource = FermentationRuntimeBinding.PrimaryInput0;
         float organicCAvailable = GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, organicCResource, cellIndex);
-        float pulled = Mathf.Min(cNeed, organicCAvailable);
+        float pulled = Mathf.Min(cNeed * Mathf.Clamp01(o2Efficiency), organicCAvailable);
         lackOrganicC = cNeed > 0f && pulled <= Mathf.Epsilon;
         lackStoredC = false;
 
@@ -726,6 +752,7 @@ public class ReplicatorMetabolismSystem
         Settings settings,
         int cellIndex,
         float performance,
+        float o2Efficiency,
         float maxStore,
         out bool lackCo2,
         out bool lackH2,
@@ -741,7 +768,7 @@ public class ReplicatorMetabolismSystem
         float h2Available = GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, h2Resource, cellIndex);
         float co2Ratio = co2Need <= Mathf.Epsilon ? 1f : co2Available / co2Need;
         float h2Ratio = h2Need <= Mathf.Epsilon ? 1f : h2Available / h2Need;
-        float pulledRatio = Mathf.Clamp01(Mathf.Min(co2Ratio, h2Ratio));
+        float pulledRatio = Mathf.Clamp01(Mathf.Min(co2Ratio, h2Ratio)) * Mathf.Clamp01(o2Efficiency);
         lackCo2 = false;
         lackH2 = false;
         lackStoredC = false;
@@ -1128,25 +1155,25 @@ public class ReplicatorMetabolismSystem
 
     private static bool IsAnaerobicO2Sensitive(MetabolismType metabolism, Settings settings)
     {
-        if (!settings.AnaerobeO2ToxicityEnabled)
+        if (!settings.AnaerobeO2InhibitionEnabled)
             return false;
 
         switch (metabolism)
         {
             case MetabolismType.Methanogenesis:
-                return settings.AnaerobeO2ToxicityAffectsMethanogenesis;
+                return settings.AnaerobeO2InhibitionAffectsMethanogenesis;
             case MetabolismType.Fermentation:
-                return settings.AnaerobeO2ToxicityAffectsFermentation;
+                return settings.AnaerobeO2InhibitionAffectsFermentation;
             case MetabolismType.Hydrogenotrophy:
-                return settings.AnaerobeO2ToxicityAffectsHydrogenotrophy;
+                return settings.AnaerobeO2InhibitionAffectsHydrogenotrophy;
             case MetabolismType.SulfurChemosynthesis:
-                return settings.AnaerobeO2ToxicityAffectsSulfurChemosynthesis;
+                return settings.AnaerobeO2InhibitionAffectsSulfurChemosynthesis;
             default:
                 return false;
         }
     }
 
-    private static bool ApplyAnaerobeO2Toxicity(
+    private static float ApplyAnaerobeO2Inhibition(
         ReplicatorPopulationState populationState,
         int index,
         PlanetResourceMap planetResourceMap,
@@ -1154,50 +1181,82 @@ public class ReplicatorMetabolismSystem
         MetabolismType metabolism,
         int cellIndex,
         float dtTick,
-        float basalCost,
-        ref float metabolismStressMultiplier,
         ref float speedCapMultiplier,
         ref DebugSnapshot debugSnapshot)
     {
         if (!IsAnaerobicO2Sensitive(metabolism, settings))
-            return false;
+            return 1f;
 
         float localO2 = GetAgentResourceAtCurrentLayer(populationState, index, planetResourceMap, ResourceType.O2, cellIndex);
-        float stress01 = ComputeO2ToxicityStress01(localO2, settings);
-        if (stress01 <= 0f)
+        float inhibition01 = ComputeO2Inhibition01(localO2, settings);
+        if (inhibition01 <= 0f)
         {
             populationState.O2ToxicSeconds[index] = Mathf.Max(0f, populationState.O2ToxicSeconds[index] - dtTick);
-            return false;
+            return 1f;
         }
 
-        debugSnapshot.AnaerobeO2StressedCount++;
+        float minEfficiency = GetAnaerobeO2MinEfficiency(metabolism, settings);
+        float efficiency = Mathf.Lerp(1f, minEfficiency, inhibition01);
+        debugSnapshot.AnaerobeO2InhibitedCount++;
         debugSnapshot.AnaerobeO2StressedLocalO2Sum += localO2;
+        debugSnapshot.AnaerobeO2InhibitionSum += inhibition01;
 
-        float timerRate = Mathf.Lerp(0.35f, 1.5f, stress01);
-        populationState.O2ToxicSeconds[index] += dtTick * timerRate;
-        float oxygenStressCost = Mathf.Max(0f, basalCost) * Mathf.Max(0f, settings.AnaerobeO2StressEnergyMultiplier) * stress01;
-        populationState.Energy[index] -= oxygenStressCost;
-        metabolismStressMultiplier += Mathf.Max(0f, settings.AnaerobeO2StressEnergyMultiplier) * stress01;
-        speedCapMultiplier = Mathf.Min(speedCapMultiplier, Mathf.Lerp(1f, Mathf.Clamp01(settings.AnaerobeO2StressSpeedMultiplier), stress01));
-        populationState.CanReplicate[index] = false;
+        if (efficiency < Mathf.Clamp01(settings.AnaerobeO2ReplicationMinEfficiency))
+            populationState.CanReplicate[index] = false;
 
-        if (settings.AnaerobeO2ToxicDeathSeconds > 0f && populationState.O2ToxicSeconds[index] >= settings.AnaerobeO2ToxicDeathSeconds)
+        speedCapMultiplier = Mathf.Min(speedCapMultiplier, Mathf.Lerp(1f, Mathf.Clamp01(settings.AnaerobeO2StressSpeedMultiplier), inhibition01));
+
+        if (settings.AnaerobeO2DirectDamageEnabled
+            && metabolism == MetabolismType.Methanogenesis
+            && localO2 >= Mathf.Max(0f, settings.AnaerobeO2DirectDamageThreshold))
         {
-            debugSnapshot.AnaerobeO2KilledCount++;
-            return true;
+            // O2ToxicSeconds is retained as the serialized timer for optional extreme oxidative damage/ROS-like stress.
+            populationState.O2ToxicSeconds[index] += dtTick;
+            debugSnapshot.AnaerobeO2DirectDamageCount++;
+        }
+        else
+        {
+            populationState.O2ToxicSeconds[index] = Mathf.Max(0f, populationState.O2ToxicSeconds[index] - dtTick);
         }
 
-        return false;
+        return efficiency;
     }
 
-    private static float ComputeO2ToxicityStress01(float localO2, Settings settings)
+    private static bool ShouldDieFromAnaerobeO2DirectDamage(ReplicatorPopulationState populationState, int index, Settings settings, MetabolismType metabolism)
+    {
+        return IsAnaerobicO2Sensitive(metabolism, settings)
+            && metabolism == MetabolismType.Methanogenesis
+            && settings.AnaerobeO2DirectDamageEnabled
+            && settings.AnaerobeO2DirectDeathSeconds > 0f
+            && populationState.O2ToxicSeconds[index] >= settings.AnaerobeO2DirectDeathSeconds;
+    }
+
+    private static float ComputeO2Inhibition01(float localO2, Settings settings)
     {
         float comfortMax = Mathf.Max(0f, settings.AnaerobeO2ComfortMax);
         float stressMax = Mathf.Max(comfortMax + 0.0001f, settings.AnaerobeO2StressMax);
         if (localO2 <= comfortMax)
             return 0f;
 
-        return Mathf.Clamp01((localO2 - comfortMax) / (stressMax - comfortMax));
+        float t = Mathf.Clamp01((localO2 - comfortMax) / (stressMax - comfortMax));
+        return t * t * (3f - 2f * t);
+    }
+
+    private static float GetAnaerobeO2MinEfficiency(MetabolismType metabolism, Settings settings)
+    {
+        switch (metabolism)
+        {
+            case MetabolismType.Methanogenesis:
+                return Mathf.Clamp01(settings.AnaerobeO2MinEfficiencyMethanogenesis);
+            case MetabolismType.Fermentation:
+                return Mathf.Clamp01(settings.AnaerobeO2MinEfficiencyFermentation);
+            case MetabolismType.Hydrogenotrophy:
+                return Mathf.Clamp01(settings.AnaerobeO2MinEfficiencyHydrogenotrophy);
+            case MetabolismType.SulfurChemosynthesis:
+                return Mathf.Clamp01(settings.AnaerobeO2MinEfficiencySulfurChemosynthesis);
+            default:
+                return 1f;
+        }
     }
 
     private static float UpdateStarveTimer(float current, bool deprived, float dt)
