@@ -313,6 +313,14 @@ public class ReplicatorManager : MonoBehaviour
     public float flagellumMoveSpeedMultiplier = 1.2f;
     public float flagellumDriftSuppression = 0.5f;
     public float amoeboidRunNoiseStrength = 0.08f;
+    [Tooltip("Use metabolism/resource/temperature/O2-efficiency suitability for temporal run-and-tumble comparisons without scanning neighboring cells.")]
+    public bool activeMovementMetabolismSuitabilityEnabled = true;
+    [Range(0f, 1f)] public float movementSuitabilityMemoryBlend = 0.35f;
+    public float movementSuitabilityImprovementThreshold = 0.05f;
+    public float movementSuitabilityWorseningThreshold = 0.05f;
+    [Range(0f, 1f)] public float movementTumbleChanceWhenWorse = 0.65f;
+    [Range(0f, 1f)] public float movementTumbleChanceWhenBetter = 0.05f;
+    [Range(0f, 1f)] public float movementTumbleChanceNeutral = 0.2f;
 
     [Header("Scent-Based Predation")]
     public bool useScentPredation = true;
@@ -1848,6 +1856,24 @@ public class ReplicatorManager : MonoBehaviour
             MaxTumbleProbability = maxTumbleProbability,
             TumbleDecreaseOnImproving = tumbleDecreaseOnImproving,
             TumbleIncreaseOnWorsening = tumbleIncreaseOnWorsening,
+            ActiveMovementMetabolismSuitabilityEnabled = activeMovementMetabolismSuitabilityEnabled,
+            MovementSuitabilityMemoryBlend = movementSuitabilityMemoryBlend,
+            MovementSuitabilityImprovementThreshold = movementSuitabilityImprovementThreshold,
+            MovementSuitabilityWorseningThreshold = movementSuitabilityWorseningThreshold,
+            MovementTumbleChanceWhenWorse = movementTumbleChanceWhenWorse,
+            MovementTumbleChanceWhenBetter = movementTumbleChanceWhenBetter,
+            MovementTumbleChanceNeutral = movementTumbleChanceNeutral,
+            AnaerobeO2InhibitionEnabled = anaerobeO2InhibitionEnabled,
+            AnaerobeO2ComfortMax = anaerobeO2ComfortMax,
+            AnaerobeO2StressMax = anaerobeO2StressMax,
+            AnaerobeO2MinEfficiencyMethanogenesis = anaerobeO2MinEfficiencyMethanogenesis,
+            AnaerobeO2MinEfficiencyFermentation = anaerobeO2MinEfficiencyFermentation,
+            AnaerobeO2MinEfficiencyHydrogenotrophy = anaerobeO2MinEfficiencyHydrogenotrophy,
+            AnaerobeO2MinEfficiencySulfurChemosynthesis = anaerobeO2MinEfficiencySulfurChemosynthesis,
+            AnaerobeO2InhibitionAffectsHydrogenotrophy = anaerobeO2InhibitionAffectsHydrogenotrophy,
+            AnaerobeO2InhibitionAffectsSulfurChemosynthesis = anaerobeO2InhibitionAffectsSulfurChemosynthesis,
+            AnaerobeO2InhibitionAffectsFermentation = anaerobeO2InhibitionAffectsFermentation,
+            AnaerobeO2InhibitionAffectsMethanogenesis = anaerobeO2InhibitionAffectsMethanogenesis,
             FlagellumTurnAngleMax = flagellumTurnAngleMax,
             AmoeboidTurnAngleMax = amoeboidTurnAngleMax,
             AmoeboidRunNoiseStrength = amoeboidRunNoiseStrength,

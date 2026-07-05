@@ -311,3 +311,7 @@ The previous broad direct O2 toxicity path for existing anaerobes has been refac
 ### 2026-07-04 temperature metabolism-efficiency update
 
 Temperature now shapes fitness primarily through a smooth metabolism efficiency multiplier rather than hard death just outside an organism's preferred range. The existing temperature traits are preserved as the parameters of the efficiency curve, replication is slowed or stopped through reduced energy/carbon gain and a low-efficiency replication floor, and direct temperature death is reserved for broad extreme cold/heat. This parallels the O2 inhibition model by applying an environmental multiplier to useful reaction output while keeping lethal damage as an extreme-case path.
+
+## Metabolism-aware temporal taxis note
+
+Active movement now keeps the existing run-and-tumble/temporal-gradient design: motile replicators compare current experienced suitability with remembered previous suitability rather than scanning neighbor candidate cells. The suitability score includes metabolism-specific resources, temperature fitness, layered light where relevant, and configured anaerobe O2 inhibition efficiency, so O2-sensitive anaerobes indirectly tumble away from oxic regions when metabolism worsens while methanotrophs can still benefit from O2 + CH4 overlap. This does not address bottom-layer O2 propagation or layer mixing, which remain separate follow-up topics.

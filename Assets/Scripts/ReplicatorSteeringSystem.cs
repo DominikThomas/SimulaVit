@@ -23,6 +23,24 @@ public class ReplicatorSteeringSystem
         public float MaxTumbleProbability;
         public float TumbleDecreaseOnImproving;
         public float TumbleIncreaseOnWorsening;
+        public bool ActiveMovementMetabolismSuitabilityEnabled;
+        public float MovementSuitabilityMemoryBlend;
+        public float MovementSuitabilityImprovementThreshold;
+        public float MovementSuitabilityWorseningThreshold;
+        public float MovementTumbleChanceWhenWorse;
+        public float MovementTumbleChanceWhenBetter;
+        public float MovementTumbleChanceNeutral;
+        public bool AnaerobeO2InhibitionEnabled;
+        public float AnaerobeO2ComfortMax;
+        public float AnaerobeO2StressMax;
+        public float AnaerobeO2MinEfficiencyMethanogenesis;
+        public float AnaerobeO2MinEfficiencyFermentation;
+        public float AnaerobeO2MinEfficiencyHydrogenotrophy;
+        public float AnaerobeO2MinEfficiencySulfurChemosynthesis;
+        public bool AnaerobeO2InhibitionAffectsHydrogenotrophy;
+        public bool AnaerobeO2InhibitionAffectsSulfurChemosynthesis;
+        public bool AnaerobeO2InhibitionAffectsFermentation;
+        public bool AnaerobeO2InhibitionAffectsMethanogenesis;
         public float FlagellumTurnAngleMax;
         public float AmoeboidTurnAngleMax;
         public float AmoeboidRunNoiseStrength;
@@ -41,6 +59,11 @@ public class ReplicatorSteeringSystem
         public float TumbleProbabilityAccumulator;
         public int TumbleProbabilitySampleCount;
         public int TumblesThisWindow;
+        public int SuitabilityComparisons;
+        public int ContinuedDueToImprovedSuitability;
+        public int TumbledDueToWorsenedSuitability;
+        public int O2InhibitedAnaerobeWorsenedComparisons;
+        public float SuitabilityDeltaAccumulator;
         public float RunAndTumbleDebugTimer;
     }
 
@@ -57,8 +80,9 @@ public class ReplicatorSteeringSystem
         float tempFitness = ComputeTemperatureFitness(populationState, index, temperature);
         float foodFitness = ComputeFoodFitness(populationState, index, normalizedDir, cellIndex, layerIndex, planetResourceMap, settings);
 
+        float metabolismEfficiency = ComputeAnaerobeO2MovementEfficiency(populationState.Metabolism[index], planetResourceMap, cellIndex, layerIndex, settings);
         float score = Mathf.Max(0f, settings.SteerTempWeight) * tempFitness
-                    + Mathf.Max(0f, settings.SteerFoodWeight) * foodFitness;
+                    + Mathf.Max(0f, settings.SteerFoodWeight) * foodFitness * metabolismEfficiency;
 
         if (settings.UseScentPredation && planetResourceMap.enableScentFields)
         {
@@ -142,8 +166,9 @@ public class ReplicatorSteeringSystem
                 break;
         }
 
+        float metabolismEfficiency = ComputeAnaerobeO2MovementEfficiency(agent.metabolism, planetResourceMap, cellIndex, habitatLayerIndex, settings);
         float score = Mathf.Max(0f, settings.SteerTempWeight) * tempFitness
-                    + Mathf.Max(0f, settings.SteerFoodWeight) * foodFitness;
+                    + Mathf.Max(0f, settings.SteerFoodWeight) * foodFitness * metabolismEfficiency;
 
         if (settings.UseScentPredation && planetResourceMap.enableScentFields)
         {
@@ -223,9 +248,35 @@ public class ReplicatorSteeringSystem
                 float habitatValue = ComputeLocalHabitatValue(populationState, i, currentDir, cellIndex, planetResourceMap, settings);
                 bool initialized = populationState.NextSenseTime[i] > 0f;
 
+                bool worsenedBySuitability = false;
                 if (!initialized)
                 {
                     populationState.TumbleProbability[i] = Mathf.Clamp(settings.BaseTumbleProbability, settings.MinTumbleProbability, settings.MaxTumbleProbability);
+                }
+                else if (settings.ActiveMovementMetabolismSuitabilityEnabled)
+                {
+                    float delta = habitatValue - populationState.LastHabitatValue[i];
+                    debugState.SuitabilityComparisons++;
+                    debugState.SuitabilityDeltaAccumulator += delta;
+
+                    if (delta >= Mathf.Max(0f, settings.MovementSuitabilityImprovementThreshold))
+                    {
+                        populationState.TumbleProbability[i] = Mathf.Clamp(settings.MovementTumbleChanceWhenBetter, settings.MinTumbleProbability, settings.MaxTumbleProbability);
+                        debugState.ContinuedDueToImprovedSuitability++;
+                    }
+                    else if (delta <= -Mathf.Max(0f, settings.MovementSuitabilityWorseningThreshold))
+                    {
+                        populationState.TumbleProbability[i] = Mathf.Clamp(settings.MovementTumbleChanceWhenWorse, settings.MinTumbleProbability, settings.MaxTumbleProbability);
+                        worsenedBySuitability = true;
+                        if (IsAnaerobicO2Sensitive(populationState.Metabolism[i], settings))
+                        {
+                            debugState.O2InhibitedAnaerobeWorsenedComparisons++;
+                        }
+                    }
+                    else
+                    {
+                        populationState.TumbleProbability[i] = Mathf.Clamp(settings.MovementTumbleChanceNeutral, settings.MinTumbleProbability, settings.MaxTumbleProbability);
+                    }
                 }
                 else if (habitatValue > populationState.LastHabitatValue[i])
                 {
@@ -241,6 +292,10 @@ public class ReplicatorSteeringSystem
                     float maxTurnAngle = isFlagellum ? Mathf.Max(0f, settings.FlagellumTurnAngleMax) : Mathf.Max(0f, settings.AmoeboidTurnAngleMax);
                     populationState.MoveDirection[i] = GenerateTumbledDirection(populationState.MoveDirection[i], currentDir, maxTurnAngle);
                     debugState.TumblesThisWindow++;
+                    if (worsenedBySuitability)
+                    {
+                        debugState.TumbledDueToWorsenedSuitability++;
+                    }
                 }
                 else if (isAmoeboid && settings.AmoeboidRunNoiseStrength > 0f)
                 {
@@ -248,7 +303,9 @@ public class ReplicatorSteeringSystem
                 }
 
                 populationState.DesiredMoveDirection[i] = populationState.MoveDirection[i];
-                populationState.LastHabitatValue[i] = habitatValue;
+                populationState.LastHabitatValue[i] = initialized && settings.ActiveMovementMetabolismSuitabilityEnabled
+                    ? Mathf.Lerp(populationState.LastHabitatValue[i], habitatValue, Mathf.Clamp01(settings.MovementSuitabilityMemoryBlend))
+                    : habitatValue;
 
                 float baseInterval = isFlagellum ? Mathf.Max(0.01f, settings.FlagellumSenseInterval) : Mathf.Max(0.01f, settings.AmoeboidSenseInterval);
                 float jitter = isFlagellum ? Mathf.Max(0f, settings.FlagellumSenseIntervalJitter) : Mathf.Max(0f, settings.AmoeboidSenseIntervalJitter);
@@ -266,7 +323,8 @@ public class ReplicatorSteeringSystem
         {
             float avgTumbleProbability = debugState.TumbleProbabilitySampleCount > 0 ? debugState.TumbleProbabilityAccumulator / debugState.TumbleProbabilitySampleCount : 0f;
             float avgRunDuration = debugState.RunDurationSampleCount > 0f ? debugState.RunDurationAccumulator / debugState.RunDurationSampleCount : 0f;
-            Debug.Log($"Run&Tumble debug: avgTumbleProbability={avgTumbleProbability:0.000}, avgRunDuration={avgRunDuration:0.000}s, tumblesInWindow={debugState.TumblesThisWindow}");
+            float avgSuitabilityDelta = debugState.SuitabilityComparisons > 0 ? debugState.SuitabilityDeltaAccumulator / debugState.SuitabilityComparisons : 0f;
+            Debug.Log($"Run&Tumble debug: avgTumbleProbability={avgTumbleProbability:0.000}, avgRunDuration={avgRunDuration:0.000}s, tumblesInWindow={debugState.TumblesThisWindow}, suitabilityComparisons={debugState.SuitabilityComparisons}, improvedContinuations={debugState.ContinuedDueToImprovedSuitability}, worsenedTumbles={debugState.TumbledDueToWorsenedSuitability}, avgSuitabilityDelta={avgSuitabilityDelta:0.000}, o2InhibitedAnaerobeWorse={debugState.O2InhibitedAnaerobeWorsenedComparisons}");
 
             debugState.RunAndTumbleDebugTimer = 0f;
             debugState.RunDurationAccumulator = 0f;
@@ -274,6 +332,11 @@ public class ReplicatorSteeringSystem
             debugState.TumbleProbabilityAccumulator = 0f;
             debugState.TumbleProbabilitySampleCount = 0;
             debugState.TumblesThisWindow = 0;
+            debugState.SuitabilityComparisons = 0;
+            debugState.ContinuedDueToImprovedSuitability = 0;
+            debugState.TumbledDueToWorsenedSuitability = 0;
+            debugState.O2InhibitedAnaerobeWorsenedComparisons = 0;
+            debugState.SuitabilityDeltaAccumulator = 0f;
         }
     }
 
@@ -350,6 +413,67 @@ public class ReplicatorSteeringSystem
             default:
                 return 0f;
         }
+    }
+
+    float ComputeAnaerobeO2MovementEfficiency(MetabolismType metabolism, PlanetResourceMap planetResourceMap, int cellIndex, int layerIndex, in Settings settings)
+    {
+        if (!IsAnaerobicO2Sensitive(metabolism, settings))
+        {
+            return 1f;
+        }
+
+        float localO2 = GetRawResource(planetResourceMap, ResourceType.O2, cellIndex, layerIndex);
+        float inhibition01 = ComputeO2Inhibition01(localO2, settings);
+        return Mathf.Lerp(1f, GetAnaerobeO2MinEfficiency(metabolism, settings), inhibition01);
+    }
+
+    bool IsAnaerobicO2Sensitive(MetabolismType metabolism, in Settings settings)
+    {
+        if (!settings.AnaerobeO2InhibitionEnabled)
+        {
+            return false;
+        }
+
+        switch (metabolism)
+        {
+            case MetabolismType.Methanogenesis: return settings.AnaerobeO2InhibitionAffectsMethanogenesis;
+            case MetabolismType.Fermentation: return settings.AnaerobeO2InhibitionAffectsFermentation;
+            case MetabolismType.Hydrogenotrophy: return settings.AnaerobeO2InhibitionAffectsHydrogenotrophy;
+            case MetabolismType.SulfurChemosynthesis: return settings.AnaerobeO2InhibitionAffectsSulfurChemosynthesis;
+            default: return false;
+        }
+    }
+
+    float ComputeO2Inhibition01(float localO2, in Settings settings)
+    {
+        float comfortMax = Mathf.Max(0f, settings.AnaerobeO2ComfortMax);
+        float stressMax = Mathf.Max(comfortMax + 0.0001f, settings.AnaerobeO2StressMax);
+        if (localO2 <= comfortMax)
+        {
+            return 0f;
+        }
+
+        float t = Mathf.Clamp01((localO2 - comfortMax) / (stressMax - comfortMax));
+        return t * t * (3f - 2f * t);
+    }
+
+    float GetAnaerobeO2MinEfficiency(MetabolismType metabolism, in Settings settings)
+    {
+        switch (metabolism)
+        {
+            case MetabolismType.Methanogenesis: return Mathf.Clamp01(settings.AnaerobeO2MinEfficiencyMethanogenesis);
+            case MetabolismType.Fermentation: return Mathf.Clamp01(settings.AnaerobeO2MinEfficiencyFermentation);
+            case MetabolismType.Hydrogenotrophy: return Mathf.Clamp01(settings.AnaerobeO2MinEfficiencyHydrogenotrophy);
+            case MetabolismType.SulfurChemosynthesis: return Mathf.Clamp01(settings.AnaerobeO2MinEfficiencySulfurChemosynthesis);
+            default: return 1f;
+        }
+    }
+
+    float GetRawResource(PlanetResourceMap planetResourceMap, ResourceType resourceType, int cellIndex, int layerIndex)
+    {
+        return layerIndex >= 0
+            ? planetResourceMap.GetResourceForCellLayer(resourceType, cellIndex, layerIndex, PlanetResourceMap.AggregateCompatibilityCallsite.UnknownLegacy)
+            : planetResourceMap.Get(resourceType, cellIndex, PlanetResourceMap.AggregateCompatibilityCallsite.UnknownLegacy);
     }
 
     float NormalizeResource(PlanetResourceMap planetResourceMap, ResourceType resourceType, int cellIndex, int layerIndex, float goodEnoughScale)
