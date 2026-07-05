@@ -157,8 +157,13 @@ public class PlanetCellInspectorPanel : MonoBehaviour
             }
             sb.AppendLine($"  O2: {layer.O2:0.###}, CO2: {layer.CO2:0.###}");
             sb.AppendLine($"  DissolvedFe2+: {layer.DissolvedFe2Plus:0.###}");
+            sb.AppendLine($"  Visual precip: S0 {layer.SulfurPrecipitateVisual:0.###}, FeOx {layer.IronOxidePrecipitateVisual:0.###}");
             sb.AppendLine($"  CH4: {layer.CH4:0.###}, H2: {layer.H2:0.###}, H2S: {layer.H2S:0.###}");
             sb.AppendLine($"  Light: {layer.LightFactor:0.###}, OrganicC: {layer.OrganicC:0.###}");
+            if (layer.LayerIndex == snapshot.OceanLayers.Length - 1)
+            {
+                sb.AppendLine($"  Bottom tint: S0 {layer.BottomSulfurTintVisual:0.###}, FeOx {layer.BottomIronOxideTintVisual:0.###}");
+            }
             sb.AppendLine($"  Temp Estimate: {ReplicatorManager.FormatTemperature(layer.TemperatureKelvinEstimate, temperatureDisplayUnit)}");
             sb.AppendLine();
         }

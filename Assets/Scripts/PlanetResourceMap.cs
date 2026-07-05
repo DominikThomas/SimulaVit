@@ -72,6 +72,10 @@ public class PlanetResourceMap : MonoBehaviour
         public int LayerIndex;
         public float O2;
         public float DissolvedFe2Plus;
+        public float SulfurPrecipitateVisual;
+        public float IronOxidePrecipitateVisual;
+        public float BottomSulfurTintVisual;
+        public float BottomIronOxideTintVisual;
         public float CO2;
         public float CH4;
         public float OrganicC;
@@ -228,6 +232,36 @@ public class PlanetResourceMap : MonoBehaviour
     public Color oxygenatedOceanColor = new Color(0.18f, 0.40f, 0.75f, 1f);
     [Range(0f, 1f)] public float oceanAlpha = 0.35f;
     [Range(0.01f, 10f)] public float oceanColorLerpSpeed = 2f;
+
+    [Header("Ocean Precipitate Visuals")]
+    [Tooltip("Visual-only suspended precipitate fields generated from existing S0 and Fe2+ oxidation events.")]
+    public bool enablePrecipitateVisuals = true;
+    [Tooltip("Draw sampled local precipitate cloudiness/tint points in Scene view when this component is selected.")]
+    public bool drawPrecipitateDebugPoints = true;
+    [Tooltip("How strongly positive S0 production contributes to yellow suspended cloudiness.")]
+    [Min(0f)] public float sulfurPrecipitateVisualScale = 1f;
+    [Tooltip("How strongly Fe2+ oxidation contributes to rusty suspended cloudiness.")]
+    [Min(0f)] public float ironOxidePrecipitateVisualScale = 1f;
+    [Tooltip("Fraction of suspended precipitate that settles one layer downward each atmosphere tick.")]
+    [Range(0f, 1f)] public float precipitateSettleFractionPerTick = 0.08f;
+    [Tooltip("Fraction of suspended precipitate that fades each second while above the bottom layer.")]
+    [Range(0f, 1f)] public float precipitateSuspendedDecayPerSecond = 0.04f;
+    [Tooltip("Fraction of suspended precipitate that fades each second in the bottom layer after tint deposition.")]
+    [Range(0f, 1f)] public float precipitateBottomSuspendedDecayPerSecond = 0.35f;
+    [Tooltip("Fraction of bottom-layer suspended precipitate transferred to persistent bottom/seafloor tint each atmosphere tick.")]
+    [Range(0f, 1f)] public float precipitateBottomDepositFractionPerTick = 0.25f;
+    [Tooltip("Slow visual fade for accumulated bottom tint. 0 makes tint persistent for the run.")]
+    [Range(0f, 1f)] public float precipitateBottomTintDecayPerSecond = 0.002f;
+    [Min(0.0001f)] public float precipitateVisualSaturation = 1f;
+    public Color sulfurPrecipitateColor = new Color(1f, 0.86f, 0.12f, 1f);
+    public Color ironOxidePrecipitateColor = new Color(0.85f, 0.34f, 0.08f, 1f);
+    public Color sulfurBottomTintColor = new Color(0.95f, 0.78f, 0.08f, 1f);
+    public Color ironOxideBottomTintColor = new Color(0.65f, 0.22f, 0.06f, 1f);
+    [Range(0f, 1f)] public float precipitateOceanTintStrength = 0.18f;
+    public float debugSulfurPrecipitateSuspendedTotal;
+    public float debugIronOxidePrecipitateSuspendedTotal;
+    public float debugSulfurBottomTintTotal;
+    public float debugIronOxideBottomTintTotal;
 
     private Material oceanMaterialInstance;
     private Color currentOceanColor;
@@ -463,6 +497,10 @@ public class PlanetResourceMap : MonoBehaviour
     private byte[] oceanActiveLayerCounts;
     private float[] oceanLayerLightFactors;
     private float[] oceanLayerTemperatureOffsets;
+    private float[] sulfurPrecipitateVisual;
+    private float[] ironOxidePrecipitateVisual;
+    private float[] sulfurBottomTintVisual;
+    private float[] ironOxideBottomTintVisual;
     private float ventTimer;
     private float atmosphereTimer;
     private float thermalTimer;
@@ -957,6 +995,7 @@ public class PlanetResourceMap : MonoBehaviour
                 // Surface Fe2+ can still draw atmospheric O2, but only from local top-layer demand.
                 TransferAtmosphericO2ToSurfaceFe2Demand(atmosphereTick);
                 ApplyDissolvedFe2PlusOxidation(atmosphereTick);
+                UpdatePrecipitateVisuals(atmosphereTick);
                 ApplyLocalResourceMixing(atmosphereTick);
                 ApplyVerticalLayeredOceanProcesses(atmosphereTick);
                 UpdateAtmosphereDebugMeans();
@@ -1114,6 +1153,7 @@ public class PlanetResourceMap : MonoBehaviour
             debugLayeredAggregateAddCompatibilityAbsDelta += Mathf.Abs(delta);
             RecordAggregateAddCompatibilityCallsite(callsite, delta);
             AddLayeredResourceDelta(t, cell, delta, callsite);
+            TrackVisualPrecipitateProduction(t, cell, GetOceanBottomLayerIndex(cell), delta);
             SyncLegacyOceanResourceFromLayers(t, cell);
             return;
         }
@@ -1125,6 +1165,10 @@ public class PlanetResourceMap : MonoBehaviour
 
         float[] arr = GetArray(t);
         arr[cell] = Mathf.Max(0f, arr[cell] + delta);
+        if (t == ResourceType.S0 && delta > 0f && IsOceanCell(cell))
+        {
+            TrackVisualPrecipitateProduction(t, cell, GetOceanBottomLayerIndex(cell), delta);
+        }
     }
 
     public void AddResourceForCellLayer(ResourceType t, int cell, int requestedLayerIndex, float delta, AggregateCompatibilityCallsite callsite = AggregateCompatibilityCallsite.UnknownLegacy)
@@ -1162,6 +1206,7 @@ public class PlanetResourceMap : MonoBehaviour
 
         int idx = GetLayeredArrayIndex(cell, clampedLayer);
         layered[idx] = Mathf.Max(0f, layered[idx] + delta);
+        TrackVisualPrecipitateProduction(t, cell, clampedLayer, delta);
         SyncLegacyOceanResourceFromLayers(t, cell);
     }
 
@@ -1502,6 +1547,10 @@ public class PlanetResourceMap : MonoBehaviour
             layerSnapshot.LayerIndex = layer;
             layerSnapshot.O2 = GetLayerResource(ResourceType.O2, cell, layer);
             layerSnapshot.DissolvedFe2Plus = GetLayerResource(ResourceType.DissolvedFe2Plus, cell, layer);
+            layerSnapshot.SulfurPrecipitateVisual = GetPrecipitateVisual(sulfurPrecipitateVisual, cell, layer);
+            layerSnapshot.IronOxidePrecipitateVisual = GetPrecipitateVisual(ironOxidePrecipitateVisual, cell, layer);
+            layerSnapshot.BottomSulfurTintVisual = GetBottomPrecipitateTint(sulfurBottomTintVisual, cell);
+            layerSnapshot.BottomIronOxideTintVisual = GetBottomPrecipitateTint(ironOxideBottomTintVisual, cell);
             layerSnapshot.CO2 = GetLayerResource(ResourceType.CO2, cell, layer);
             layerSnapshot.CH4 = GetLayerResource(ResourceType.CH4, cell, layer);
             layerSnapshot.OrganicC = GetLayerResource(ResourceType.OrganicC, cell, layer);
@@ -1798,6 +1847,10 @@ public class PlanetResourceMap : MonoBehaviour
         oceanActiveLayerCounts = new byte[cellCount];
         oceanLayerLightFactors = new float[cellCount * MaxOceanLayers];
         oceanLayerTemperatureOffsets = new float[cellCount * MaxOceanLayers];
+        sulfurPrecipitateVisual = new float[cellCount * MaxOceanLayers];
+        ironOxidePrecipitateVisual = new float[cellCount * MaxOceanLayers];
+        sulfurBottomTintVisual = new float[cellCount];
+        ironOxideBottomTintVisual = new float[cellCount];
         layeredOrganicCTmp = new float[cellCount * MaxOceanLayers];
         ConfigureOceanDissolvedSpecies(cellCount);
         ConfigureLayeredOceanResources(cellCount);
@@ -3417,6 +3470,7 @@ public class PlanetResourceMap : MonoBehaviour
                 dissolvedFe2PlusLegacy[cell] = availableFe2 - oxidizedFe2;
                 o2[cell] = Mathf.Max(0f, availableO2 - (oxidizedFe2 * o2PerFe2));
                 fe[cell] += oxidizedFe2;
+                AddVisualPrecipitate(ironOxidePrecipitateVisual, cell, GetOceanBottomLayerIndex(cell), oxidizedFe2 * ironOxidePrecipitateVisualScale);
             }
 
             return;
@@ -3476,6 +3530,7 @@ public class PlanetResourceMap : MonoBehaviour
                 dissolvedFe2PlusLayers[idx] = availableFe2 - oxidizedFe2;
                 o2Layers[idx] = Mathf.Max(0f, availableO2 - (oxidizedFe2 * o2PerFe2));
                 oxidizedTotalThisCell += oxidizedFe2;
+                AddVisualPrecipitate(ironOxidePrecipitateVisual, cell, layer, oxidizedFe2 * ironOxidePrecipitateVisualScale);
             }
 
             if (oxidizedTotalThisCell > 0f)
@@ -3551,6 +3606,13 @@ public class PlanetResourceMap : MonoBehaviour
     {
         float fe2Remaining = Mathf.Clamp01(debugDissolvedFe2PlusRemainingFraction);
         Color color = Color.Lerp(oxygenatedOceanColor, ironRichOceanColor, fe2Remaining);
+        if (enablePrecipitateVisuals)
+        {
+            float sulfur = Mathf.Clamp01(debugSulfurPrecipitateSuspendedTotal / Mathf.Max(0.0001f, CountOceanCells() * precipitateVisualSaturation));
+            float iron = Mathf.Clamp01(debugIronOxidePrecipitateSuspendedTotal / Mathf.Max(0.0001f, CountOceanCells() * precipitateVisualSaturation));
+            color = Color.Lerp(color, sulfurPrecipitateColor, sulfur * precipitateOceanTintStrength);
+            color = Color.Lerp(color, ironOxidePrecipitateColor, iron * precipitateOceanTintStrength);
+        }
         color.a = Mathf.Clamp01(oceanAlpha);
         return color;
     }
@@ -3579,6 +3641,103 @@ public class PlanetResourceMap : MonoBehaviour
 
         if (oceanMaterialInstance.HasProperty(ColorId))
             oceanMaterialInstance.SetColor(ColorId, color);
+    }
+
+
+    private void TrackVisualPrecipitateProduction(ResourceType resourceType, int cell, int layer, float delta)
+    {
+        if (!enablePrecipitateVisuals || delta <= 0f || resourceType != ResourceType.S0)
+            return;
+
+        AddVisualPrecipitate(sulfurPrecipitateVisual, cell, layer, delta * sulfurPrecipitateVisualScale);
+    }
+
+    private void AddVisualPrecipitate(float[] target, int cell, int layer, float amount)
+    {
+        if (!enablePrecipitateVisuals || target == null || amount <= 0f || !IsOceanCell(cell))
+            return;
+
+        int clampedLayer = ClampOceanLayerIndex(cell, layer);
+        if (clampedLayer < 0)
+            clampedLayer = GetOceanBottomLayerIndex(cell);
+
+        int idx = GetLayeredArrayIndex(cell, clampedLayer);
+        if (idx >= 0 && idx < target.Length)
+            target[idx] = Mathf.Max(0f, target[idx] + amount);
+    }
+
+    private float GetPrecipitateVisual(float[] source, int cell, int layer)
+    {
+        if (source == null || cell < 0 || layer < 0)
+            return 0f;
+        int idx = GetLayeredArrayIndex(cell, layer);
+        return idx >= 0 && idx < source.Length ? source[idx] : 0f;
+    }
+
+    private float GetBottomPrecipitateTint(float[] source, int cell)
+    {
+        return source != null && cell >= 0 && cell < source.Length ? source[cell] : 0f;
+    }
+
+    private void UpdatePrecipitateVisuals(float dt)
+    {
+        if (!enablePrecipitateVisuals || sulfurPrecipitateVisual == null || ironOxidePrecipitateVisual == null || oceanMask == null)
+            return;
+
+        UpdatePrecipitateVisualArray(sulfurPrecipitateVisual, sulfurBottomTintVisual, dt, out debugSulfurPrecipitateSuspendedTotal, out debugSulfurBottomTintTotal);
+        UpdatePrecipitateVisualArray(ironOxidePrecipitateVisual, ironOxideBottomTintVisual, dt, out debugIronOxidePrecipitateSuspendedTotal, out debugIronOxideBottomTintTotal);
+    }
+
+    private void UpdatePrecipitateVisualArray(float[] suspended, float[] bottomTint, float dt, out float suspendedTotal, out float bottomTintTotal)
+    {
+        suspendedTotal = 0f;
+        bottomTintTotal = 0f;
+        float settle = Mathf.Clamp01(precipitateSettleFractionPerTick);
+        float suspendedDecay = 1f - Mathf.Clamp01(precipitateSuspendedDecayPerSecond) * Mathf.Max(0f, dt);
+        float bottomDecay = 1f - Mathf.Clamp01(precipitateBottomSuspendedDecayPerSecond) * Mathf.Max(0f, dt);
+        float deposit = Mathf.Clamp01(precipitateBottomDepositFractionPerTick);
+        float tintDecay = 1f - Mathf.Clamp01(precipitateBottomTintDecayPerSecond) * Mathf.Max(0f, dt);
+
+        for (int cell = 0; cell < oceanMask.Length; cell++)
+        {
+            if (oceanMask[cell] == 0)
+                continue;
+
+            int active = GetOceanActiveLayerCount(cell);
+            int bottom = Mathf.Max(0, active - 1);
+            for (int layer = bottom; layer >= 0; layer--)
+            {
+                int idx = GetLayeredArrayIndex(cell, layer);
+                float value = Mathf.Max(0f, suspended[idx]);
+                if (value <= 0f)
+                    continue;
+
+                if (layer < bottom && settle > 0f)
+                {
+                    float moved = value * settle;
+                    value -= moved;
+                    suspended[GetLayeredArrayIndex(cell, layer + 1)] += moved;
+                }
+
+                if (layer == bottom)
+                {
+                    float deposited = value * deposit;
+                    value = (value - deposited) * bottomDecay;
+                    if (bottomTint != null && cell < bottomTint.Length)
+                        bottomTint[cell] = Mathf.Max(0f, (bottomTint[cell] * tintDecay) + deposited);
+                }
+                else
+                {
+                    value *= suspendedDecay;
+                }
+
+                suspended[idx] = Mathf.Max(0f, value);
+                suspendedTotal += suspended[idx];
+            }
+
+            if (bottomTint != null && cell < bottomTint.Length)
+                bottomTintTotal += bottomTint[cell];
+        }
     }
 
     private void ApplyNaturalOxidation()
@@ -4567,6 +4726,15 @@ public class PlanetResourceMap : MonoBehaviour
         ventDissolvedFe2PlusPerTick = Mathf.Max(0f, ventDissolvedFe2PlusPerTick);
         fe2PlusOxidationRatePerSecond = Mathf.Max(0f, fe2PlusOxidationRatePerSecond);
         o2ConsumptionPerFe2PlusOxidized = Mathf.Max(0f, o2ConsumptionPerFe2PlusOxidized);
+        sulfurPrecipitateVisualScale = Mathf.Max(0f, sulfurPrecipitateVisualScale);
+        ironOxidePrecipitateVisualScale = Mathf.Max(0f, ironOxidePrecipitateVisualScale);
+        precipitateSettleFractionPerTick = Mathf.Clamp01(precipitateSettleFractionPerTick);
+        precipitateSuspendedDecayPerSecond = Mathf.Clamp01(precipitateSuspendedDecayPerSecond);
+        precipitateBottomSuspendedDecayPerSecond = Mathf.Clamp01(precipitateBottomSuspendedDecayPerSecond);
+        precipitateBottomDepositFractionPerTick = Mathf.Clamp01(precipitateBottomDepositFractionPerTick);
+        precipitateBottomTintDecayPerSecond = Mathf.Clamp01(precipitateBottomTintDecayPerSecond);
+        precipitateVisualSaturation = Mathf.Max(0.0001f, precipitateVisualSaturation);
+        precipitateOceanTintStrength = Mathf.Clamp01(precipitateOceanTintStrength);
         dissolvedOrganicLeakDecayPerSecond = Mathf.Max(0f, dissolvedOrganicLeakDecayPerSecond);
         toxicProteolyticWasteDecayPerSecond = Mathf.Max(0f, toxicProteolyticWasteDecayPerSecond);
         scentDiffusePasses = Mathf.Clamp(scentDiffusePasses, 0, 4);
@@ -4807,6 +4975,31 @@ public class PlanetResourceMap : MonoBehaviour
             {
                 Gizmos.color = ventDebugColor;
                 Gizmos.DrawWireSphere(world, debugPointSize * 1.25f);
+            }
+
+            if (drawPrecipitateDebugPoints && enablePrecipitateVisuals && oceanMask != null && oceanMask[i] != 0)
+            {
+                int bottom = GetOceanBottomLayerIndex(i);
+                float sulfur = 0f;
+                float iron = 0f;
+                int active = GetOceanActiveLayerCount(i);
+                for (int layer = 0; layer < active; layer++)
+                {
+                    sulfur += GetPrecipitateVisual(sulfurPrecipitateVisual, i, layer);
+                    iron += GetPrecipitateVisual(ironOxidePrecipitateVisual, i, layer);
+                }
+
+                sulfur += GetBottomPrecipitateTint(sulfurBottomTintVisual, i);
+                iron += GetBottomPrecipitateTint(ironOxideBottomTintVisual, i);
+                float total = sulfur + iron;
+                if (total > 0.0001f)
+                {
+                    Color precipColor = Color.Lerp(sulfurPrecipitateColor, ironOxidePrecipitateColor, iron / total);
+                    precipColor.a = Mathf.Clamp01(total / Mathf.Max(0.0001f, precipitateVisualSaturation));
+                    Gizmos.color = precipColor;
+                    Vector3 precipWorld = transform.position + dir * (surfaceRadius + debugPointSize * 1.8f + bottom * debugPointSize * 0.15f);
+                    Gizmos.DrawSphere(precipWorld, debugPointSize * Mathf.Lerp(0.75f, 1.8f, precipColor.a));
+                }
             }
         }
     }
