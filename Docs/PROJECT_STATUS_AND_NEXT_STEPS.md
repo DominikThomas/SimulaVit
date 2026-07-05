@@ -42,7 +42,7 @@ Implemented:
 ### Population state ownership
 
 Implemented/current ownership:
-- `ReplicatorPopulationState` is authoritative for hot simulation fields used by metabolism, steering, movement, lifecycle gating, rendering transforms/colors, cooldowns, starvation counters, O2 toxicity timers, and ocean layer indices.
+- `ReplicatorPopulationState` is authoritative for hot simulation fields used by metabolism, steering, movement, lifecycle gating, rendering transforms/colors, cooldowns, starvation counters, O2 inhibition/direct-damage timers, and ocean layer indices.
 - `List<Replicator>` remains a companion structure for compatibility, debugging, lifecycle object construction, spawn/reproduction trait handling, and any fields not yet mirrored in SoA.
 - Save/load correctly treats `ReplicatorPopulationState` as the primary source for hot fields and captures selected companion-only fields until those are migrated.
 
@@ -62,7 +62,7 @@ Implemented/current state:
 Not implemented:
 - Reactions are not the authoritative execution model.
 - Stoichiometry values are marked as scaffolding/provisional.
-- O2 toxicity, UV protection, inhibition, maintenance cost, running cost, and modular reaction effects are not yet generalized as reaction effects.
+- O2 inhibition/direct damage, UV protection, inhibition, maintenance cost, running cost, and modular reaction effects are not yet generalized as reaction effects.
 
 ### Phosphorus and nutrient-limited replication
 
@@ -239,7 +239,7 @@ Intentional but should be measured:
 
 Save/load:
 - Save, load immediately, and assert population count matches.
-- Save, load immediately, and compare representative per-agent fields: position, direction, velocity, energy, age, metabolism, locomotion, starvation timers, O2 toxicity timer, color, size, current/preferred ocean layer.
+- Save, load immediately, and compare representative per-agent fields: position, direction, velocity, energy, age, metabolism, locomotion, starvation timers, O2 inhibition/direct-damage timer, color, size, current/preferred ocean layer.
 - Save, load immediately, and compare resource sums and sampled cell/layer values for CO2, O2, OrganicC, H2S, H2, CH4, S0, DissolvedFe2+, DissolvedOrganicLeak, and ToxicProteolyticWaste.
 - Save, load immediately, and verify surface temperature arrays when thermal inertia is enabled.
 - Save, load immediately, and verify vent/atmosphere/thermal timers.

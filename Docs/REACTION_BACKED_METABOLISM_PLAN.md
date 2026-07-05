@@ -52,13 +52,13 @@ Each branch in `ReplicatorMetabolismSystem` directly performs:
 
 ### 2.3 Data/state currently involved
 
-- **Replicator-level identity/state**: `Replicator.metabolism`, per-agent starvation fields, O2 toxicity fields, replicate gating fields.
+- **Replicator-level identity/state**: `Replicator.metabolism`, per-agent starvation fields, O2 inhibition/direct-damage fields, replicate gating fields.
 - **SoA hot state**: `ReplicatorPopulationState` stores `Metabolism[]`, `Energy[]`, `OrganicCStore[]`, starvation arrays, `O2ToxicSeconds[]`, `O2ComfortMax[]`, `O2StressMax[]`, and layer indices.
 - **Environment/resources**: `PlanetResourceMap` and `ResourceType` define available resources and layer-aware/fallback write telemetry.
 
-### 2.4 Existing O2 toxicity and special cases
+### 2.4 Existing O2 inhibition and optional direct-damage special cases
 
-- O2 toxicity is already represented by `DeathCause.O2_Toxicity` and per-agent timers (`o2ToxicSeconds` / `O2ToxicSeconds[]`), but logic is still metabolism-branch specific and not generalized as reaction effects.
+- O2 pressure is currently represented by runtime inhibition plus legacy optional direct-damage fields (`DeathCause.O2_Toxicity`, `o2ToxicSeconds` / `O2ToxicSeconds[]`), but those effects are still metabolism-branch specific and not generalized as reaction effects.
 - Photosynthesis has dedicated helper flow (`ProcessPhotosynthesisMetabolism`, dark aerobic respiration, dark anoxic fallback) and debug counters, showing the current pattern of “feature = special branch code”.
 - Anoxygenic-like behavior currently exists as a photosynth dark fallback path, but it is encoded procedurally, not as explicit reactions.
 
@@ -170,11 +170,11 @@ Each metabolism migration should be isolated in its own commit where possible, w
 
 ---
 
-## 6. Phase 2 O2 toxicity integration
+## 6. Phase 2 O2 inhibition/direct-damage integration
 
-**Objective:** Move O2 toxicity from metabolism-branch logic into reaction-level inhibition/toxicity effects.
+**Objective:** Move O2 pressure from metabolism-branch logic into reaction-level inhibition and optional direct-damage effects.
 
-- Model O2 toxicity as reaction modifiers that can:
+- Model O2 pressure as reaction modifiers that can:
   - reduce effective throughput,
   - increase maintenance burden,
   - increment toxicity timers under high O2,
@@ -281,7 +281,7 @@ Long-term ecological goals:
 2. **Behavior parity (long horizon)**
    - Population composition trends remain within predefined tolerance windows.
 3. **Toxicity parity**
-   - O2 toxicity death timing/frequency comparable before richer toxicity kinetics are introduced.
+   - optional direct oxidative-damage timing/frequency comparable before richer damage kinetics are introduced.
 4. **Performance**
    - Hot-loop timings and allocation profile meet or beat current baseline.
 5. **Telemetry continuity**
