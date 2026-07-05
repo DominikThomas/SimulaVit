@@ -86,7 +86,8 @@ Counters are lifetime counters for the current play/session state:
 - `Blocked` increments when the gate rejects the target.
 - `AttemptsByTarget`, `AllowedByTarget`, and `BlockedByTarget` are fixed-size arrays indexed by `MetabolismType` integer value.
 - `BlockedByReason` is a fixed-size array indexed by `MetabolismMutationGateBlockReason` integer value.
-- `topMutationGateBlockReason` / `topMutationGateBlockReasonCount` and `topBlockedMutationGateTarget` / `topBlockedMutationGateTargetCount` summarize the highest blocked reason and target for quick Inspector reads.
+- `topMutationGateBlockReason` / `topMutationGateBlockReasonCount` and `topBlockedMutationGateTarget` / `topBlockedMutationGateTargetCount` summarize the highest blocked reason and target for quick Inspector reads. These two fields are independent summaries.
+- `topBlockedMutationGatePairTarget` / `topBlockedMutationGatePairReason` / `topBlockedMutationGatePairCount` summarize the highest blocked target/reason pair from the lightweight `BlockedByTargetAndReason` matrix.
 
 To reset telemetry during play mode, use the `ReplicatorManager` component context menu item **Reset Metabolism Mutation Gate Telemetry**. This replaces the telemetry object, clears top-counter fields, and rebuilds fixed-size arrays to the current enum lengths.
 
@@ -116,7 +117,10 @@ Block reasons mean:
 - Near vents with H2 + CO2 and low O2, Methanogenesis should be allowed when attempted.
 - Near lit CO2-rich layers, Photosynthesis should be allowed when attempted.
 
+## Methanogenesis `TooMuchO2` note
+
+`TooMuchO2` blocks for Methanogenesis are expected behavior. They only block new methanogenesis mutations in oxic habitats. Existing methanogens are handled by runtime O2 inhibition, where O2 reduces metabolism efficiency and usually causes decline through energy/carbon limitation rather than direct death. If methanogenesis disappears globally, first check for anoxic H2 + CO2 refuges and O2 layer transport/mixing before weakening the gate.
 
 ## Validation playtest note
 
-The first telemetry playtest after enabling reaction-derived mutation gates showed the gates were active but not over-restrictive: mutation attempts were both allowed and blocked, many attempts remained allowed, Fermentation blocks appeared as `MissingOrganicC`, SulfurChemosynthesis blocks appeared as `MissingH2S`, and later Methanogenesis blocks appeared as `TooMuchO2`. O2 toxicity for anaerobes has not been implemented yet and remains the next biological selection-pressure step.
+The first telemetry playtest after enabling reaction-derived mutation gates showed the gates were active but not over-restrictive: mutation attempts were both allowed and blocked, many attempts remained allowed, Fermentation blocks appeared as `MissingOrganicC`, SulfurChemosynthesis blocks appeared as `MissingH2S`, and later Methanogenesis blocks appeared as `TooMuchO2`. Runtime O2 pressure is now modeled primarily as anaerobe metabolism inhibition rather than normal direct oxidative death.

@@ -46,7 +46,7 @@ Use the `ReplicatorManager` debug fields in play mode:
 * `debugAnaerobeO2InhibitedCount`: organisms currently under O2 reaction inhibition.
 * `debugAnaerobeO2AverageInhibition`: average inhibition severity for inhibited organisms.
 * `debugAnaerobeO2DirectDamageCount`: organisms currently accumulating optional oxidative damage.
-* `debugAnaerobeO2KilledCount`: direct O2 toxicity deaths this tick/window.
+* `debugAnaerobeO2KilledCount`: optional direct oxidative damage deaths this tick/window.
 * `debugAnaerobeO2StressedAverageLocalO2`: average local O2 among inhibited organisms.
 
 To verify the intended behavior, compare `debugAnaerobeO2KilledCount` with starvation/energy death telemetry. Under defaults, O2 pressure should mostly appear as inhibited metabolism followed by starvation or energy depletion, not direct O2 kills.

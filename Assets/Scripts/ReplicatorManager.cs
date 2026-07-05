@@ -39,6 +39,7 @@ public class ReplicatorManager : MonoBehaviour
         public int[] AllowedByTarget;
         public int[] BlockedByTarget;
         public int[] BlockedByReason;
+        public int[] BlockedByTargetAndReason;
     }
 
     [Header("Settings")]
@@ -611,6 +612,9 @@ public class ReplicatorManager : MonoBehaviour
     [SerializeField] private int topBlockedMutationGateTargetCount;
     [SerializeField] private MetabolismMutationGateBlockReason topMutationGateBlockReason;
     [SerializeField] private int topMutationGateBlockReasonCount;
+    [SerializeField] private MetabolismType topBlockedMutationGatePairTarget;
+    [SerializeField] private MetabolismMutationGateBlockReason topBlockedMutationGatePairReason;
+    [SerializeField] private int topBlockedMutationGatePairCount;
     private readonly ReplicatorHudPresenter hudPresenter = new ReplicatorHudPresenter();
     private readonly ReplicatorDebugTelemetry debugTelemetry = new ReplicatorDebugTelemetry();
     private bool isInitialized;
@@ -1009,10 +1013,14 @@ public class ReplicatorManager : MonoBehaviour
             MetabolismGateAllowedByTarget = metabolismMutationGateTelemetry.AllowedByTarget,
             MetabolismGateBlockedByTarget = metabolismMutationGateTelemetry.BlockedByTarget,
             MetabolismGateBlockedByReason = metabolismMutationGateTelemetry.BlockedByReason,
+            MetabolismGateBlockedByTargetAndReason = metabolismMutationGateTelemetry.BlockedByTargetAndReason,
             TopMutationGateBlockReason = topMutationGateBlockReason,
             TopMutationGateBlockReasonCount = topMutationGateBlockReasonCount,
             TopBlockedMutationGateTarget = topBlockedMutationGateTarget,
-            TopBlockedMutationGateTargetCount = topBlockedMutationGateTargetCount
+            TopBlockedMutationGateTargetCount = topBlockedMutationGateTargetCount,
+            TopBlockedMutationGatePairTarget = topBlockedMutationGatePairTarget,
+            TopBlockedMutationGatePairReason = topBlockedMutationGatePairReason,
+            TopBlockedMutationGatePairCount = topBlockedMutationGatePairCount
         };
 
         if (planetResourceMap != null)
@@ -2382,6 +2390,7 @@ public class ReplicatorManager : MonoBehaviour
         metabolismMutationGateTelemetry.Blocked++;
         IncrementTelemetryCounter(metabolismMutationGateTelemetry.BlockedByTarget, (int)target);
         IncrementTelemetryCounter(metabolismMutationGateTelemetry.BlockedByReason, (int)reason);
+        IncrementTelemetryCounter(metabolismMutationGateTelemetry.BlockedByTargetAndReason, GetMutationGatePairIndex(target, reason));
         RefreshTopMetabolismMutationGateCounters();
     }
 
@@ -2398,6 +2407,7 @@ public class ReplicatorManager : MonoBehaviour
         EnsureTelemetryArray(ref metabolismMutationGateTelemetry.AllowedByTarget, metabolismCount);
         EnsureTelemetryArray(ref metabolismMutationGateTelemetry.BlockedByTarget, metabolismCount);
         EnsureTelemetryArray(ref metabolismMutationGateTelemetry.BlockedByReason, reasonCount);
+        EnsureTelemetryArray(ref metabolismMutationGateTelemetry.BlockedByTargetAndReason, metabolismCount * reasonCount);
     }
 
     [ContextMenu("Reset Metabolism Mutation Gate Telemetry")]
@@ -2408,6 +2418,9 @@ public class ReplicatorManager : MonoBehaviour
         topBlockedMutationGateTargetCount = 0;
         topMutationGateBlockReason = MetabolismMutationGateBlockReason.None;
         topMutationGateBlockReasonCount = 0;
+        topBlockedMutationGatePairTarget = default;
+        topBlockedMutationGatePairReason = MetabolismMutationGateBlockReason.None;
+        topBlockedMutationGatePairCount = 0;
         EnsureMetabolismMutationGateTelemetry();
     }
 
@@ -2418,6 +2431,24 @@ public class ReplicatorManager : MonoBehaviour
         topBlockedMutationGateTarget = Enum.IsDefined(typeof(MetabolismType), targetIndex) ? (MetabolismType)targetIndex : default;
         topMutationGateBlockReasonCount = GetTopTelemetryCounter(metabolismMutationGateTelemetry.BlockedByReason, out int reasonIndex);
         topMutationGateBlockReason = Enum.IsDefined(typeof(MetabolismMutationGateBlockReason), reasonIndex) ? (MetabolismMutationGateBlockReason)reasonIndex : MetabolismMutationGateBlockReason.None;
+
+        topBlockedMutationGatePairCount = GetTopTelemetryCounter(metabolismMutationGateTelemetry.BlockedByTargetAndReason, out int pairIndex);
+        DecodeMutationGatePairIndex(pairIndex, out topBlockedMutationGatePairTarget, out topBlockedMutationGatePairReason);
+    }
+
+    int GetMutationGatePairIndex(MetabolismType target, MetabolismMutationGateBlockReason reason)
+    {
+        int reasonCount = Enum.GetValues(typeof(MetabolismMutationGateBlockReason)).Length;
+        return ((int)target * reasonCount) + (int)reason;
+    }
+
+    void DecodeMutationGatePairIndex(int pairIndex, out MetabolismType target, out MetabolismMutationGateBlockReason reason)
+    {
+        int reasonCount = Enum.GetValues(typeof(MetabolismMutationGateBlockReason)).Length;
+        int targetIndex = reasonCount > 0 ? pairIndex / reasonCount : 0;
+        int reasonIndex = reasonCount > 0 ? pairIndex % reasonCount : 0;
+        target = Enum.IsDefined(typeof(MetabolismType), targetIndex) ? (MetabolismType)targetIndex : default;
+        reason = Enum.IsDefined(typeof(MetabolismMutationGateBlockReason), reasonIndex) ? (MetabolismMutationGateBlockReason)reasonIndex : MetabolismMutationGateBlockReason.None;
     }
 
     static void EnsureTelemetryArray(ref int[] values, int length)

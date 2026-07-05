@@ -103,6 +103,7 @@ public class Replicator
     public float starveO2Seconds;
     public float starveCh4Seconds;
     public float starveStoredCSeconds;
+    [Tooltip("Legacy serialized timer name. Now used only for optional extreme direct oxidative damage; normal O2 pressure is metabolism-efficiency inhibition.")]
     public float o2ToxicSeconds;
     public float o2ComfortMax;
     public float o2StressMax;

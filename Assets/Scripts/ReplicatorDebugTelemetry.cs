@@ -75,10 +75,14 @@ public sealed class ReplicatorTelemetrySnapshot
     public int[] MetabolismGateAllowedByTarget;
     public int[] MetabolismGateBlockedByTarget;
     public int[] MetabolismGateBlockedByReason;
+    public int[] MetabolismGateBlockedByTargetAndReason;
     public MetabolismMutationGateBlockReason TopMutationGateBlockReason;
     public int TopMutationGateBlockReasonCount;
     public MetabolismType TopBlockedMutationGateTarget;
     public int TopBlockedMutationGateTargetCount;
+    public MetabolismType TopBlockedMutationGatePairTarget;
+    public MetabolismMutationGateBlockReason TopBlockedMutationGatePairReason;
+    public int TopBlockedMutationGatePairCount;
 }
 
 public class ReplicatorDebugTelemetry
@@ -214,7 +218,7 @@ public class ReplicatorDebugTelemetry
 
     private static string FormatMutationGateSummary(ReplicatorTelemetrySnapshot snapshot)
     {
-        return $"attempts={snapshot.MetabolismGateTotalAttempts} allowed={snapshot.MetabolismGateAllowed} blocked={snapshot.MetabolismGateBlocked} | topBlockedReason={snapshot.TopMutationGateBlockReason}:{snapshot.TopMutationGateBlockReasonCount} | topBlockedTarget={snapshot.TopBlockedMutationGateTarget}:{snapshot.TopBlockedMutationGateTargetCount}";
+        return $"attempts={snapshot.MetabolismGateTotalAttempts} allowed={snapshot.MetabolismGateAllowed} blocked={snapshot.MetabolismGateBlocked} | topBlockedReason={snapshot.TopMutationGateBlockReason}:{snapshot.TopMutationGateBlockReasonCount} | topBlockedTarget={snapshot.TopBlockedMutationGateTarget}:{snapshot.TopBlockedMutationGateTargetCount} | topBlockedPair={snapshot.TopBlockedMutationGatePairTarget}/{snapshot.TopBlockedMutationGatePairReason}:{snapshot.TopBlockedMutationGatePairCount}";
     }
 
     private static string FormatChemistrySummary(ReplicatorTelemetrySnapshot snapshot)
