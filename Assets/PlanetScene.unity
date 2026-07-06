@@ -410,7 +410,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
   m_AnchorMax: {x: 1, y: 1}
-  m_AnchoredPosition: {x: 0, y: -0.000061035156}
+  m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 0, y: 0}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &209742444
@@ -1070,7 +1070,7 @@ MonoBehaviour:
   m_HandleRect: {fileID: 1049548736}
   m_Direction: 2
   m_Value: 0
-  m_Size: 0.4736841
+  m_Size: 0.47368422
   m_NumberOfSteps: 0
   m_OnValueChanged:
     m_PersistentCalls:
@@ -1435,6 +1435,30 @@ MonoBehaviour:
   minGlobalO2: 0.01
   minLocalO2: 15
   minLocalOrganicC: 0.001
+  mutationGateMinH2S: 0.0005
+  mutationGateMinCO2: 0.001
+  mutationGateMinH2: 0.001
+  mutationGateMaxO2ForAnaerobes: 0.02
+  anaerobeO2InhibitionEnabled: 1
+  anaerobeO2ComfortMax: 0.02
+  anaerobeO2StressMax: 0.12
+  anaerobeO2MinEfficiencyMethanogenesis: 0
+  anaerobeO2MinEfficiencyFermentation: 0.65
+  anaerobeO2MinEfficiencyHydrogenotrophy: 0.25
+  anaerobeO2MinEfficiencySulfurChemosynthesis: 0.6
+  anaerobeO2ReplicationMinEfficiency: 0.35
+  anaerobeO2DirectDamageEnabled: 0
+  anaerobeO2DirectDamageThreshold: 0.25
+  anaerobeO2DirectDeathSeconds: 120
+  anaerobeO2StressSpeedMultiplier: 0.75
+  anaerobeO2InhibitionAffectsHydrogenotrophy: 1
+  anaerobeO2InhibitionAffectsSulfurChemosynthesis: 1
+  anaerobeO2InhibitionAffectsFermentation: 1
+  anaerobeO2InhibitionAffectsMethanogenesis: 1
+  mutationGateMinO2ForAerobes: 0.01
+  mutationGateMinOrganicC: 0.001
+  mutationGateMinCH4: 0.001
+  mutationGateMinLight: 0.05
   energyForFullSpeed: 1.5
   minSpeedFactor: 0.15
   chemosynthesisCo2NeedPerTick: 0.02
@@ -1522,6 +1546,13 @@ MonoBehaviour:
   methanogenesisTempRange: {x: 273.15, y: 293.15}
   methanotrophyTempRange: {x: 280.15, y: 320.15}
   defaultLethalMargin: 20
+  temperatureDormancyFloor: 0.02
+  temperatureReplicationMinEfficiency: 0.15
+  temperatureDirectDamageEnabled: 1
+  extremeColdDeathTempKelvin: 233.15
+  extremeHeatDeathTempKelvin: 423.15
+  heatDamageStartTempKelvin: 373.15
+  coldDamageStartTempKelvin: 253.15
   tempMutationChance: 0.02
   tempMutationScale: 2
   temperatureDisplayUnit: 1
@@ -1549,6 +1580,13 @@ MonoBehaviour:
   flagellumMoveSpeedMultiplier: 2
   flagellumDriftSuppression: 0.5
   amoeboidRunNoiseStrength: 0.08
+  activeMovementMetabolismSuitabilityEnabled: 1
+  movementSuitabilityMemoryBlend: 0.35
+  movementSuitabilityImprovementThreshold: 0.05
+  movementSuitabilityWorseningThreshold: 0.05
+  movementTumbleChanceWhenWorse: 0.65
+  movementTumbleChanceWhenBetter: 0.05
+  movementTumbleChanceNeutral: 0.2
   useScentPredation: 1
   dissolvedOrganicLeakEmitPerSecond: 1
   toxicProteolyticWasteEmitPerSecond: 1.5
@@ -1601,6 +1639,22 @@ MonoBehaviour:
   methanotrophAgentCount: 0
   averageOrganicCStore: 0
   divisionEligibleAgentCount: 0
+  metabolismMutationGateTelemetry:
+    TotalAttempts: 0
+    Allowed: 0
+    Blocked: 0
+    AttemptsByTarget: 
+    AllowedByTarget: 
+    BlockedByTarget: 
+    BlockedByReason: 
+    BlockedByTargetAndReason: 
+  topBlockedMutationGateTarget: 0
+  topBlockedMutationGateTargetCount: 0
+  topMutationGateBlockReason: 0
+  topMutationGateBlockReasonCount: 0
+  topBlockedMutationGatePairTarget: 0
+  topBlockedMutationGatePairReason: 0
+  topBlockedMutationGatePairCount: 0
   debugPhotosynthLightModeCount: 0
   debugPhotosynthDarkAerobicModeCount: 0
   debugPhotosynthDarkAnoxicFallbackModeCount: 0
@@ -1608,6 +1662,15 @@ MonoBehaviour:
   debugPhotosynthDarkAnoxicEnergyGeneratedPerTick: 0
   debugPhotosynthDarkAnoxicCO2ReleasedPerTick: 0
   debugPhotosynthDarkAnoxicH2ReleasedPerTick: 0
+  debugAnaerobeO2InhibitedCount: 0
+  debugAnaerobeO2DirectDamageCount: 0
+  debugAnaerobeO2KilledCount: 0
+  debugAnaerobeO2AverageInhibition: 0
+  debugAnaerobeO2StressedAverageLocalO2: 0
+  debugAverageTemperatureEfficiency: 0
+  debugTemperatureLimitedCount: 0
+  debugTemperatureHeatDamageCount: 0
+  debugTemperatureColdDormantCount: 0
   debugCurrentSteeringRecomputeInterval: 1
   debugPredatorsForceFullRateSteering: 0
   debugActiveSteeringForceFullRate: 0
@@ -1745,6 +1808,31 @@ MonoBehaviour:
   oxygenatedOceanColor: {r: 0.18, g: 0.4, b: 0.75, a: 1}
   oceanAlpha: 0.9
   oceanColorLerpSpeed: 2
+  enablePrecipitateVisuals: 1
+  drawPrecipitateDebugPoints: 1
+  sulfurPrecipitateVisualScale: 1
+  ironOxidePrecipitateVisualScale: 1
+  precipitateSettleFractionPerTick: 0.08
+  precipitateSuspendedDecayPerSecond: 0.04
+  precipitateBottomSuspendedDecayPerSecond: 0.35
+  precipitateBottomDepositFractionPerTick: 0.25
+  precipitateBottomTintDecayPerSecond: 0.002
+  precipitateVisualSaturation: 50
+  sulfurPrecipitateColor: {r: 1, g: 0.86, b: 0.12, a: 1}
+  ironOxidePrecipitateColor: {r: 0.85, g: 0.34, b: 0.08, a: 1}
+  sulfurBottomTintColor: {r: 0.95, g: 0.78, b: 0.08, a: 1}
+  ironOxideBottomTintColor: {r: 0.65, g: 0.22, b: 0.06, a: 1}
+  precipitateOceanTintStrength: 0.18
+  enablePrecipitateOverlay: 1
+  forceVisiblePrecipitateDebug: 0
+  precipitateDebugBoost: 8
+  precipitateOverlayMaxAlpha: 0.6
+  precipitateOverlayUpdateIntervalSeconds: 0.25
+  precipitateOverlayRadiusOffset: 0.006
+  debugSulfurPrecipitateSuspendedTotal: 0
+  debugIronOxidePrecipitateSuspendedTotal: 0
+  debugSulfurBottomTintTotal: 0
+  debugIronOxideBottomTintTotal: 0
   baseTempKelvin: 268.15
   insolationTempGain: 35
   ventTempGain: 200
@@ -51584,7 +51672,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 1}
   m_AnchorMax: {x: 1, y: 1}
-  m_AnchoredPosition: {x: 0, y: -0.000061035156}
+  m_AnchoredPosition: {x: 0, y: 0.000030517578}
   m_SizeDelta: {x: 0, y: 500}
   m_Pivot: {x: 0, y: 1}
 --- !u!114 &1582151553
