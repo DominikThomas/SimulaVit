@@ -264,6 +264,8 @@ public class PlanetResourceMap : MonoBehaviour
     [Min(0f)] public float bottomTintDebugBoost = 2f;
     [Tooltip("Render a terrain-hugging underwater overlay in Game view for accumulated bottom sulfur/iron precipitate deposits.")]
     public bool showBottomPrecipitateOverlay = true;
+    [Tooltip("Ignore normal visibility scaling and map raw settled bottom tint directly to the seabed overlay at the correct terrain depth.")]
+    public bool showRawBottomTintDebug = false;
     [Tooltip("Render one transparent vertex-colored overlay mesh in Game view for local suspended precipitate visibility.")]
     public bool enablePrecipitateOverlay = true;
     [Tooltip("Force nonzero precipitate cells to render at least this strongly for visual debugging.")]
@@ -533,6 +535,7 @@ public class PlanetResourceMap : MonoBehaviour
     private Color[] bottomPrecipitateOverlayColors;
     private int[] bottomPrecipitateOverlayVertexCells;
     private int bottomPrecipitateOverlaySourceVertexCount;
+    private Mesh bottomPrecipitateOverlaySourceMesh;
     private float ventTimer;
     private float atmosphereTimer;
     private float thermalTimer;
@@ -3775,7 +3778,7 @@ public class PlanetResourceMap : MonoBehaviour
 
         if (bottomPrecipitateOverlayMaterial == null)
         {
-            Shader shader = Shader.Find("SimulaVit/PrecipitateOverlay");
+            Shader shader = Shader.Find("SimulaVit/BottomPrecipitateOverlay");
             if (shader == null)
                 shader = Shader.Find("Sprites/Default");
             if (shader == null)
@@ -3788,9 +3791,10 @@ public class PlanetResourceMap : MonoBehaviour
             bottomPrecipitateOverlayMaterial.renderQueue = 3095;
         }
 
-        if (bottomPrecipitateOverlayMesh == null || bottomPrecipitateOverlaySourceVertexCount != terrainMesh.vertexCount)
+        if (bottomPrecipitateOverlayMesh == null || bottomPrecipitateOverlaySourceVertexCount != terrainMesh.vertexCount || bottomPrecipitateOverlaySourceMesh != terrainMesh)
         {
             bottomPrecipitateOverlaySourceVertexCount = terrainMesh.vertexCount;
+            bottomPrecipitateOverlaySourceMesh = terrainMesh;
             bottomPrecipitateOverlayMesh = new Mesh { name = "Bottom Precipitate Overlay Mesh" };
             bottomPrecipitateOverlayMesh.MarkDynamic();
             Vector3[] sourceVertices = terrainMesh.vertices;
@@ -3798,11 +3802,10 @@ public class PlanetResourceMap : MonoBehaviour
             bottomPrecipitateOverlayColors = new Color[sourceVertices.Length];
             bottomPrecipitateOverlayVertexCells = new int[sourceVertices.Length];
 
-            float offset = Mathf.Max(0.0005f, precipitateOverlayRadiusOffset * 0.25f);
             for (int i = 0; i < sourceVertices.Length; i++)
             {
                 Vector3 dir = sourceVertices[i].sqrMagnitude > 0f ? sourceVertices[i].normalized : Vector3.up;
-                overlayVertices[i] = sourceVertices[i] + dir * offset;
+                overlayVertices[i] = sourceVertices[i];
                 bottomPrecipitateOverlayVertexCells[i] = GetCellIndexFromDirection(dir);
                 bottomPrecipitateOverlayColors[i] = ClearPrecipitateOverlayColor;
             }
@@ -3832,8 +3835,8 @@ public class PlanetResourceMap : MonoBehaviour
             return;
 
         float saturation = Mathf.Max(0.0001f, precipitateVisualSaturation);
-        float boost = Mathf.Max(0f, bottomTintDebugBoost);
-        float strength = Mathf.Clamp01(bottomTintVisualStrength);
+        float boost = showRawBottomTintDebug ? 1f : Mathf.Max(0f, bottomTintDebugBoost);
+        float strength = showRawBottomTintDebug ? 1f : Mathf.Clamp01(bottomTintVisualStrength);
         float maxAlpha = Mathf.Clamp01(precipitateOverlayMaxAlpha);
 
         for (int i = 0; i < bottomPrecipitateOverlayColors.Length; i++)
