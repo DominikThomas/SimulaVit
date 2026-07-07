@@ -17,12 +17,20 @@ public class VentVisualizer : MonoBehaviour
     public float glowRadiusMax = 0.15f;
     public float glowEmissionMin = 0.5f;
     public float glowEmissionMax = 3.0f;
-    public float surfaceOffset = 0.01f;
+    [Tooltip("Tiny outward visual offset used only to avoid z-fighting; capped at 0.001 planet-radius units so vents stay on the rendered seafloor.")]
+    public float surfaceOffset = 0.0005f;
+
+    [Header("Seafloor Placement Debug")]
+    public bool logSeafloorPlacementComparisons = false;
+    public bool drawCorrectedSeafloorSamplePoints = false;
+    [Min(1)] public int seafloorPlacementDebugSampleCount = 6;
+    public float seafloorPlacementDebugPointSize = 0.01f;
+
     public bool showLandVents = true;
     public bool showUnderwaterVents = true;
 
     [Header("Vent Clustering")]
-    [Tooltip("Higher merges vents more aggressively into patches. 1–3 is typical.")]
+    [Tooltip("Higher merges vents more aggressively into patches. 1Â–3 is typical.")]
     public float clusterAngleMultiplier = 2f;
 
     [Tooltip("Skip tiny clusters (helps remove speckle). 0 disables.")]
@@ -49,6 +57,14 @@ public class VentVisualizer : MonoBehaviour
         {
             parent = transform;
         }
+    }
+
+
+    private void OnValidate()
+    {
+        surfaceOffset = Mathf.Clamp(surfaceOffset, 0f, 0.001f);
+        seafloorPlacementDebugSampleCount = Mathf.Max(1, seafloorPlacementDebugSampleCount);
+        seafloorPlacementDebugPointSize = Mathf.Max(0.0001f, seafloorPlacementDebugPointSize);
     }
 
     private IEnumerator Start()
@@ -96,6 +112,7 @@ public class VentVisualizer : MonoBehaviour
         }
 
         float oceanRadius = planetGenerator.GetOceanRadius();
+        LogSeafloorPlacementComparisons(vents, cellDirs, oceanRadius);
         MaterialPropertyBlock propertyBlock = new MaterialPropertyBlock();
 
         if (vents != null && vents.Length > 0)
@@ -148,7 +165,8 @@ public class VentVisualizer : MonoBehaviour
         }
 
         Vector3 dir = cellDirs[cell].normalized;
-        float surfaceRadius = planetGenerator.GetSurfaceRadius(dir);
+        Vector3 seafloorWorld = GetCorrectedSeafloorWorldPosition(dir);
+        float surfaceRadius = Vector3.Distance(planetGenerator.transform.position, seafloorWorld);
         bool underwater = surfaceRadius < oceanRadius;
 
         if ((!underwater && !showLandVents) || (underwater && !showUnderwaterVents))
@@ -160,7 +178,7 @@ public class VentVisualizer : MonoBehaviour
         float scale = Mathf.Lerp(glowRadiusMin, glowRadiusMax, normalizedStrength);
         float emission = Mathf.Lerp(glowEmissionMin, glowEmissionMax, normalizedStrength);
 
-        Vector3 worldPos = planetGenerator.transform.position + dir * (surfaceRadius + surfaceOffset);
+        Vector3 worldPos = seafloorWorld;
 
         GameObject marker = new GameObject($"Vent_{cell}");
         marker.transform.SetParent(parent, true);
@@ -311,6 +329,72 @@ public class VentVisualizer : MonoBehaviour
         return quadMesh;
     }
 
+    private float GetDepthSafeSurfaceOffset()
+    {
+        return Mathf.Clamp(surfaceOffset, 0f, 0.001f);
+    }
+
+    private Vector3 GetCorrectedSeafloorWorldPosition(Vector3 dir)
+    {
+        if (planetGenerator == null)
+        {
+            Vector3 safeDir = dir.sqrMagnitude > 0f ? dir.normalized : Vector3.up;
+            return transform.position + safeDir * GetDepthSafeSurfaceOffset();
+        }
+
+        return planetGenerator.GetSeafloorWorldPosition(dir, GetDepthSafeSurfaceOffset());
+    }
+
+    private void LogSeafloorPlacementComparisons(int[] vents, Vector3[] cellDirs, float oceanRadius)
+    {
+        if (!logSeafloorPlacementComparisons || vents == null || cellDirs == null || planetGenerator == null)
+        {
+            return;
+        }
+
+        int samples = Mathf.Min(Mathf.Max(1, seafloorPlacementDebugSampleCount), vents.Length);
+        float offset = GetDepthSafeSurfaceOffset();
+        for (int i = 0; i < samples; i++)
+        {
+            int cell = vents[i];
+            if (cell < 0 || cell >= cellDirs.Length)
+            {
+                continue;
+            }
+
+            Vector3 dir = cellDirs[cell].normalized;
+            float oldRadius = planetGenerator.GetSurfaceRadius(dir) + surfaceOffset;
+            float renderedTerrainRadius = planetGenerator.GetRenderedSurfaceRadius(dir);
+            Vector3 correctedWorld = planetGenerator.GetSeafloorWorldPosition(dir, offset);
+            float correctedRadius = Vector3.Distance(planetGenerator.transform.position, correctedWorld);
+            Debug.Log($"[VentVisualizer] Seafloor placement cell={cell} oldRadius={oldRadius:0.00000} correctedRadius={correctedRadius:0.00000} renderedTerrainRadius={renderedTerrainRadius:0.00000} oceanSurfaceRadius={oceanRadius:0.00000} rawOffset={surfaceOffset:0.00000} usedOffset={offset:0.00000}", this);
+        }
+    }
+
+    private void OnDrawGizmosSelected()
+    {
+        if (!drawCorrectedSeafloorSamplePoints || resourceMap == null || planetGenerator == null || resourceMap.VentCells == null || resourceMap.CellDirs == null)
+        {
+            return;
+        }
+
+        int[] vents = resourceMap.VentCells;
+        Vector3[] cellDirs = resourceMap.CellDirs;
+        int samples = Mathf.Min(Mathf.Max(1, seafloorPlacementDebugSampleCount), vents.Length);
+        Gizmos.color = Color.cyan;
+        for (int i = 0; i < samples; i++)
+        {
+            int cell = vents[i];
+            if (cell < 0 || cell >= cellDirs.Length)
+            {
+                continue;
+            }
+
+            Vector3 dir = cellDirs[cell].normalized;
+            Gizmos.DrawSphere(GetCorrectedSeafloorWorldPosition(dir), seafloorPlacementDebugPointSize);
+        }
+    }
+
     private class VentCluster
     {
         public Vector3 weightedDirSum;
@@ -398,7 +482,8 @@ public class VentVisualizer : MonoBehaviour
     {
         Vector3 dir = cl.CenterDir;
 
-        float surfaceRadius = planetGenerator.GetSurfaceRadius(dir);
+        Vector3 seafloorWorld = GetCorrectedSeafloorWorldPosition(dir);
+        float surfaceRadius = Vector3.Distance(planetGenerator.transform.position, seafloorWorld);
         bool underwater = surfaceRadius < oceanRadius;
 
         if ((!underwater && !showLandVents) || (underwater && !showUnderwaterVents))
@@ -411,7 +496,7 @@ public class VentVisualizer : MonoBehaviour
         float scale = Mathf.Lerp(glowRadiusMin, glowRadiusMax, normalizedStrength) * Mathf.Lerp(1f, 1.8f, Mathf.Clamp01((sizeBoost - 1f) / 4f));
         float emission = Mathf.Lerp(glowEmissionMin, glowEmissionMax, normalizedStrength) * Mathf.Lerp(1f, 1.5f, Mathf.Clamp01((sizeBoost - 1f) / 4f));
 
-        Vector3 worldPos = planetGenerator.transform.position + dir * (surfaceRadius + surfaceOffset);
+        Vector3 worldPos = seafloorWorld;
 
         GameObject marker = new GameObject($"VentCluster_{spawnedVentIndex++}_n{cl.count}");
         marker.transform.SetParent(parent, true);

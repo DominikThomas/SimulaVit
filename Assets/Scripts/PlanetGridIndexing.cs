@@ -35,6 +35,39 @@ public static class PlanetGridIndexing
         return faceIndex * (resolution * resolution) + localIndex;
     }
 
+
+
+    public static Vector3 CellIndexToDirection(int cell, int resolution)
+    {
+        if (resolution <= 0)
+        {
+            return Vector3.up;
+        }
+
+        int cellsPerFace = resolution * resolution;
+        int face = Mathf.Clamp(cell / cellsPerFace, 0, 5);
+        int local = Mathf.Clamp(cell % cellsPerFace, 0, cellsPerFace - 1);
+
+        int x = local % resolution;
+        int y = local / resolution;
+
+        float u = ((x + 0.5f) / resolution) * 2f - 1f;
+        float v = ((y + 0.5f) / resolution) * 2f - 1f;
+
+        Vector3 pointOnCube;
+        switch (face)
+        {
+            case 0: pointOnCube = new Vector3(u, 1f, -v); break;
+            case 1: pointOnCube = new Vector3(-u, -1f, -v); break;
+            case 2: pointOnCube = new Vector3(-1f, -v, -u); break;
+            case 3: pointOnCube = new Vector3(1f, -v, u); break;
+            case 4: pointOnCube = new Vector3(-v, u, 1f); break;
+            default: pointOnCube = new Vector3(-v, -u, -1f); break;
+        }
+
+        return pointOnCube.normalized;
+    }
+
     public static bool TryDirectionToFaceUV(Vector3 dir, out int faceIndex, out Vector2 uv)
     {
         uv = default;

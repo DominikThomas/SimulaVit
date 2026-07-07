@@ -1388,6 +1388,24 @@ public class PlanetResourceMap : MonoBehaviour
         return planetGenerator.GetOceanFloorRadius(GetDirectionForCell(cell));
     }
 
+
+    public Vector3 GetSeafloorWorldPosition(int cell, float normalOffset = 0f)
+    {
+        Vector3 dir = GetDirectionForCell(cell);
+        if (planetGenerator != null)
+        {
+            return planetGenerator.GetSeafloorWorldPosition(dir, normalOffset);
+        }
+
+        return transform.position + dir * normalOffset;
+    }
+
+    public float GetRenderedSeafloorRadius(int cell)
+    {
+        Vector3 dir = GetDirectionForCell(cell);
+        return planetGenerator != null ? planetGenerator.GetRenderedSurfaceRadius(dir) : 0f;
+    }
+
     public float GetOceanLayerShellRadius(int cell, int requestedLayerIndex)
     {
         if (!isInitialized || !IsCellValid(cell))
@@ -3805,7 +3823,8 @@ public class PlanetResourceMap : MonoBehaviour
             for (int i = 0; i < sourceVertices.Length; i++)
             {
                 Vector3 dir = sourceVertices[i].sqrMagnitude > 0f ? sourceVertices[i].normalized : Vector3.up;
-                overlayVertices[i] = sourceVertices[i];
+                Vector3 seafloorWorld = planetGenerator.GetSeafloorWorldPosition(dir);
+                overlayVertices[i] = planetGenerator.transform.InverseTransformPoint(seafloorWorld);
                 bottomPrecipitateOverlayVertexCells[i] = GetCellIndexFromDirection(dir);
                 bottomPrecipitateOverlayColors[i] = ClearPrecipitateOverlayColor;
             }

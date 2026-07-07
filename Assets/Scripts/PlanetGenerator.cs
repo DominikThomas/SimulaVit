@@ -659,6 +659,38 @@ public class PlanetGenerator : MonoBehaviour
         return radius;
     }
 
+    public float GetRenderedSurfaceRadius(Vector3 pointOnSphere)
+    {
+        return GetSurfaceRadius(pointOnSphere);
+    }
+
+    public float GetRenderedSurfaceRadius(int cellIndex)
+    {
+        return GetSurfaceRadius(cellIndex);
+    }
+
+    public Vector3 GetRenderedSurfaceWorldPosition(Vector3 pointOnSphere, float normalOffset = 0f)
+    {
+        Vector3 dir = pointOnSphere.sqrMagnitude > 0f ? pointOnSphere.normalized : Vector3.up;
+        return transform.position + dir * (GetRenderedSurfaceRadius(dir) + normalOffset);
+    }
+
+    public Vector3 GetRenderedSurfaceWorldPosition(int cellIndex, float normalOffset = 0f)
+    {
+        Vector3 dir = PlanetGridIndexing.CellIndexToDirection(cellIndex, resolution);
+        return GetRenderedSurfaceWorldPosition(dir, normalOffset);
+    }
+
+    public Vector3 GetSeafloorWorldPosition(Vector3 pointOnSphere, float normalOffset = 0f)
+    {
+        return GetRenderedSurfaceWorldPosition(pointOnSphere, normalOffset);
+    }
+
+    public Vector3 GetSeafloorWorldPosition(int cellIndex, float normalOffset = 0f)
+    {
+        return GetRenderedSurfaceWorldPosition(cellIndex, normalOffset);
+    }
+
     public float GetOceanFloorRadius(int cellIndex)
     {
         // For ocean cells this is the local seafloor shell.
