@@ -1,4 +1,5 @@
 using UnityEngine;
+using System;
 using System.Collections.Generic;
 #if UNITY_EDITOR
 using UnityEditor;
@@ -32,6 +33,7 @@ public enum ThermalStartupMode
 [DisallowMultipleComponent]
 public class PlanetResourceMap : MonoBehaviour
 {
+    public event Action<PlanetResourceMap, string> ResourcesReadyForVisualization;
     // Lightweight callsite tagging used by layered-ocean aggregate compatibility telemetry.
     // Keep this broad (subsystem-level) so counters stay stable and low-overhead.
     public enum AggregateCompatibilityCallsite
@@ -686,6 +688,7 @@ public class PlanetResourceMap : MonoBehaviour
         UpdateOceanChemistryDebugStats();
 
         Debug.Log("Mutable planet resources restored:\n" + string.Join("\n", statuses), this);
+        NotifyResourcesReadyForVisualization("mutable resource snapshot applied from load");
         return anyRestored;
     }
 
@@ -957,6 +960,7 @@ public class PlanetResourceMap : MonoBehaviour
     {
         InitializeIfNeeded();
         InitializeOceanVisuals();
+        NotifyResourcesReadyForVisualization("initial PlanetResourceMap Start initialization");
     }
 
     private void Update()
@@ -2115,6 +2119,14 @@ public class PlanetResourceMap : MonoBehaviour
 
         InitializeIfNeeded();
         InitializeOceanVisuals();
+        NotifyResourcesReadyForVisualization("PlanetResourceMap.ReinitializeResources completed");
+    }
+
+    private void NotifyResourcesReadyForVisualization(string reason)
+    {
+        int seed = planetGenerator != null ? planetGenerator.randomSeed : 0;
+        Debug.Log($"[PlanetResourceMap] Resources ready for visualization: reason={reason}, seed={seed}, vents={VentCount}, cells={SimulationCellCount}", this);
+        ResourcesReadyForVisualization?.Invoke(this, reason);
     }
 
     private void ConfigureOceanDissolvedSpecies(int cellCount)
