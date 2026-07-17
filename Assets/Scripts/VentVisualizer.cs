@@ -22,7 +22,11 @@ public class VentVisualizer : MonoBehaviour
     public bool showUnderwaterVents = true;
 
     [Header("Vent Clustering")]
-    [Tooltip("Higher merges vents more aggressively into patches. 1–3 is typical.")]
+    [Header("Vent Anchor Diagnostics")]
+    public bool logVentAnchors = false;
+    [Min(0)] public int maxVentAnchorLogs = 8;
+
+    [Tooltip("Higher merges vents more aggressively into patches. 1â€“3 is typical.")]
     public float clusterAngleMultiplier = 2f;
 
     [Tooltip("Skip tiny clusters (helps remove speckle). 0 disables.")]
@@ -97,12 +101,28 @@ public class VentVisualizer : MonoBehaviour
 
         float oceanRadius = planetGenerator.GetOceanRadius();
         MaterialPropertyBlock propertyBlock = new MaterialPropertyBlock();
+        int anchorLogCount = 0;
 
         if (vents != null && vents.Length > 0)
         {
-            int resolution = Mathf.Max(2, planetGenerator.resolution);
+            if (clusterAngleMultiplier <= 0f)
+            {
+                int spawnedIndividuals = 0;
+                for (int i = 0; i < vents.Length; i++)
+                {
+                    if (BuildVentVisual(vents[i], oceanRadius, cellDirs, propertyBlock, ref anchorLogCount))
+                    {
+                        spawnedIndividuals++;
+                    }
+                }
 
-            // Build clusters
+                Debug.Log($"[VentVisualizer] Spawned {spawnedIndividuals} individual vent visuals (clustering disabled, from {vents.Length} vent cells).");
+                return;
+            }
+
+            int resolution = Mathf.Max(2, resourceMap.SimulationResolution);
+
+            // Build clusters from resource-grid vent cells, so the angular scale must use the resource-grid resolution.
             List<VentCluster> clusters = BuildClusters(vents, cellDirs, resourceMap.ventStrength, resolution);
 
             int spawned = 0;
@@ -113,8 +133,10 @@ public class VentVisualizer : MonoBehaviour
                 if (minClusterStrengthToRender > 0f && cl.strengthMax < minClusterStrengthToRender)
                     continue;
 
-                SpawnClusterVisual(cl, oceanRadius, propertyBlock);
-                spawned++;
+                if (SpawnClusterVisual(cl, oceanRadius, propertyBlock, ref anchorLogCount))
+                {
+                    spawned++;
+                }
             }
 
             Debug.Log($"[VentVisualizer] Spawned {spawned} vent clusters (from {vents.Length} vent cells).");
@@ -129,38 +151,42 @@ public class VentVisualizer : MonoBehaviour
         {
             if (resourceMap.ventStrength[cell] > 0f)
             {
-                BuildVentVisual(cell, oceanRadius, cellDirs, propertyBlock);
+                BuildVentVisual(cell, oceanRadius, cellDirs, propertyBlock, ref anchorLogCount);
             }
         }
     }
 
-    private void BuildVentVisual(int cell, float oceanRadius, Vector3[] cellDirs, MaterialPropertyBlock propertyBlock)
+    private bool BuildVentVisual(int cell, float oceanRadius, Vector3[] cellDirs, MaterialPropertyBlock propertyBlock, ref int anchorLogCount)
     {
         if (cell < 0 || cell >= cellDirs.Length || cell >= resourceMap.ventStrength.Length)
         {
-            return;
+            return false;
         }
 
         float strength = resourceMap.ventStrength[cell];
         if (strength <= 0f)
         {
-            return;
+            return false;
         }
 
-        Vector3 dir = cellDirs[cell].normalized;
-        float surfaceRadius = planetGenerator.GetSurfaceRadius(dir);
-        bool underwater = surfaceRadius < oceanRadius;
+        if (!TryGetVentAnchor(cell, oceanRadius, false, cell, out VentAnchor anchor, ref anchorLogCount))
+        {
+            return false;
+        }
+
+        Vector3 dir = anchor.Direction;
+        bool underwater = anchor.IsOcean;
 
         if ((!underwater && !showLandVents) || (underwater && !showUnderwaterVents))
         {
-            return;
+            return false;
         }
 
         float normalizedStrength = Mathf.InverseLerp(resourceMap.ventStrengthMin, resourceMap.ventStrengthMax, strength);
         float scale = Mathf.Lerp(glowRadiusMin, glowRadiusMax, normalizedStrength);
         float emission = Mathf.Lerp(glowEmissionMin, glowEmissionMax, normalizedStrength);
 
-        Vector3 worldPos = planetGenerator.transform.position + dir * (surfaceRadius + surfaceOffset);
+        Vector3 worldPos = planetGenerator.transform.position + dir * (anchor.PlacementRadius + surfaceOffset);
 
         GameObject marker = new GameObject($"Vent_{cell}");
         marker.transform.SetParent(parent, true);
@@ -317,6 +343,7 @@ public class VentVisualizer : MonoBehaviour
         public float strengthSum;
         public float strengthMax;
         public int count;
+        public int representativeCell;
 
         public Vector3 CenterDir
         {
@@ -343,7 +370,7 @@ public class VentVisualizer : MonoBehaviour
         // For resolution R, a face spans ~90 degrees. Tile ~ (90deg / (R-1)).
         float safeR = Mathf.Max(2, resolution);
         float tileAngleRad = (Mathf.PI * 0.5f) / (safeR - 1f);
-        float maxAngle = tileAngleRad * Mathf.Max(0.1f, clusterAngleMultiplier);
+        float maxAngle = tileAngleRad * clusterAngleMultiplier;
         float cosThreshold = Mathf.Cos(maxAngle);
 
         for (int i = 0; i < vents.Length; i++)
@@ -377,7 +404,8 @@ public class VentVisualizer : MonoBehaviour
                     weightedDirSum = dir * s,
                     strengthSum = s,
                     strengthMax = s,
-                    count = 1
+                    count = 1,
+                    representativeCell = cell
                 };
                 clusters.Add(nc);
             }
@@ -386,7 +414,11 @@ public class VentVisualizer : MonoBehaviour
                 var cl = clusters[bestIndex];
                 cl.weightedDirSum += dir * s;
                 cl.strengthSum += s;
-                cl.strengthMax = Mathf.Max(cl.strengthMax, s);
+                if (s > cl.strengthMax)
+                {
+                    cl.strengthMax = s;
+                    cl.representativeCell = cell;
+                }
                 cl.count++;
             }
         }
@@ -394,15 +426,18 @@ public class VentVisualizer : MonoBehaviour
         return clusters;
     }
 
-    private void SpawnClusterVisual(VentCluster cl, float oceanRadius, MaterialPropertyBlock propertyBlock)
+    private bool SpawnClusterVisual(VentCluster cl, float oceanRadius, MaterialPropertyBlock propertyBlock, ref int anchorLogCount)
     {
-        Vector3 dir = cl.CenterDir;
+        if (!TryGetVentAnchor(cl.representativeCell, oceanRadius, true, cl.representativeCell, out VentAnchor anchor, ref anchorLogCount))
+        {
+            return false;
+        }
 
-        float surfaceRadius = planetGenerator.GetSurfaceRadius(dir);
-        bool underwater = surfaceRadius < oceanRadius;
+        Vector3 dir = anchor.Direction;
+        bool underwater = anchor.IsOcean;
 
         if ((!underwater && !showLandVents) || (underwater && !showUnderwaterVents))
-            return;
+            return false;
 
         float normalizedStrength = cl.NormalizedStrength(resourceMap.ventStrengthMin, resourceMap.ventStrengthMax);
 
@@ -411,7 +446,7 @@ public class VentVisualizer : MonoBehaviour
         float scale = Mathf.Lerp(glowRadiusMin, glowRadiusMax, normalizedStrength) * Mathf.Lerp(1f, 1.8f, Mathf.Clamp01((sizeBoost - 1f) / 4f));
         float emission = Mathf.Lerp(glowEmissionMin, glowEmissionMax, normalizedStrength) * Mathf.Lerp(1f, 1.5f, Mathf.Clamp01((sizeBoost - 1f) / 4f));
 
-        Vector3 worldPos = planetGenerator.transform.position + dir * (surfaceRadius + surfaceOffset);
+        Vector3 worldPos = planetGenerator.transform.position + dir * (anchor.PlacementRadius + surfaceOffset);
 
         GameObject marker = new GameObject($"VentCluster_{spawnedVentIndex++}_n{cl.count}");
         marker.transform.SetParent(parent, true);
@@ -431,6 +466,88 @@ public class VentVisualizer : MonoBehaviour
         renderer.SetPropertyBlock(propertyBlock);
 
         AttachSoot(marker.transform, normalizedStrength);
+        return true;
+    }
+
+    private struct VentAnchor
+    {
+        public Vector3 Direction;
+        public bool IsOcean;
+        public float OceanTopRadius;
+        public float OceanFloorRadius;
+        public float PlacementRadius;
+    }
+
+    private bool TryGetVentAnchor(int cell, float oceanRadius, bool clustered, int representativeCell, out VentAnchor anchor, ref int anchorLogCount)
+    {
+        anchor = default;
+        Vector3[] cellDirs = resourceMap != null ? resourceMap.CellDirs : null;
+        if (resourceMap == null || planetGenerator == null || cellDirs == null || cell < 0 || cell >= cellDirs.Length)
+        {
+            return false;
+        }
+
+        Vector3 dir = cellDirs[cell];
+        if (dir.sqrMagnitude <= 1e-12f)
+        {
+            dir = Vector3.up;
+        }
+        else
+        {
+            dir.Normalize();
+        }
+
+        bool isOcean = resourceMap.IsOceanCell(cell);
+        float oceanTopRadius = resourceMap.GetOceanTopRadius(cell);
+        if (!float.IsFinite(oceanTopRadius) || oceanTopRadius <= 0f)
+        {
+            oceanTopRadius = oceanRadius;
+        }
+
+        float oceanFloorRadius = isOcean ? resourceMap.GetOceanFloorRadius(cell) : 0f;
+        float placementRadius;
+        if (isOcean)
+        {
+            float belowOceanTop = oceanTopRadius - Mathf.Max(0.0001f, surfaceOffset + 0.0001f);
+            if (float.IsFinite(oceanFloorRadius) && oceanFloorRadius > 0f)
+            {
+                placementRadius = Mathf.Max(0.0001f, Mathf.Min(oceanFloorRadius, belowOceanTop));
+            }
+            else
+            {
+                float terrainFallback = planetGenerator.GetSurfaceRadius(dir);
+                placementRadius = float.IsFinite(terrainFallback) && terrainFallback > 0f
+                    ? Mathf.Min(terrainFallback, belowOceanTop)
+                    : belowOceanTop;
+                placementRadius = Mathf.Max(0.0001f, placementRadius);
+                Debug.LogWarning($"[VentVisualizer] Invalid ocean-floor radius for vent cell {cell}; using conservative fallback radius {placementRadius:0.###} below ocean top {oceanTopRadius:0.###}.", this);
+            }
+        }
+        else
+        {
+            placementRadius = planetGenerator.GetSurfaceRadius(dir);
+            if (!float.IsFinite(placementRadius) || placementRadius <= 0f)
+            {
+                placementRadius = planetGenerator.radius;
+            }
+        }
+
+        anchor = new VentAnchor
+        {
+            Direction = dir,
+            IsOcean = isOcean,
+            OceanTopRadius = oceanTopRadius,
+            OceanFloorRadius = oceanFloorRadius,
+            PlacementRadius = placementRadius
+        };
+
+        if (logVentAnchors && anchorLogCount < maxVentAnchorLogs)
+        {
+            Debug.Log($"[VentVisualizer] Anchor {(clustered ? "cluster" : "individual")}: cell={cell}, ocean={isOcean}, dir={dir}, oceanTop={oceanTopRadius:0.###}, oceanFloor={oceanFloorRadius:0.###}, placement={placementRadius:0.###}, representativeClusterCell={representativeCell}", this);
+            anchorLogCount++;
+        }
+
+        return true;
     }
 
 }
