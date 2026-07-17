@@ -208,6 +208,8 @@ public class VentVisualizer : MonoBehaviour
         renderer.SetPropertyBlock(propertyBlock);
 
         AttachSoot(marker.transform, normalizedStrength);
+
+        return true;
     }
 
     private void AttachSoot(Transform marker, float normalizedStrength)
