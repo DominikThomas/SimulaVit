@@ -35,7 +35,9 @@ public class VentVisualizer : MonoBehaviour
     private static Mesh markerMesh;
     private static Mesh quadMesh;
 
+    private readonly List<GameObject> spawnedVentVisuals = new List<GameObject>();
     private int spawnedVentIndex = 0;
+    private bool subscribedToResourceMap;
 
     private void Awake()
     {
@@ -53,6 +55,16 @@ public class VentVisualizer : MonoBehaviour
         {
             parent = transform;
         }
+    }
+
+    private void OnEnable()
+    {
+        SubscribeToResourceMap();
+    }
+
+    private void OnDisable()
+    {
+        UnsubscribeFromResourceMap();
     }
 
     private IEnumerator Start()
@@ -80,22 +92,36 @@ public class VentVisualizer : MonoBehaviour
         }
 
         Debug.Log($"[VentVisualizer] Ready. Vent count: {resourceMap.VentCells.Length}");
-        BuildVentVisuals();
+        if (SimulationStartupController.IsSetupActive)
+        {
+            Debug.Log("[VentVisualizer] Initial Start build skipped because setup menu is active; waiting for final planet/resource completion notification.", this);
+            yield break;
+        }
+
+        RebuildVentVisuals("initial VentVisualizer Start after setup completed");
     }
 
     public void BuildVentVisuals()
     {
+        RebuildVentVisuals("direct BuildVentVisuals call");
+    }
+
+    public void RebuildVentVisuals(string reason)
+    {
         if (resourceMap == null || planetGenerator == null || resourceMap.ventStrength == null)
         {
-            Debug.Log($"[VentVisualizer] resourceMap == null || planetGenerator == null || resourceMap.ventStrength == null.");
+            ClearVentVisuals(reason);
+            Debug.Log($"[VentVisualizer] resourceMap == null || planetGenerator == null || resourceMap.ventStrength == null. Rebuild skipped. Reason: {reason}");
             return;
         }
+
+        ClearVentVisuals(reason);
 
         int[] vents = resourceMap.VentCells;
         Vector3[] cellDirs = resourceMap.CellDirs;
         if (cellDirs == null || cellDirs.Length == 0)
         {
-            Debug.Log($"[VentVisualizer] cellDirs == null || cellDirs.Length == 0.");
+            Debug.Log($"[VentVisualizer] cellDirs == null || cellDirs.Length == 0. Rebuild skipped. Reason: {reason}");
             return;
         }
 
@@ -116,7 +142,7 @@ public class VentVisualizer : MonoBehaviour
                     }
                 }
 
-                Debug.Log($"[VentVisualizer] Spawned {spawnedIndividuals} individual vent visuals (clustering disabled, from {vents.Length} vent cells).");
+                LogRebuildComplete(reason, vents.Length, spawnedIndividuals, "individual vent visuals (clustering disabled)");
                 return;
             }
 
@@ -139,7 +165,7 @@ public class VentVisualizer : MonoBehaviour
                 }
             }
 
-            Debug.Log($"[VentVisualizer] Spawned {spawned} vent clusters (from {vents.Length} vent cells).");
+            LogRebuildComplete(reason, vents.Length, spawned, "vent clusters");
             return;
         }
         else
@@ -154,6 +180,85 @@ public class VentVisualizer : MonoBehaviour
                 BuildVentVisual(cell, oceanRadius, cellDirs, propertyBlock, ref anchorLogCount);
             }
         }
+    }
+
+    private void SubscribeToResourceMap()
+    {
+        if (subscribedToResourceMap || resourceMap == null)
+        {
+            return;
+        }
+
+        resourceMap.ResourcesReadyForVisualization += HandleResourcesReadyForVisualization;
+        subscribedToResourceMap = true;
+    }
+
+    private void UnsubscribeFromResourceMap()
+    {
+        if (!subscribedToResourceMap || resourceMap == null)
+        {
+            return;
+        }
+
+        resourceMap.ResourcesReadyForVisualization -= HandleResourcesReadyForVisualization;
+        subscribedToResourceMap = false;
+    }
+
+    private void HandleResourcesReadyForVisualization(PlanetResourceMap map, string reason)
+    {
+        if (map != resourceMap)
+        {
+            return;
+        }
+
+        if (SimulationStartupController.IsSetupActive && reason != null && reason.StartsWith("initial PlanetResourceMap Start"))
+        {
+            Debug.Log($"[VentVisualizer] Rebuild skipped for non-final startup resources while setup is active. Reason: {reason}", this);
+            return;
+        }
+
+        RebuildVentVisuals(reason);
+    }
+
+    private void ClearVentVisuals(string reason)
+    {
+        int cleared = 0;
+        List<GameObject> trackedVisuals = new List<GameObject>(spawnedVentVisuals);
+        for (int i = spawnedVentVisuals.Count - 1; i >= 0; i--)
+        {
+            GameObject visual = spawnedVentVisuals[i];
+            if (visual == null)
+            {
+                continue;
+            }
+
+            Destroy(visual);
+            cleared++;
+        }
+
+        spawnedVentVisuals.Clear();
+
+        if (parent != null)
+        {
+            for (int i = parent.childCount - 1; i >= 0; i--)
+            {
+                Transform child = parent.GetChild(i);
+                if (child != null && (child.name.StartsWith("Vent_") || child.name.StartsWith("VentCluster_")) && !trackedVisuals.Contains(child.gameObject))
+                {
+                    Destroy(child.gameObject);
+                    cleared++;
+                }
+            }
+        }
+
+        spawnedVentIndex = 0;
+        Debug.Log($"[VentVisualizer] Cleared {cleared} old vent visuals and soot particle children before rebuild. Reason: {reason}", this);
+    }
+
+    private void LogRebuildComplete(string reason, int ventCellCount, int spawned, string visualKind)
+    {
+        int seed = planetGenerator != null ? planetGenerator.randomSeed : 0;
+        Debug.Log($"[VentVisualizer] Rebuild complete. Reason: {reason}, seed={seed}, VentCells={ventCellCount}, spawned={spawned} {visualKind}.", this);
     }
 
     private bool BuildVentVisual(int cell, float oceanRadius, Vector3[] cellDirs, MaterialPropertyBlock propertyBlock, ref int anchorLogCount)
@@ -189,6 +294,7 @@ public class VentVisualizer : MonoBehaviour
         Vector3 worldPos = planetGenerator.transform.position + dir * (anchor.PlacementRadius + surfaceOffset);
 
         GameObject marker = new GameObject($"Vent_{cell}");
+        spawnedVentVisuals.Add(marker);
         marker.transform.SetParent(parent, true);
         marker.transform.position = worldPos;
         marker.transform.rotation = Quaternion.LookRotation(-dir);
@@ -451,6 +557,7 @@ public class VentVisualizer : MonoBehaviour
         Vector3 worldPos = planetGenerator.transform.position + dir * (anchor.PlacementRadius + surfaceOffset);
 
         GameObject marker = new GameObject($"VentCluster_{spawnedVentIndex++}_n{cl.count}");
+        spawnedVentVisuals.Add(marker);
         marker.transform.SetParent(parent, true);
         marker.transform.position = worldPos;
         marker.transform.rotation = Quaternion.LookRotation(-dir);

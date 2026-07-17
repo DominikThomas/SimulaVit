@@ -256,9 +256,11 @@ MonoBehaviour:
   glowRadiusMax: 0.15
   glowEmissionMin: 1
   glowEmissionMax: 6
-  surfaceOffset: 0.01
+  surfaceOffset: 0.001
   showLandVents: 1
   showUnderwaterVents: 1
+  logVentAnchors: 1
+  maxVentAnchorLogs: 10
   clusterAngleMultiplier: 10
   minClusterStrengthToRender: 0
 --- !u!4 &184847770
@@ -1070,7 +1072,7 @@ MonoBehaviour:
   m_HandleRect: {fileID: 1049548736}
   m_Direction: 2
   m_Value: 0
-  m_Size: 0.47368422
+  m_Size: 0.4736842
   m_NumberOfSteps: 0
   m_OnValueChanged:
     m_PersistentCalls:
