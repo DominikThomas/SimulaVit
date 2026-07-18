@@ -958,9 +958,7 @@ public class PlanetResourceMap : MonoBehaviour
 
     private void Start()
     {
-        InitializeIfNeeded();
-        InitializeOceanVisuals();
-        NotifyResourcesReadyForVisualization("initial PlanetResourceMap Start initialization");
+        Debug.Log("[StartupLifecycle] PlanetResourceMap Start deferred; waiting for explicit final planet initialization.", this);
     }
 
     private void Update()
@@ -1828,7 +1826,7 @@ public class PlanetResourceMap : MonoBehaviour
 
     public void InitializeIfNeeded()
     {
-        if (planetGenerator == null)
+        if (planetGenerator == null || !planetGenerator.IsPlanetInitialized)
         {
             return;
         }
@@ -2104,8 +2102,20 @@ public class PlanetResourceMap : MonoBehaviour
         Debug.Log($"Initialized {VentCount} vents", this);
     }
 
+    public void InitializeForFinalPlanet(string reason, bool notifyVisualizers = true)
+    {
+        InitializeIfNeeded();
+        InitializeOceanVisuals();
+        Debug.Log($"[StartupLifecycle] Resource initialization complete. Reason: {reason}, cells={SimulationCellCount}, vents={VentCount}", this);
+        if (notifyVisualizers)
+        {
+            NotifyResourcesReadyForVisualization(reason);
+        }
+    }
+
     public void ReinitializeResources()
     {
+        ClearRuntimePlanetVisuals("PlanetResourceMap.ReinitializeResources");
         isInitialized = false;
         surfaceTemperatureInitialized = false;
         ventTimer = 0f;
@@ -2117,9 +2127,7 @@ public class PlanetResourceMap : MonoBehaviour
         debugSimulationDeltaTimeUsedByPlanetResourceMap = 0f;
         initialDissolvedFe2PlusTotal = 0f;
 
-        InitializeIfNeeded();
-        InitializeOceanVisuals();
-        NotifyResourcesReadyForVisualization("PlanetResourceMap.ReinitializeResources completed");
+        InitializeForFinalPlanet("PlanetResourceMap.ReinitializeResources completed");
     }
 
     private void NotifyResourcesReadyForVisualization(string reason)
@@ -3678,9 +3686,61 @@ public class PlanetResourceMap : MonoBehaviour
 
 
 
+    public void ClearRuntimePlanetVisuals(string reason)
+    {
+        DestroyPrecipitateOverlay(reason);
+        oceanMaterialInstance = null;
+    }
+
+    public void DeinitializeForStartupMenu(string reason)
+    {
+        ClearRuntimePlanetVisuals(reason);
+        isInitialized = false;
+        surfaceTemperatureInitialized = false;
+        ventTimer = 0f;
+        atmosphereTimer = 0f;
+        thermalTimer = 0f;
+        debugVentTimer = 0f;
+        debugLastVentDeltaTime = 0f;
+        debugSimulationDeltaTimeUsedByPlanetResourceMap = 0f;
+    }
+
+    public void DestroyPrecipitateOverlay(string reason)
+    {
+        if (precipitateOverlayObject != null)
+        {
+            Destroy(precipitateOverlayObject);
+        }
+        else if (precipitateOverlayMeshFilter != null)
+        {
+            Destroy(precipitateOverlayMeshFilter.gameObject);
+        }
+
+        if (precipitateOverlayMesh != null)
+        {
+            Destroy(precipitateOverlayMesh);
+        }
+
+        if (precipitateOverlayMaterial != null)
+        {
+            Destroy(precipitateOverlayMaterial);
+        }
+
+        precipitateOverlayObject = null;
+        precipitateOverlayMeshFilter = null;
+        precipitateOverlayRenderer = null;
+        precipitateOverlayMesh = null;
+        precipitateOverlayMaterial = null;
+        precipitateOverlayColors = null;
+        precipitateOverlayVertexCells = null;
+        precipitateOverlaySourceVertexCount = 0;
+        precipitateOverlayTimer = 0f;
+        Debug.Log($"[PlanetResourceMap] Cleared precipitate overlay runtime visuals. Reason: {reason}", this);
+    }
+
     private void EnsurePrecipitateOverlayVisual()
     {
-        if (!enablePrecipitateOverlay || planetGenerator == null || planetGenerator.OceanRenderer == null)
+        if (!isInitialized || !enablePrecipitateOverlay || planetGenerator == null || !planetGenerator.IsPlanetInitialized || planetGenerator.OceanRenderer == null)
         {
             if (precipitateOverlayRenderer != null)
                 precipitateOverlayRenderer.enabled = false;
@@ -3695,6 +3755,7 @@ public class PlanetResourceMap : MonoBehaviour
         if (precipitateOverlayObject == null)
         {
             precipitateOverlayObject = new GameObject("Ocean Precipitate Overlay");
+            Debug.Log("[StartupLifecycle] Precipitate overlay created.", this);
             precipitateOverlayObject.transform.SetParent(planetGenerator.transform, false);
             precipitateOverlayObject.layer = planetGenerator.gameObject.layer;
             precipitateOverlayMeshFilter = precipitateOverlayObject.AddComponent<MeshFilter>();

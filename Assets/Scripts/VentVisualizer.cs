@@ -1,4 +1,3 @@
-using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -67,38 +66,10 @@ public class VentVisualizer : MonoBehaviour
         UnsubscribeFromResourceMap();
     }
 
-    private IEnumerator Start()
+    private void Start()
     {
-        // wait 1 frame
-        yield return null;
-
-        // wait for PlanetResourceMap init
-        float timeout = 5f; // avoid infinite loop
-        while (timeout > 0f &&
-              (resourceMap == null ||
-               resourceMap.ventStrength == null ||
-               resourceMap.CellDirs == null ||
-               resourceMap.CellDirs.Length == 0 ||
-               resourceMap.VentCells == null))
-        {
-            timeout -= Time.deltaTime;
-            yield return null;
-        }
-
-        if (timeout <= 0f)
-        {
-            Debug.LogWarning("[VentVisualizer] Timed out waiting for PlanetResourceMap initialization.");
-            yield break;
-        }
-
-        Debug.Log($"[VentVisualizer] Ready. Vent count: {resourceMap.VentCells.Length}");
-        if (SimulationStartupController.IsSetupActive)
-        {
-            Debug.Log("[VentVisualizer] Initial Start build skipped because setup menu is active; waiting for final planet/resource completion notification.", this);
-            yield break;
-        }
-
-        RebuildVentVisuals("initial VentVisualizer Start after setup completed");
+        Debug.Log("[VentVisualizer] Start deferred; waiting for explicit final PlanetResourceMap initialization.", this);
+        ClearVentVisuals("startup deferred before final planet");
     }
 
     public void BuildVentVisuals()
@@ -166,6 +137,7 @@ public class VentVisualizer : MonoBehaviour
             }
 
             LogRebuildComplete(reason, vents.Length, spawned, "vent clusters");
+            Debug.Log($"[StartupLifecycle] Vent visuals built. Spawned={spawned}, sourceVents={vents.Length}", this);
             return;
         }
         else
@@ -218,6 +190,11 @@ public class VentVisualizer : MonoBehaviour
         }
 
         RebuildVentVisuals(reason);
+    }
+
+    public void ClearRuntimeVisuals(string reason)
+    {
+        ClearVentVisuals(reason);
     }
 
     private void ClearVentVisuals(string reason)

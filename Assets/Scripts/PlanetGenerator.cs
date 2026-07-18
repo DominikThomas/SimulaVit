@@ -121,6 +121,7 @@ public class PlanetGenerator : MonoBehaviour
     public MeshRenderer OceanRenderer => oceanMeshRenderer;
     public IReadOnlyList<float> LocalOceanDepths => localOceanDepthByCell;
     public int VisualResolution => Mathf.Max(1, resolution);
+    public bool IsPlanetInitialized { get; private set; }
 
     void Awake()
     {
@@ -140,16 +141,7 @@ public class PlanetGenerator : MonoBehaviour
 
         SetupOceanLayer();
         SetupAtmosphereLayer();
-    }
-
-    void Start()
-    {
-        if (randomizeOnStart)
-        {
-            RandomizeGenerationSettings();
-        }
-
-        RegeneratePlanet();
+        ClearGeneratedPlanetRuntime();
     }
 
     public void ApplyStartupSeed(int seed, bool randomSeedEnabled)
@@ -167,9 +159,43 @@ public class PlanetGenerator : MonoBehaviour
             (float)(seededRandom.NextDouble() * 2000.0 - 1000.0));
     }
 
+    public void InitializeAuthoritativePlanet(string reason = null)
+    {
+        Debug.Log($"[StartupLifecycle] Final planet initialization requested. Reason: {reason ?? "unspecified"}, seed={randomSeed}", this);
+        if (randomizeOnStart)
+        {
+            RandomizeGenerationSettings();
+        }
+
+        ClearGeneratedPlanetRuntime();
+        GeneratePlanet();
+        IsPlanetInitialized = true;
+        Debug.Log($"[StartupLifecycle] Planet generation complete. Seed={randomSeed}, resolution={resolution}", this);
+    }
+
     public void RegeneratePlanet()
     {
-        GeneratePlanet();
+        InitializeAuthoritativePlanet("RegeneratePlanet explicit request");
+    }
+
+    public void ClearGeneratedPlanetRuntime()
+    {
+        IsPlanetInitialized = false;
+        generatedSurfaceRadiusByCell = null;
+        localOceanDepthByCell = null;
+        oceanDistanceToShoreByCell = null;
+        oceanMaskByCell = null;
+
+        if (mesh != null) mesh.Clear();
+        if (oceanMesh != null) oceanMesh.Clear();
+        if (atmosphereMesh != null) atmosphereMesh.Clear();
+
+        MeshCollider meshCollider = GetComponent<MeshCollider>();
+        if (meshCollider != null) meshCollider.sharedMesh = null;
+
+        if (meshRenderer != null) meshRenderer.enabled = false;
+        if (oceanMeshRenderer != null) oceanMeshRenderer.enabled = false;
+        if (atmosphereMeshRenderer != null) atmosphereMeshRenderer.enabled = false;
     }
 
     void RandomizeGenerationSettings()
@@ -347,6 +373,11 @@ public class PlanetGenerator : MonoBehaviour
 
         UpdateSurfaceMaterialProperties();
 
+        if (meshRenderer != null)
+        {
+            meshRenderer.enabled = true;
+        }
+
         MeshCollider meshCollider = GetComponent<MeshCollider>();
         if (meshCollider != null)
         {
@@ -418,7 +449,6 @@ public class PlanetGenerator : MonoBehaviour
             runtimePlanetMaterial = meshRenderer.sharedMaterial;
         }
 
-        UpdateSurfaceMaterialProperties();
     }
 
     void UpdateSurfaceMaterialProperties()

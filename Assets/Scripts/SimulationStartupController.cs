@@ -48,6 +48,7 @@ public class SimulationStartupController : MonoBehaviour
     [Header("References")]
     [SerializeField] private PlanetGenerator planetGenerator;
     [SerializeField] private PlanetResourceMap planetResourceMap;
+    [SerializeField] private VentVisualizer ventVisualizer;
     [SerializeField] private ReplicatorManager replicatorManager;
     [SerializeField] private SunSkyRotator sunSkyRotator;
     [SerializeField] private ReplicatorSimulationPipeline simulationPipeline;
@@ -95,6 +96,7 @@ public class SimulationStartupController : MonoBehaviour
     private bool warnedAboutHudRoots;
     private bool warnedAboutMissingOverlay;
     private bool returningToMainMenu;
+    private bool deferredStartupPrepared;
 
     public static bool IsSetupActive { get; private set; }
     public static bool IsStartupBlockingHud => IsSetupActive;
@@ -140,6 +142,7 @@ public class SimulationStartupController : MonoBehaviour
     {
         planetGenerator ??= FindFirstObjectByType<PlanetGenerator>();
         planetResourceMap ??= FindFirstObjectByType<PlanetResourceMap>();
+        ventVisualizer ??= FindFirstObjectByType<VentVisualizer>();
         replicatorManager ??= FindFirstObjectByType<ReplicatorManager>();
         sunSkyRotator ??= FindFirstObjectByType<SunSkyRotator>();
         simulationPipeline ??= FindFirstObjectByType<ReplicatorSimulationPipeline>();
@@ -198,6 +201,12 @@ public class SimulationStartupController : MonoBehaviour
 
     private void PrepareDeferredStartup()
     {
+        if (deferredStartupPrepared)
+        {
+            return;
+        }
+
+        deferredStartupPrepared = true;
         Time.timeScale = 1f;
 
         if (replicatorManager != null)
@@ -210,6 +219,16 @@ public class SimulationStartupController : MonoBehaviour
         {
             simulationPipeline.SetSimulationStepsPerFrame(0);
         }
+
+        ClearRuntimePlanetState("startup menu entered");
+        Debug.Log("[StartupLifecycle] Startup menu entered; planet not initialized.", this);
+    }
+
+    private void ClearRuntimePlanetState(string reason)
+    {
+        ventVisualizer?.ClearRuntimeVisuals(reason);
+        planetResourceMap?.DeinitializeForStartupMenu(reason);
+        planetGenerator?.ClearGeneratedPlanetRuntime();
     }
 
 
@@ -265,6 +284,7 @@ public class SimulationStartupController : MonoBehaviour
         simulationPipeline?.SetSimulationStepsPerFrame(0);
         FindFirstObjectByType<SimulationSpeedController>()?.RefreshFromSimulationTiming();
         FindFirstObjectByType<PlanetCellInspectorController>()?.ClearSelection();
+        ClearRuntimePlanetState("returning to main menu");
 
         ShowMainMenu();
     }
@@ -340,6 +360,7 @@ public class SimulationStartupController : MonoBehaviour
         RestoreRuntimeHud();
         IsSetupActive = false;
         loadingOverlay?.FadeOut(0.25f);
+        Debug.Log("[StartupLifecycle] Simulation started.", this);
         replicatorManager?.SetSimulationTiming(1);
         simulationPipeline?.SetSimulationStepsPerFrame(1);
         FindFirstObjectByType<SimulationSpeedController>()?.RefreshFromSimulationTiming();
@@ -379,7 +400,6 @@ public class SimulationStartupController : MonoBehaviour
         applyingConfig = true;
         ShowSetupScreen(false);
         loadingOverlay?.ShowLoading("Generating planet...");
-        yield return null;
 
         ApplyConfig(currentConfig);
 
@@ -393,8 +413,6 @@ public class SimulationStartupController : MonoBehaviour
             LogStartupConfigApplied(currentConfig, keepPaused);
         }
 
-        yield return null;
-
         if (replicatorManager != null)
         {
             if (replicatorManager.InitializeForSimulation(false))
@@ -402,8 +420,6 @@ public class SimulationStartupController : MonoBehaviour
                 replicatorManager.SpawnInitialPopulation();
             }
         }
-
-        yield return null;
 
         int targetSteps = keepPaused ? 0 : Mathf.Max(1, resumeStepsPerFrame);
         replicatorManager?.SetSimulationTiming(targetSteps);
@@ -417,6 +433,7 @@ public class SimulationStartupController : MonoBehaviour
         RestoreRuntimeHud();
         IsSetupActive = false;
         loadingOverlay?.FadeOut(0.5f);
+        Debug.Log("[StartupLifecycle] Simulation started.", this);
     }
 
     private void ApplyConfig(SimulationStartupConfig config)
@@ -433,7 +450,7 @@ public class SimulationStartupController : MonoBehaviour
         if (planetGenerator != null)
         {
             planetGenerator.ApplyStartupSeed(seed, requestedRandomSeed);
-            planetGenerator.RegeneratePlanet();
+            planetGenerator.InitializeAuthoritativePlanet("New Game startup selection");
         }
 
         if (requestedRandomSeed)
