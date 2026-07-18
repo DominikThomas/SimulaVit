@@ -178,8 +178,14 @@ public class SimulationSaveLoadService : MonoBehaviour
 
             sunRestored = sunSkyRotator != null && sunSkyRotator.ApplySnapshot(saveFile.sun, saveFile.clock);
 
+            if (planetGenerator != null)
+            {
+                planetGenerator.InitializeAuthoritativePlanet("Load Game snapshot");
+            }
+
             if (planetResourceMap != null)
             {
+                planetResourceMap.InitializeForFinalPlanet("Load Game generated base resources before mutable restore", false);
                 resourceMapRestored = planetResourceMap.ApplyMutableResourceSnapshot(saveFile.resourceMap);
             }
             else if (saveFile.resourceMap != null)
