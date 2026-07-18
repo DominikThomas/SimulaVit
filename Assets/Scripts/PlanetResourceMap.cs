@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Serialization;
 using System;
 using System.Collections.Generic;
 #if UNITY_EDITOR
@@ -260,16 +261,32 @@ public class PlanetResourceMap : MonoBehaviour
     public Color sulfurBottomTintColor = new Color(0.95f, 0.78f, 0.08f, 1f);
     public Color ironOxideBottomTintColor = new Color(0.65f, 0.22f, 0.06f, 1f);
     [Range(0f, 1f)] public float precipitateOceanTintStrength = 0.18f;
-    [Tooltip("Render one transparent vertex-colored overlay mesh in Game view for local precipitate visibility.")]
+    [Tooltip("Master switch for runtime precipitate visuals. Separate switches below choose suspended surface precipitate and deposited seafloor sediment paths.")]
     public bool enablePrecipitateOverlay = true;
-    [Tooltip("Force nonzero precipitate cells to render at least this strongly for visual debugging.")]
+    [Tooltip("Draw suspended precipitate near the ocean surface using only layer 0 plus a small layer 1 contribution.")]
+    public bool enableSurfacePrecipitateOverlay = true;
+    [Tooltip("Draw deposited sulfur/iron sediment directly on the final seafloor/terrain mesh. Does not include suspended precipitate.")]
+    public bool enableSeafloorSedimentOverlay = true;
+    [Tooltip("Surface-ocean visible fraction of suspended precipitate in ocean layer 0 when two or more layers are active.")]
+    [Range(0f, 1f)] public float surfaceTopLayerWeight = 0.95f;
+    [Tooltip("Surface-ocean visible fraction of suspended precipitate in ocean layer 1 when two or more layers are active. Deeper layers are invisible at the surface.")]
+    [Range(0f, 1f)] public float surfaceFirstSubsurfaceWeight = 0.05f;
+    [Tooltip("Force nonzero suspended surface precipitate cells to render at least this strongly for visual debugging.")]
     public bool forceVisiblePrecipitateDebug = false;
     [Min(0f)] public float precipitateDebugBoost = 8f;
-    [Range(0f, 1f)] public float precipitateOverlayMaxAlpha = 0.7f;
+    [Tooltip("Debug multiplier for the deposited seafloor sediment overlay only.")]
+    [Min(0f)] public float seafloorSedimentDebugBoost = 1f;
+    [FormerlySerializedAs("precipitateOverlayMaxAlpha")]
+    [Range(0f, 1f)] public float surfacePrecipitateOverlayMaxAlpha = 0.7f;
+    [Range(0f, 1f)] public float seafloorSedimentOverlayMaxAlpha = 0.55f;
     [Min(0.02f)] public float precipitateOverlayUpdateIntervalSeconds = 0.25f;
     [Min(0f)] public float precipitateOverlayRadiusOffset = 0.006f;
+    [Tooltip("Tiny outward offset from final rendered terrain for deposited sediment. Clamped to remain much smaller than ocean depth.")]
+    [Min(0f)] public float seafloorSedimentOffset = 0.0015f;
     public float debugSulfurPrecipitateSuspendedTotal;
     public float debugIronOxidePrecipitateSuspendedTotal;
+    public float debugSurfaceVisibleSulfurPrecipitateTotal;
+    public float debugSurfaceVisibleIronOxidePrecipitateTotal;
     public float debugSulfurBottomTintTotal;
     public float debugIronOxideBottomTintTotal;
 
@@ -512,14 +529,23 @@ public class PlanetResourceMap : MonoBehaviour
     private float[] ironOxidePrecipitateVisual;
     private float[] sulfurBottomTintVisual;
     private float[] ironOxideBottomTintVisual;
-    private GameObject precipitateOverlayObject;
-    private MeshFilter precipitateOverlayMeshFilter;
-    private MeshRenderer precipitateOverlayRenderer;
-    private Mesh precipitateOverlayMesh;
-    private Material precipitateOverlayMaterial;
-    private Color[] precipitateOverlayColors;
-    private int[] precipitateOverlayVertexCells;
-    private int precipitateOverlaySourceVertexCount;
+    private GameObject surfacePrecipitateOverlayObject;
+    private MeshFilter surfacePrecipitateOverlayMeshFilter;
+    private MeshRenderer surfacePrecipitateOverlayRenderer;
+    private Mesh surfacePrecipitateOverlayMesh;
+    private Material surfacePrecipitateOverlayMaterial;
+    private Color[] surfacePrecipitateOverlayColors;
+    private int[] surfacePrecipitateOverlayVertexCells;
+    private int surfacePrecipitateOverlaySourceVertexCount;
+    private GameObject seafloorSedimentOverlayObject;
+    private MeshFilter seafloorSedimentOverlayMeshFilter;
+    private MeshRenderer seafloorSedimentOverlayRenderer;
+    private Mesh seafloorSedimentOverlayMesh;
+    private Material seafloorSedimentOverlayMaterial;
+    private Color[] seafloorSedimentOverlayColors;
+    private int[] seafloorSedimentOverlayVertexCells;
+    private float[] seafloorSedimentOverlayVertexRadii;
+    private int seafloorSedimentOverlaySourceVertexCount;
     private float precipitateOverlayTimer;
     private float ventTimer;
     private float atmosphereTimer;
@@ -3647,8 +3673,8 @@ public class PlanetResourceMap : MonoBehaviour
         Color color = Color.Lerp(oxygenatedOceanColor, ironRichOceanColor, fe2Remaining);
         if (enablePrecipitateVisuals)
         {
-            float sulfur = Mathf.Clamp01(debugSulfurPrecipitateSuspendedTotal / Mathf.Max(0.0001f, CountOceanCells() * precipitateVisualSaturation));
-            float iron = Mathf.Clamp01(debugIronOxidePrecipitateSuspendedTotal / Mathf.Max(0.0001f, CountOceanCells() * precipitateVisualSaturation));
+            float sulfur = Mathf.Clamp01(debugSurfaceVisibleSulfurPrecipitateTotal / Mathf.Max(0.0001f, CountOceanCells() * precipitateVisualSaturation));
+            float iron = Mathf.Clamp01(debugSurfaceVisibleIronOxidePrecipitateTotal / Mathf.Max(0.0001f, CountOceanCells() * precipitateVisualSaturation));
             color = Color.Lerp(color, sulfurPrecipitateColor, sulfur * precipitateOceanTintStrength);
             color = Color.Lerp(color, ironOxidePrecipitateColor, iron * precipitateOceanTintStrength);
         }
@@ -3707,43 +3733,60 @@ public class PlanetResourceMap : MonoBehaviour
 
     public void DestroyPrecipitateOverlay(string reason)
     {
-        if (precipitateOverlayObject != null)
-        {
-            Destroy(precipitateOverlayObject);
-        }
-        else if (precipitateOverlayMeshFilter != null)
-        {
-            Destroy(precipitateOverlayMeshFilter.gameObject);
-        }
+        DestroyOverlay(ref surfacePrecipitateOverlayObject, ref surfacePrecipitateOverlayMeshFilter, ref surfacePrecipitateOverlayRenderer,
+            ref surfacePrecipitateOverlayMesh, ref surfacePrecipitateOverlayMaterial);
+        DestroyOverlay(ref seafloorSedimentOverlayObject, ref seafloorSedimentOverlayMeshFilter, ref seafloorSedimentOverlayRenderer,
+            ref seafloorSedimentOverlayMesh, ref seafloorSedimentOverlayMaterial);
 
-        if (precipitateOverlayMesh != null)
-        {
-            Destroy(precipitateOverlayMesh);
-        }
-
-        if (precipitateOverlayMaterial != null)
-        {
-            Destroy(precipitateOverlayMaterial);
-        }
-
-        precipitateOverlayObject = null;
-        precipitateOverlayMeshFilter = null;
-        precipitateOverlayRenderer = null;
-        precipitateOverlayMesh = null;
-        precipitateOverlayMaterial = null;
-        precipitateOverlayColors = null;
-        precipitateOverlayVertexCells = null;
-        precipitateOverlaySourceVertexCount = 0;
+        surfacePrecipitateOverlayColors = null;
+        surfacePrecipitateOverlayVertexCells = null;
+        surfacePrecipitateOverlaySourceVertexCount = 0;
+        seafloorSedimentOverlayColors = null;
+        seafloorSedimentOverlayVertexCells = null;
+        seafloorSedimentOverlayVertexRadii = null;
+        seafloorSedimentOverlaySourceVertexCount = 0;
         precipitateOverlayTimer = 0f;
-        Debug.Log($"[PlanetResourceMap] Cleared precipitate overlay runtime visuals. Reason: {reason}", this);
+        Debug.Log($"[PlanetResourceMap] Cleared precipitate/sediment overlay runtime visuals. Reason: {reason}", this);
+    }
+
+    private void DestroyOverlay(ref GameObject obj, ref MeshFilter meshFilter, ref MeshRenderer renderer, ref Mesh mesh, ref Material material)
+    {
+        if (obj != null)
+            Destroy(obj);
+        else if (meshFilter != null)
+            Destroy(meshFilter.gameObject);
+
+        if (mesh != null)
+            Destroy(mesh);
+
+        if (material != null)
+            Destroy(material);
+
+        obj = null;
+        meshFilter = null;
+        renderer = null;
+        mesh = null;
+        material = null;
     }
 
     private void EnsurePrecipitateOverlayVisual()
     {
-        if (!isInitialized || !enablePrecipitateOverlay || planetGenerator == null || !planetGenerator.IsPlanetInitialized || planetGenerator.OceanRenderer == null)
+        if (!isInitialized || !enablePrecipitateOverlay || planetGenerator == null || !planetGenerator.IsPlanetInitialized)
         {
-            if (precipitateOverlayRenderer != null)
-                precipitateOverlayRenderer.enabled = false;
+            SetOverlayEnabled(surfacePrecipitateOverlayRenderer, false);
+            SetOverlayEnabled(seafloorSedimentOverlayRenderer, false);
+            return;
+        }
+
+        EnsureSurfacePrecipitateOverlayVisual();
+        EnsureSeafloorSedimentOverlayVisual();
+    }
+
+    private void EnsureSurfacePrecipitateOverlayVisual()
+    {
+        if (!enableSurfacePrecipitateOverlay || planetGenerator.OceanRenderer == null)
+        {
+            SetOverlayEnabled(surfacePrecipitateOverlayRenderer, false);
             return;
         }
 
@@ -3752,122 +3795,274 @@ public class PlanetResourceMap : MonoBehaviour
         if (oceanMesh == null || oceanMesh.vertexCount == 0)
             return;
 
-        if (precipitateOverlayObject == null)
+        if (surfacePrecipitateOverlayObject == null)
         {
-            precipitateOverlayObject = new GameObject("Ocean Precipitate Overlay");
-            Debug.Log("[StartupLifecycle] Precipitate overlay created.", this);
-            precipitateOverlayObject.transform.SetParent(planetGenerator.transform, false);
-            precipitateOverlayObject.layer = planetGenerator.gameObject.layer;
-            precipitateOverlayMeshFilter = precipitateOverlayObject.AddComponent<MeshFilter>();
-            precipitateOverlayRenderer = precipitateOverlayObject.AddComponent<MeshRenderer>();
+            surfacePrecipitateOverlayObject = new GameObject("Ocean Surface Precipitate Overlay");
+            Debug.Log("[StartupLifecycle] Surface precipitate overlay created.", this);
+            surfacePrecipitateOverlayObject.transform.SetParent(planetGenerator.transform, false);
+            surfacePrecipitateOverlayObject.layer = planetGenerator.gameObject.layer;
+            surfacePrecipitateOverlayMeshFilter = surfacePrecipitateOverlayObject.AddComponent<MeshFilter>();
+            surfacePrecipitateOverlayRenderer = surfacePrecipitateOverlayObject.AddComponent<MeshRenderer>();
         }
 
-        if (precipitateOverlayMaterial == null)
+        if (surfacePrecipitateOverlayMaterial == null)
         {
-            Shader shader = Shader.Find("SimulaVit/PrecipitateOverlay");
-            if (shader == null)
-                shader = Shader.Find("Sprites/Default");
-            if (shader == null)
+            surfacePrecipitateOverlayMaterial = CreateOverlayMaterial("Ocean Surface Precipitate Overlay (Runtime)", GetOverlayRenderQueue(planetGenerator.OceanRenderer, 1, 3001));
+            if (surfacePrecipitateOverlayMaterial == null)
             {
-                precipitateOverlayRenderer.enabled = false;
+                SetOverlayEnabled(surfacePrecipitateOverlayRenderer, false);
                 return;
             }
-
-            precipitateOverlayMaterial = new Material(shader) { name = "Ocean Precipitate Overlay (Runtime)" };
-            precipitateOverlayMaterial.renderQueue = 3100;
         }
 
-        if (precipitateOverlayMesh == null || precipitateOverlaySourceVertexCount != oceanMesh.vertexCount)
+        if (surfacePrecipitateOverlayMesh == null || surfacePrecipitateOverlaySourceVertexCount != oceanMesh.vertexCount)
         {
-            precipitateOverlaySourceVertexCount = oceanMesh.vertexCount;
-            precipitateOverlayMesh = new Mesh { name = "Ocean Precipitate Overlay Mesh" };
-            precipitateOverlayMesh.MarkDynamic();
+            surfacePrecipitateOverlaySourceVertexCount = oceanMesh.vertexCount;
+            surfacePrecipitateOverlayMesh = new Mesh { name = "Ocean Surface Precipitate Overlay Mesh" };
+            surfacePrecipitateOverlayMesh.MarkDynamic();
             Vector3[] sourceVertices = oceanMesh.vertices;
             Vector3[] overlayVertices = new Vector3[sourceVertices.Length];
-            precipitateOverlayColors = new Color[sourceVertices.Length];
-            precipitateOverlayVertexCells = new int[sourceVertices.Length];
+            surfacePrecipitateOverlayColors = new Color[sourceVertices.Length];
+            surfacePrecipitateOverlayVertexCells = new int[sourceVertices.Length];
 
             float offset = Mathf.Max(0f, precipitateOverlayRadiusOffset);
             for (int i = 0; i < sourceVertices.Length; i++)
             {
                 Vector3 dir = sourceVertices[i].sqrMagnitude > 0f ? sourceVertices[i].normalized : Vector3.up;
                 overlayVertices[i] = sourceVertices[i] + dir * offset;
-                precipitateOverlayVertexCells[i] = GetCellIndexFromDirection(dir);
-                precipitateOverlayColors[i] = ClearPrecipitateOverlayColor;
+                surfacePrecipitateOverlayVertexCells[i] = GetCellIndexFromDirection(dir);
+                surfacePrecipitateOverlayColors[i] = ClearPrecipitateOverlayColor;
             }
 
-            precipitateOverlayMesh.vertices = overlayVertices;
-            precipitateOverlayMesh.triangles = oceanMesh.triangles;
-            precipitateOverlayMesh.colors = precipitateOverlayColors;
-            precipitateOverlayMesh.RecalculateBounds();
-            precipitateOverlayMeshFilter.sharedMesh = precipitateOverlayMesh;
+            surfacePrecipitateOverlayMesh.vertices = overlayVertices;
+            surfacePrecipitateOverlayMesh.triangles = oceanMesh.triangles;
+            surfacePrecipitateOverlayMesh.colors = surfacePrecipitateOverlayColors;
+            surfacePrecipitateOverlayMesh.RecalculateBounds();
+            surfacePrecipitateOverlayMeshFilter.sharedMesh = surfacePrecipitateOverlayMesh;
         }
 
-        precipitateOverlayRenderer.sharedMaterial = precipitateOverlayMaterial;
-        precipitateOverlayRenderer.enabled = enablePrecipitateVisuals;
+        surfacePrecipitateOverlayRenderer.sharedMaterial = surfacePrecipitateOverlayMaterial;
+        SetOverlayEnabled(surfacePrecipitateOverlayRenderer, enablePrecipitateVisuals);
+    }
+
+    private void EnsureSeafloorSedimentOverlayVisual()
+    {
+        if (!enableSeafloorSedimentOverlay)
+        {
+            SetOverlayEnabled(seafloorSedimentOverlayRenderer, false);
+            return;
+        }
+
+        MeshFilter terrainMeshFilter = planetGenerator.GetComponent<MeshFilter>();
+        Mesh terrainMesh = terrainMeshFilter != null ? terrainMeshFilter.sharedMesh : null;
+        if (terrainMesh == null || terrainMesh.vertexCount == 0)
+            return;
+
+        if (seafloorSedimentOverlayObject == null)
+        {
+            seafloorSedimentOverlayObject = new GameObject("Seafloor Sediment Overlay");
+            Debug.Log("[StartupLifecycle] Seafloor sediment overlay created.", this);
+            seafloorSedimentOverlayObject.transform.SetParent(planetGenerator.transform, false);
+            seafloorSedimentOverlayObject.layer = planetGenerator.gameObject.layer;
+            seafloorSedimentOverlayMeshFilter = seafloorSedimentOverlayObject.AddComponent<MeshFilter>();
+            seafloorSedimentOverlayRenderer = seafloorSedimentOverlayObject.AddComponent<MeshRenderer>();
+        }
+
+        if (seafloorSedimentOverlayMaterial == null)
+        {
+            seafloorSedimentOverlayMaterial = CreateOverlayMaterial("Seafloor Sediment Overlay (Runtime)", 2451);
+            if (seafloorSedimentOverlayMaterial == null)
+            {
+                SetOverlayEnabled(seafloorSedimentOverlayRenderer, false);
+                return;
+            }
+        }
+
+        if (seafloorSedimentOverlayMesh == null || seafloorSedimentOverlaySourceVertexCount != terrainMesh.vertexCount)
+        {
+            seafloorSedimentOverlaySourceVertexCount = terrainMesh.vertexCount;
+            seafloorSedimentOverlayMesh = new Mesh { name = "Seafloor Sediment Overlay Mesh" };
+            seafloorSedimentOverlayMesh.MarkDynamic();
+            Vector3[] sourceVertices = terrainMesh.vertices;
+            Vector3[] overlayVertices = new Vector3[sourceVertices.Length];
+            seafloorSedimentOverlayColors = new Color[sourceVertices.Length];
+            seafloorSedimentOverlayVertexCells = new int[sourceVertices.Length];
+            seafloorSedimentOverlayVertexRadii = new float[sourceVertices.Length];
+            float offset = GetSafeSeafloorSedimentOffset();
+
+            for (int i = 0; i < sourceVertices.Length; i++)
+            {
+                Vector3 dir = sourceVertices[i].sqrMagnitude > 0f ? sourceVertices[i].normalized : Vector3.up;
+                overlayVertices[i] = sourceVertices[i] + dir * offset;
+                seafloorSedimentOverlayVertexCells[i] = GetCellIndexFromDirection(dir);
+                seafloorSedimentOverlayVertexRadii[i] = sourceVertices[i].magnitude;
+                seafloorSedimentOverlayColors[i] = ClearPrecipitateOverlayColor;
+            }
+
+            seafloorSedimentOverlayMesh.vertices = overlayVertices;
+            seafloorSedimentOverlayMesh.triangles = terrainMesh.triangles;
+            seafloorSedimentOverlayMesh.colors = seafloorSedimentOverlayColors;
+            seafloorSedimentOverlayMesh.RecalculateBounds();
+            seafloorSedimentOverlayMeshFilter.sharedMesh = seafloorSedimentOverlayMesh;
+        }
+
+        seafloorSedimentOverlayRenderer.sharedMaterial = seafloorSedimentOverlayMaterial;
+        SetOverlayEnabled(seafloorSedimentOverlayRenderer, enablePrecipitateVisuals);
+    }
+
+    private Material CreateOverlayMaterial(string materialName, int renderQueue)
+    {
+        Shader shader = Shader.Find("SimulaVit/PrecipitateOverlay");
+        if (shader == null)
+            shader = Shader.Find("Sprites/Default");
+        if (shader == null)
+            return null;
+
+        Material material = new Material(shader) { name = materialName };
+        material.renderQueue = renderQueue;
+        return material;
+    }
+
+    private int GetOverlayRenderQueue(Renderer referenceRenderer, int offset, int fallback)
+    {
+        Material reference = referenceRenderer != null ? referenceRenderer.sharedMaterial : null;
+        int queue = reference != null ? reference.renderQueue : fallback - offset;
+        if (queue < 0)
+            queue = fallback - offset;
+        return queue + offset;
+    }
+
+    private void SetOverlayEnabled(Renderer renderer, bool enabled)
+    {
+        if (renderer != null)
+            renderer.enabled = enabled;
     }
 
     private void UpdatePrecipitateOverlayVisual(float dt)
     {
         if (!enablePrecipitateOverlay || !enablePrecipitateVisuals)
         {
-            if (precipitateOverlayRenderer != null)
-                precipitateOverlayRenderer.enabled = false;
+            SetOverlayEnabled(surfacePrecipitateOverlayRenderer, false);
+            SetOverlayEnabled(seafloorSedimentOverlayRenderer, false);
             return;
         }
 
         EnsurePrecipitateOverlayVisual();
-        if (precipitateOverlayMesh == null || precipitateOverlayColors == null || precipitateOverlayVertexCells == null)
-            return;
-
         precipitateOverlayTimer -= Mathf.Max(0f, dt);
         if (precipitateOverlayTimer > 0f)
             return;
 
         precipitateOverlayTimer = Mathf.Max(0.02f, precipitateOverlayUpdateIntervalSeconds);
+        UpdateSurfacePrecipitateOverlayColors();
+        UpdateSeafloorSedimentOverlayColors();
+    }
+
+    private void UpdateSurfacePrecipitateOverlayColors()
+    {
+        if (!enableSurfacePrecipitateOverlay || surfacePrecipitateOverlayMesh == null || surfacePrecipitateOverlayColors == null || surfacePrecipitateOverlayVertexCells == null)
+            return;
+
         float saturation = Mathf.Max(0.0001f, precipitateVisualSaturation);
         float boost = Mathf.Max(0f, precipitateDebugBoost);
-        float maxAlpha = Mathf.Clamp01(precipitateOverlayMaxAlpha);
-
-        for (int i = 0; i < precipitateOverlayColors.Length; i++)
+        float maxAlpha = Mathf.Clamp01(surfacePrecipitateOverlayMaxAlpha);
+        for (int i = 0; i < surfacePrecipitateOverlayColors.Length; i++)
         {
-            int cell = precipitateOverlayVertexCells[i];
+            int cell = surfacePrecipitateOverlayVertexCells[i];
             if (!IsCellValid(cell) || !IsOceanCell(cell))
             {
-                precipitateOverlayColors[i] = ClearPrecipitateOverlayColor;
+                surfacePrecipitateOverlayColors[i] = ClearPrecipitateOverlayColor;
                 continue;
             }
 
-            float sulfur = GetBottomPrecipitateTint(sulfurBottomTintVisual, cell);
-            float iron = GetBottomPrecipitateTint(ironOxideBottomTintVisual, cell);
-            int active = GetOceanActiveLayerCount(cell);
-            for (int layer = 0; layer < active; layer++)
-            {
-                sulfur += GetPrecipitateVisual(sulfurPrecipitateVisual, cell, layer);
-                iron += GetPrecipitateVisual(ironOxidePrecipitateVisual, cell, layer);
-            }
-
-            sulfur *= boost;
-            iron *= boost;
-            float total = sulfur + iron;
-            if (total <= 0.00001f)
-            {
-                precipitateOverlayColors[i] = ClearPrecipitateOverlayColor;
-                continue;
-            }
-
-            float alpha = Mathf.Clamp01(total / saturation) * maxAlpha;
-            if (forceVisiblePrecipitateDebug)
-                alpha = Mathf.Max(alpha, Mathf.Min(maxAlpha, 0.28f));
-
-            Color color = Color.Lerp(sulfurPrecipitateColor, ironOxidePrecipitateColor, iron / total);
-            color.a = alpha;
-            precipitateOverlayColors[i] = color;
+            GetSurfaceVisiblePrecipitateForCell(cell, out float sulfur, out float iron);
+            surfacePrecipitateOverlayColors[i] = BuildPrecipitateOverlayColor(sulfur * boost, iron * boost, saturation, maxAlpha, forceVisiblePrecipitateDebug);
         }
 
-        precipitateOverlayMesh.colors = precipitateOverlayColors;
-        if (precipitateOverlayRenderer != null)
-            precipitateOverlayRenderer.enabled = true;
+        surfacePrecipitateOverlayMesh.colors = surfacePrecipitateOverlayColors;
+        SetOverlayEnabled(surfacePrecipitateOverlayRenderer, true);
+    }
+
+    private void UpdateSeafloorSedimentOverlayColors()
+    {
+        if (!enableSeafloorSedimentOverlay || seafloorSedimentOverlayMesh == null || seafloorSedimentOverlayColors == null || seafloorSedimentOverlayVertexCells == null)
+            return;
+
+        float saturation = Mathf.Max(0.0001f, precipitateVisualSaturation);
+        float boost = Mathf.Max(0f, seafloorSedimentDebugBoost);
+        float maxAlpha = Mathf.Clamp01(seafloorSedimentOverlayMaxAlpha);
+        for (int i = 0; i < seafloorSedimentOverlayColors.Length; i++)
+        {
+            int cell = seafloorSedimentOverlayVertexCells[i];
+            if (!IsCellValid(cell) || !IsOceanCell(cell))
+            {
+                seafloorSedimentOverlayColors[i] = ClearPrecipitateOverlayColor;
+                continue;
+            }
+
+            GetBottomSedimentTintForCell(cell, out float sulfur, out float iron);
+            seafloorSedimentOverlayColors[i] = BuildPrecipitateOverlayColor(sulfur * boost, iron * boost, saturation, maxAlpha, false);
+        }
+
+        seafloorSedimentOverlayMesh.colors = seafloorSedimentOverlayColors;
+        SetOverlayEnabled(seafloorSedimentOverlayRenderer, true);
+    }
+
+    private Color BuildPrecipitateOverlayColor(float sulfur, float iron, float saturation, float maxAlpha, bool forceDebugAlpha)
+    {
+        float total = sulfur + iron;
+        if (total <= 0.00001f)
+            return ClearPrecipitateOverlayColor;
+
+        float alpha = Mathf.Clamp01(total / saturation) * maxAlpha;
+        if (forceDebugAlpha)
+            alpha = Mathf.Max(alpha, Mathf.Min(maxAlpha, 0.28f));
+
+        Color color = Color.Lerp(sulfurPrecipitateColor, ironOxidePrecipitateColor, iron / total);
+        color.a = alpha;
+        return color;
+    }
+
+    private void GetSurfaceVisiblePrecipitateForCell(int cell, out float sulfur, out float iron)
+    {
+        sulfur = 0f;
+        iron = 0f;
+        int active = GetOceanActiveLayerCount(cell);
+        if (active <= 0)
+            return;
+
+        if (active == 1)
+        {
+            sulfur = GetPrecipitateVisual(sulfurPrecipitateVisual, cell, 0);
+            iron = GetPrecipitateVisual(ironOxidePrecipitateVisual, cell, 0);
+            return;
+        }
+
+        float topWeight = Mathf.Max(0f, surfaceTopLayerWeight);
+        float subsurfaceWeight = Mathf.Max(0f, surfaceFirstSubsurfaceWeight);
+        float sum = topWeight + subsurfaceWeight;
+        if (sum > 1f)
+        {
+            topWeight /= sum;
+            subsurfaceWeight /= sum;
+        }
+
+        sulfur = GetPrecipitateVisual(sulfurPrecipitateVisual, cell, 0) * topWeight
+            + GetPrecipitateVisual(sulfurPrecipitateVisual, cell, 1) * subsurfaceWeight;
+        iron = GetPrecipitateVisual(ironOxidePrecipitateVisual, cell, 0) * topWeight
+            + GetPrecipitateVisual(ironOxidePrecipitateVisual, cell, 1) * subsurfaceWeight;
+    }
+
+    private void GetBottomSedimentTintForCell(int cell, out float sulfur, out float iron)
+    {
+        sulfur = GetBottomPrecipitateTint(sulfurBottomTintVisual, cell);
+        iron = GetBottomPrecipitateTint(ironOxideBottomTintVisual, cell);
+    }
+
+    private float GetSafeSeafloorSedimentOffset()
+    {
+        float requested = Mathf.Max(0f, seafloorSedimentOffset);
+        float oceanDepth = planetGenerator != null ? Mathf.Max(0.0001f, planetGenerator.oceanDepth) : 0.0001f;
+        return Mathf.Min(requested, oceanDepth * 0.02f);
     }
 
     private void TrackVisualPrecipitateProduction(ResourceType resourceType, int cell, int layer, float delta)
@@ -3912,8 +4107,27 @@ public class PlanetResourceMap : MonoBehaviour
 
         UpdatePrecipitateVisualArray(sulfurPrecipitateVisual, sulfurBottomTintVisual, dt, out debugSulfurPrecipitateSuspendedTotal, out debugSulfurBottomTintTotal);
         UpdatePrecipitateVisualArray(ironOxidePrecipitateVisual, ironOxideBottomTintVisual, dt, out debugIronOxidePrecipitateSuspendedTotal, out debugIronOxideBottomTintTotal);
+        UpdateSurfaceVisiblePrecipitateDiagnostics();
     }
 
+
+    private void UpdateSurfaceVisiblePrecipitateDiagnostics()
+    {
+        debugSurfaceVisibleSulfurPrecipitateTotal = 0f;
+        debugSurfaceVisibleIronOxidePrecipitateTotal = 0f;
+        if (oceanMask == null)
+            return;
+
+        for (int cell = 0; cell < oceanMask.Length; cell++)
+        {
+            if (oceanMask[cell] == 0)
+                continue;
+
+            GetSurfaceVisiblePrecipitateForCell(cell, out float sulfur, out float iron);
+            debugSurfaceVisibleSulfurPrecipitateTotal += sulfur;
+            debugSurfaceVisibleIronOxidePrecipitateTotal += iron;
+        }
+    }
     private void UpdatePrecipitateVisualArray(float[] suspended, float[] bottomTint, float dt, out float suspendedTotal, out float bottomTintTotal)
     {
         suspendedTotal = 0f;
@@ -4961,10 +5175,15 @@ public class PlanetResourceMap : MonoBehaviour
         precipitateBottomTintDecayPerSecond = Mathf.Clamp01(precipitateBottomTintDecayPerSecond);
         precipitateVisualSaturation = Mathf.Max(0.0001f, precipitateVisualSaturation);
         precipitateOceanTintStrength = Mathf.Clamp01(precipitateOceanTintStrength);
+        surfaceTopLayerWeight = Mathf.Clamp01(surfaceTopLayerWeight);
+        surfaceFirstSubsurfaceWeight = Mathf.Clamp01(surfaceFirstSubsurfaceWeight);
         precipitateDebugBoost = Mathf.Max(0f, precipitateDebugBoost);
-        precipitateOverlayMaxAlpha = Mathf.Clamp01(precipitateOverlayMaxAlpha);
+        seafloorSedimentDebugBoost = Mathf.Max(0f, seafloorSedimentDebugBoost);
+        surfacePrecipitateOverlayMaxAlpha = Mathf.Clamp01(surfacePrecipitateOverlayMaxAlpha);
+        seafloorSedimentOverlayMaxAlpha = Mathf.Clamp01(seafloorSedimentOverlayMaxAlpha);
         precipitateOverlayUpdateIntervalSeconds = Mathf.Max(0.02f, precipitateOverlayUpdateIntervalSeconds);
         precipitateOverlayRadiusOffset = Mathf.Max(0f, precipitateOverlayRadiusOffset);
+        seafloorSedimentOffset = Mathf.Max(0f, seafloorSedimentOffset);
         dissolvedOrganicLeakDecayPerSecond = Mathf.Max(0f, dissolvedOrganicLeakDecayPerSecond);
         toxicProteolyticWasteDecayPerSecond = Mathf.Max(0f, toxicProteolyticWasteDecayPerSecond);
         scentDiffusePasses = Mathf.Clamp(scentDiffusePasses, 0, 4);

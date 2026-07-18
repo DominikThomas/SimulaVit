@@ -8,6 +8,7 @@ Shader "SimulaVit/PrecipitateOverlay"
     {
         Tags { "Queue"="Transparent" "RenderType"="Transparent" }
         ZWrite Off
+        ZTest LEqual
         Cull Back
         Blend SrcAlpha OneMinusSrcAlpha
 
