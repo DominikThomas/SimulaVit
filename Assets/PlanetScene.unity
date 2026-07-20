@@ -188,6 +188,7 @@ MonoBehaviour:
   savedConfigFileName: startup_config.json
   planetGenerator: {fileID: 382753102}
   planetResourceMap: {fileID: 1222684993}
+  ventVisualizer: {fileID: 0}
   replicatorManager: {fileID: 1064713443}
   sunSkyRotator: {fileID: 313342988}
   simulationPipeline: {fileID: 1064713445}
@@ -1072,7 +1073,7 @@ MonoBehaviour:
   m_HandleRect: {fileID: 1049548736}
   m_Direction: 2
   m_Value: 0
-  m_Size: 0.4736842
+  m_Size: 0.47368428
   m_NumberOfSteps: 0
   m_OnValueChanged:
     m_PersistentCalls:
@@ -1826,13 +1827,22 @@ MonoBehaviour:
   ironOxideBottomTintColor: {r: 0.65, g: 0.22, b: 0.06, a: 1}
   precipitateOceanTintStrength: 0.18
   enablePrecipitateOverlay: 1
+  enableSurfacePrecipitateOverlay: 1
+  enableSeafloorSedimentOverlay: 1
+  surfaceTopLayerWeight: 0.95
+  surfaceFirstSubsurfaceWeight: 0.05
   forceVisiblePrecipitateDebug: 0
   precipitateDebugBoost: 8
-  precipitateOverlayMaxAlpha: 0.6
+  seafloorSedimentDebugBoost: 10
+  surfacePrecipitateOverlayMaxAlpha: 0.6
+  seafloorSedimentOverlayMaxAlpha: 0.55
   precipitateOverlayUpdateIntervalSeconds: 0.25
   precipitateOverlayRadiusOffset: 0.006
+  seafloorSedimentOffset: 0.0015
   debugSulfurPrecipitateSuspendedTotal: 0
   debugIronOxidePrecipitateSuspendedTotal: 0
+  debugSurfaceVisibleSulfurPrecipitateTotal: 0
+  debugSurfaceVisibleIronOxidePrecipitateTotal: 0
   debugSulfurBottomTintTotal: 0
   debugIronOxideBottomTintTotal: 0
   baseTempKelvin: 268.15
