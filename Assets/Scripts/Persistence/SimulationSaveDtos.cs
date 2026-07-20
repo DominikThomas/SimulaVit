@@ -81,6 +81,7 @@ public class PlanetResourceMapSnapshot
     // PlanetResourceMap arrays (or lower-resolution ocean-layer arrays), not visual mesh/terrain data.
     public float[] co2;
     public float[] o2;
+    public float[] atmosphericO2;
     public float[] organicC;
     public float[] h2s;
     public float[] h2;

@@ -195,13 +195,27 @@ public class PlanetResourceMap : MonoBehaviour
     public float atmosphereTickSeconds = 0.5f;
     public float landExchangeRate = 0.25f;
     public float oceanExchangeRate = 0.05f;
-    [Tooltip("Fraction of atmospheric O2 drawdown demand from Fe2+ oxidation that can be transferred into ocean cells each atmosphere tick.")]
-    [Range(0f, 1f)] public float atmosphereToOceanO2TransferFractionPerTick = 1f;
+    [FormerlySerializedAs("atmosphereToOceanO2TransferFractionPerTick")]
+    [Tooltip("Mass-conserving first-order O2 exchange rate per simulation second from atmosphere into ocean surface layer only. Positive flux occurs when atmospheric mean O2 exceeds surface-ocean O2.")]
+    [Min(0f)] public float atmosphereOceanO2ExchangeRatePerSecond = 0.02f;
 
     [Header("Atmosphere Debug")]
     public float debugGlobalCO2;
     public float debugGlobalO2;
     public float debugGlobalCH4;
+    public float debugAtmosphereO2Total;
+    public float debugAtmosphereToSurfaceOceanO2LastTick;
+    public float debugAtmosphereOceanO2ExchangeMassBalanceErrorLastTick;
+    public float debugOceanO2TopLayerTotal;
+    public float debugOceanO2TopLayerMean;
+    public float debugOceanO2SecondLayerTotal;
+    public float debugOceanO2SecondLayerMean;
+    public float debugOceanO2DeepestLayerTotal;
+    public float debugOceanO2DeepestLayerMean;
+    public float debugO2ConsumedByFe2OxidationLastTick;
+    public float[] debugFe2TotalByLayer = new float[MaxOceanLayers];
+    public float[] debugFe2OxidizedLastTickByLayer = new float[MaxOceanLayers];
+    public float[] debugFeOxPrecipitateGeneratedLastTickByLayer = new float[MaxOceanLayers];
 
     [Header("Simulation Time Diagnostics")]
     [Tooltip("Simulation-time delta consumed by PlanetResourceMap this Unity frame. Resource and thermal timers should use this, not wall-clock delta.")]
@@ -365,8 +379,6 @@ public class PlanetResourceMap : MonoBehaviour
     [Range(0f, 0.2f)] public float layeredThirdLayerLightFactor = 0.02f;
     [Tooltip("Simple conservative adjacent-layer diffusion rate applied each atmosphere tick.")]
     [Range(0f, 1f)] public float layeredVerticalMixRate = 0.02f;
-    [Tooltip("Slow oxygenation source that pushes atmospheric O2 into ocean surface layers.")]
-    [Range(0f, 1f)] public float layeredSurfaceOxygenationRate = 0.02f;
     [Tooltip("Downward sinking flux of organic material (marine snow) per atmosphere tick.")]
     [Range(0f, 1f)] public float layeredMarineSnowRate = 0.015f;
     [Tooltip("Weak in-layer lateral spread for OrganicC (marine snow plume broadening).")]
@@ -605,6 +617,7 @@ public class PlanetResourceMap : MonoBehaviour
             },
             co2 = CopyAuthoritativeResourceArray(ResourceType.CO2),
             o2 = CopyAuthoritativeResourceArray(ResourceType.O2),
+            atmosphericO2 = o2 != null ? (float[])o2.Clone() : null,
             organicC = CopyAuthoritativeResourceArray(ResourceType.OrganicC),
             h2s = CopyAuthoritativeResourceArray(ResourceType.H2S),
             h2 = CopyAuthoritativeResourceArray(ResourceType.H2),
@@ -670,6 +683,7 @@ public class PlanetResourceMap : MonoBehaviour
         bool anyRestored = false;
         anyRestored |= TryApplyMutableArray("CO2", snapshot.co2, GetLayeredOrAggregateArray(ResourceType.CO2), statuses);
         anyRestored |= TryApplyMutableArray("O2", snapshot.o2, GetLayeredOrAggregateArray(ResourceType.O2), statuses);
+        anyRestored |= TryApplyMutableArray("Atmospheric O2", snapshot.atmosphericO2, o2, statuses);
         anyRestored |= TryApplyMutableArray("OrganicC", snapshot.organicC, GetLayeredOrAggregateArray(ResourceType.OrganicC), statuses);
         anyRestored |= TryApplyMutableArray("H2S", snapshot.h2s, GetLayeredOrAggregateArray(ResourceType.H2S), statuses);
         anyRestored |= TryApplyMutableArray("H2", snapshot.h2, GetLayeredOrAggregateArray(ResourceType.H2), statuses);
@@ -1037,13 +1051,12 @@ public class PlanetResourceMap : MonoBehaviour
             {
                 atmosphereTimer -= atmosphereTick;
                 ApplyAtmosphereMixing();
-                ApplyNaturalOxidation();
-                // Surface Fe2+ can still draw atmospheric O2, but only from local top-layer demand.
-                TransferAtmosphericO2ToSurfaceFe2Demand(atmosphereTick);
+                ApplyAtmosphereOceanO2Exchange(atmosphereTick);
                 ApplyDissolvedFe2PlusOxidation(atmosphereTick);
+                ApplyVerticalLayeredOceanProcesses(atmosphereTick);
+                ApplyNaturalOxidation();
                 UpdatePrecipitateVisuals(atmosphereTick);
                 ApplyLocalResourceMixing(atmosphereTick);
-                ApplyVerticalLayeredOceanProcesses(atmosphereTick);
                 UpdateAtmosphereDebugMeans();
                 UpdateOceanChemistryDebugStats();
             }
@@ -1930,7 +1943,7 @@ public class PlanetResourceMap : MonoBehaviour
                 bool isOcean = oceanMask[cell] != 0;
 
                 co2[cell] = Mathf.Max(0f, baselineCO2 * allCellInventoryScale);
-                o2[cell] = Mathf.Max(0f, baselineO2 * allCellInventoryScale);
+                o2[cell] = isOcean ? 0f : Mathf.Max(0f, baselineO2 * allCellInventoryScale);
                 organicC[cell] = 0f;
                 ch4[cell] = Mathf.Max(0f, baselineCH4 * allCellInventoryScale);
                 s0[cell] = Mathf.Max(0f, baselineS0 * allCellInventoryScale);
@@ -1976,7 +1989,7 @@ public class PlanetResourceMap : MonoBehaviour
                 bool isOcean = oceanMask[cell] != 0;
 
                 co2[cell] = Mathf.Max(0f, baselineCO2 * allCellInventoryScale);
-                o2[cell] = Mathf.Max(0f, baselineO2 * allCellInventoryScale);
+                o2[cell] = isOcean ? 0f : Mathf.Max(0f, baselineO2 * allCellInventoryScale);
                 organicC[cell] = 0f;
                 ch4[cell] = Mathf.Max(0f, baselineCH4 * allCellInventoryScale);
                 s0[cell] = Mathf.Max(0f, baselineS0 * allCellInventoryScale);
@@ -2627,6 +2640,7 @@ public class PlanetResourceMap : MonoBehaviour
             debugGlobalCO2 = 0f;
             debugGlobalO2 = 0f;
             debugGlobalCH4 = 0f;
+            debugAtmosphereO2Total = 0f;
             return;
         }
 
@@ -2680,7 +2694,7 @@ public class PlanetResourceMap : MonoBehaviour
             }
 
             float mixedCO2 = currentCO2 + exchangeRate * (globalCO2 - currentCO2);
-            float mixedO2 = o2[cell] + exchangeRate * (globalO2 - o2[cell]);
+            float mixedO2 = oceanMask[cell] == 0 ? o2[cell] + exchangeRate * (globalO2 - o2[cell]) : o2[cell];
             float mixedCH4 = ch4[cell] + exchangeRate * (globalCH4 - ch4[cell]);
 
             if (topLayer >= 0)
@@ -2703,215 +2717,131 @@ public class PlanetResourceMap : MonoBehaviour
         UpdateAtmosphereDebugMeans();
     }
 
-    private void TransferAtmosphericO2ToSurfaceFe2Demand(float dt)
+    private void ApplyAtmosphereOceanO2Exchange(float dt)
     {
+        debugAtmosphereToSurfaceOceanO2LastTick = 0f;
+        debugAtmosphereOceanO2ExchangeMassBalanceErrorLastTick = 0f;
         if (!isInitialized || o2 == null || oceanMask == null)
         {
             return;
         }
 
-        float transferFraction = Mathf.Clamp01(atmosphereToOceanO2TransferFractionPerTick);
-        float rate = Mathf.Max(0f, fe2PlusOxidationRatePerSecond);
-        float o2PerFe2 = Mathf.Max(0f, o2ConsumptionPerFe2PlusOxidized);
-        if (transferFraction <= 0f || rate <= 0f || o2PerFe2 <= 0f)
+        float rate = Mathf.Max(0f, atmosphereOceanO2ExchangeRatePerSecond);
+        if (rate <= 0f)
         {
             return;
         }
 
-        float[] demandWeights = surfaceO2DemandTmp;
-        if (demandWeights == null || demandWeights.Length != o2.Length)
-        {
-            return;
-        }
+        float[] o2Layers = enableLayeredOcean ? GetLayeredOceanArray(ResourceType.O2) : null;
+        float atmosphereTotal = 0f;
+        int atmosphereCount = 0;
+        float surfaceTotal = 0f;
+        int surfaceCount = 0;
 
-        float totalDemand = 0f;
-
-        if (enableLayeredOcean)
-        {
-            float[] dissolvedFe2PlusLayers = GetLayeredOceanArray(ResourceType.DissolvedFe2Plus);
-            float[] o2Layers = GetLayeredOceanArray(ResourceType.O2);
-            if (dissolvedFe2PlusLayers == null || o2Layers == null)
-            {
-                return;
-            }
-
-            for (int cell = 0; cell < oceanMask.Length; cell++)
-            {
-                demandWeights[cell] = 0f;
-                if (oceanMask[cell] == 0)
-                {
-                    continue;
-                }
-
-                int topLayer = GetOceanTopLayerIndex(cell);
-                if (topLayer < 0)
-                {
-                    continue;
-                }
-
-                int idx = GetLayeredArrayIndex(cell, topLayer);
-                if (idx < 0 || idx >= dissolvedFe2PlusLayers.Length || idx >= o2Layers.Length)
-                {
-                    continue;
-                }
-
-                float availableFe2 = Mathf.Max(0f, dissolvedFe2PlusLayers[idx]);
-                if (availableFe2 <= 0f)
-                {
-                    continue;
-                }
-
-                float desiredOxidation = availableFe2 * rate * Mathf.Max(0f, dt);
-                float o2Demand = desiredOxidation * o2PerFe2;
-                float localDeficit = Mathf.Max(0f, o2Demand - Mathf.Max(0f, o2Layers[idx]));
-                if (localDeficit <= 0f)
-                {
-                    continue;
-                }
-
-                demandWeights[cell] = localDeficit;
-                totalDemand += localDeficit;
-            }
-        }
-        else
-        {
-            float[] dissolvedFe2Plus = GetOceanDissolvedArray(ResourceType.DissolvedFe2Plus);
-            if (dissolvedFe2Plus == null)
-            {
-                return;
-            }
-
-            for (int cell = 0; cell < oceanMask.Length; cell++)
-            {
-                demandWeights[cell] = 0f;
-                if (oceanMask[cell] == 0)
-                {
-                    continue;
-                }
-
-                float availableFe2 = Mathf.Max(0f, dissolvedFe2Plus[cell]);
-                if (availableFe2 <= 0f)
-                {
-                    continue;
-                }
-
-                float desiredOxidation = availableFe2 * rate * Mathf.Max(0f, dt);
-                float o2Demand = desiredOxidation * o2PerFe2;
-                float localDeficit = Mathf.Max(0f, o2Demand - Mathf.Max(0f, o2[cell]));
-                if (localDeficit <= 0f)
-                {
-                    continue;
-                }
-
-                demandWeights[cell] = localDeficit;
-                totalDemand += localDeficit;
-            }
-        }
-
-        if (totalDemand <= 1e-6f)
-        {
-            return;
-        }
-
-        float totalAtmosphericO2 = 0f;
         for (int cell = 0; cell < o2.Length; cell++)
         {
             if (oceanMask[cell] == 0)
             {
-                totalAtmosphericO2 += Mathf.Max(0f, o2[cell]);
+                atmosphereTotal += Mathf.Max(0f, o2[cell]);
+                atmosphereCount++;
+            }
+            else if (enableLayeredOcean && o2Layers != null)
+            {
+                int top = GetOceanTopLayerIndex(cell);
+                if (top >= 0)
+                {
+                    surfaceTotal += Mathf.Max(0f, o2Layers[GetLayeredArrayIndex(cell, top)]);
+                    surfaceCount++;
+                }
+            }
+            else
+            {
+                surfaceTotal += Mathf.Max(0f, o2[cell]);
+                surfaceCount++;
             }
         }
 
-        if (totalAtmosphericO2 <= 0f)
+        debugAtmosphereO2Total = atmosphereTotal;
+        if (atmosphereTotal <= 0f || atmosphereCount <= 0 || surfaceCount <= 0)
         {
             return;
         }
 
-        float transferredO2 = Mathf.Min(totalDemand, totalAtmosphericO2 * transferFraction);
-        if (transferredO2 <= 0f)
+        float atmosphereMean = atmosphereTotal / atmosphereCount;
+        float surfaceMean = surfaceTotal / surfaceCount;
+        float gradient = Mathf.Max(0f, atmosphereMean - surfaceMean);
+        float desiredTransfer = gradient * surfaceCount * rate * Mathf.Max(0f, dt);
+        float actualTransfer = Mathf.Min(atmosphereTotal, desiredTransfer);
+        if (actualTransfer <= 0f)
         {
             return;
         }
 
-        float toRemove = transferredO2;
-        for (int cell = 0; cell < o2.Length; cell++)
+        float remainingRemoval = actualTransfer;
+        for (int cell = 0; cell < o2.Length && remainingRemoval > 0f; cell++)
         {
-            if (oceanMask[cell] != 0 || toRemove <= 0f)
+            if (oceanMask[cell] != 0)
             {
                 continue;
             }
 
-            float share = totalAtmosphericO2 > 0f ? Mathf.Max(0f, o2[cell]) / totalAtmosphericO2 : 0f;
-            float remove = Mathf.Min(o2[cell], transferredO2 * share);
-            o2[cell] = Mathf.Max(0f, o2[cell] - remove);
-            toRemove -= remove;
+            float before = Mathf.Max(0f, o2[cell]);
+            float share = before / atmosphereTotal;
+            float remove = Mathf.Min(before, actualTransfer * share);
+            o2[cell] = before - remove;
+            remainingRemoval -= remove;
         }
 
-        if (toRemove > 0f)
+        for (int cell = 0; cell < o2.Length && remainingRemoval > 0f; cell++)
         {
-            for (int cell = 0; cell < o2.Length && toRemove > 0f; cell++)
+            if (oceanMask[cell] != 0 || o2[cell] <= 0f)
             {
-                if (oceanMask[cell] != 0 || o2[cell] <= 0f)
-                {
-                    continue;
-                }
-
-                float remove = Mathf.Min(o2[cell], toRemove);
-                o2[cell] = Mathf.Max(0f, o2[cell] - remove);
-                toRemove -= remove;
-            }
-        }
-
-        float actualTransferred = transferredO2 - Mathf.Max(0f, toRemove);
-        if (actualTransferred <= 0f)
-        {
-            return;
-        }
-
-        if (enableLayeredOcean)
-        {
-            float[] o2Layers = GetLayeredOceanArray(ResourceType.O2);
-            if (o2Layers == null)
-            {
-                return;
+                continue;
             }
 
+            float remove = Mathf.Min(o2[cell], remainingRemoval);
+            o2[cell] -= remove;
+            remainingRemoval -= remove;
+        }
+
+        float removed = actualTransfer - Mathf.Max(0f, remainingRemoval);
+        float added = 0f;
+        if (enableLayeredOcean && o2Layers != null)
+        {
+            float addPerSurfaceCell = removed / surfaceCount;
             for (int cell = 0; cell < oceanMask.Length; cell++)
             {
-                float demand = demandWeights[cell];
-                if (demand <= 0f)
+                if (oceanMask[cell] == 0)
                 {
                     continue;
                 }
 
-                int topLayer = GetOceanTopLayerIndex(cell);
-                if (topLayer < 0)
+                int top = GetOceanTopLayerIndex(cell);
+                if (top < 0)
                 {
                     continue;
                 }
 
-                int idx = GetLayeredArrayIndex(cell, topLayer);
-                if (idx < 0 || idx >= o2Layers.Length)
-                {
-                    continue;
-                }
-
-                o2Layers[idx] += actualTransferred * (demand / totalDemand);
+                o2Layers[GetLayeredArrayIndex(cell, top)] += addPerSurfaceCell;
+                added += addPerSurfaceCell;
             }
         }
         else
         {
+            float addPerSurfaceCell = removed / surfaceCount;
             for (int cell = 0; cell < oceanMask.Length; cell++)
             {
-                float demand = demandWeights[cell];
-                if (demand <= 0f)
+                if (oceanMask[cell] != 0)
                 {
-                    continue;
+                    o2[cell] += addPerSurfaceCell;
+                    added += addPerSurfaceCell;
                 }
-
-                o2[cell] += actualTransferred * (demand / totalDemand);
             }
         }
+
+        debugAtmosphereToSurfaceOceanO2LastTick = added;
+        debugAtmosphereOceanO2ExchangeMassBalanceErrorLastTick = added - removed;
+        UpdateAtmosphereDebugMeans();
     }
 
     private void ApplyLocalResourceMixing(float dt)
@@ -3032,49 +2962,10 @@ public class PlanetResourceMap : MonoBehaviour
         }
 
         UpdateLayerLightAndTemperatureProfiles();
-        ApplySurfaceOxygenationToLayers(dt);
         ApplyVerticalDiffusion(dt);
         ApplyLayeredOrganicCTransport(dt);
         SyncLegacyOceanFromLayeredArrays();
         UpdateLayeredDebugSample();
-    }
-
-    private void ApplySurfaceOxygenationToLayers(float dt)
-    {
-        float oxygenationRate = Mathf.Clamp01(layeredSurfaceOxygenationRate) * Mathf.Max(0f, dt);
-        if (oxygenationRate <= 0f)
-        {
-            return;
-        }
-
-        float targetSurfaceO2 = Mathf.Max(0f, debugGlobalO2);
-        float[] o2Layers = GetLayeredOceanArray(ResourceType.O2);
-        if (o2Layers == null || oceanMask == null)
-        {
-            return;
-        }
-
-        for (int cell = 0; cell < oceanMask.Length; cell++)
-        {
-            if (!IsOceanCell(cell))
-            {
-                continue;
-            }
-
-            int top = GetOceanTopLayerIndex(cell);
-            if (top < 0)
-            {
-                continue;
-            }
-
-            int idx = GetLayeredArrayIndex(cell, top);
-            if (idx < 0 || idx >= o2Layers.Length)
-            {
-                continue;
-            }
-
-            o2Layers[idx] = Mathf.Max(0f, Mathf.Lerp(o2Layers[idx], targetSurfaceO2, oxygenationRate));
-        }
     }
 
     private void ApplyVerticalDiffusion(float dt)
@@ -3406,6 +3297,7 @@ public class PlanetResourceMap : MonoBehaviour
         float invCellCount = 1f / co2.Length;
         debugGlobalCO2 = totalCO2 * invCellCount;
         debugGlobalO2 = atmosphereCellCount > 0 ? totalAtmosphereO2 / atmosphereCellCount : 0f;
+        debugAtmosphereO2Total = totalAtmosphereO2;
         debugGlobalCH4 = atmosphereCellCount > 0 ? totalAtmosphereCH4 / atmosphereCellCount : 0f;
     }
 
@@ -3486,12 +3378,36 @@ public class PlanetResourceMap : MonoBehaviour
         UpdateOceanChemistryDebugStats();
     }
 
+
+    private void EnsureLayerDiagnosticArrays()
+    {
+        if (debugFe2TotalByLayer == null || debugFe2TotalByLayer.Length != MaxOceanLayers)
+        {
+            debugFe2TotalByLayer = new float[MaxOceanLayers];
+        }
+
+        if (debugFe2OxidizedLastTickByLayer == null || debugFe2OxidizedLastTickByLayer.Length != MaxOceanLayers)
+        {
+            debugFe2OxidizedLastTickByLayer = new float[MaxOceanLayers];
+        }
+
+        if (debugFeOxPrecipitateGeneratedLastTickByLayer == null || debugFeOxPrecipitateGeneratedLastTickByLayer.Length != MaxOceanLayers)
+        {
+            debugFeOxPrecipitateGeneratedLastTickByLayer = new float[MaxOceanLayers];
+        }
+    }
+
     private void ApplyDissolvedFe2PlusOxidation(float dt)
     {
         if (!isInitialized || oceanMask == null || fe == null)
         {
             return;
         }
+
+        EnsureLayerDiagnosticArrays();
+        Array.Clear(debugFe2OxidizedLastTickByLayer, 0, debugFe2OxidizedLastTickByLayer.Length);
+        Array.Clear(debugFeOxPrecipitateGeneratedLastTickByLayer, 0, debugFeOxPrecipitateGeneratedLastTickByLayer.Length);
+        debugO2ConsumedByFe2OxidationLastTick = 0f;
 
         float rate = Mathf.Max(0f, fe2PlusOxidationRatePerSecond);
         float o2PerFe2 = Mathf.Max(0f, o2ConsumptionPerFe2PlusOxidized);
@@ -3534,6 +3450,9 @@ public class PlanetResourceMap : MonoBehaviour
                 dissolvedFe2PlusLegacy[cell] = availableFe2 - oxidizedFe2;
                 o2[cell] = Mathf.Max(0f, availableO2 - (oxidizedFe2 * o2PerFe2));
                 fe[cell] += oxidizedFe2;
+                debugO2ConsumedByFe2OxidationLastTick += oxidizedFe2 * o2PerFe2;
+                if (debugFe2OxidizedLastTickByLayer.Length > 0) debugFe2OxidizedLastTickByLayer[0] += oxidizedFe2;
+                if (debugFeOxPrecipitateGeneratedLastTickByLayer.Length > 0) debugFeOxPrecipitateGeneratedLastTickByLayer[0] += oxidizedFe2 * ironOxidePrecipitateVisualScale;
                 AddVisualPrecipitate(ironOxidePrecipitateVisual, cell, GetOceanBottomLayerIndex(cell), oxidizedFe2 * ironOxidePrecipitateVisualScale);
             }
 
@@ -3594,7 +3513,11 @@ public class PlanetResourceMap : MonoBehaviour
                 dissolvedFe2PlusLayers[idx] = availableFe2 - oxidizedFe2;
                 o2Layers[idx] = Mathf.Max(0f, availableO2 - (oxidizedFe2 * o2PerFe2));
                 oxidizedTotalThisCell += oxidizedFe2;
-                AddVisualPrecipitate(ironOxidePrecipitateVisual, cell, layer, oxidizedFe2 * ironOxidePrecipitateVisualScale);
+                debugO2ConsumedByFe2OxidationLastTick += oxidizedFe2 * o2PerFe2;
+                if (layer >= 0 && layer < debugFe2OxidizedLastTickByLayer.Length) debugFe2OxidizedLastTickByLayer[layer] += oxidizedFe2;
+                float precipitateGenerated = oxidizedFe2 * ironOxidePrecipitateVisualScale;
+                if (layer >= 0 && layer < debugFeOxPrecipitateGeneratedLastTickByLayer.Length) debugFeOxPrecipitateGeneratedLastTickByLayer[layer] += precipitateGenerated;
+                AddVisualPrecipitate(ironOxidePrecipitateVisual, cell, layer, precipitateGenerated);
             }
 
             if (oxidizedTotalThisCell > 0f)
@@ -3627,9 +3550,24 @@ public class PlanetResourceMap : MonoBehaviour
             return;
         }
 
+        EnsureLayerDiagnosticArrays();
+        Array.Clear(debugFe2TotalByLayer, 0, debugFe2TotalByLayer.Length);
+        debugOceanO2TopLayerTotal = 0f;
+        debugOceanO2TopLayerMean = 0f;
+        debugOceanO2SecondLayerTotal = 0f;
+        debugOceanO2SecondLayerMean = 0f;
+        debugOceanO2DeepestLayerTotal = 0f;
+        debugOceanO2DeepestLayerMean = 0f;
+
         float dissolvedTotal = 0f;
         float oxidizedTotal = 0f;
         int oceanCount = 0;
+        int topCount = 0;
+        int secondCount = 0;
+        int deepestCount = 0;
+        float[] fe2Layers = enableLayeredOcean ? GetLayeredOceanArray(ResourceType.DissolvedFe2Plus) : null;
+        float[] o2Layers = enableLayeredOcean ? GetLayeredOceanArray(ResourceType.O2) : null;
+
         for (int cell = 0; cell < oceanMask.Length; cell++)
         {
             if (oceanMask[cell] == 0)
@@ -3637,7 +3575,34 @@ public class PlanetResourceMap : MonoBehaviour
                 continue;
             }
 
-            dissolvedTotal += dissolvedFe2Plus[cell];
+            int active = GetOceanActiveLayerCount(cell);
+            if (enableLayeredOcean && active > 0 && fe2Layers != null)
+            {
+                for (int layer = 0; layer < active; layer++)
+                {
+                    float fe2Value = Mathf.Max(0f, fe2Layers[GetLayeredArrayIndex(cell, layer)]);
+                    dissolvedTotal += fe2Value;
+                    if (layer < debugFe2TotalByLayer.Length) debugFe2TotalByLayer[layer] += fe2Value;
+                }
+            }
+            else
+            {
+                dissolvedTotal += dissolvedFe2Plus[cell];
+            }
+
+            if (enableLayeredOcean && active > 0 && o2Layers != null)
+            {
+                debugOceanO2TopLayerTotal += Mathf.Max(0f, o2Layers[GetLayeredArrayIndex(cell, 0)]);
+                topCount++;
+                if (active > 1)
+                {
+                    debugOceanO2SecondLayerTotal += Mathf.Max(0f, o2Layers[GetLayeredArrayIndex(cell, 1)]);
+                    secondCount++;
+                }
+                debugOceanO2DeepestLayerTotal += Mathf.Max(0f, o2Layers[GetLayeredArrayIndex(cell, active - 1)]);
+                deepestCount++;
+            }
+
             oxidizedTotal += fe[cell];
             oceanCount++;
         }
@@ -3645,6 +3610,9 @@ public class PlanetResourceMap : MonoBehaviour
         debugDissolvedFe2PlusTotal = dissolvedTotal;
         debugFeTotal = oxidizedTotal;
         debugDissolvedFe2PlusOceanMean = oceanCount > 0 ? dissolvedTotal / oceanCount : 0f;
+        debugOceanO2TopLayerMean = topCount > 0 ? debugOceanO2TopLayerTotal / topCount : 0f;
+        debugOceanO2SecondLayerMean = secondCount > 0 ? debugOceanO2SecondLayerTotal / secondCount : 0f;
+        debugOceanO2DeepestLayerMean = deepestCount > 0 ? debugOceanO2DeepestLayerTotal / deepestCount : 0f;
 
         if (initialDissolvedFe2PlusTotal <= 0f)
         {
@@ -4733,16 +4701,61 @@ public class PlanetResourceMap : MonoBehaviour
 
     private void SyncLayeredOceanFromLegacyArrays()
     {
-        SyncResourceLegacyToLayered(ResourceType.O2);
+        InitializeLayeredO2FromAtmosphereSeparatedState();
         SyncResourceLegacyToLayered(ResourceType.CO2);
         SyncResourceLegacyToLayered(ResourceType.OrganicC);
         SyncResourceLegacyToLayered(ResourceType.H2);
         SyncResourceLegacyToLayered(ResourceType.H2S);
         SyncResourceLegacyToLayered(ResourceType.S0);
         SyncResourceLegacyToLayered(ResourceType.CH4);
-        SyncResourceLegacyToLayered(ResourceType.DissolvedFe2Plus);
+        SyncPerCellInventoryLegacyToLayeredEvenly(ResourceType.DissolvedFe2Plus);
         SyncResourceLegacyToLayered(ResourceType.DissolvedOrganicLeak);
         SyncResourceLegacyToLayered(ResourceType.ToxicProteolyticWaste);
+    }
+
+
+    private void InitializeLayeredO2FromAtmosphereSeparatedState()
+    {
+        float[] layered = GetLayeredOceanArray(ResourceType.O2);
+        if (layered == null || oceanMask == null)
+        {
+            return;
+        }
+
+        for (int cell = 0; cell < oceanMask.Length; cell++)
+        {
+            int active = GetOceanActiveLayerCount(cell);
+            for (int layer = 0; layer < active; layer++)
+            {
+                // Existing startup O2 is atmospheric only; dissolved ocean O2 defaults to anoxic.
+                layered[GetLayeredArrayIndex(cell, layer)] = 0f;
+            }
+        }
+    }
+
+    private void SyncPerCellInventoryLegacyToLayeredEvenly(ResourceType resourceType)
+    {
+        float[] legacy = GetArray(resourceType);
+        float[] layered = GetLayeredOceanArray(resourceType);
+        if (legacy == null || layered == null)
+        {
+            return;
+        }
+
+        for (int cell = 0; cell < legacy.Length; cell++)
+        {
+            int active = GetOceanActiveLayerCount(cell);
+            if (active <= 0)
+            {
+                continue;
+            }
+
+            float perLayer = Mathf.Max(0f, legacy[cell]) / active;
+            for (int layer = 0; layer < active; layer++)
+            {
+                layered[GetLayeredArrayIndex(cell, layer)] = perLayer;
+            }
+        }
     }
 
     private void SyncResourceLegacyToLayered(ResourceType resourceType)
@@ -5160,7 +5173,6 @@ public class PlanetResourceMap : MonoBehaviour
         atmosphereTickSeconds = Mathf.Max(0.0001f, atmosphereTickSeconds);
         landExchangeRate = Mathf.Max(0f, landExchangeRate);
         oceanExchangeRate = Mathf.Max(0f, oceanExchangeRate);
-        atmosphereToOceanO2TransferFractionPerTick = Mathf.Clamp01(atmosphereToOceanO2TransferFractionPerTick);
         naturalOxidationFractionPerTick = Mathf.Clamp01(naturalOxidationFractionPerTick);
         initialDissolvedFe2PlusPerOceanCell = Mathf.Max(0f, initialDissolvedFe2PlusPerOceanCell);
         ventDissolvedFe2PlusPerTick = Mathf.Max(0f, ventDissolvedFe2PlusPerTick);
@@ -5200,7 +5212,7 @@ public class PlanetResourceMap : MonoBehaviour
         layeredSecondLayerLightFactor = Mathf.Clamp(layeredSecondLayerLightFactor, 0.4f, 0.7f);
         layeredThirdLayerLightFactor = Mathf.Clamp(layeredThirdLayerLightFactor, 0f, 0.2f);
         layeredVerticalMixRate = Mathf.Clamp01(layeredVerticalMixRate);
-        layeredSurfaceOxygenationRate = Mathf.Clamp01(layeredSurfaceOxygenationRate);
+        atmosphereOceanO2ExchangeRatePerSecond = Mathf.Max(0f, atmosphereOceanO2ExchangeRatePerSecond);
         layeredMarineSnowRate = Mathf.Clamp01(layeredMarineSnowRate);
         layeredOrganicCLateralSpreadRate = Mathf.Clamp01(layeredOrganicCLateralSpreadRate);
         layeredOrganicCUpwardBleedRate = Mathf.Clamp01(layeredOrganicCUpwardBleedRate);

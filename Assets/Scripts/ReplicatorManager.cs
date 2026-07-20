@@ -2786,15 +2786,16 @@ public class ReplicatorManager : MonoBehaviour
         int preferredLayerIndex = parent.preferredOceanLayerIndex;
 
         float globalO2 = planetResourceMap.debugGlobalO2;
-        bool hasLocalO2 = IsOxygenLocallyAvailable(cellIndex, parent.currentOceanLayerIndex, preferredLayerIndex, minLocalO2);
+        float localO2Threshold = GetAreaNormalizedLocalThreshold(minLocalO2);
+        float localO2 = GetLocalHabitatResource(ResourceType.O2, cellIndex, parent.currentOceanLayerIndex, preferredLayerIndex);
+        bool hasLocalO2 = localO2 > localO2Threshold;
         bool hasLocalOrganicC = IsOrganicCLocallyAvailable(cellIndex, parent.currentOceanLayerIndex, preferredLayerIndex, minLocalOrganicC);
-        unlockedByLocalOxygen = globalO2 <= minGlobalO2 && hasLocalO2;
+        unlockedByLocalOxygen = hasLocalO2;
 
-        if (unlockedByLocalOxygen)
+        if (!hasLocalO2 || !hasLocalOrganicC)
         {
-            float localO2Threshold = GetAreaNormalizedLocalThreshold(minLocalO2);
-            float localO2 = GetLocalHabitatResource(ResourceType.O2, cellIndex, parent.currentOceanLayerIndex, preferredLayerIndex);
-            Debug.Log($"[LocalO2Mutation] Saprotrophy mutation became eligible due to local O2 (global O2 {globalO2:0.0000} <= {minGlobalO2:0.0000}). Local O2: {localO2:0.0000}, threshold(area-normalized): {localO2Threshold:0.0000}");
+            string reason = !hasLocalO2 ? "MissingLocalLayerO2" : "MissingLocalOrganicC";
+            Debug.Log($"[SaprotrophyMutationBlocked] cell={cellIndex} currentLayer={parent.currentOceanLayerIndex} preferredLayer={preferredLayerIndex} localLayerO2={localO2:0.0000} globalAtmosphereO2={globalO2:0.0000} reason={reason}");
         }
 
         return hasLocalO2 && hasLocalOrganicC;
@@ -2827,12 +2828,10 @@ public class ReplicatorManager : MonoBehaviour
 
     bool IsOxygenLocallyAvailable(int habitatCellIndex, int habitatOceanLayerIndex, int fallbackOceanLayerIndex, float minimumAmount)
     {
-        bool isOxygenGloballyAvailable = planetResourceMap.debugGlobalO2 > minGlobalO2;
-        // Local O2 gameplay gates are area-normalized from reference resolution so
-        // oxygen-requiring unlock/spawn behavior is stable across simulation tile sizes.
+        // O2-dependent mutation gates must use only the organism's local cell/layer.
+        // Global atmospheric O2 is diagnostic context elsewhere, not an eligibility source.
         float localO2Threshold = GetAreaNormalizedLocalThreshold(minimumAmount);
-        bool isLocalOxygenAboveThreshold = GetLocalHabitatResource(ResourceType.O2, habitatCellIndex, habitatOceanLayerIndex, fallbackOceanLayerIndex) > localO2Threshold;
-        return isOxygenGloballyAvailable || isLocalOxygenAboveThreshold;
+        return GetLocalHabitatResource(ResourceType.O2, habitatCellIndex, habitatOceanLayerIndex, fallbackOceanLayerIndex) > localO2Threshold;
     }
 
     bool IsOrganicCLocallyAvailable(int habitatCellIndex, int habitatOceanLayerIndex, int fallbackOceanLayerIndex, float minimumAmount)
