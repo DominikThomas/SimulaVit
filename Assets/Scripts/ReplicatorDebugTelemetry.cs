@@ -83,6 +83,11 @@ public sealed class ReplicatorTelemetrySnapshot
     public MetabolismType TopBlockedMutationGatePairTarget;
     public MetabolismMutationGateBlockReason TopBlockedMutationGatePairReason;
     public int TopBlockedMutationGatePairCount;
+
+    public int ReplicationOceanAttempts;
+    public int ReplicationSurfaceAttempts;
+    public int ReplicationSurfaceRejected;
+    public int ReplicationBlockedByHabitat;
 }
 
 public class ReplicatorDebugTelemetry
@@ -111,6 +116,7 @@ public class ReplicatorDebugTelemetry
         Debug.Log($"{prefix} Ocean: Fe2+=avg {snapshot.DissolvedFe2OceanMean:F3} total {snapshot.DissolvedFe2Total:F1} remaining {(snapshot.DissolvedFe2RemainingFraction * 100f):F1}%");
         Debug.Log($"{prefix} Resources: {FormatChemistrySummary(snapshot)}");
         Debug.Log($"{prefix} Mutation gates: {FormatMutationGateSummary(snapshot)}");
+        Debug.Log($"{prefix} Replication habitat: {FormatReplicationHabitatSummary(snapshot)}");
         return true;
     }
 
@@ -219,6 +225,11 @@ public class ReplicatorDebugTelemetry
     private static string FormatMutationGateSummary(ReplicatorTelemetrySnapshot snapshot)
     {
         return $"attempts={snapshot.MetabolismGateTotalAttempts} allowed={snapshot.MetabolismGateAllowed} blocked={snapshot.MetabolismGateBlocked} | topBlockedReason={snapshot.TopMutationGateBlockReason}:{snapshot.TopMutationGateBlockReasonCount} | topBlockedTarget={snapshot.TopBlockedMutationGateTarget}:{snapshot.TopBlockedMutationGateTargetCount} | topBlockedPair={snapshot.TopBlockedMutationGatePairTarget}/{snapshot.TopBlockedMutationGatePairReason}:{snapshot.TopBlockedMutationGatePairCount}";
+    }
+
+    private static string FormatReplicationHabitatSummary(ReplicatorTelemetrySnapshot snapshot)
+    {
+        return $"oceanAttempts={snapshot.ReplicationOceanAttempts} surfaceAttempts={snapshot.ReplicationSurfaceAttempts} surfaceRejected={snapshot.ReplicationSurfaceRejected} blockedByHabitat={snapshot.ReplicationBlockedByHabitat}";
     }
 
     private static string FormatChemistrySummary(ReplicatorTelemetrySnapshot snapshot)
