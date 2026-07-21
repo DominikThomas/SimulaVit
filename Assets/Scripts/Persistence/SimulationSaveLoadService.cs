@@ -340,8 +340,8 @@ public class SimulationSaveLoadService : MonoBehaviour
             geodesicSubdivisionLevel = planetGenerator != null ? planetGenerator.geodesicSubdivisionLevel : 0,
             gridTopologyVersion = 1,
             gridTopologyHash = type == PlanetGridType.GeodesicIcosphere && planetGenerator != null && planetGenerator.GeodesicTopology != null
-                ? $\"geo-v1-s{planetGenerator.geodesicSubdivisionLevel}-c{planetGenerator.GeodesicTopology.CellCount}-t{planetGenerator.GeodesicTopology.TriangleCount}\"
-                : null
+            ? $"geo-v1-s{planetGenerator.geodesicSubdivisionLevel}-c{planetGenerator.GeodesicTopology.CellCount}-t{planetGenerator.GeodesicTopology.TriangleCount}"
+            : null
         };
     }
 
