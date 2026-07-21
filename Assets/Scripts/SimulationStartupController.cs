@@ -33,7 +33,7 @@ public class SimulationStartupController : MonoBehaviour
     private const float VentCO2MaxPerTick = 1f;
     private const int InitialSpawnMin = 0;
     private const int InitialSpawnMax = 10000;
-    private const int SavedStartupConfigVersion = 1;
+    private const int SavedStartupConfigVersion = 2;
 
     [Header("Startup Config")]
     [SerializeField] private SimulationStartupConfig defaults = new SimulationStartupConfig();
@@ -158,6 +158,9 @@ public class SimulationStartupController : MonoBehaviour
         {
             defaults.planetSeed = planetGenerator.randomSeed;
             defaults.useRandomSeed = planetGenerator.useRandomSeed;
+            defaults.gridType = planetGenerator.CurrentGridType;
+            defaults.cubeSphereResolution = planetGenerator.resolution;
+            defaults.geodesicSubdivisionLevel = planetGenerator.geodesicSubdivisionLevel;
         }
 
         if (sunSkyRotator != null)
@@ -413,15 +416,19 @@ public class SimulationStartupController : MonoBehaviour
             LogStartupConfigApplied(currentConfig, keepPaused);
         }
 
-        if (replicatorManager != null)
+        if (currentConfig.gridType == PlanetGridType.LegacyCubeSphere && replicatorManager != null)
         {
             if (replicatorManager.InitializeForSimulation(false))
             {
                 replicatorManager.SpawnInitialPopulation();
             }
         }
+        else if (currentConfig.gridType == PlanetGridType.GeodesicIcosphere)
+        {
+            Debug.Log("[StartupLifecycle] Geodesic prototype mode: skipping replicator initialization/spawn once.", this);
+        }
 
-        int targetSteps = keepPaused ? 0 : Mathf.Max(1, resumeStepsPerFrame);
+        int targetSteps = currentConfig.gridType == PlanetGridType.GeodesicIcosphere ? 0 : (keepPaused ? 0 : Mathf.Max(1, resumeStepsPerFrame));
         replicatorManager?.SetSimulationTiming(targetSteps);
         simulationPipeline?.SetSimulationStepsPerFrame(targetSteps);
         FindFirstObjectByType<SimulationSpeedController>()?.RefreshFromSimulationTiming();
@@ -450,6 +457,7 @@ public class SimulationStartupController : MonoBehaviour
         if (planetGenerator != null)
         {
             planetGenerator.ApplyStartupSeed(seed, requestedRandomSeed);
+            planetGenerator.ApplyStartupGrid(config.gridType, config.cubeSphereResolution, config.geodesicSubdivisionLevel);
             planetGenerator.InitializeAuthoritativePlanet("New Game startup selection");
         }
 
@@ -463,7 +471,7 @@ public class SimulationStartupController : MonoBehaviour
             sunSkyRotator.ApplyStartupTiming(config.axisTiltDegrees, config.dayLengthSeconds, config.yearLengthInDays);
         }
 
-        if (planetResourceMap != null)
+        if (config.gridType == PlanetGridType.LegacyCubeSphere && planetResourceMap != null)
         {
             planetResourceMap.baseTempKelvin = config.baseTempKelvin;
             planetResourceMap.insolationTempGain = config.insolationTempGain;
@@ -475,6 +483,11 @@ public class SimulationStartupController : MonoBehaviour
             planetResourceMap.ventH2SPerTick = Mathf.Max(0f, config.ventH2SPerTick);
             planetResourceMap.ventCO2PerTick = Mathf.Max(0f, config.ventCO2PerTick);
             planetResourceMap.ReinitializeResources();
+        }
+        else if (config.gridType == PlanetGridType.GeodesicIcosphere)
+        {
+            Debug.Log("[StartupLifecycle] Geodesic prototype mode: skipping PlanetResourceMap resource initialization and vent/resource overlays once.", this);
+            ventVisualizer?.ClearRuntimeVisuals("geodesic prototype mode selected");
         }
 
         if (replicatorManager != null)
@@ -620,6 +633,8 @@ public class SimulationStartupController : MonoBehaviour
         config.ventH2SPerTick = Mathf.Clamp(config.ventH2SPerTick, VentPerTickMin, VentH2SMaxPerTick);
         config.ventCO2PerTick = Mathf.Clamp(config.ventCO2PerTick, VentPerTickMin, VentCO2MaxPerTick);
         config.initialSpawnCount = Mathf.Clamp(config.initialSpawnCount, InitialSpawnMin, InitialSpawnMax);
+        config.cubeSphereResolution = Mathf.Clamp(config.cubeSphereResolution, 3, 240);
+        config.geodesicSubdivisionLevel = Mathf.Clamp(config.geodesicSubdivisionLevel, 0, GeodesicGridTopology.MaxSupportedSubdivision);
     }
 
     private void RefreshStartupPanels()
@@ -641,6 +656,9 @@ public class SimulationStartupController : MonoBehaviour
         builder.AppendLine("[Startup Config Applied]");
         builder.AppendLine($"Planet Seed: {config.planetSeed}");
         builder.AppendLine($"Use Random Seed: {config.useRandomSeed}");
+        builder.AppendLine($"Planet Grid: {config.gridType}");
+        builder.AppendLine($"Cube Sphere Resolution: {config.cubeSphereResolution}");
+        builder.AppendLine($"Geodesic Subdivision Level: {config.geodesicSubdivisionLevel}");
         builder.AppendLine($"Axis Tilt Degrees: {config.axisTiltDegrees:0.###}");
         builder.AppendLine($"Day Length Seconds: {config.dayLengthSeconds:0.###}");
         builder.AppendLine($"Year Length In Days: {config.yearLengthInDays:0.###}");
@@ -665,6 +683,9 @@ public class SimulationStartupController : MonoBehaviour
         public int version = SavedStartupConfigVersion;
         public int planetSeed;
         public bool useRandomSeed;
+        public PlanetGridType gridType;
+        public int cubeSphereResolution;
+        public int geodesicSubdivisionLevel;
         public float axisTiltDegrees;
         public float dayLengthSeconds;
         public float yearLengthInDays;
@@ -693,6 +714,9 @@ public class SimulationStartupController : MonoBehaviour
                 version = SavedStartupConfigVersion,
                 planetSeed = config.planetSeed,
                 useRandomSeed = config.useRandomSeed,
+                gridType = config.gridType,
+                cubeSphereResolution = config.cubeSphereResolution,
+                geodesicSubdivisionLevel = config.geodesicSubdivisionLevel,
                 axisTiltDegrees = config.axisTiltDegrees,
                 dayLengthSeconds = config.dayLengthSeconds,
                 yearLengthInDays = config.yearLengthInDays,
@@ -715,6 +739,9 @@ public class SimulationStartupController : MonoBehaviour
             SimulationStartupConfig config = (fallback ?? new SimulationStartupConfig()).Clone();
             config.planetSeed = planetSeed;
             config.useRandomSeed = useRandomSeed;
+            config.gridType = gridType;
+            config.cubeSphereResolution = cubeSphereResolution > 0 ? cubeSphereResolution : config.cubeSphereResolution;
+            config.geodesicSubdivisionLevel = geodesicSubdivisionLevel;
             config.axisTiltDegrees = axisTiltDegrees;
             config.dayLengthSeconds = dayLengthSeconds;
             config.yearLengthInDays = yearLengthInDays;
@@ -972,7 +999,7 @@ public class SimulationStartupController : MonoBehaviour
         setupGuiScrollPosition = GUILayout.BeginScrollView(setupGuiScrollPosition, GUILayout.Width(width), GUILayout.Height(scrollHeight));
 
         float contentWidth = Mathf.Max(1f, width - 20f);
-        float contentHeight = 44f + ((line + gap) * 15f) + (gap * 2f) + 42f + 30f + 44f;
+        float contentHeight = 44f + ((line + gap) * 18f) + (gap * 2f) + 42f + 30f + 44f;
         Rect contentRect = GUILayoutUtility.GetRect(contentWidth, contentHeight, GUILayout.Width(contentWidth), GUILayout.Height(contentHeight));
         float controlX = contentRect.x;
         float y = contentRect.y;
@@ -983,6 +1010,17 @@ public class SimulationStartupController : MonoBehaviour
         DrawBool(new Rect(controlX, y, contentWidth, line), "Use Random Seed", ref currentConfig.useRandomSeed);
         y += line + gap;
         DrawInt(new Rect(controlX, y, contentWidth, line), "Planet Seed", ref currentConfig.planetSeed, !currentConfig.useRandomSeed);
+        y += line + gap;
+        DrawPlanetGridPopup(new Rect(controlX, y, contentWidth, line));
+        y += line + gap;
+        if (currentConfig.gridType == PlanetGridType.LegacyCubeSphere)
+        {
+            DrawInt(new Rect(controlX, y, contentWidth, line), "Cube Sphere Resolution", ref currentConfig.cubeSphereResolution, true, 3, 240);
+        }
+        else
+        {
+            DrawInt(new Rect(controlX, y, contentWidth, line), "Geodesic Subdivision Level", ref currentConfig.geodesicSubdivisionLevel, true, 0, GeodesicGridTopology.MaxSupportedSubdivision);
+        }
         y += line + gap;
         DrawFloat(new Rect(controlX, y, contentWidth, line), "Axis Tilt (deg)", ref currentConfig.axisTiltDegrees, AxisTiltMinDegrees, AxisTiltMaxDegrees);
         y += line + gap;
@@ -1057,7 +1095,7 @@ public class SimulationStartupController : MonoBehaviour
         savePickerScrollPosition = GUILayout.BeginScrollView(savePickerScrollPosition, GUILayout.Height(height - 120f));
         foreach (SimulationSaveLoadService.SaveFileInfo save in cachedSaveFiles)
         {
-            string row = $"{save.FileName}  •  {FormatBytes(save.SizeBytes)}  •  {save.LastWriteTimeLocal:yyyy-MM-dd HH:mm:ss}";
+            string row = $"{save.FileName}  •  {save.GridDescription}  •  {FormatBytes(save.SizeBytes)}  •  {save.LastWriteTimeLocal:yyyy-MM-dd HH:mm:ss}";
             if (GUILayout.Button(row, buttonStyle, GUILayout.Height(34f))) LoadSaveFromStartScreen(save.Path);
         }
         GUILayout.EndScrollView();
@@ -1075,6 +1113,15 @@ public class SimulationStartupController : MonoBehaviour
     {
         GUI.Label(new Rect(rect.x, rect.y, rect.width * 0.45f, rect.height), label, labelStyle);
         value = GUI.Toggle(new Rect(rect.x + rect.width * 0.48f, rect.y, rect.width * 0.52f, rect.height), value, value ? "Yes" : "No");
+    }
+
+    private void DrawPlanetGridPopup(Rect rect)
+    {
+        GUI.Label(new Rect(rect.x, rect.y, rect.width * 0.42f, rect.height), "Planet Grid", labelStyle);
+        string[] labels = { "Cube Sphere (Legacy)", "Geodesic Icosphere" };
+        int selected = currentConfig.gridType == PlanetGridType.GeodesicIcosphere ? 1 : 0;
+        selected = GUI.SelectionGrid(new Rect(rect.x + rect.width * 0.44f, rect.y, rect.width * 0.56f, rect.height), selected, labels, 2);
+        currentConfig.gridType = selected == 1 ? PlanetGridType.GeodesicIcosphere : PlanetGridType.LegacyCubeSphere;
     }
 
     private void DrawFloat(Rect rect, string label, ref float value, float min, float max)

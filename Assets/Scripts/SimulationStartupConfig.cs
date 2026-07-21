@@ -7,6 +7,9 @@ public class SimulationStartupConfig
     [Header("Planet")]
     public int planetSeed = 12345;
     public bool useRandomSeed = true;
+    public PlanetGridType gridType = PlanetGridType.LegacyCubeSphere;
+    [Range(3, 240)] public int cubeSphereResolution = 10;
+    [Range(0, GeodesicGridTopology.MaxSupportedSubdivision)] public int geodesicSubdivisionLevel = 3;
 
     [Header("Sun / Seasons")]
     [Range(0f, 90f)] public float axisTiltDegrees = 23.5f;

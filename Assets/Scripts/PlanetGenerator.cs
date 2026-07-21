@@ -21,6 +21,14 @@ public class PlanetGenerator : MonoBehaviour
     }
 
     [SerializeField] private ReplicatorManager replicatorManager;
+    [Header("Generation Mode")]
+    public PlanetGenerationMode generationMode = PlanetGenerationMode.LegacyCubeSphere;
+    [Range(0, GeodesicGridTopology.MaxSupportedSubdivision)]
+    public int geodesicSubdivisionLevel = 3;
+    public bool showGeodesicCellOutlines = true;
+    public bool highlightGeodesicPentagons = true;
+    public bool showGeodesicCellCentres;
+    public bool showSelectedGeodesicCell = true;
     [Header("Visual Mesh")]
     [Tooltip("Visual/mesh resolution used for terrain/ocean/atmosphere geometry generation. Simulation/resource resolution is configured on PlanetResourceMap.")]
     [Range(3, 240)]
@@ -122,6 +130,8 @@ public class PlanetGenerator : MonoBehaviour
     public IReadOnlyList<float> LocalOceanDepths => localOceanDepthByCell;
     public int VisualResolution => Mathf.Max(1, resolution);
     public bool IsPlanetInitialized { get; private set; }
+    public GeodesicGridTopology GeodesicTopology { get; private set; }
+    public PlanetGridType CurrentGridType => generationMode == PlanetGenerationMode.GeodesicPrototype ? PlanetGridType.GeodesicIcosphere : PlanetGridType.LegacyCubeSphere;
 
     void Awake()
     {
@@ -161,16 +171,23 @@ public class PlanetGenerator : MonoBehaviour
 
     public void InitializeAuthoritativePlanet(string reason = null)
     {
-        Debug.Log($"[StartupLifecycle] Final planet initialization requested. Reason: {reason ?? "unspecified"}, seed={randomSeed}", this);
+        Debug.Log($"[StartupLifecycle] Final planet initialization requested. Reason: {reason ?? "unspecified"}, mode={generationMode}, seed={randomSeed}", this);
         if (randomizeOnStart)
         {
             RandomizeGenerationSettings();
         }
 
         ClearGeneratedPlanetRuntime();
-        GeneratePlanet();
+        if (generationMode == PlanetGenerationMode.GeodesicPrototype)
+        {
+            GenerateGeodesicPrototype();
+        }
+        else
+        {
+            GeneratePlanet();
+        }
         IsPlanetInitialized = true;
-        Debug.Log($"[StartupLifecycle] Planet generation complete. Seed={randomSeed}, resolution={resolution}", this);
+        Debug.Log($"[StartupLifecycle] Planet generation complete. Mode={generationMode}, seed={randomSeed}, resolution={resolution}, geodesicSubdivision={geodesicSubdivisionLevel}", this);
     }
 
     public void RegeneratePlanet()
@@ -196,6 +213,80 @@ public class PlanetGenerator : MonoBehaviour
         if (meshRenderer != null) meshRenderer.enabled = false;
         if (oceanMeshRenderer != null) oceanMeshRenderer.enabled = false;
         if (atmosphereMeshRenderer != null) atmosphereMeshRenderer.enabled = false;
+        GeodesicTopology = null;
+        GetComponent<GeodesicCellPicker>()?.SetTopology(null);
+        transform.Find("Geodesic Debug Lines")?.GetComponent<GeodesicGridDebugRenderer>()?.Render(null, radius);
+    }
+
+    public void ApplyStartupGrid(PlanetGridType gridType, int cubeSphereResolution, int geodesicSubdivision)
+    {
+        generationMode = gridType == PlanetGridType.GeodesicIcosphere ? PlanetGenerationMode.GeodesicPrototype : PlanetGenerationMode.LegacyCubeSphere;
+        resolution = Mathf.Clamp(cubeSphereResolution, 3, 240);
+        geodesicSubdivisionLevel = Mathf.Clamp(geodesicSubdivision, 0, GeodesicGridTopology.MaxSupportedSubdivision);
+        int expected = gridType == PlanetGridType.GeodesicIcosphere
+            ? GeodesicGridTopology.ExpectedCellCount(geodesicSubdivisionLevel)
+            : PlanetGridIndexing.GetCellCount(resolution);
+        Debug.Log($"[PlanetGenerator] Selected grid type={gridType}, cubeSphereResolution={resolution}, geodesicSubdivision={geodesicSubdivisionLevel}, expectedCellCount={expected}", this);
+    }
+
+    private void GenerateGeodesicPrototype()
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        GeodesicTopology = GeodesicGridTopology.Build(geodesicSubdivisionLevel);
+        if (!GeodesicGridValidation.Validate(GeodesicTopology, out string validation))
+        {
+            Debug.LogError($"[GeodesicPrototype] Validation failed: {validation}", this);
+            ClearGeneratedPlanetRuntime();
+            return;
+        }
+
+        mesh = GeodesicSphereMeshBuilder.BuildSurfaceMesh(GeodesicTopology, radius);
+        meshFilter.sharedMesh = mesh;
+        if (meshRenderer != null)
+        {
+            meshRenderer.enabled = true;
+        }
+        MeshCollider meshCollider = GetOrAddComponent<MeshCollider>(gameObject);
+        meshCollider.sharedMesh = null;
+        meshCollider.sharedMesh = mesh;
+        if (oceanMesh != null) oceanMesh.Clear();
+        if (atmosphereMesh != null) atmosphereMesh.Clear();
+        if (oceanMeshRenderer != null) oceanMeshRenderer.enabled = false;
+        if (atmosphereMeshRenderer != null) atmosphereMeshRenderer.enabled = false;
+        var picker = GetOrAddComponent<GeodesicCellPicker>(gameObject);
+        picker.SetTopology(GeodesicTopology);
+        Transform debugTransform = transform.Find("Geodesic Debug Lines");
+        GameObject debugObject = debugTransform != null ? debugTransform.gameObject : new GameObject("Geodesic Debug Lines");
+        debugObject.transform.SetParent(transform, false);
+        debugObject.layer = gameObject.layer;
+        var debug = GetOrAddComponent<GeodesicGridDebugRenderer>(debugObject);
+        debug.showCellOutlines = showGeodesicCellOutlines;
+        debug.highlightPentagons = highlightGeodesicPentagons;
+        debug.showCellCentres = showGeodesicCellCentres;
+        debug.showSelectedCell = showSelectedGeodesicCell;
+        debug.Render(GeodesicTopology, radius);
+        sw.Stop();
+        Debug.Log($"[GeodesicPrototype] subdivision={geodesicSubdivisionLevel}, cells={GeodesicTopology.CellCount}, triangles={GeodesicTopology.TriangleCount}, edges={GeodesicTopology.EdgeCount}, durationMs={sw.Elapsed.TotalMilliseconds:F2}, approxTopologyMemory={GeodesicTopology.ApproximateMemoryBytes} bytes. Validation: {validation}", this);
+    }
+
+    [ContextMenu("Geodesic Prototype Scaling Test 0-5")]
+    public void RunGeodesicPrototypeScalingTest()
+    {
+        for (int level = 0; level <= GeodesicGridTopology.MaxSupportedSubdivision; level++)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            GeodesicGridTopology t = GeodesicGridTopology.Build(level);
+            sw.Stop();
+            GeodesicGridValidation.Validate(t, out string validation);
+            int pentagons = 0; float minArea = float.MaxValue, maxArea = 0f, sumArea = 0f, minDist = float.MaxValue, maxDist = 0f;
+            for (int i = 0; i < t.CellCount; i++)
+            {
+                if (t.IsPentagon[i]) pentagons++;
+                minArea = Mathf.Min(minArea, t.UnitCellAreas[i]); maxArea = Mathf.Max(maxArea, t.UnitCellAreas[i]); sumArea += t.UnitCellAreas[i];
+                for (int k = 0; k < t.NeighborCounts[i]; k++) { float d = t.NeighborAngularDistances6[i * 6 + k]; minDist = Mathf.Min(minDist, d); maxDist = Mathf.Max(maxDist, d); }
+            }
+            Debug.Log($"[GeodesicScalingTest] level={level}, expectedCells={GeodesicGridTopology.ExpectedCellCount(level)}, actualCells={t.CellCount}, expectedTriangles={GeodesicGridTopology.ExpectedTriangleCount(level)}, actualTriangles={t.TriangleCount}, pentagons={pentagons}, areaMinMaxMean={minArea:F8}/{maxArea:F8}/{sumArea / t.CellCount:F8}, neighborDistanceMinMax={minDist:F8}/{maxDist:F8}, durationMs={sw.Elapsed.TotalMilliseconds:F2}, validation={validation}", this);
+        }
     }
 
     void RandomizeGenerationSettings()

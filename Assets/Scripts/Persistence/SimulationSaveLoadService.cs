@@ -15,13 +15,14 @@ public class SimulationSaveLoadService : MonoBehaviour
 
     public readonly struct SaveFileInfo
     {
-        public SaveFileInfo(string path, string fileName, DateTime lastWriteTimeLocal, DateTime lastWriteTimeUtc, long sizeBytes)
+        public SaveFileInfo(string path, string fileName, DateTime lastWriteTimeLocal, DateTime lastWriteTimeUtc, long sizeBytes, string gridDescription = null)
         {
             Path = path;
             FileName = fileName;
             LastWriteTimeLocal = lastWriteTimeLocal;
             LastWriteTimeUtc = lastWriteTimeUtc;
             SizeBytes = sizeBytes;
+            GridDescription = gridDescription;
         }
 
         public string Path { get; }
@@ -29,6 +30,7 @@ public class SimulationSaveLoadService : MonoBehaviour
         public DateTime LastWriteTimeLocal { get; }
         public DateTime LastWriteTimeUtc { get; }
         public long SizeBytes { get; }
+        public string GridDescription { get; }
     }
 
     [Header("Capture References")]
@@ -122,7 +124,7 @@ public class SimulationSaveLoadService : MonoBehaviour
             .Select(file => new FileInfo(file))
             .Where(info => info.Exists)
             .OrderByDescending(info => info.LastWriteTimeUtc)
-            .Select(info => new SaveFileInfo(info.FullName, info.Name, info.LastWriteTime, info.LastWriteTimeUtc, info.Length))
+            .Select(info => new SaveFileInfo(info.FullName, info.Name, info.LastWriteTime, info.LastWriteTimeUtc, info.Length, TryReadGridDescription(info.FullName)))
             .ToArray();
     }
 
@@ -148,6 +150,12 @@ public class SimulationSaveLoadService : MonoBehaviour
         if (!ValidateSaveFile(saveFile, out string validationError))
         {
             Debug.LogError($"Simulation snapshot load aborted: {validationError}", this);
+            return false;
+        }
+        saveFile.grid ??= new PlanetGridMetadata { gridType = PlanetGridType.LegacyCubeSphere };
+        if (saveFile.grid.gridType == PlanetGridType.GeodesicIcosphere)
+        {
+            Debug.LogError("Geodesic prototype save loading is not available yet; incompatible/incomplete geodesic saves are rejected instead of falling back to cube-sphere loading.", this);
             return false;
         }
 
@@ -180,6 +188,7 @@ public class SimulationSaveLoadService : MonoBehaviour
 
             if (planetGenerator != null)
             {
+                planetGenerator.ApplyStartupGrid(saveFile.grid.gridType, saveFile.grid.cubeSphereResolution > 0 ? saveFile.grid.cubeSphereResolution : (saveFile.planetGenerator != null ? saveFile.planetGenerator.resolution : planetGenerator.resolution), saveFile.grid.geodesicSubdivisionLevel);
                 planetGenerator.InitializeAuthoritativePlanet("Load Game snapshot");
             }
 
@@ -245,6 +254,11 @@ public class SimulationSaveLoadService : MonoBehaviour
     public string SaveSnapshot()
     {
         ResolveReferences();
+        if (planetGenerator != null && planetGenerator.CurrentGridType == PlanetGridType.GeodesicIcosphere)
+        {
+            Debug.LogWarning("Geodesic prototype saving is not available yet.", this);
+            return null;
+        }
 
         SimulationSaveFile saveFile = BuildSaveFile();
         string saveDirectory = SavesDirectory;
@@ -308,10 +322,26 @@ public class SimulationSaveLoadService : MonoBehaviour
             savedUtc = DateTime.UtcNow.ToString("o"),
             clock = clockSnapshot,
             sun = sunSkyRotator != null ? sunSkyRotator.CaptureSnapshot() : new SunSkySnapshot { available = false },
+            grid = CapturePlanetGridMetadata(),
             planetGenerator = CapturePlanetGeneratorSnapshot(),
             resourceMap = resourceSnapshot,
             population = populationSnapshot,
             diagnostics = diagnostics
+        };
+    }
+
+    private PlanetGridMetadata CapturePlanetGridMetadata()
+    {
+        PlanetGridType type = planetGenerator != null ? planetGenerator.CurrentGridType : PlanetGridType.LegacyCubeSphere;
+        return new PlanetGridMetadata
+        {
+            gridType = type,
+            cubeSphereResolution = planetGenerator != null ? planetGenerator.resolution : 0,
+            geodesicSubdivisionLevel = planetGenerator != null ? planetGenerator.geodesicSubdivisionLevel : 0,
+            gridTopologyVersion = 1,
+            gridTopologyHash = type == PlanetGridType.GeodesicIcosphere && planetGenerator != null && planetGenerator.GeodesicTopology != null
+                ? $\"geo-v1-s{planetGenerator.geodesicSubdivisionLevel}-c{planetGenerator.GeodesicTopology.CellCount}-t{planetGenerator.GeodesicTopology.TriangleCount}\"
+                : null
         };
     }
 
@@ -379,6 +409,7 @@ public class SimulationSaveLoadService : MonoBehaviour
             saveFile.clock = new SimulationClockSnapshot();
             Debug.LogWarning("Simulation snapshot has no clock; using zero-time fallback.");
         }
+        saveFile.grid ??= new PlanetGridMetadata { gridType = PlanetGridType.LegacyCubeSphere };
 
         error = null;
         return true;
@@ -393,6 +424,7 @@ public class SimulationSaveLoadService : MonoBehaviour
         return "Loaded simulation snapshot:\n" +
             $"Path: {path}\n" +
             $"Schema: {saveFile.schemaVersion}\n" +
+            $"Grid: {FormatGridDescription(saveFile.grid)}\n" +
             $"Saved UTC: {saveFile.savedUtc}\n" +
             $"Simulation time: {(saveFile.clock != null ? saveFile.clock.simulationTimeSeconds : 0d):F3}\n" +
             $"Step count: {(saveFile.clock != null ? saveFile.clock.simulationStepCount : 0)}\n" +
@@ -474,6 +506,7 @@ public class SimulationSaveLoadService : MonoBehaviour
             $"Uncompressed JSON size estimate: {BytesToMegabytes(uncompressedJsonBytes):F3} MB\n" +
             $"Replicators: {(saveFile.population != null ? saveFile.population.count : 0)}\n" +
             $"Schema: {saveFile.schemaVersion}\n" +
+            $"Grid: {FormatGridDescription(saveFile.grid)}\n" +
             $"Simulation time: {(saveFile.clock != null ? saveFile.clock.simulationTimeSeconds : 0d):F3}\n" +
             $"Step count: {(saveFile.clock != null ? saveFile.clock.simulationStepCount : 0)}\n" +
             $"Resource cells: {(saveFile.resourceMap != null ? saveFile.resourceMap.cellCount : 0)}\n" +
@@ -506,6 +539,29 @@ public class SimulationSaveLoadService : MonoBehaviour
     private static double BytesToMegabytes(long bytes)
     {
         return bytes / (1024d * 1024d);
+    }
+
+    private static string FormatGridDescription(PlanetGridMetadata grid)
+    {
+        if (grid == null || grid.gridType == PlanetGridType.LegacyCubeSphere)
+        {
+            return $"Cube sphere, resolution {(grid != null ? grid.cubeSphereResolution : 0)}";
+        }
+        return $"Geodesic icosphere, subdivision {grid.geodesicSubdivisionLevel}";
+    }
+
+    private static string TryReadGridDescription(string path)
+    {
+        try
+        {
+            SimulationSaveFile save = ReadCompressedJson(path);
+            save.grid ??= new PlanetGridMetadata { gridType = PlanetGridType.LegacyCubeSphere, cubeSphereResolution = save.planetGenerator != null ? save.planetGenerator.resolution : 0 };
+            return FormatGridDescription(save.grid);
+        }
+        catch
+        {
+            return "Grid metadata unavailable";
+        }
     }
 
     private void ResolveReferences()

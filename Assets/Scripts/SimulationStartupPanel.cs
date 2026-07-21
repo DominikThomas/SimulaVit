@@ -9,6 +9,11 @@ public class SimulationStartupPanel : MonoBehaviour
     [Header("Inputs")]
     [SerializeField] private Toggle useRandomSeedToggle;
     [SerializeField] private TMP_InputField seedInput;
+    [SerializeField] private TMP_Dropdown planetGridDropdown;
+    [SerializeField] private TMP_InputField cubeSphereResolutionInput;
+    [SerializeField] private TMP_InputField geodesicSubdivisionInput;
+    [SerializeField] private GameObject[] cubeSphereOnlySettings;
+    [SerializeField] private GameObject[] geodesicOnlySettings;
     [SerializeField] private Slider axisTiltSlider;
     [SerializeField] private TMP_InputField dayLengthInput;
     [SerializeField] private TMP_InputField yearLengthInput;
@@ -52,6 +57,7 @@ public class SimulationStartupPanel : MonoBehaviour
         if (resetDefaultsButton != null) resetDefaultsButton.onClick.RemoveListener(ResetDefaults);
         if (backButton != null) backButton.onClick.RemoveListener(BackToMainMenu);
         if (axisTiltSlider != null) axisTiltSlider.onValueChanged.RemoveListener(OnAxisTiltChanged);
+        if (planetGridDropdown != null) planetGridDropdown.onValueChanged.RemoveListener(OnPlanetGridChanged);
     }
 
     private void WireButtons()
@@ -62,6 +68,7 @@ public class SimulationStartupPanel : MonoBehaviour
         if (resetDefaultsButton != null) resetDefaultsButton.onClick.AddListener(ResetDefaults);
         if (backButton != null) backButton.onClick.AddListener(BackToMainMenu);
         if (axisTiltSlider != null) axisTiltSlider.onValueChanged.AddListener(OnAxisTiltChanged);
+        if (planetGridDropdown != null) planetGridDropdown.onValueChanged.AddListener(OnPlanetGridChanged);
     }
 
     public void RefreshFromConfig()
@@ -74,6 +81,10 @@ public class SimulationStartupPanel : MonoBehaviour
         SimulationStartupConfig config = controller.CurrentConfig;
         SetToggle(useRandomSeedToggle, config.useRandomSeed);
         SetText(seedInput, config.planetSeed.ToString());
+        if (planetGridDropdown != null) planetGridDropdown.SetValueWithoutNotify(config.gridType == PlanetGridType.GeodesicIcosphere ? 1 : 0);
+        SetText(cubeSphereResolutionInput, config.cubeSphereResolution.ToString());
+        SetText(geodesicSubdivisionInput, config.geodesicSubdivisionLevel.ToString());
+        ApplyGridSpecificVisibility(config.gridType);
         SetSlider(axisTiltSlider, config.axisTiltDegrees);
         SetText(dayLengthInput, config.dayLengthSeconds.ToString("0.###"));
         SetText(yearLengthInput, config.yearLengthInDays.ToString("0.###"));
@@ -100,6 +111,9 @@ public class SimulationStartupPanel : MonoBehaviour
         SimulationStartupConfig config = controller.CurrentConfig;
         config.useRandomSeed = useRandomSeedToggle == null ? config.useRandomSeed : useRandomSeedToggle.isOn;
         config.planetSeed = ReadInt(seedInput, config.planetSeed);
+        if (planetGridDropdown != null) config.gridType = planetGridDropdown.value == 1 ? PlanetGridType.GeodesicIcosphere : PlanetGridType.LegacyCubeSphere;
+        config.cubeSphereResolution = Mathf.Clamp(ReadInt(cubeSphereResolutionInput, config.cubeSphereResolution), 3, 240);
+        config.geodesicSubdivisionLevel = Mathf.Clamp(ReadInt(geodesicSubdivisionInput, config.geodesicSubdivisionLevel), 0, GeodesicGridTopology.MaxSupportedSubdivision);
         config.axisTiltDegrees = axisTiltSlider == null ? config.axisTiltDegrees : axisTiltSlider.value;
         config.dayLengthSeconds = Mathf.Max(0.01f, ReadFloat(dayLengthInput, config.dayLengthSeconds));
         config.yearLengthInDays = Mathf.Max(1f, ReadFloat(yearLengthInput, config.yearLengthInDays));
@@ -149,6 +163,30 @@ public class SimulationStartupPanel : MonoBehaviour
         if (axisTiltValueLabel != null)
         {
             axisTiltValueLabel.text = $"{value:0.#}°";
+        }
+    }
+
+    private void OnPlanetGridChanged(int value)
+    {
+        if (controller?.CurrentConfig != null)
+        {
+            controller.CurrentConfig.gridType = value == 1 ? PlanetGridType.GeodesicIcosphere : PlanetGridType.LegacyCubeSphere;
+            ApplyGridSpecificVisibility(controller.CurrentConfig.gridType);
+        }
+    }
+
+    private void ApplyGridSpecificVisibility(PlanetGridType gridType)
+    {
+        SetRoots(cubeSphereOnlySettings, gridType == PlanetGridType.LegacyCubeSphere);
+        SetRoots(geodesicOnlySettings, gridType == PlanetGridType.GeodesicIcosphere);
+    }
+
+    private static void SetRoots(GameObject[] roots, bool active)
+    {
+        if (roots == null) return;
+        foreach (GameObject root in roots)
+        {
+            if (root != null) root.SetActive(active);
         }
     }
 
