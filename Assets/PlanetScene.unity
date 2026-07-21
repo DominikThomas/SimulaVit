@@ -151,6 +151,9 @@ MonoBehaviour:
   defaults:
     planetSeed: 12345
     useRandomSeed: 1
+    gridType: 0
+    cubeSphereResolution: 10
+    geodesicSubdivisionLevel: 3
     axisTiltDegrees: 23.5
     dayLengthSeconds: 480
     yearLengthInDays: 100
@@ -168,6 +171,9 @@ MonoBehaviour:
   currentConfig:
     planetSeed: 12345
     useRandomSeed: 1
+    gridType: 0
+    cubeSphereResolution: 10
+    geodesicSubdivisionLevel: 3
     axisTiltDegrees: 23.5
     dayLengthSeconds: 480
     yearLengthInDays: 100
@@ -882,6 +888,41 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   replicatorManager: {fileID: 0}
+  generationMode: 0
+  geodesicSubdivisionLevel: 4
+  showGeodesicCellOutlines: 0
+  highlightGeodesicPentagons: 1
+  showGeodesicCellCentres: 0
+  showSelectedGeodesicCell: 1
+  enableGeodesicTerrainDisplacement: 1
+  usePlanetSeedForTerrain: 1
+  customTerrainSeed: 67890
+  deprecatedGeodesicBaseRadius: 1
+  geodesicTerrainAmplitude: 1
+  geodesicContinentNoiseScale: 0.85
+  geodesicMountainNoiseScale: 4.25
+  geodesicTerrainOctaves: 5
+  geodesicTerrainPersistence: 0.48
+  geodesicTerrainLacunarity: 2
+  geodesicTerrainHeightContrast: 3.78
+  geodesicContinentBias: -0.08
+  geodesicContinentThreshold: 0
+  geodesicMinimumTerrainOffset: -0.937
+  geodesicMaximumTerrainOffset: 0.941
+  geodesicSeaLevelPreviewOffset: 0.181
+  geodesicColoursUseTerrainHeight: 1
+  geodesicOutlineRadialOffset: 0.003
+  enableGeodesicProceduralSurfaceColours: 1
+  usePlanetSeedForVisuals: 1
+  customVisualSeed: 12345
+  geodesicVisualNoiseScale: 2.25
+  geodesicVisualOctaves: 4
+  geodesicVisualPersistence: 0.5
+  geodesicVisualLacunarity: 2
+  geodesicLowColour: {r: 0.16, g: 0.2, b: 0.15, a: 1}
+  geodesicMiddleColour: {r: 0.42, g: 0.38, b: 0.25, a: 1}
+  geodesicHighColour: {r: 0.72, g: 0.7, b: 0.58, a: 1}
+  geodesicVisualContrast: 1.2
   resolution: 100
   radius: 8
   planetMaterial: {fileID: 2100000, guid: 513d49edfa76328498dfe1098aab132c, type: 2}
@@ -1651,6 +1692,13 @@ MonoBehaviour:
     BlockedByTarget: 
     BlockedByReason: 
     BlockedByTargetAndReason: 
+  replicationHabitatTelemetry:
+    OceanAttempts: 0
+    SurfaceAttempts: 0
+    SurfaceRejected: 0
+    BlockedByHabitat: 0
+    RepresentativeParentCell: -1
+    RepresentativeParentMetabolism: 0
   topBlockedMutationGateTarget: 0
   topBlockedMutationGateTargetCount: 0
   topMutationGateBlockReason: 0
@@ -1790,10 +1838,38 @@ MonoBehaviour:
   atmosphereTickSeconds: 2
   landExchangeRate: 0.25
   oceanExchangeRate: 0.05
-  atmosphereToOceanO2TransferFractionPerTick: 1
+  atmosphereOceanO2ExchangeRatePerSecond: 1
   debugGlobalCO2: 5
   debugGlobalO2: 0.010003356
   debugGlobalCH4: 0
+  debugAtmosphereO2Total: 0
+  debugAtmosphereToSurfaceOceanO2LastTick: 0
+  debugAtmosphereOceanO2ExchangeMassBalanceErrorLastTick: 0
+  debugOceanO2TopLayerTotal: 0
+  debugOceanO2TopLayerMean: 0
+  debugOceanO2SecondLayerTotal: 0
+  debugOceanO2SecondLayerMean: 0
+  debugOceanO2DeepestLayerTotal: 0
+  debugOceanO2DeepestLayerMean: 0
+  debugO2ConsumedByFe2OxidationLastTick: 0
+  debugFe2TotalByLayer:
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  debugFe2OxidizedLastTickByLayer:
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  debugFeOxPrecipitateGeneratedLastTickByLayer:
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
   debugSimulationDeltaTimeUsedByPlanetResourceMap: 0
   debugLastVentDeltaTime: 0
   debugVentTimer: 0
@@ -1891,7 +1967,6 @@ MonoBehaviour:
   layeredSecondLayerLightFactor: 0.55
   layeredThirdLayerLightFactor: 0.02
   layeredVerticalMixRate: 0.02
-  layeredSurfaceOxygenationRate: 0.02
   layeredMarineSnowRate: 0.015
   layeredOrganicCLateralSpreadRate: 0.002
   layeredOrganicCUpwardBleedRate: 0.0002

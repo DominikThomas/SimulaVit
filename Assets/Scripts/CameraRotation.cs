@@ -316,9 +316,10 @@ public class CameraRotation : MonoBehaviour
         }
 
         planetGenerator = generator;
-        planetRadius = generator.radius;
-        orbitDistance = generator.radius + distanceBuffer;
-        minZoomDistance = Mathf.Max(planetRadius + 0.5f, minZoomDistance);
+        planetRadius = generator.BasePlanetRadius;
+        float maximumSurfaceRadius = generator.HasRuntimeDescriptor ? generator.RuntimeDescriptor.MaximumGeneratedRadius : generator.MaximumSurfaceRadius;
+        orbitDistance = maximumSurfaceRadius + distanceBuffer;
+        minZoomDistance = Mathf.Max(maximumSurfaceRadius + 0.5f, minZoomDistance);
         maxZoomDistance = Mathf.Max(minZoomDistance, maxZoomDistance);
     }
 
@@ -408,12 +409,14 @@ public class CameraRotation : MonoBehaviour
         }
 
         Vector3 normalizedDirection = directionFromCenter.normalized;
-        float terrainSurfaceRadius = planetGenerator.GetSurfaceRadius(normalizedDirection);
+        float terrainSurfaceRadius = planetGenerator.GetSurfaceRadiusAtDirection(normalizedDirection);
         float landMinDistance = terrainSurfaceRadius + terrainClearance;
         float localMinDistance = landMinDistance;
 
-        int cellIndex = PlanetGridIndexing.DirectionToCellIndex(normalizedDirection, planetGenerator.resolution);
-        bool isOceanCell = planetGenerator.OceanEnabled && planetGenerator.IsOceanCell(cellIndex);
+        int cellIndex = planetGenerator.CurrentGridType == PlanetGridType.LegacyCubeSphere
+            ? PlanetGridIndexing.DirectionToCellIndex(normalizedDirection, planetGenerator.resolution)
+            : -1;
+        bool isOceanCell = cellIndex >= 0 && planetGenerator.OceanEnabled && planetGenerator.IsOceanCell(cellIndex);
         if (isOceanCell)
         {
             float oceanSurfaceRadius = planetGenerator.GetOceanRadius();

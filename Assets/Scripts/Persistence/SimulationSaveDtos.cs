@@ -71,6 +71,12 @@ public class PlanetGeneratorSnapshot
     public int resolution;
     public float radius;
     public float seaLevel;
+    public int masterSeed;
+    public int generationVersion;
+    public bool usePlanetSeedForTerrain;
+    public int customTerrainSeed;
+    public bool usePlanetSeedForVisuals;
+    public int customVisualSeed;
 }
 
 [Serializable]

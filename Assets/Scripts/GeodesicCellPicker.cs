@@ -217,6 +217,15 @@ public class GeodesicCellPicker : MonoBehaviour
                 pickingCollider.bounds.extents.z);
         }
 
+        if (planetGenerator != null)
+        {
+            float transformScale = Mathf.Max(
+                Mathf.Abs(transform.lossyScale.x),
+                Mathf.Abs(transform.lossyScale.y),
+                Mathf.Abs(transform.lossyScale.z));
+            return planetGenerator.MaximumSurfaceRadius * transformScale;
+        }
+
         Renderer renderer = GetComponentInChildren<Renderer>();
         if (renderer != null)
         {
@@ -226,12 +235,12 @@ public class GeodesicCellPicker : MonoBehaviour
                 renderer.bounds.extents.z);
         }
 
-        float transformScale = Mathf.Max(
+        float fallbackTransformScale = Mathf.Max(
             Mathf.Abs(transform.lossyScale.x),
             Mathf.Abs(transform.lossyScale.y),
             Mathf.Abs(transform.lossyScale.z));
 
-        return Mathf.Max(0f, fallbackSphereRadius * transformScale);
+        return Mathf.Max(0f, fallbackSphereRadius * fallbackTransformScale);
     }
 
     private void ResolvePickingCollider()

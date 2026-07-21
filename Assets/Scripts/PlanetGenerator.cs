@@ -1,7 +1,8 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Serialization;
 
-public class PlanetGenerator : MonoBehaviour
+public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializationCallbackReceiver
 {
     /// <summary>
     /// PlanetGenerator is the authoritative source for terrain surface queries.
@@ -34,10 +35,13 @@ public class PlanetGenerator : MonoBehaviour
     [Header("Geodesic Terrain")]
     [Tooltip("Displace only the welded geodesic prototype mesh radially with deterministic direction-sampled terrain. Legacy cube-sphere generation is unaffected.")]
     public bool enableGeodesicTerrainDisplacement = true;
-    [Tooltip("When enabled, the planet seed is used as the geodesic terrain seed.")]
-    public bool usePlanetSeedForGeodesicTerrainSeed = true;
-    public int geodesicTerrainSeed = 67890;
-    [Min(0.001f)] public float geodesicBaseRadius = 1f;
+    [Tooltip("When enabled, a deterministic Terrain-domain seed derived from the master planet seed is used.")]
+    [FormerlySerializedAs("usePlanetSeedForGeodesicTerrainSeed")]
+    public bool usePlanetSeedForTerrain = true;
+    [FormerlySerializedAs("geodesicTerrainSeed")]
+    public int customTerrainSeed = 67890;
+    [FormerlySerializedAs("geodesicBaseRadius")]
+    [SerializeField, HideInInspector] private float deprecatedGeodesicBaseRadius = 1f;
     [Range(0f, 1f)] public float geodesicTerrainAmplitude = 0.14f;
     [Min(0.001f)] public float geodesicContinentNoiseScale = 0.85f;
     [Min(0.001f)] public float geodesicMountainNoiseScale = 4.25f;
@@ -49,7 +53,7 @@ public class PlanetGenerator : MonoBehaviour
     [Range(-1f, 1f)] public float geodesicContinentThreshold = 0f;
     [Range(-1f, 0f)] public float geodesicMinimumTerrainOffset = -0.08f;
     [Range(0f, 1f)] public float geodesicMaximumTerrainOffset = 0.18f;
-    [Tooltip("Visual/debug-only future sea-level preview offset relative to geodesicBaseRadius. It does not create ocean cells or simulation state.")]
+    [Tooltip("Visual/debug-only future sea-level preview offset relative to PlanetGenerator.radius. It does not create ocean cells or simulation state.")]
     [Range(-1f, 1f)] public float geodesicSeaLevelPreviewOffset = 0f;
     [Tooltip("Blend vertex colours with normalized terrain height while preserving directional visual noise.")]
     public bool geodesicColoursUseTerrainHeight = true;
@@ -59,9 +63,11 @@ public class PlanetGenerator : MonoBehaviour
     [Header("Geodesic Surface Visuals")]
     [Tooltip("Apply deterministic vertex colours to the welded geodesic prototype mesh. Legacy cube-sphere generation is unaffected.")]
     public bool enableGeodesicProceduralSurfaceColours = true;
-    [Tooltip("When enabled, the planet seed is used as the geodesic visual seed.")]
-    public bool usePlanetSeedForGeodesicVisualSeed = true;
-    public int geodesicVisualSeed = 12345;
+    [Tooltip("When enabled, a deterministic SurfaceVisuals-domain seed derived from the master planet seed is used.")]
+    [FormerlySerializedAs("usePlanetSeedForGeodesicVisualSeed")]
+    public bool usePlanetSeedForVisuals = true;
+    [FormerlySerializedAs("geodesicVisualSeed")]
+    public int customVisualSeed = 12345;
     [Min(0.001f)] public float geodesicVisualNoiseScale = 2.25f;
     [Range(1, 8)] public int geodesicVisualOctaves = 4;
     [Range(0f, 1f)] public float geodesicVisualPersistence = 0.5f;
@@ -176,7 +182,25 @@ public class PlanetGenerator : MonoBehaviour
     public int VisualResolution => Mathf.Max(1, resolution);
     public bool IsPlanetInitialized { get; private set; }
     public GeodesicGridTopology GeodesicTopology { get; private set; }
+    public PlanetRuntimeDescriptor RuntimeDescriptor { get; private set; }
+    public bool HasRuntimeDescriptor { get; private set; }
+    public const int GenerationVersion = 1;
+    public float BasePlanetRadius => Mathf.Max(0.001f, radius);
+    public float MinimumSurfaceRadius => CurrentGridType == PlanetGridType.GeodesicIcosphere ? BasePlanetRadius + GetGeodesicMinimumTerrainOffset() : GetGeneratedRadiusExtrema().min;
+    public float MaximumSurfaceRadius => CurrentGridType == PlanetGridType.GeodesicIcosphere ? BasePlanetRadius + GetGeodesicMaximumTerrainOffset() : GetGeneratedRadiusExtrema().max;
+    public int DerivedTerrainSeed => usePlanetSeedForTerrain ? PlanetSeedUtility.DeriveSeed(randomSeed, PlanetSeedDomain.Terrain, GenerationVersion) : customTerrainSeed;
+    public int DerivedVisualSeed => usePlanetSeedForVisuals ? PlanetSeedUtility.DeriveSeed(randomSeed, PlanetSeedDomain.SurfaceVisuals, GenerationVersion) : customVisualSeed;
     public PlanetGridType CurrentGridType => generationMode == PlanetGenerationMode.GeodesicPrototype ? PlanetGridType.GeodesicIcosphere : PlanetGridType.LegacyCubeSphere;
+
+    public void OnBeforeSerialize() { }
+
+    public void OnAfterDeserialize()
+    {
+        if (!Mathf.Approximately(deprecatedGeodesicBaseRadius, 1f) && Mathf.Approximately(radius, 1f))
+        {
+            radius = deprecatedGeodesicBaseRadius;
+        }
+    }
 
     void Awake()
     {
@@ -262,7 +286,9 @@ public class PlanetGenerator : MonoBehaviour
         if (atmosphereMeshRenderer != null) atmosphereMeshRenderer.enabled = false;
         GeodesicTopology = null;
         GetComponent<GeodesicCellPicker>()?.SetTopology(null);
-        transform.Find("Geodesic Debug Lines")?.GetComponent<GeodesicGridDebugRenderer>()?.Render(null, radius);
+        HasRuntimeDescriptor = false;
+        RuntimeDescriptor = default;
+        transform.Find("Geodesic Debug Lines")?.GetComponent<GeodesicGridDebugRenderer>()?.Render(null, BasePlanetRadius);
         ReleaseGeodesicSurfaceMaterial();
         if (meshRenderer != null && runtimePlanetMaterial != null)
         {
@@ -292,7 +318,7 @@ public class PlanetGenerator : MonoBehaviour
             return;
         }
 
-        mesh = GeodesicSphereMeshBuilder.BuildSurfaceMesh(GeodesicTopology, GetGeodesicBaseRadius());
+        mesh = GeodesicSphereMeshBuilder.BuildSurfaceMesh(GeodesicTopology, BasePlanetRadius);
         ApplyGeodesicTerrainDisplacement(mesh);
         RebuildGeodesicCellTerrainCache();
         ApplyGeodesicSurfaceColours(mesh);
@@ -321,7 +347,9 @@ public class PlanetGenerator : MonoBehaviour
         debug.showSelectedCell = showSelectedGeodesicCell;
         debug.surfaceRadiusSampler = GetSurfaceRadiusAtDirection;
         debug.radialOffset = geodesicOutlineRadialOffset;
-        debug.Render(GeodesicTopology, GetGeodesicBaseRadius());
+        debug.Render(GeodesicTopology, BasePlanetRadius);
+        PopulateRuntimeDescriptor(GeodesicTopology.CellCount);
+        LogPlanetGenerationValidation(meshCollider);
         sw.Stop();
         Debug.Log($"[GeodesicPrototype] subdivision={geodesicSubdivisionLevel}, cells={GeodesicTopology.CellCount}, triangles={GeodesicTopology.TriangleCount}, edges={GeodesicTopology.EdgeCount}, durationMs={sw.Elapsed.TotalMilliseconds:F2}, approxTopologyMemory={GeodesicTopology.ApproximateMemoryBytes} bytes. Validation: {validation}", this);
     }
@@ -336,7 +364,7 @@ public class PlanetGenerator : MonoBehaviour
 
         Vector3[] vertices = targetMesh.vertices;
         Color[] colours = new Color[vertices.Length];
-        int seed = usePlanetSeedForGeodesicVisualSeed ? randomSeed : geodesicVisualSeed;
+        int seed = DerivedVisualSeed;
         Vector3 seedOffset = BuildGeodesicVisualSeedOffset(seed);
         float scale = Mathf.Max(0.001f, geodesicVisualNoiseScale);
         int octaves = Mathf.Clamp(geodesicVisualOctaves, 1, 8);
@@ -401,12 +429,22 @@ public class PlanetGenerator : MonoBehaviour
 
     public float GetTerrainHeightAtDirection(Vector3 direction)
     {
-        return EvaluateGeodesicTerrainHeight(direction);
+        if (CurrentGridType == PlanetGridType.GeodesicIcosphere)
+        {
+            return EvaluateGeodesicTerrainHeight(direction);
+        }
+
+        return GetSurfaceRadius(direction) - BasePlanetRadius;
     }
 
     public float GetSurfaceRadiusAtDirection(Vector3 direction)
     {
-        return GetGeodesicBaseRadius() + EvaluateGeodesicTerrainHeight(direction);
+        if (CurrentGridType == PlanetGridType.GeodesicIcosphere)
+        {
+            return BasePlanetRadius + EvaluateGeodesicTerrainHeight(direction);
+        }
+
+        return GetSurfaceRadius(direction);
     }
 
     public float GetCellTerrainHeight(int geodesicCellIndex)
@@ -423,7 +461,7 @@ public class PlanetGenerator : MonoBehaviour
 
     public float GetCellSurfaceRadius(int geodesicCellIndex)
     {
-        return GetGeodesicBaseRadius() + GetCellTerrainHeight(geodesicCellIndex);
+        return BasePlanetRadius + GetCellTerrainHeight(geodesicCellIndex);
     }
 
     public float GetNormalizedTerrainHeightAtDirection(Vector3 direction)
@@ -448,14 +486,14 @@ public class PlanetGenerator : MonoBehaviour
 
     public bool IsAboveGeodesicSeaLevelPreview(int geodesicCellIndex)
     {
-        return GetCellSurfaceRadius(geodesicCellIndex) >= GetGeodesicBaseRadius() + geodesicSeaLevelPreviewOffset;
+        return GetCellSurfaceRadius(geodesicCellIndex) >= BasePlanetRadius + geodesicSeaLevelPreviewOffset;
     }
 
     public float EvaluateGeodesicTerrainHeight(Vector3 direction)
     {
         if (!enableGeodesicTerrainDisplacement) return 0f;
         Vector3 d = direction.sqrMagnitude > 1e-10f ? direction.normalized : Vector3.up;
-        Vector3 offset = BuildGeodesicVisualSeedOffset(usePlanetSeedForGeodesicTerrainSeed ? randomSeed : geodesicTerrainSeed);
+        Vector3 offset = BuildGeodesicVisualSeedOffset(DerivedTerrainSeed);
         float continent = 0.5f * (SimpleNoise.Evaluate(d * Mathf.Max(0.001f, geodesicContinentNoiseScale) + offset) + 1f);
         float continentalMask = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((continent + geodesicContinentBias - geodesicContinentThreshold + 0.5f)));
         float mountain = SampleGeodesicVisualNoise(d, offset + new Vector3(91.7f, -37.2f, 18.4f), Mathf.Max(0.001f, geodesicMountainNoiseScale), Mathf.Clamp(geodesicTerrainOctaves, 1, 8), Mathf.Clamp01(geodesicTerrainPersistence), Mathf.Max(1f, geodesicTerrainLacunarity));
@@ -497,7 +535,6 @@ public class PlanetGenerator : MonoBehaviour
         }
     }
 
-    float GetGeodesicBaseRadius() => Mathf.Max(0.001f, geodesicBaseRadius);
     float GetGeodesicMinimumTerrainOffset() => Mathf.Min(geodesicMinimumTerrainOffset, geodesicMaximumTerrainOffset);
     float GetGeodesicMaximumTerrainOffset() => Mathf.Max(geodesicMinimumTerrainOffset, geodesicMaximumTerrainOffset);
 
@@ -632,6 +669,8 @@ public class PlanetGenerator : MonoBehaviour
             oceanDistanceToShoreByCell = cachedData.OceanDistanceToShoreByCell;
             oceanMaskByCell = cachedData.OceanMaskByCell;
             ApplyGeneratedPlanetGeometry(cachedData.UnitVertices, cachedData.Triangles, cachedData.FinalTerrainRadii);
+            PopulateRuntimeDescriptor(cellCount);
+            LogPlanetGenerationValidation(GetComponent<MeshCollider>());
             Debug.Log($"[PlanetGenerationCache] Loaded planet generation cache ({cachePath}).");
             return;
         }
@@ -695,6 +734,8 @@ public class PlanetGenerator : MonoBehaviour
                 OceanDistanceToShoreByCell = (float[])oceanDistanceToShoreByCell.Clone(),
                 OceanNoiseThreshold = oceanNoiseThreshold
             });
+        PopulateRuntimeDescriptor(cellCount);
+        LogPlanetGenerationValidation(GetComponent<MeshCollider>());
         Debug.Log($"[PlanetGenerationCache] Regenerated planet and saved cache ({cachePath}).");
     }
 
@@ -786,6 +827,53 @@ public class PlanetGenerator : MonoBehaviour
                 atmosphereMeshRenderer.sharedMaterial = atmosphereMaterial;
             }
         }
+    }
+
+
+    private (float min, float max) GetGeneratedRadiusExtrema()
+    {
+        if (generatedSurfaceRadiusByCell == null || generatedSurfaceRadiusByCell.Length == 0)
+        {
+            return (BasePlanetRadius, BasePlanetRadius);
+        }
+
+        float min = float.PositiveInfinity;
+        float max = float.NegativeInfinity;
+        for (int i = 0; i < generatedSurfaceRadiusByCell.Length; i++)
+        {
+            float value = generatedSurfaceRadiusByCell[i];
+            if (value < min) min = value;
+            if (value > max) max = value;
+        }
+
+        bool minValid = !float.IsNaN(min) && !float.IsInfinity(min);
+        bool maxValid = !float.IsNaN(max) && !float.IsInfinity(max);
+        return (minValid ? min : BasePlanetRadius, maxValid ? max : BasePlanetRadius);
+    }
+
+    private void PopulateRuntimeDescriptor(int cellCount)
+    {
+        RuntimeDescriptor = new PlanetRuntimeDescriptor
+        {
+            GridType = CurrentGridType,
+            MasterSeed = randomSeed,
+            GenerationVersion = GenerationVersion,
+            BaseRadius = BasePlanetRadius,
+            MinimumGeneratedRadius = MinimumSurfaceRadius,
+            MaximumGeneratedRadius = MaximumSurfaceRadius,
+            CellCount = Mathf.Max(0, cellCount),
+            CubeSphereResolution = CurrentGridType == PlanetGridType.LegacyCubeSphere ? resolution : 0,
+            GeodesicSubdivision = CurrentGridType == PlanetGridType.GeodesicIcosphere ? geodesicSubdivisionLevel : 0
+        };
+        HasRuntimeDescriptor = true;
+    }
+
+    private void LogPlanetGenerationValidation(MeshCollider meshCollider)
+    {
+        Bounds meshBounds = mesh != null ? mesh.bounds : default;
+        Bounds colliderBounds = meshCollider != null ? meshCollider.bounds : default;
+        float cameraMinDistance = MaximumSurfaceRadius + 0.5f;
+        Debug.Log($"[PlanetGenerationValidation] grid={CurrentGridType}, masterSeed={randomSeed}, derivedTerrainSeed={DerivedTerrainSeed}, derivedVisualSeed={DerivedVisualSeed}, baseRadius={BasePlanetRadius:F5}, minSurfaceRadius={MinimumSurfaceRadius:F5}, maxSurfaceRadius={MaximumSurfaceRadius:F5}, meshBounds={meshBounds}, colliderBounds={colliderBounds}, cameraMinimumDistance={cameraMinDistance:F5}", this);
     }
 
     void SetupPlanetMaterial()
@@ -1001,17 +1089,17 @@ public class PlanetGenerator : MonoBehaviour
     {
         if (!enableOcean)
         {
-            return radius;
+            return BasePlanetRadius;
         }
 
-        return radius * (1f + oceanNoiseThreshold * noiseMagnitude);
+        return BasePlanetRadius * (1f + oceanNoiseThreshold * noiseMagnitude);
     }
 
     public SurfaceQueryParameters GetSurfaceQueryParameters()
     {
         return new SurfaceQueryParameters
         {
-            Radius = radius,
+            Radius = BasePlanetRadius,
             NoiseMagnitude = noiseMagnitude,
             NoiseRoughness = noiseRoughness,
             NoiseOffset = noiseOffset,
@@ -1045,7 +1133,7 @@ public class PlanetGenerator : MonoBehaviour
             return generatedSurfaceRadiusByCell[cellIndex];
         }
 
-        return radius;
+        return BasePlanetRadius;
     }
 
     public float GetOceanFloorRadius(int cellIndex)
