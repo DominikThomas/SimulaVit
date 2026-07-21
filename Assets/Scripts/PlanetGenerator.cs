@@ -29,6 +29,22 @@ public class PlanetGenerator : MonoBehaviour
     public bool highlightGeodesicPentagons = true;
     public bool showGeodesicCellCentres;
     public bool showSelectedGeodesicCell = true;
+
+    [Header("Geodesic Surface Visuals")]
+    [Tooltip("Apply deterministic vertex colours to the welded geodesic prototype mesh. Legacy cube-sphere generation is unaffected.")]
+    public bool enableGeodesicProceduralSurfaceColours = true;
+    [Tooltip("When enabled, the planet seed is used as the geodesic visual seed.")]
+    public bool usePlanetSeedForGeodesicVisualSeed = true;
+    public int geodesicVisualSeed = 12345;
+    [Min(0.001f)] public float geodesicVisualNoiseScale = 2.25f;
+    [Range(1, 8)] public int geodesicVisualOctaves = 4;
+    [Range(0f, 1f)] public float geodesicVisualPersistence = 0.5f;
+    [Min(1f)] public float geodesicVisualLacunarity = 2f;
+    public Color geodesicLowColour = new Color(0.16f, 0.20f, 0.15f, 1f);
+    public Color geodesicMiddleColour = new Color(0.42f, 0.38f, 0.25f, 1f);
+    public Color geodesicHighColour = new Color(0.72f, 0.70f, 0.58f, 1f);
+    [Range(0.25f, 4f)] public float geodesicVisualContrast = 1.2f;
+
     [Header("Visual Mesh")]
     [Tooltip("Visual/mesh resolution used for terrain/ocean/atmosphere geometry generation. Simulation/resource resolution is configured on PlanetResourceMap.")]
     [Range(3, 240)]
@@ -110,6 +126,7 @@ public class PlanetGenerator : MonoBehaviour
     private MeshRenderer meshRenderer;
     private Mesh mesh;
     private Material runtimePlanetMaterial;
+    private Material runtimeGeodesicSurfaceMaterial;
     private Texture2D runtimeSurfaceTexture;
 
     private MeshFilter oceanMeshFilter;
@@ -216,6 +233,11 @@ public class PlanetGenerator : MonoBehaviour
         GeodesicTopology = null;
         GetComponent<GeodesicCellPicker>()?.SetTopology(null);
         transform.Find("Geodesic Debug Lines")?.GetComponent<GeodesicGridDebugRenderer>()?.Render(null, radius);
+        ReleaseGeodesicSurfaceMaterial();
+        if (meshRenderer != null && runtimePlanetMaterial != null)
+        {
+            meshRenderer.sharedMaterial = runtimePlanetMaterial;
+        }
     }
 
     public void ApplyStartupGrid(PlanetGridType gridType, int cubeSphereResolution, int geodesicSubdivision)
@@ -241,6 +263,7 @@ public class PlanetGenerator : MonoBehaviour
         }
 
         mesh = GeodesicSphereMeshBuilder.BuildSurfaceMesh(GeodesicTopology, radius);
+        ApplyGeodesicSurfaceColours(mesh);
         meshFilter.sharedMesh = mesh;
         if (meshRenderer != null)
         {
@@ -267,6 +290,105 @@ public class PlanetGenerator : MonoBehaviour
         debug.Render(GeodesicTopology, radius);
         sw.Stop();
         Debug.Log($"[GeodesicPrototype] subdivision={geodesicSubdivisionLevel}, cells={GeodesicTopology.CellCount}, triangles={GeodesicTopology.TriangleCount}, edges={GeodesicTopology.EdgeCount}, durationMs={sw.Elapsed.TotalMilliseconds:F2}, approxTopologyMemory={GeodesicTopology.ApproximateMemoryBytes} bytes. Validation: {validation}", this);
+    }
+
+    void ApplyGeodesicSurfaceColours(Mesh targetMesh)
+    {
+        if (targetMesh == null || !enableGeodesicProceduralSurfaceColours)
+        {
+            if (targetMesh != null) targetMesh.colors = null;
+            return;
+        }
+
+        Vector3[] vertices = targetMesh.vertices;
+        Color[] colours = new Color[vertices.Length];
+        int seed = usePlanetSeedForGeodesicVisualSeed ? randomSeed : geodesicVisualSeed;
+        Vector3 seedOffset = BuildGeodesicVisualSeedOffset(seed);
+        float scale = Mathf.Max(0.001f, geodesicVisualNoiseScale);
+        int octaves = Mathf.Clamp(geodesicVisualOctaves, 1, 8);
+        float persistenceSafe = Mathf.Clamp01(geodesicVisualPersistence);
+        float lacunaritySafe = Mathf.Max(1f, geodesicVisualLacunarity);
+        float contrastSafe = Mathf.Max(0.25f, geodesicVisualContrast);
+
+        for (int i = 0; i < vertices.Length; i++)
+        {
+            Vector3 direction = vertices[i].normalized;
+            float value = SampleGeodesicVisualNoise(direction, seedOffset, scale, octaves, persistenceSafe, lacunaritySafe);
+            value = Mathf.Clamp01(Mathf.Pow(value, contrastSafe));
+            colours[i] = BlendGeodesicPalette(value);
+        }
+
+        targetMesh.colors = colours;
+        EnsureGeodesicSurfaceMaterial();
+    }
+
+    float SampleGeodesicVisualNoise(Vector3 direction, Vector3 seedOffset, float scale, int octaves, float persistenceSafe, float lacunaritySafe)
+    {
+        float amplitude = 1f;
+        float frequency = scale;
+        float total = 0f;
+        float amplitudeSum = 0f;
+
+        for (int octave = 0; octave < octaves; octave++)
+        {
+            float sample = 0.5f * (SimpleNoise.Evaluate(direction * frequency + seedOffset) + 1f);
+            total += sample * amplitude;
+            amplitudeSum += amplitude;
+            amplitude *= persistenceSafe;
+            frequency *= lacunaritySafe;
+        }
+
+        return amplitudeSum > 0f ? total / amplitudeSum : 0f;
+    }
+
+    Vector3 BuildGeodesicVisualSeedOffset(int seed)
+    {
+        System.Random random = new System.Random(seed);
+        return new Vector3(
+            (float)(random.NextDouble() * 2000.0 - 1000.0),
+            (float)(random.NextDouble() * 2000.0 - 1000.0),
+            (float)(random.NextDouble() * 2000.0 - 1000.0));
+    }
+
+    Color BlendGeodesicPalette(float value)
+    {
+        if (value < 0.5f)
+        {
+            return Color.Lerp(geodesicLowColour, geodesicMiddleColour, value * 2f);
+        }
+
+        return Color.Lerp(geodesicMiddleColour, geodesicHighColour, (value - 0.5f) * 2f);
+    }
+
+    void EnsureGeodesicSurfaceMaterial()
+    {
+        if (meshRenderer == null)
+        {
+            return;
+        }
+
+        if (runtimeGeodesicSurfaceMaterial == null)
+        {
+            Shader shader = Shader.Find("SimulaVit/GeodesicVertexColorURP");
+            if (shader == null)
+            {
+                Debug.LogWarning("[GeodesicPrototype] Vertex-colour shader SimulaVit/GeodesicVertexColorURP was not found; falling back to the existing planet material, which may not display geodesic vertex colours.", this);
+                return;
+            }
+
+            runtimeGeodesicSurfaceMaterial = new Material(shader) { name = "Geodesic Vertex Colour Surface (Runtime)" };
+        }
+
+        meshRenderer.sharedMaterial = runtimeGeodesicSurfaceMaterial;
+    }
+
+    void ReleaseGeodesicSurfaceMaterial()
+    {
+        if (runtimeGeodesicSurfaceMaterial != null)
+        {
+            Destroy(runtimeGeodesicSurfaceMaterial);
+            runtimeGeodesicSurfaceMaterial = null;
+        }
     }
 
     [ContextMenu("Geodesic Prototype Scaling Test 0-5")]
@@ -697,6 +819,8 @@ public class PlanetGenerator : MonoBehaviour
             Destroy(runtimeSurfaceTexture);
             runtimeSurfaceTexture = null;
         }
+
+        ReleaseGeodesicSurfaceMaterial();
     }
 
     float CalculateNoiseThreshold(List<float> samples, float coveragePercent)
