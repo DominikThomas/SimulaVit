@@ -5,6 +5,7 @@ using UnityEngine;
 public class ReplicatorLifecycleSystem
 {
     public delegate bool SpawnAgentFromParentDelegate(Replicator parent, out Replicator childAgent);
+    public delegate bool CanAttemptReplicationDelegate(Replicator parent);
 
     public void UpdateLifecycle(
         List<Replicator> agents,
@@ -23,6 +24,7 @@ public class ReplicatorLifecycleSystem
         SpawnAgentFromParentDelegate trySpawnChild,
         Action<Replicator> depositDeathOrganicC,
         Action<MetabolismType, DeathCause> registerDeathCause,
+        CanAttemptReplicationDelegate canAttemptReplication,
         out float averageOrganicCStore,
         out int divisionEligibleAgentCount)
     {
@@ -73,7 +75,7 @@ public class ReplicatorLifecycleSystem
                 }
             }
 
-            if (UnityEngine.Random.value < reproductionChance && hasEnergyForDivision && hasCarbonForDivision)
+            if (hasEnergyForDivision && hasCarbonForDivision)
             {
                 agent.currentDirection = populationState.CurrentDirection[i];
                 agent.currentOceanLayerIndex = populationState.CurrentOceanLayerIndex[i];
@@ -81,7 +83,12 @@ public class ReplicatorLifecycleSystem
                 agent.metabolism = populationState.Metabolism[i];
                 agent.locomotion = populationState.Locomotion[i];
 
-                if (trySpawnChild(agent, out Replicator childAgent))
+                if (canAttemptReplication != null && !canAttemptReplication(agent))
+                {
+                    continue;
+                }
+
+                if (UnityEngine.Random.value < reproductionChance && trySpawnChild(agent, out Replicator childAgent))
                 {
                     if (enableCarbonLimitedDivision)
                     {

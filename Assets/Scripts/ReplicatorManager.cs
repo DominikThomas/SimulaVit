@@ -42,6 +42,17 @@ public class ReplicatorManager : MonoBehaviour
         public int[] BlockedByTargetAndReason;
     }
 
+    [Serializable]
+    private sealed class ReplicationHabitatTelemetry
+    {
+        public int OceanAttempts;
+        public int SurfaceAttempts;
+        public int SurfaceRejected;
+        public int BlockedByHabitat;
+        public int RepresentativeParentCell = -1;
+        public MetabolismType RepresentativeParentMetabolism;
+    }
+
     [Header("Settings")]
     public Mesh replicatorMesh;
     public Material replicatorMaterial;
@@ -608,6 +619,7 @@ public class ReplicatorManager : MonoBehaviour
     [SerializeField] private int divisionEligibleAgentCount;
     [Header("Metabolism Mutation Gate Telemetry")]
     [SerializeField] private MetabolismMutationGateTelemetry metabolismMutationGateTelemetry = new MetabolismMutationGateTelemetry();
+    [SerializeField] private ReplicationHabitatTelemetry replicationHabitatTelemetry = new ReplicationHabitatTelemetry();
     [SerializeField] private MetabolismType topBlockedMutationGateTarget;
     [SerializeField] private int topBlockedMutationGateTargetCount;
     [SerializeField] private MetabolismMutationGateBlockReason topMutationGateBlockReason;
@@ -1020,7 +1032,11 @@ public class ReplicatorManager : MonoBehaviour
             TopBlockedMutationGateTargetCount = topBlockedMutationGateTargetCount,
             TopBlockedMutationGatePairTarget = topBlockedMutationGatePairTarget,
             TopBlockedMutationGatePairReason = topBlockedMutationGatePairReason,
-            TopBlockedMutationGatePairCount = topBlockedMutationGatePairCount
+            TopBlockedMutationGatePairCount = topBlockedMutationGatePairCount,
+            ReplicationOceanAttempts = replicationHabitatTelemetry != null ? replicationHabitatTelemetry.OceanAttempts : 0,
+            ReplicationSurfaceAttempts = replicationHabitatTelemetry != null ? replicationHabitatTelemetry.SurfaceAttempts : 0,
+            ReplicationSurfaceRejected = replicationHabitatTelemetry != null ? replicationHabitatTelemetry.SurfaceRejected : 0,
+            ReplicationBlockedByHabitat = replicationHabitatTelemetry != null ? replicationHabitatTelemetry.BlockedByHabitat : 0
         };
 
         if (planetResourceMap != null)
@@ -1914,6 +1930,7 @@ public class ReplicatorManager : MonoBehaviour
             SpawnAgentFromPopulation,
             DepositDeathOrganicC,
             RegisterDeathCause,
+            CanAttemptReplicationInCurrentHabitat,
             out averageOrganicCStore,
             out divisionEligibleAgentCount);
     }
@@ -2172,13 +2189,74 @@ public class ReplicatorManager : MonoBehaviour
         movementSystem.Dispose();
     }
 
+    bool CanAttemptReplicationInCurrentHabitat(Replicator parent)
+    {
+        return CanAttemptReplicationInCurrentHabitat(parent, recordAttempt: true);
+    }
+
+    bool CanAttemptReplicationInCurrentHabitat(Replicator parent, bool recordAttempt)
+    {
+        if (parent == null)
+        {
+            return false;
+        }
+
+        bool isOcean = IsSeaLocation(parent.currentDirection);
+        if (recordAttempt)
+        {
+            RecordReplicationHabitatAttempt(parent, isOcean);
+        }
+        if (parent.traits.replicateOnlyInSea && !isOcean)
+        {
+            RecordReplicationHabitatBlocked(parent);
+            return false;
+        }
+
+        return true;
+    }
+
+    void RecordReplicationHabitatAttempt(Replicator parent, bool isOcean)
+    {
+        if (replicationHabitatTelemetry == null)
+        {
+            replicationHabitatTelemetry = new ReplicationHabitatTelemetry();
+        }
+
+        if (isOcean)
+        {
+            replicationHabitatTelemetry.OceanAttempts++;
+        }
+        else
+        {
+            replicationHabitatTelemetry.SurfaceAttempts++;
+        }
+    }
+
+    void RecordReplicationHabitatBlocked(Replicator parent)
+    {
+        if (replicationHabitatTelemetry == null)
+        {
+            replicationHabitatTelemetry = new ReplicationHabitatTelemetry();
+        }
+
+        replicationHabitatTelemetry.BlockedByHabitat++;
+        replicationHabitatTelemetry.SurfaceRejected++;
+        replicationHabitatTelemetry.RepresentativeParentCell = DirectionToSimulationCellIndex(parent.currentDirection.normalized);
+        replicationHabitatTelemetry.RepresentativeParentMetabolism = parent.metabolism;
+
+        if (debugVentPlumeDiagnostics)
+        {
+            Debug.Log($"[ReplicationHabitatBlocked] blockedByHabitat={replicationHabitatTelemetry.BlockedByHabitat} cell={replicationHabitatTelemetry.RepresentativeParentCell} metabolism={parent.metabolism} currentLayer={parent.currentOceanLayerIndex} preferredLayer={parent.preferredOceanLayerIndex} replicateOnlyInSea={parent.traits.replicateOnlyInSea}");
+        }
+    }
+
     bool SpawnAgentFromPopulation(Replicator parent, out Replicator childAgent)
     {
         childAgent = null;
 
         if (agents.Count >= maxPopulation) return false;
 
-        if (parent.traits.replicateOnlyInSea && !IsSeaLocation(parent.currentDirection))
+        if (!CanAttemptReplicationInCurrentHabitat(parent, recordAttempt: false))
         {
             return false;
         }
