@@ -356,8 +356,14 @@ public class SimulationSaveLoadService : MonoBehaviour
         {
             available = true,
             resolution = planetGenerator.resolution,
-            radius = planetGenerator.radius,
-            seaLevel = 0f // TODO: capture PlanetGenerator sea-level once the generator exposes an authoritative field.
+            radius = planetGenerator.BasePlanetRadius,
+            seaLevel = 0f, // TODO: capture PlanetGenerator sea-level once the generator exposes an authoritative field.
+            masterSeed = planetGenerator.randomSeed,
+            generationVersion = PlanetGenerator.GenerationVersion,
+            usePlanetSeedForTerrain = planetGenerator.usePlanetSeedForTerrain,
+            customTerrainSeed = planetGenerator.customTerrainSeed,
+            usePlanetSeedForVisuals = planetGenerator.usePlanetSeedForVisuals,
+            customVisualSeed = planetGenerator.customVisualSeed
         };
     }
 
