@@ -30,6 +30,32 @@ public class PlanetGenerator : MonoBehaviour
     public bool showGeodesicCellCentres;
     public bool showSelectedGeodesicCell = true;
 
+
+    [Header("Geodesic Terrain")]
+    [Tooltip("Displace only the welded geodesic prototype mesh radially with deterministic direction-sampled terrain. Legacy cube-sphere generation is unaffected.")]
+    public bool enableGeodesicTerrainDisplacement = true;
+    [Tooltip("When enabled, the planet seed is used as the geodesic terrain seed.")]
+    public bool usePlanetSeedForGeodesicTerrainSeed = true;
+    public int geodesicTerrainSeed = 67890;
+    [Min(0.001f)] public float geodesicBaseRadius = 1f;
+    [Range(0f, 1f)] public float geodesicTerrainAmplitude = 0.14f;
+    [Min(0.001f)] public float geodesicContinentNoiseScale = 0.85f;
+    [Min(0.001f)] public float geodesicMountainNoiseScale = 4.25f;
+    [Range(1, 8)] public int geodesicTerrainOctaves = 5;
+    [Range(0f, 1f)] public float geodesicTerrainPersistence = 0.48f;
+    [Min(1f)] public float geodesicTerrainLacunarity = 2f;
+    [Range(0.25f, 4f)] public float geodesicTerrainHeightContrast = 1.35f;
+    [Range(-1f, 1f)] public float geodesicContinentBias = -0.08f;
+    [Range(-1f, 1f)] public float geodesicContinentThreshold = 0f;
+    [Range(-1f, 0f)] public float geodesicMinimumTerrainOffset = -0.08f;
+    [Range(0f, 1f)] public float geodesicMaximumTerrainOffset = 0.18f;
+    [Tooltip("Visual/debug-only future sea-level preview offset relative to geodesicBaseRadius. It does not create ocean cells or simulation state.")]
+    [Range(-1f, 1f)] public float geodesicSeaLevelPreviewOffset = 0f;
+    [Tooltip("Blend vertex colours with normalized terrain height while preserving directional visual noise.")]
+    public bool geodesicColoursUseTerrainHeight = true;
+    [Tooltip("Small radial lift for debug outlines so they track displaced terrain without z-fighting.")]
+    [Range(0f, 0.05f)] public float geodesicOutlineRadialOffset = 0.003f;
+
     [Header("Geodesic Surface Visuals")]
     [Tooltip("Apply deterministic vertex colours to the welded geodesic prototype mesh. Legacy cube-sphere generation is unaffected.")]
     public bool enableGeodesicProceduralSurfaceColours = true;
@@ -142,6 +168,8 @@ public class PlanetGenerator : MonoBehaviour
     private float[] localOceanDepthByCell;
     private float[] oceanDistanceToShoreByCell;
     private byte[] oceanMaskByCell;
+    private float[] geodesicTerrainHeightByCell;
+    private float[] geodesicNormalizedTerrainByCell;
 
     public MeshRenderer OceanRenderer => oceanMeshRenderer;
     public IReadOnlyList<float> LocalOceanDepths => localOceanDepthByCell;
@@ -219,6 +247,8 @@ public class PlanetGenerator : MonoBehaviour
         localOceanDepthByCell = null;
         oceanDistanceToShoreByCell = null;
         oceanMaskByCell = null;
+        geodesicTerrainHeightByCell = null;
+        geodesicNormalizedTerrainByCell = null;
 
         if (mesh != null) mesh.Clear();
         if (oceanMesh != null) oceanMesh.Clear();
@@ -262,7 +292,9 @@ public class PlanetGenerator : MonoBehaviour
             return;
         }
 
-        mesh = GeodesicSphereMeshBuilder.BuildSurfaceMesh(GeodesicTopology, radius);
+        mesh = GeodesicSphereMeshBuilder.BuildSurfaceMesh(GeodesicTopology, GetGeodesicBaseRadius());
+        ApplyGeodesicTerrainDisplacement(mesh);
+        RebuildGeodesicCellTerrainCache();
         ApplyGeodesicSurfaceColours(mesh);
         meshFilter.sharedMesh = mesh;
         if (meshRenderer != null)
@@ -287,7 +319,9 @@ public class PlanetGenerator : MonoBehaviour
         debug.highlightPentagons = highlightGeodesicPentagons;
         debug.showCellCentres = showGeodesicCellCentres;
         debug.showSelectedCell = showSelectedGeodesicCell;
-        debug.Render(GeodesicTopology, radius);
+        debug.surfaceRadiusSampler = GetSurfaceRadiusAtDirection;
+        debug.radialOffset = geodesicOutlineRadialOffset;
+        debug.Render(GeodesicTopology, GetGeodesicBaseRadius());
         sw.Stop();
         Debug.Log($"[GeodesicPrototype] subdivision={geodesicSubdivisionLevel}, cells={GeodesicTopology.CellCount}, triangles={GeodesicTopology.TriangleCount}, edges={GeodesicTopology.EdgeCount}, durationMs={sw.Elapsed.TotalMilliseconds:F2}, approxTopologyMemory={GeodesicTopology.ApproximateMemoryBytes} bytes. Validation: {validation}", this);
     }
@@ -314,6 +348,11 @@ public class PlanetGenerator : MonoBehaviour
         {
             Vector3 direction = vertices[i].normalized;
             float value = SampleGeodesicVisualNoise(direction, seedOffset, scale, octaves, persistenceSafe, lacunaritySafe);
+            if (geodesicColoursUseTerrainHeight)
+            {
+                float terrainValue = GetNormalizedTerrainHeightAtDirection(direction);
+                value = Mathf.Lerp(value, terrainValue, 0.55f);
+            }
             value = Mathf.Clamp01(Mathf.Pow(value, contrastSafe));
             colours[i] = BlendGeodesicPalette(value);
         }
@@ -359,6 +398,108 @@ public class PlanetGenerator : MonoBehaviour
 
         return Color.Lerp(geodesicMiddleColour, geodesicHighColour, (value - 0.5f) * 2f);
     }
+
+    public float GetTerrainHeightAtDirection(Vector3 direction)
+    {
+        return EvaluateGeodesicTerrainHeight(direction);
+    }
+
+    public float GetSurfaceRadiusAtDirection(Vector3 direction)
+    {
+        return GetGeodesicBaseRadius() + EvaluateGeodesicTerrainHeight(direction);
+    }
+
+    public float GetCellTerrainHeight(int geodesicCellIndex)
+    {
+        if (geodesicTerrainHeightByCell != null && geodesicCellIndex >= 0 && geodesicCellIndex < geodesicTerrainHeightByCell.Length)
+        {
+            return geodesicTerrainHeightByCell[geodesicCellIndex];
+        }
+
+        return GeodesicTopology != null && geodesicCellIndex >= 0 && geodesicCellIndex < GeodesicTopology.CellCount
+            ? GetTerrainHeightAtDirection(GeodesicTopology.CellDirections[geodesicCellIndex])
+            : 0f;
+    }
+
+    public float GetCellSurfaceRadius(int geodesicCellIndex)
+    {
+        return GetGeodesicBaseRadius() + GetCellTerrainHeight(geodesicCellIndex);
+    }
+
+    public float GetNormalizedTerrainHeightAtDirection(Vector3 direction)
+    {
+        float min = GetGeodesicMinimumTerrainOffset();
+        float max = GetGeodesicMaximumTerrainOffset();
+        if (max <= min) return 0.5f;
+        return Mathf.InverseLerp(min, max, EvaluateGeodesicTerrainHeight(direction));
+    }
+
+    public float GetCellNormalizedTerrainHeight(int geodesicCellIndex)
+    {
+        if (geodesicNormalizedTerrainByCell != null && geodesicCellIndex >= 0 && geodesicCellIndex < geodesicNormalizedTerrainByCell.Length)
+        {
+            return geodesicNormalizedTerrainByCell[geodesicCellIndex];
+        }
+
+        return GeodesicTopology != null && geodesicCellIndex >= 0 && geodesicCellIndex < GeodesicTopology.CellCount
+            ? GetNormalizedTerrainHeightAtDirection(GeodesicTopology.CellDirections[geodesicCellIndex])
+            : 0.5f;
+    }
+
+    public bool IsAboveGeodesicSeaLevelPreview(int geodesicCellIndex)
+    {
+        return GetCellSurfaceRadius(geodesicCellIndex) >= GetGeodesicBaseRadius() + geodesicSeaLevelPreviewOffset;
+    }
+
+    public float EvaluateGeodesicTerrainHeight(Vector3 direction)
+    {
+        if (!enableGeodesicTerrainDisplacement) return 0f;
+        Vector3 d = direction.sqrMagnitude > 1e-10f ? direction.normalized : Vector3.up;
+        Vector3 offset = BuildGeodesicVisualSeedOffset(usePlanetSeedForGeodesicTerrainSeed ? randomSeed : geodesicTerrainSeed);
+        float continent = 0.5f * (SimpleNoise.Evaluate(d * Mathf.Max(0.001f, geodesicContinentNoiseScale) + offset) + 1f);
+        float continentalMask = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((continent + geodesicContinentBias - geodesicContinentThreshold + 0.5f)));
+        float mountain = SampleGeodesicVisualNoise(d, offset + new Vector3(91.7f, -37.2f, 18.4f), Mathf.Max(0.001f, geodesicMountainNoiseScale), Mathf.Clamp(geodesicTerrainOctaves, 1, 8), Mathf.Clamp01(geodesicTerrainPersistence), Mathf.Max(1f, geodesicTerrainLacunarity));
+        float ridgedMountain = 1f - Mathf.Abs(mountain * 2f - 1f);
+        ridgedMountain = Mathf.Pow(Mathf.Clamp01(ridgedMountain), 1.7f);
+        float fine = 0.5f * (SimpleNoise.Evaluate(d * Mathf.Max(0.001f, geodesicMountainNoiseScale * 3.1f) + offset + new Vector3(-12.3f, 48.9f, 73.5f)) + 1f);
+        float shaped = (continent - 0.5f) * 0.95f + ridgedMountain * continentalMask * 0.55f + (fine - 0.5f) * 0.08f;
+        shaped = Mathf.Sign(shaped) * Mathf.Pow(Mathf.Abs(shaped), Mathf.Max(0.25f, geodesicTerrainHeightContrast));
+        float height = shaped * Mathf.Max(0f, geodesicTerrainAmplitude);
+        return Mathf.Clamp(height, GetGeodesicMinimumTerrainOffset(), GetGeodesicMaximumTerrainOffset());
+    }
+
+    void ApplyGeodesicTerrainDisplacement(Mesh targetMesh)
+    {
+        if (targetMesh == null) return;
+        Vector3[] vertices = targetMesh.vertices;
+        Vector3[] normals = new Vector3[vertices.Length];
+        for (int i = 0; i < vertices.Length; i++)
+        {
+            Vector3 direction = vertices[i].sqrMagnitude > 1e-10f ? vertices[i].normalized : Vector3.up;
+            vertices[i] = direction * GetSurfaceRadiusAtDirection(direction);
+            normals[i] = direction;
+        }
+        targetMesh.vertices = vertices;
+        targetMesh.normals = normals;
+        targetMesh.RecalculateBounds();
+    }
+
+    void RebuildGeodesicCellTerrainCache()
+    {
+        if (GeodesicTopology == null) { geodesicTerrainHeightByCell = null; geodesicNormalizedTerrainByCell = null; return; }
+        geodesicTerrainHeightByCell = new float[GeodesicTopology.CellCount];
+        geodesicNormalizedTerrainByCell = new float[GeodesicTopology.CellCount];
+        for (int i = 0; i < GeodesicTopology.CellCount; i++)
+        {
+            Vector3 direction = GeodesicTopology.CellDirections[i];
+            geodesicTerrainHeightByCell[i] = GetTerrainHeightAtDirection(direction);
+            geodesicNormalizedTerrainByCell[i] = GetNormalizedTerrainHeightAtDirection(direction);
+        }
+    }
+
+    float GetGeodesicBaseRadius() => Mathf.Max(0.001f, geodesicBaseRadius);
+    float GetGeodesicMinimumTerrainOffset() => Mathf.Min(geodesicMinimumTerrainOffset, geodesicMaximumTerrainOffset);
+    float GetGeodesicMaximumTerrainOffset() => Mathf.Max(geodesicMinimumTerrainOffset, geodesicMaximumTerrainOffset);
 
     void EnsureGeodesicSurfaceMaterial()
     {
@@ -407,7 +548,10 @@ public class PlanetGenerator : MonoBehaviour
                 minArea = Mathf.Min(minArea, t.UnitCellAreas[i]); maxArea = Mathf.Max(maxArea, t.UnitCellAreas[i]); sumArea += t.UnitCellAreas[i];
                 for (int k = 0; k < t.NeighborCounts[i]; k++) { float d = t.NeighborAngularDistances6[i * 6 + k]; minDist = Mathf.Min(minDist, d); maxDist = Mathf.Max(maxDist, d); }
             }
-            Debug.Log($"[GeodesicScalingTest] level={level}, expectedCells={GeodesicGridTopology.ExpectedCellCount(level)}, actualCells={t.CellCount}, expectedTriangles={GeodesicGridTopology.ExpectedTriangleCount(level)}, actualTriangles={t.TriangleCount}, pentagons={pentagons}, areaMinMaxMean={minArea:F8}/{maxArea:F8}/{sumArea / t.CellCount:F8}, neighborDistanceMinMax={minDist:F8}/{maxDist:F8}, durationMs={sw.Elapsed.TotalMilliseconds:F2}, validation={validation}", this);
+            float hX = GetTerrainHeightAtDirection(Vector3.right);
+            float hY = GetTerrainHeightAtDirection(Vector3.up);
+            float hDiag = GetTerrainHeightAtDirection(new Vector3(1f, 1f, 1f));
+            Debug.Log($"[GeodesicScalingTest] level={level}, expectedCells={GeodesicGridTopology.ExpectedCellCount(level)}, actualCells={t.CellCount}, expectedTriangles={GeodesicGridTopology.ExpectedTriangleCount(level)}, actualTriangles={t.TriangleCount}, pentagons={pentagons}, areaMinMaxMean={minArea:F8}/{maxArea:F8}/{sumArea / t.CellCount:F8}, neighborDistanceMinMax={minDist:F8}/{maxDist:F8}, deterministicTerrainHeights(+X/+Y/diag)={hX:F8}/{hY:F8}/{hDiag:F8}, durationMs={sw.Elapsed.TotalMilliseconds:F2}, validation={validation}", this);
         }
     }
 

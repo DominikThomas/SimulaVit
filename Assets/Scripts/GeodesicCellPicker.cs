@@ -29,12 +29,14 @@ public class GeodesicCellPicker : MonoBehaviour
     public int[] selectedNeighborIndices = System.Array.Empty<int>();
 
     private GeodesicGridTopology topology;
+    private PlanetGenerator planetGenerator;
     private bool warnedMissingCamera;
     private bool warnedNoPickSurface;
 
     private void Awake()
     {
         ResolvePickingCollider();
+        planetGenerator = GetComponent<PlanetGenerator>();
     }
 
     public void SetTopology(GeodesicGridTopology t)
@@ -146,7 +148,8 @@ public class GeodesicCellPicker : MonoBehaviour
             Debug.LogWarning(
                 "[GeodesicCellPicker] Click did not hit the geodesic planet. " +
                 "Assign the generated MeshCollider/SphereCollider to pickingCollider, " +
-                "or ensure the generated sphere has a Renderer so the analytic fallback can estimate its radius.",
+                "or ensure the generated sphere has a Renderer so the analytic fallback can estimate its radius. " +
+                "The analytic sphere fallback is approximate for displaced geodesic terrain; prefer the refreshed MeshCollider.",
                 this);
             warnedNoPickSurface = true;
         }
@@ -325,6 +328,17 @@ public class GeodesicCellPicker : MonoBehaviour
         GUILayout.Label($"Cell type: {(selectedIsPentagon ? "Pentagon" : "Hexagon")}");
         GUILayout.Label($"Neighbor count: {selectedNeighborCount}");
         GUILayout.Label($"Unit-sphere area: {selectedUnitArea:F8}");
+        if (planetGenerator != null)
+        {
+            float height = planetGenerator.GetCellTerrainHeight(selectedCellIndex);
+            float surfaceRadius = planetGenerator.GetCellSurfaceRadius(selectedCellIndex);
+            float normalizedHeight = planetGenerator.GetCellNormalizedTerrainHeight(selectedCellIndex);
+            bool abovePreview = planetGenerator.IsAboveGeodesicSeaLevelPreview(selectedCellIndex);
+            GUILayout.Label($"Terrain height: {height:F5}");
+            GUILayout.Label($"Surface radius: {surfaceRadius:F5}");
+            GUILayout.Label($"Normalized terrain: {normalizedHeight:F3}");
+            GUILayout.Label($"Sea-level preview: {(abovePreview ? "above" : "below")}");
+        }
 
         StringBuilder neighbors = new StringBuilder();
         for (int i = 0; i < selectedNeighborIndices.Length; i++)
