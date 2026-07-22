@@ -889,7 +889,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   replicatorManager: {fileID: 0}
   generationMode: 0
-  geodesicSubdivisionLevel: 4
+  geodesicSubdivisionLevel: 5
+  geodesicSimulationSubdivisionLevel: 5
+  geodesicRenderSubdivisionLevel: 5
   showGeodesicCellOutlines: 0
   highlightGeodesicPentagons: 1
   showGeodesicCellCentres: 0
@@ -898,15 +900,22 @@ MonoBehaviour:
   usePlanetSeedForTerrain: 1
   customTerrainSeed: 67890
   deprecatedGeodesicBaseRadius: 1
-  geodesicTerrainAmplitude: 1
+  geodesicContinentAmplitude: 0.09
   geodesicContinentNoiseScale: 0.85
+  geodesicContinentBias: -0.08
+  geodesicMountainAmplitude: 0.8
   geodesicMountainNoiseScale: 4.25
+  geodesicMountainCoverageThreshold: 0.248
+  geodesicMountainMaskSoftness: 0.18
+  geodesicRidgeSharpness: 1.25
+  geodesicDomainWarpScale: 1.35
+  geodesicDomainWarpStrength: 0.28
+  geodesicFineDetailScale: 18
+  geodesicFineDetailAmplitude: 0.018
   geodesicTerrainOctaves: 5
   geodesicTerrainPersistence: 0.48
   geodesicTerrainLacunarity: 2
   geodesicTerrainHeightContrast: 3.78
-  geodesicContinentBias: -0.08
-  geodesicContinentThreshold: 0
   geodesicMinimumTerrainOffset: -0.937
   geodesicMaximumTerrainOffset: 0.941
   geodesicSeaLevelPreviewOffset: 0.181
