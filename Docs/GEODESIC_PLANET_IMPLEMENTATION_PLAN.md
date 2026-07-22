@@ -890,3 +890,48 @@ Every completed phase should record:
 - commit hash when available.
 
 Do not claim Unity compilation or play-mode validation unless it was actually run.
+
+---
+
+## Phase 2A — Shared ocean visual appearance architecture
+
+### Status
+
+Implemented as a focused rendering-architecture refactor. Geometry and renderer mapping remain grid-specific: legacy cube-sphere still builds the existing `Ocean Layer` mesh from cube-face-derived vertices, while geodesic mode still builds one smooth undisplaced `Geodesic Ocean` sphere at `GeodesicSeaLevelRadius` with its separate render subdivision and no collider.
+
+### Audit summary
+
+- Legacy authoritative visual defaults were the assigned `OceanMaterial` asset values: `_BaseColor` `(0.15966536, 0.30129746, 0.49056602, 0.58)` and `_Smoothness` `0.876`. Legacy transparency came from the material alpha/render state, while geometry came from the cube-sphere ocean mesh.
+- The geodesic prototype duplicated ocean colour, shallow tint, opacity, and smoothness fields on `PlanetGenerator` and bound them directly to `SimulaVit/GeodesicOceanURP`.
+- Shallow/deep geometry behaviour is grid-specific today: legacy depth and bathymetry data are derived from cube-sphere cells and `PlanetResourceMap`; geodesic depth is classification-only and currently samples no resource chemistry.
+- Existing resource-driven visual paths remain legacy/resource-map-specific: dissolved Fe2+, suspended precipitate visuals, sulfur/FeOx bottom tint/sediment diagnostics, temperature estimates, and ice surface visuals are not migrated into geodesic mode in this phase.
+
+### Architecture
+
+- `PlanetGenerator.oceanAppearance` is the authoritative shared visual settings owner for both modes.
+- `OceanAppearanceSettings` contains only shared visual controls: base water colour, shallow/deep tint, opacity, smoothness, Fresnel controls, ambient/intensity response, and placeholder visual coefficients for future dissolved Fe2, suspended FeOx, suspended sulfur, organic turbidity, temperature, and ice tinting.
+- `OceanAppearanceSample` is the geometry-independent colour-model input. It has future-compatible fields for base depth fraction, dissolved Fe2, suspended FeOx, suspended sulfur, organic turbidity, temperature, and ice fraction.
+- `OceanAppearanceModel.Evaluate` is a pure visual evaluation utility independent of cube-sphere indexing, geodesic indexing, meshes, textures, and `PlanetResourceMap` ownership.
+- Iron visual semantics are explicitly separated:
+  - dissolved Fe2 water tint;
+  - suspended FeOx water turbidity;
+  - deposited FeOx seafloor sediment, which remains outside this water-column appearance refactor and will be supplied by future layered resource migration.
+- `OceanMaterialBinder` standardizes shared shader/material property names (`_BaseColor`, `_ShallowColor`, `_DeepColor`, `_Opacity`, `_Smoothness`, `_FresnelStrength`, `_FresnelPower`, `_Fe2Tint`, `_FeOxTint`, `_SulfurTint`, `_Turbidity`) and applies settings to runtime-owned material instances only.
+
+### Shader strategy
+
+Legacy and geodesic renderers remain separate. The legacy path keeps using a runtime clone of the assigned legacy ocean material so the material asset is not modified globally. The geodesic path keeps using `SimulaVit/GeodesicOceanURP`, updated to accept the standardized shared property names without adding cube/geodesic-specific assumptions.
+
+### Current geodesic chemistry inputs
+
+Geodesic chemistry visual inputs are defaulted to zero in this phase. No geodesic ocean resource arrays, reactions, Fe2 chemistry, vents, biology, sediments, temperature, layered-ocean data, or save-state arrays were added. Future layered resource migration should populate `OceanAppearanceSample` from grid-specific resource sampling, then feed the same shared colour model.
+
+### Validation still required in Unity
+
+- Legacy ocean retains its existing appearance with the runtime material clone.
+- Geodesic ocean retains its expected transparent smooth-sphere appearance while using shared settings.
+- Changing `PlanetGenerator.oceanAppearance.baseWaterColor` affects both modes.
+- Changing `PlanetGenerator.oceanAppearance.opacity` affects both modes.
+- No material asset is modified globally at runtime.
+- No stale runtime ocean material or geodesic ocean object remains after returning to the main menu.
+- Terrain picking remains unaffected by the collider-free geodesic ocean.

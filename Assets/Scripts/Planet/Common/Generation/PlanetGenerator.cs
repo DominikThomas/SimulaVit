@@ -37,12 +37,20 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     public bool highlightGeodesicOceanCells;
     public bool highlightGeodesicCoastlineCells = true;
 
+    [Header("Ocean Visual Appearance")]
+    [Tooltip("Authoritative visual-only ocean appearance consumed by both legacy cube-sphere and geodesic ocean renderers.")]
+    public OceanAppearanceSettings oceanAppearance = OceanAppearanceSettings.LegacyDefaults;
+
     [Header("Geodesic Ocean Visual")]
     [Range(0, GeodesicGridTopology.MaxSupportedSubdivision)] public int geodesicOceanRenderSubdivisionLevel = 5;
-    public Color geodesicOceanColour = new Color(0.02f, 0.28f, 0.55f, 0.42f);
-    public Color geodesicOceanShallowTint = new Color(0.10f, 0.55f, 0.75f, 0.42f);
-    [Range(0f, 1f)] public float geodesicOceanOpacity = 0.42f;
-    [Range(0f, 1f)] public float geodesicOceanSmoothness = 0.82f;
+    [FormerlySerializedAs("geodesicOceanColour")]
+    [SerializeField, HideInInspector] private Color deprecatedGeodesicOceanColour = new Color(0.02f, 0.28f, 0.55f, 0.42f);
+    [FormerlySerializedAs("geodesicOceanShallowTint")]
+    [SerializeField, HideInInspector] private Color deprecatedGeodesicOceanShallowTint = new Color(0.10f, 0.55f, 0.75f, 0.42f);
+    [FormerlySerializedAs("geodesicOceanOpacity")]
+    [SerializeField, HideInInspector] private float deprecatedGeodesicOceanOpacity = 0.42f;
+    [FormerlySerializedAs("geodesicOceanSmoothness")]
+    [SerializeField, HideInInspector] private float deprecatedGeodesicOceanSmoothness = 0.82f;
 
     [Header("Geodesic Terrain")]
     [Tooltip("Displace only the welded geodesic prototype mesh radially with deterministic direction-sampled terrain. Legacy cube-sphere generation is unaffected.")]
@@ -178,6 +186,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     private MeshRenderer meshRenderer;
     private Mesh mesh;
     private Material runtimePlanetMaterial;
+    private Material runtimeOceanMaterial;
     private Material runtimeGeodesicSurfaceMaterial;
     private Material runtimeGeodesicOceanMaterial;
     private GameObject geodesicOceanObject;
@@ -230,6 +239,28 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         {
             radius = deprecatedGeodesicBaseRadius;
         }
+
+        if (IsUnsetOceanAppearance(oceanAppearance))
+        {
+            oceanAppearance = OceanAppearanceSettings.LegacyDefaults;
+        }
+    }
+
+    void OnValidate()
+    {
+        if (IsUnsetOceanAppearance(oceanAppearance))
+        {
+            oceanAppearance = OceanAppearanceSettings.LegacyDefaults;
+        }
+    }
+
+    static bool IsUnsetOceanAppearance(OceanAppearanceSettings settings)
+    {
+        return settings.baseWaterColor == default
+            && settings.shallowTint == default
+            && settings.deepTint == default
+            && Mathf.Approximately(settings.opacity, 0f)
+            && Mathf.Approximately(settings.smoothness, 0f);
     }
 
     void Awake()
@@ -326,6 +357,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         RuntimeDescriptor = default;
         transform.Find("Geodesic Debug Lines")?.GetComponent<GeodesicGridDebugRenderer>()?.Render(null, BasePlanetRadius);
         ReleaseGeodesicSurfaceMaterial();
+        ReleaseRuntimeOceanMaterial();
         ReleaseGeodesicOceanMaterial();
         if (geodesicOceanObject != null) Destroy(geodesicOceanObject);
         geodesicOceanObject = null;
@@ -768,6 +800,31 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         geodesicOceanMeshRenderer.enabled = enableOcean;
         geodesicOceanMeshRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
         geodesicOceanMeshRenderer.receiveShadows = false;
+        LogOceanRendererDiagnostics("GeodesicIcosphere", geodesicOceanMeshRenderer.sharedMaterial, false);
+    }
+
+    void EnsureLegacyOceanMaterial()
+    {
+        if (oceanMeshRenderer == null) return;
+        if (runtimeOceanMaterial == null)
+        {
+            runtimeOceanMaterial = oceanMaterial != null
+                ? new Material(oceanMaterial) { name = $"{oceanMaterial.name} (Runtime Ocean)" }
+                : new Material(Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard")) { name = "Legacy Ocean (Runtime)" };
+        }
+
+        OceanAppearanceEvaluation evaluation = OceanAppearanceModel.Evaluate(oceanAppearance, OceanAppearanceSample.Default);
+        OceanMaterialBinder.Apply(runtimeOceanMaterial, oceanAppearance, evaluation);
+        oceanMeshRenderer.sharedMaterial = runtimeOceanMaterial;
+    }
+
+    void ReleaseRuntimeOceanMaterial()
+    {
+        if (runtimeOceanMaterial != null)
+        {
+            Destroy(runtimeOceanMaterial);
+            runtimeOceanMaterial = null;
+        }
     }
 
     void EnsureGeodesicOceanMaterial()
@@ -779,11 +836,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
             if (shader == null) shader = Shader.Find("Universal Render Pipeline/Lit");
             runtimeGeodesicOceanMaterial = new Material(shader) { name = "Geodesic Ocean (Runtime)" };
         }
-        Color c = geodesicOceanColour; c.a = geodesicOceanOpacity;
-        if (runtimeGeodesicOceanMaterial.HasProperty("_BaseColor")) runtimeGeodesicOceanMaterial.SetColor("_BaseColor", c);
-        if (runtimeGeodesicOceanMaterial.HasProperty("_Color")) runtimeGeodesicOceanMaterial.SetColor("_Color", c);
-        if (runtimeGeodesicOceanMaterial.HasProperty("_ShallowColor")) runtimeGeodesicOceanMaterial.SetColor("_ShallowColor", geodesicOceanShallowTint);
-        if (runtimeGeodesicOceanMaterial.HasProperty("_Smoothness")) runtimeGeodesicOceanMaterial.SetFloat("_Smoothness", geodesicOceanSmoothness);
+        OceanAppearanceEvaluation evaluation = OceanAppearanceModel.Evaluate(oceanAppearance, OceanAppearanceSample.Default);
+        OceanMaterialBinder.Apply(runtimeGeodesicOceanMaterial, oceanAppearance, evaluation);
         geodesicOceanMeshRenderer.sharedMaterial = runtimeGeodesicOceanMaterial;
     }
 
@@ -794,6 +848,13 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
             Destroy(runtimeGeodesicOceanMaterial);
             runtimeGeodesicOceanMaterial = null;
         }
+    }
+
+    void LogOceanRendererDiagnostics(string rendererType, Material material, bool chemistryInputsActive)
+    {
+        string settingsSource = $"PlanetGenerator.oceanAppearance ({nameof(OceanAppearanceSettings)})";
+        string shaderName = material != null && material.shader != null ? material.shader.name : "<none>";
+        Debug.Log($"[OceanVisualDiagnostics] renderer={rendererType}, settingsSource={settingsSource}, baseColor={oceanAppearance.baseWaterColor}, opacity={oceanAppearance.opacity:F3}, smoothness={oceanAppearance.smoothness:F3}, shader={shaderName}, chemistryVisualInputs={(chemistryInputsActive ? "active" : "defaulted")}", this);
     }
 
     float GetGeodesicMinimumTerrainOffset() => Mathf.Min(geodesicMinimumTerrainOffset, geodesicMaximumTerrainOffset);
@@ -884,10 +945,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         }
 
         oceanMeshFilter.sharedMesh = oceanMesh;
-        if (oceanMaterial != null)
-        {
-            oceanMeshRenderer.sharedMaterial = oceanMaterial;
-        }
+        EnsureLegacyOceanMaterial();
     }
 
     void SetupAtmosphereLayer()
@@ -1061,7 +1119,9 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
         if (oceanMeshRenderer != null)
         {
+            EnsureLegacyOceanMaterial();
             oceanMeshRenderer.enabled = enableOcean;
+            LogOceanRendererDiagnostics("LegacyCubeSphere", oceanMeshRenderer.sharedMaterial, false);
         }
 
         if (atmosphereMesh == null)
@@ -1314,6 +1374,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         }
 
         ReleaseGeodesicSurfaceMaterial();
+        ReleaseRuntimeOceanMaterial();
         ReleaseGeodesicOceanMaterial();
         if (geodesicOceanMesh != null) Destroy(geodesicOceanMesh);
         geodesicOceanMesh = null;

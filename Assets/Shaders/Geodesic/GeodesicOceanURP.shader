@@ -2,9 +2,19 @@ Shader "SimulaVit/GeodesicOceanURP"
 {
     Properties
     {
-        _BaseColor ("Ocean Color", Color) = (0.02, 0.28, 0.55, 0.42)
-        _ShallowColor ("Shallow Tint", Color) = (0.10, 0.55, 0.75, 0.42)
-        _Smoothness ("Smoothness", Range(0, 1)) = 0.82
+        _BaseColor ("Base Water Color", Color) = (0.15966536, 0.30129746, 0.49056602, 0.58)
+        _ShallowColor ("Shallow Tint", Color) = (0.10, 0.55, 0.75, 0.58)
+        _DeepColor ("Deep Tint", Color) = (0.02, 0.12, 0.28, 0.58)
+        _Opacity ("Opacity", Range(0, 1)) = 0.58
+        _Smoothness ("Smoothness", Range(0, 1)) = 0.876
+        _FresnelStrength ("Fresnel Strength", Range(0, 1)) = 0.18
+        _FresnelPower ("Fresnel Power", Range(0.001, 8)) = 3
+        _AmbientResponse ("Ambient Response", Range(0, 2)) = 1
+        _ColorIntensity ("Color Intensity", Range(0, 3)) = 1
+        _Fe2Tint ("Dissolved Fe2 Tint", Color) = (0.18, 0.38, 0.52, 1)
+        _FeOxTint ("Suspended FeOx Tint", Color) = (0.72, 0.36, 0.12, 1)
+        _SulfurTint ("Suspended Sulfur Tint", Color) = (0.95, 0.82, 0.20, 1)
+        _Turbidity ("Turbidity", Range(0, 1)) = 0
     }
     SubShader
     {
@@ -26,7 +36,17 @@ Shader "SimulaVit/GeodesicOceanURP"
             CBUFFER_START(UnityPerMaterial)
                 half4 _BaseColor;
                 half4 _ShallowColor;
+                half4 _DeepColor;
+                half _Opacity;
                 half _Smoothness;
+                half _FresnelStrength;
+                half _FresnelPower;
+                half _AmbientResponse;
+                half _ColorIntensity;
+                half4 _Fe2Tint;
+                half4 _FeOxTint;
+                half4 _SulfurTint;
+                half _Turbidity;
             CBUFFER_END
 
             struct Attributes
@@ -56,10 +76,12 @@ Shader "SimulaVit/GeodesicOceanURP"
             {
                 half3 normalWS = normalize(input.normalWS);
                 half3 viewDirWS = normalize(input.viewDirWS);
-                half fresnel = pow(1.0 - saturate(dot(normalWS, viewDirWS)), 3.0);
+                half fresnel = pow(1.0 - saturate(dot(normalWS, viewDirWS)), _FresnelPower);
                 half3 color = lerp(_ShallowColor.rgb, _BaseColor.rgb, saturate(0.35 + fresnel));
-                color += fresnel * _Smoothness * 0.18;
-                return half4(color, _BaseColor.a);
+                color = lerp(color, _DeepColor.rgb, saturate(_Turbidity * 0.35));
+                color *= _AmbientResponse * _ColorIntensity;
+                color += fresnel * _FresnelStrength;
+                return half4(color, _Opacity);
             }
             ENDHLSL
         }
