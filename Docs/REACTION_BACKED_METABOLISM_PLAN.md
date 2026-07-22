@@ -131,12 +131,12 @@ Phase 1 does not implement mutable reaction ownership or capacity limits.
 
 ### Likely file/class touch points when implementation begins
 
-- `Assets/Scripts/ReplicatorMetabolismSystem.cs` (execution engine insertion point)
-- `Assets/Scripts/ReplicatorPopulationState.cs` (timer/state fields consumed by reactions)
-- `Assets/Scripts/ReplicatorData.cs` (metabolism enum + death causes)
-- `Assets/Scripts/PlanetResourceMap.cs` (resource access/write paths + telemetry compatibility)
-- `Assets/Scripts/ReplicatorManager.cs` (settings assembly, tick cadence, debug outputs)
-- `Assets/Scripts/ReplicatorHudPresenter.cs` (still enum-facing in early phases)
+- `Assets/Scripts/Biology/Replicators/ReplicatorMetabolismSystem.cs` (execution engine insertion point)
+- `Assets/Scripts/Biology/Replicators/ReplicatorPopulationState.cs` (timer/state fields consumed by reactions)
+- `Assets/Scripts/Biology/Replicators/ReplicatorData.cs` (metabolism enum + death causes)
+- `Assets/Scripts/Planet/Environment/Resources/PlanetResourceMap.cs` (resource access/write paths + telemetry compatibility)
+- `Assets/Scripts/Biology/Replicators/ReplicatorManager.cs` (settings assembly, tick cadence, debug outputs)
+- `Assets/Scripts/UI/ReplicatorHudPresenter.cs` (still enum-facing in early phases)
 
 ---
 
@@ -295,10 +295,10 @@ Long-term ecological goals:
 
 ## Appendix: Current code anchors for migration planning
 
-- Metabolism enum and death causes: `Assets/Scripts/ReplicatorData.cs`
-- Hot-loop metabolism execution and specialized paths: `Assets/Scripts/ReplicatorMetabolismSystem.cs`
-- SoA agent-state fields/timers used by metabolism: `Assets/Scripts/ReplicatorPopulationState.cs`
-- Resource types, layered-ocean write/fallback telemetry: `Assets/Scripts/PlanetResourceMap.cs`
-- Tick cadence/settings assembly and debug handoff: `Assets/Scripts/ReplicatorManager.cs`
-- HUD still presenting enum categories: `Assets/Scripts/ReplicatorHudPresenter.cs`
+- Metabolism enum and death causes: `Assets/Scripts/Biology/Replicators/ReplicatorData.cs`
+- Hot-loop metabolism execution and specialized paths: `Assets/Scripts/Biology/Replicators/ReplicatorMetabolismSystem.cs`
+- SoA agent-state fields/timers used by metabolism: `Assets/Scripts/Biology/Replicators/ReplicatorPopulationState.cs`
+- Resource types, layered-ocean write/fallback telemetry: `Assets/Scripts/Planet/Environment/Resources/PlanetResourceMap.cs`
+- Tick cadence/settings assembly and debug handoff: `Assets/Scripts/Biology/Replicators/ReplicatorManager.cs`
+- HUD still presenting enum categories: `Assets/Scripts/UI/ReplicatorHudPresenter.cs`
 

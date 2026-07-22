@@ -15,7 +15,7 @@ These fields are touched in nearly every metabolism/movement/steering iteration 
 - Starvation timers used for death attribution: `starve*Seconds` fields.
 
 ## 2) Concrete `ReplicatorPopulationState` design
-Step-1 introduces a transitional runtime SoA container (`Assets/Scripts/ReplicatorPopulationState.cs`) with packed arrays and explicit sync APIs:
+Step-1 introduces a transitional runtime SoA container (`Assets/Scripts/Biology/Replicators/ReplicatorPopulationState.cs`) with packed arrays and explicit sync APIs:
 
 - `SyncFromAgents(List<Replicator>)`: copy hot fields from object list to arrays.
 - `SyncToAgents(List<Replicator>)`: write updated hot fields back to objects.
