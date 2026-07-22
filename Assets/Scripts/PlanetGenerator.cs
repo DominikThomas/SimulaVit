@@ -25,7 +25,11 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     [Header("Generation Mode")]
     public PlanetGenerationMode generationMode = PlanetGenerationMode.LegacyCubeSphere;
     [Range(0, GeodesicGridTopology.MaxSupportedSubdivision)]
-    public int geodesicSubdivisionLevel = 3;
+    public int geodesicSubdivisionLevel = 4;
+    [Range(0, GeodesicGridTopology.MaxSupportedSubdivision)]
+    public int geodesicSimulationSubdivisionLevel = 4;
+    [Range(0, GeodesicGridTopology.MaxSupportedSubdivision)]
+    public int geodesicRenderSubdivisionLevel = 5;
     public bool showGeodesicCellOutlines = true;
     public bool highlightGeodesicPentagons = true;
     public bool showGeodesicCellCentres;
@@ -42,17 +46,24 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     public int customTerrainSeed = 67890;
     [FormerlySerializedAs("geodesicBaseRadius")]
     [SerializeField, HideInInspector] private float deprecatedGeodesicBaseRadius = 1f;
-    [Range(0f, 1f)] public float geodesicTerrainAmplitude = 0.14f;
-    [Min(0.001f)] public float geodesicContinentNoiseScale = 0.85f;
-    [Min(0.001f)] public float geodesicMountainNoiseScale = 4.25f;
+    [Min(0f)] public float geodesicContinentAmplitude = 0.09f;
+    [Min(0.001f)] public float geodesicContinentNoiseScale = 0.75f;
+    [Range(-1f, 1f)] public float geodesicContinentBias = -0.05f;
+    [Min(0f)] public float geodesicMountainAmplitude = 0.16f;
+    [Min(0.001f)] public float geodesicMountainNoiseScale = 4.75f;
+    [Range(0f, 1f)] public float geodesicMountainCoverageThreshold = 0.58f;
+    [Min(0.001f)] public float geodesicMountainMaskSoftness = 0.18f;
+    [Min(0.01f)] public float geodesicRidgeSharpness = 1.65f;
+    [Min(0.001f)] public float geodesicDomainWarpScale = 1.35f;
+    [Min(0f)] public float geodesicDomainWarpStrength = 0.28f;
+    [Min(0.001f)] public float geodesicFineDetailScale = 18f;
+    [Min(0f)] public float geodesicFineDetailAmplitude = 0.018f;
     [Range(1, 8)] public int geodesicTerrainOctaves = 5;
     [Range(0f, 1f)] public float geodesicTerrainPersistence = 0.48f;
     [Min(1f)] public float geodesicTerrainLacunarity = 2f;
-    [Range(0.25f, 4f)] public float geodesicTerrainHeightContrast = 1.35f;
-    [Range(-1f, 1f)] public float geodesicContinentBias = -0.08f;
-    [Range(-1f, 1f)] public float geodesicContinentThreshold = 0f;
-    [Range(-1f, 0f)] public float geodesicMinimumTerrainOffset = -0.08f;
-    [Range(0f, 1f)] public float geodesicMaximumTerrainOffset = 0.18f;
+    [Range(0.25f, 4f)] public float geodesicTerrainHeightContrast = 1.15f;
+    [Range(-1f, 0f)] public float geodesicMinimumTerrainOffset = -0.09f;
+    [Range(0f, 1f)] public float geodesicMaximumTerrainOffset = 0.22f;
     [Tooltip("Visual/debug-only future sea-level preview offset relative to PlanetGenerator.radius. It does not create ocean cells or simulation state.")]
     [Range(-1f, 1f)] public float geodesicSeaLevelPreviewOffset = 0f;
     [Tooltip("Blend vertex colours with normalized terrain height while preserving directional visual noise.")]
@@ -256,7 +267,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
             GeneratePlanet();
         }
         IsPlanetInitialized = true;
-        Debug.Log($"[StartupLifecycle] Planet generation complete. Mode={generationMode}, seed={randomSeed}, resolution={resolution}, geodesicSubdivision={geodesicSubdivisionLevel}", this);
+        Debug.Log($"[StartupLifecycle] Planet generation complete. Mode={generationMode}, seed={randomSeed}, resolution={resolution}, geodesicSimulationSubdivision={geodesicSimulationSubdivisionLevel}, geodesicRenderSubdivision={geodesicRenderSubdivisionLevel}", this);
     }
 
     public void RegeneratePlanet()
@@ -301,16 +312,21 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         generationMode = gridType == PlanetGridType.GeodesicIcosphere ? PlanetGenerationMode.GeodesicPrototype : PlanetGenerationMode.LegacyCubeSphere;
         resolution = Mathf.Clamp(cubeSphereResolution, 3, 240);
         geodesicSubdivisionLevel = Mathf.Clamp(geodesicSubdivision, 0, GeodesicGridTopology.MaxSupportedSubdivision);
+        geodesicSimulationSubdivisionLevel = geodesicSubdivisionLevel;
+        geodesicRenderSubdivisionLevel = Mathf.Clamp(Mathf.Max(geodesicSimulationSubdivisionLevel, geodesicRenderSubdivisionLevel), 0, GeodesicGridTopology.MaxSupportedSubdivision);
         int expected = gridType == PlanetGridType.GeodesicIcosphere
             ? GeodesicGridTopology.ExpectedCellCount(geodesicSubdivisionLevel)
             : PlanetGridIndexing.GetCellCount(resolution);
-        Debug.Log($"[PlanetGenerator] Selected grid type={gridType}, cubeSphereResolution={resolution}, geodesicSubdivision={geodesicSubdivisionLevel}, expectedCellCount={expected}", this);
+        Debug.Log($"[PlanetGenerator] Selected grid type={gridType}, cubeSphereResolution={resolution}, geodesicSimulationSubdivision={geodesicSimulationSubdivisionLevel}, geodesicRenderSubdivision={geodesicRenderSubdivisionLevel}, expectedCellCount={expected}", this);
     }
 
     private void GenerateGeodesicPrototype()
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        GeodesicTopology = GeodesicGridTopology.Build(geodesicSubdivisionLevel);
+        int simulationSubdivision = Mathf.Clamp(geodesicSimulationSubdivisionLevel, 0, GeodesicGridTopology.MaxSupportedSubdivision);
+        int renderSubdivision = Mathf.Clamp(geodesicRenderSubdivisionLevel, 0, GeodesicGridTopology.MaxSupportedSubdivision);
+        geodesicSubdivisionLevel = simulationSubdivision;
+        GeodesicTopology = GeodesicGridTopology.Build(simulationSubdivision);
         if (!GeodesicGridValidation.Validate(GeodesicTopology, out string validation))
         {
             Debug.LogError($"[GeodesicPrototype] Validation failed: {validation}", this);
@@ -318,7 +334,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
             return;
         }
 
-        mesh = GeodesicSphereMeshBuilder.BuildSurfaceMesh(GeodesicTopology, BasePlanetRadius);
+        GeodesicGridTopology renderTopology = GeodesicGridTopology.Build(renderSubdivision);
+        mesh = GeodesicSphereMeshBuilder.BuildSurfaceMesh(renderTopology, BasePlanetRadius, $"Geodesic Terrain Render L{renderSubdivision}");
         ApplyGeodesicTerrainDisplacement(mesh);
         RebuildGeodesicCellTerrainCache();
         ApplyGeodesicSurfaceColours(mesh);
@@ -351,7 +368,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         PopulateRuntimeDescriptor(GeodesicTopology.CellCount);
         LogPlanetGenerationValidation(meshCollider);
         sw.Stop();
-        Debug.Log($"[GeodesicPrototype] subdivision={geodesicSubdivisionLevel}, cells={GeodesicTopology.CellCount}, triangles={GeodesicTopology.TriangleCount}, edges={GeodesicTopology.EdgeCount}, durationMs={sw.Elapsed.TotalMilliseconds:F2}, approxTopologyMemory={GeodesicTopology.ApproximateMemoryBytes} bytes. Validation: {validation}", this);
+        LogGeodesicTerrainDiagnostics(mesh, simulationSubdivision, renderSubdivision);
+        Debug.Log($"[GeodesicPrototype] simulationSubdivision={simulationSubdivision}, renderSubdivision={renderSubdivision}, cells={GeodesicTopology.CellCount}, renderVertices={mesh.vertexCount}, renderTriangles={mesh.triangles.Length / 3}, simulationTriangles={GeodesicTopology.TriangleCount}, edges={GeodesicTopology.EdgeCount}, durationMs={sw.Elapsed.TotalMilliseconds:F2}, approxTopologyMemory={GeodesicTopology.ApproximateMemoryBytes} bytes. Validation: {validation}", this);
     }
 
     void ApplyGeodesicSurfaceColours(Mesh targetMesh)
@@ -492,34 +510,115 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     public float EvaluateGeodesicTerrainHeight(Vector3 direction)
     {
         if (!enableGeodesicTerrainDisplacement) return 0f;
-        Vector3 d = direction.sqrMagnitude > 1e-10f ? direction.normalized : Vector3.up;
-        Vector3 offset = BuildGeodesicVisualSeedOffset(DerivedTerrainSeed);
-        float continent = 0.5f * (SimpleNoise.Evaluate(d * Mathf.Max(0.001f, geodesicContinentNoiseScale) + offset) + 1f);
-        float continentalMask = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((continent + geodesicContinentBias - geodesicContinentThreshold + 0.5f)));
-        float mountain = SampleGeodesicVisualNoise(d, offset + new Vector3(91.7f, -37.2f, 18.4f), Mathf.Max(0.001f, geodesicMountainNoiseScale), Mathf.Clamp(geodesicTerrainOctaves, 1, 8), Mathf.Clamp01(geodesicTerrainPersistence), Mathf.Max(1f, geodesicTerrainLacunarity));
-        float ridgedMountain = 1f - Mathf.Abs(mountain * 2f - 1f);
-        ridgedMountain = Mathf.Pow(Mathf.Clamp01(ridgedMountain), 1.7f);
-        float fine = 0.5f * (SimpleNoise.Evaluate(d * Mathf.Max(0.001f, geodesicMountainNoiseScale * 3.1f) + offset + new Vector3(-12.3f, 48.9f, 73.5f)) + 1f);
-        float shaped = (continent - 0.5f) * 0.95f + ridgedMountain * continentalMask * 0.55f + (fine - 0.5f) * 0.08f;
-        shaped = Mathf.Sign(shaped) * Mathf.Pow(Mathf.Abs(shaped), Mathf.Max(0.25f, geodesicTerrainHeightContrast));
-        float height = shaped * Mathf.Max(0f, geodesicTerrainAmplitude);
-        return Mathf.Clamp(height, GetGeodesicMinimumTerrainOffset(), GetGeodesicMaximumTerrainOffset());
+        return PlanetTerrainSampler.EvaluateHeight(direction, DerivedTerrainSeed, GetGeodesicTerrainSettings());
+    }
+
+    public PlanetTerrainSample EvaluateGeodesicTerrainSample(Vector3 direction)
+    {
+        if (!enableGeodesicTerrainDisplacement) return default;
+        return PlanetTerrainSampler.Evaluate(direction, DerivedTerrainSeed, GetGeodesicTerrainSettings());
+    }
+
+    PlanetTerrainSettings GetGeodesicTerrainSettings()
+    {
+        return new PlanetTerrainSettings
+        {
+            continentAmplitude = geodesicContinentAmplitude,
+            continentScale = geodesicContinentNoiseScale,
+            continentBias = geodesicContinentBias,
+            mountainAmplitude = geodesicMountainAmplitude,
+            mountainScale = geodesicMountainNoiseScale,
+            mountainCoverageThreshold = geodesicMountainCoverageThreshold,
+            mountainMaskSoftness = geodesicMountainMaskSoftness,
+            ridgeSharpness = geodesicRidgeSharpness,
+            domainWarpScale = geodesicDomainWarpScale,
+            domainWarpStrength = geodesicDomainWarpStrength,
+            fineDetailScale = geodesicFineDetailScale,
+            fineDetailAmplitude = geodesicFineDetailAmplitude,
+            minimumTerrainOffset = geodesicMinimumTerrainOffset,
+            maximumTerrainOffset = geodesicMaximumTerrainOffset,
+            octaves = geodesicTerrainOctaves,
+            persistence = geodesicTerrainPersistence,
+            lacunarity = geodesicTerrainLacunarity,
+            heightContrast = geodesicTerrainHeightContrast
+        };
+    }
+
+    [ContextMenu("Apply Geodesic Smooth Terrain Preset")]
+    public void ApplyGeodesicSmoothTerrainPreset()
+    {
+        geodesicContinentAmplitude = 0.045f; geodesicContinentNoiseScale = 0.65f; geodesicContinentBias = -0.02f;
+        geodesicMountainAmplitude = 0.055f; geodesicMountainNoiseScale = 3.8f; geodesicMountainCoverageThreshold = 0.68f; geodesicMountainMaskSoftness = 0.24f;
+        geodesicRidgeSharpness = 2.2f; geodesicDomainWarpScale = 1.1f; geodesicDomainWarpStrength = 0.12f; geodesicFineDetailScale = 12f; geodesicFineDetailAmplitude = 0.006f;
+        geodesicMinimumTerrainOffset = -0.04f; geodesicMaximumTerrainOffset = 0.08f;
+    }
+
+    [ContextMenu("Apply Geodesic Earthlike Terrain Preset")]
+    public void ApplyGeodesicEarthlikeTerrainPreset()
+    {
+        PlanetTerrainSettings s = PlanetTerrainSettings.Earthlike;
+        geodesicContinentAmplitude = s.continentAmplitude; geodesicContinentNoiseScale = s.continentScale; geodesicContinentBias = s.continentBias;
+        geodesicMountainAmplitude = s.mountainAmplitude; geodesicMountainNoiseScale = s.mountainScale; geodesicMountainCoverageThreshold = s.mountainCoverageThreshold; geodesicMountainMaskSoftness = s.mountainMaskSoftness;
+        geodesicRidgeSharpness = s.ridgeSharpness; geodesicDomainWarpScale = s.domainWarpScale; geodesicDomainWarpStrength = s.domainWarpStrength; geodesicFineDetailScale = s.fineDetailScale; geodesicFineDetailAmplitude = s.fineDetailAmplitude;
+        geodesicMinimumTerrainOffset = s.minimumTerrainOffset; geodesicMaximumTerrainOffset = s.maximumTerrainOffset; geodesicTerrainOctaves = s.octaves; geodesicTerrainPersistence = s.persistence; geodesicTerrainLacunarity = s.lacunarity; geodesicTerrainHeightContrast = s.heightContrast;
+    }
+
+    [ContextMenu("Apply Geodesic Rugged Terrain Preset")]
+    public void ApplyGeodesicRuggedTerrainPreset()
+    {
+        geodesicContinentAmplitude = 0.11f; geodesicContinentNoiseScale = 0.72f; geodesicContinentBias = -0.04f;
+        geodesicMountainAmplitude = 0.24f; geodesicMountainNoiseScale = 5.4f; geodesicMountainCoverageThreshold = 0.5f; geodesicMountainMaskSoftness = 0.16f;
+        geodesicRidgeSharpness = 1.35f; geodesicDomainWarpScale = 1.45f; geodesicDomainWarpStrength = 0.38f; geodesicFineDetailScale = 22f; geodesicFineDetailAmplitude = 0.025f;
+        geodesicMinimumTerrainOffset = -0.11f; geodesicMaximumTerrainOffset = 0.31f; geodesicRenderSubdivisionLevel = Mathf.Max(5, geodesicRenderSubdivisionLevel);
+    }
+
+    [ContextMenu("Apply Geodesic Extreme Terrain Preset")]
+    public void ApplyGeodesicExtremeTerrainPreset()
+    {
+        geodesicContinentAmplitude = 0.14f; geodesicContinentNoiseScale = 0.68f; geodesicContinentBias = -0.02f;
+        geodesicMountainAmplitude = 0.36f; geodesicMountainNoiseScale = 6.8f; geodesicMountainCoverageThreshold = 0.44f; geodesicMountainMaskSoftness = 0.12f;
+        geodesicRidgeSharpness = 1.1f; geodesicDomainWarpScale = 1.65f; geodesicDomainWarpStrength = 0.52f; geodesicFineDetailScale = 28f; geodesicFineDetailAmplitude = 0.035f;
+        geodesicMinimumTerrainOffset = -0.16f; geodesicMaximumTerrainOffset = 0.48f; geodesicRenderSubdivisionLevel = Mathf.Max(5, geodesicRenderSubdivisionLevel);
     }
 
     void ApplyGeodesicTerrainDisplacement(Mesh targetMesh)
     {
         if (targetMesh == null) return;
         Vector3[] vertices = targetMesh.vertices;
-        Vector3[] normals = new Vector3[vertices.Length];
         for (int i = 0; i < vertices.Length; i++)
         {
             Vector3 direction = vertices[i].sqrMagnitude > 1e-10f ? vertices[i].normalized : Vector3.up;
             vertices[i] = direction * GetSurfaceRadiusAtDirection(direction);
-            normals[i] = direction;
         }
         targetMesh.vertices = vertices;
-        targetMesh.normals = normals;
+        targetMesh.RecalculateNormals();
         targetMesh.RecalculateBounds();
+    }
+
+
+    void LogGeodesicTerrainDiagnostics(Mesh renderMesh, int simulationSubdivision, int renderSubdivision)
+    {
+        if (renderMesh == null) return;
+        Vector3[] vertices = renderMesh.vertices;
+        if (vertices == null || vertices.Length == 0) return;
+        float min = float.PositiveInfinity, max = float.NegativeInfinity, sum = 0f, sumSq = 0f, maskAbove = 0f;
+        float minRadius = float.PositiveInfinity, maxRadius = float.NegativeInfinity;
+        PlanetTerrainSettings settings = GetGeodesicTerrainSettings();
+        for (int i = 0; i < vertices.Length; i++)
+        {
+            Vector3 direction = vertices[i].sqrMagnitude > 1e-10f ? vertices[i].normalized : Vector3.up;
+            PlanetTerrainSample sample = PlanetTerrainSampler.Evaluate(direction, DerivedTerrainSeed, settings);
+            float h = sample.HeightOffset;
+            min = Mathf.Min(min, h); max = Mathf.Max(max, h); sum += h; sumSq += h * h;
+            if (sample.MountainMask > 0f) maskAbove += 1f;
+            float r = BasePlanetRadius + h; minRadius = Mathf.Min(minRadius, r); maxRadius = Mathf.Max(maxRadius, r);
+        }
+        float count = vertices.Length;
+        float mean = sum / count;
+        float variance = Mathf.Max(0f, (sumSq / count) - mean * mean);
+        float stdDev = Mathf.Sqrt(variance);
+        MeshCollider collider = GetComponent<MeshCollider>();
+        Debug.Log($"[GeodesicTerrainDiagnostics] simulationSubdivision={simulationSubdivision}, simulationCells={GeodesicTopology?.CellCount ?? 0}, renderSubdivision={renderSubdivision}, renderVertices={renderMesh.vertexCount}, renderTriangles={renderMesh.triangles.Length / 3}, heightMinMaxMeanStd={min:F6}/{max:F6}/{mean:F6}/{stdDev:F6}, terrainSeed={DerivedTerrainSeed}, mountainMaskActivePercent={(maskAbove / count) * 100f:F2}, surfaceRadiusMinMax={minRadius:F6}/{maxRadius:F6}, meshBounds={renderMesh.bounds}, colliderBounds={(collider != null ? collider.bounds.ToString() : "<none>")}", this);
     }
 
     void RebuildGeodesicCellTerrainCache()
@@ -863,7 +962,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
             MaximumGeneratedRadius = MaximumSurfaceRadius,
             CellCount = Mathf.Max(0, cellCount),
             CubeSphereResolution = CurrentGridType == PlanetGridType.LegacyCubeSphere ? resolution : 0,
-            GeodesicSubdivision = CurrentGridType == PlanetGridType.GeodesicIcosphere ? geodesicSubdivisionLevel : 0
+            GeodesicSubdivision = CurrentGridType == PlanetGridType.GeodesicIcosphere ? geodesicSimulationSubdivisionLevel : 0
         };
         HasRuntimeDescriptor = true;
     }
