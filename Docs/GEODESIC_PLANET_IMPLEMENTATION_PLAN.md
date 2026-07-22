@@ -1,0 +1,832 @@
+# Geodesic Planet Implementation Plan
+
+## Purpose
+
+This document is the persistent roadmap for migrating SimulaVit from the legacy cube-sphere grid to a geodesic icosphere-based planet.
+
+Future Codex prompts should reference this file and update it whenever a phase is completed, changed, or split.
+
+The long-term target is:
+
+- a welded icosphere render surface;
+- a separate geodesic simulation topology;
+- mostly hexagonal cells with exactly 12 pentagons;
+- deterministic generation from one master planet seed;
+- one authoritative planet radius and terrain-height API;
+- support for terrain, ocean, atmosphere, resources, temperature, vents, layered ocean chemistry, replicators, visuals, picking, and save/load;
+- preservation of the legacy cube-sphere path until geodesic mode reaches sufficient feature parity.
+
+---
+
+# 1. Architectural principles
+
+## 1.1 Separate render geometry from simulation topology
+
+The visible planet mesh and simulation grid must not be the same data structure.
+
+### Render geometry
+
+The render mesh may use a higher icosphere subdivision for smooth terrain. It is responsible for:
+
+- visible terrain;
+- normals and vertex colours;
+- collider geometry;
+- ocean and atmosphere shells;
+- visual overlays.
+
+### Simulation topology
+
+The simulation grid uses the dual of a subdivided icosphere:
+
+- each icosphere vertex is one simulation-cell centre;
+- exactly 12 cells have 5 neighbors;
+- all remaining cells have 6 neighbors;
+- adjacency comes from shared icosphere edges;
+- each cell has a spherical area and shared-edge metrics.
+
+Recommended current defaults:
+
+- simulation subdivision: 4;
+- render subdivision: 5.
+
+A likely production-equivalent simulation subdivision is 5, giving 10,242 cells.
+
+## 1.2 One authoritative radius
+
+`PlanetGenerator.radius` is the single authoritative base planet radius.
+
+All geodesic surface geometry must use:
+
+```csharp
+surfaceRadius = PlanetGenerator.radius + terrainHeightOffset;
+```
+
+No geodesic subsystem should own an independent base planet radius.
+
+The following must share the same radius convention:
+
+- terrain mesh;
+- MeshCollider;
+- debug outlines;
+- cell picker;
+- camera zoom and surface clearance;
+- ocean surface;
+- atmosphere shell;
+- replicator placement;
+- vent placement;
+- layered-ocean radii.
+
+Required shared queries:
+
+```csharp
+float BasePlanetRadius { get; }
+float MinimumSurfaceRadius { get; }
+float MaximumSurfaceRadius { get; }
+
+float GetTerrainHeightAtDirection(Vector3 direction);
+float GetSurfaceRadiusAtDirection(Vector3 direction);
+float GetCellTerrainHeight(int cellIndex);
+float GetCellSurfaceRadius(int cellIndex);
+```
+
+## 1.3 One master seed with stable derived seeds
+
+The existing planet seed is the master seed.
+
+Subsystems should derive stable domain seeds rather than reuse the raw seed directly.
+
+Suggested domains:
+
+- Terrain
+- SurfaceVisuals
+- Vents
+- Climate
+- Resources
+- Biology
+- Ocean
+- Atmosphere
+
+Do not use `string.GetHashCode()`, `object.GetHashCode()`, or runtime-dependent hashes.
+
+Feature-specific custom seed overrides may remain available, but the default should be a deterministic domain seed derived from the master seed.
+
+## 1.4 Direction-based sampling
+
+Authoritative world queries should use normalized directions rather than render-vertex indices, texture pixels, or cube-face coordinates.
+
+Examples:
+
+```csharp
+float EvaluateTerrainHeight(Vector3 unitDirection);
+int DirectionToSimulationCell(Vector3 unitDirection);
+float SampleTemperature(Vector3 unitDirection);
+```
+
+This ensures subdivision independence and avoids cube-face simulation seams.
+
+## 1.5 Variable neighbor counts
+
+Pentagons have 5 real neighbors. Hexagons have 6 real neighbors.
+
+Never add duplicate, dummy, or fake sixth neighbors. Algorithms must iterate the actual neighbor count.
+
+## 1.6 Cell area and conservation
+
+Geodesic cells are similar in size but not exactly equal.
+
+The simulation must distinguish:
+
+- concentration;
+- total cell inventory;
+- source rate per area;
+- global total;
+- area-weighted global mean.
+
+Diffusion and exchange should ultimately use cell area, shared-edge length, and center-to-center distance.
+
+## 1.7 Preserve legacy mode during migration
+
+Keep the legacy cube-sphere mode operational until geodesic mode reaches sufficient parity.
+
+Startup selection:
+
+- Cube Sphere (Legacy)
+- Geodesic Icosphere
+
+Old saves without grid metadata are legacy cube-sphere saves. Geodesic saves must never be loaded as legacy saves or vice versa.
+
+---
+
+# 2. Current implementation status
+
+This section is based on reported branch summaries and local runtime fixes. Unity play mode remains the final source of truth.
+
+## 2.1 Reported completed foundation
+
+- startup selection between legacy cube-sphere and geodesic icosphere;
+- persisted startup configuration;
+- save schema version 3 with grid metadata;
+- rejection of incomplete geodesic saves;
+- welded icosphere topology generation;
+- deterministic midpoint caching;
+- 5/6-neighbor simulation adjacency;
+- ordered dual polygon corners;
+- spherical cell areas;
+- neighbor angular distances and shared dual-edge estimates;
+- topology validation and subdivision scaling tests;
+- coherent indexed render mesh;
+- combined geodesic outline mesh;
+- brute-force direction-to-cell picking with deterministic tie-breaking;
+- visible runtime cell-selection popup;
+- new Input System support;
+- geodesic startup path that skips legacy resources, vents, replicators, and stepping;
+- geodesic vertex-colour shader and runtime-owned material;
+- deterministic procedural surface colours;
+- deterministic direction-based terrain sampler;
+- continent/basin shaping, domain-warped ridged mountains, and fine detail;
+- separate simulation and render subdivisions;
+- terrain presets;
+- terrain-aware selection diagnostics;
+- refreshed MeshCollider after displacement;
+- outlines sampled against authoritative terrain radius.
+
+## 2.2 Runtime fixes already identified
+
+### Shared-edge initialization
+
+Build all `DualCorners` entries before estimating shared dual edges. Topology metrics require two passes.
+
+### Picker input
+
+`GeodesicCellPicker` must use the new Input System when enabled.
+
+### Picker visibility
+
+The picker needs a visible popup or linked inspector, not only public debug fields.
+
+### Radius consistency
+
+A separate geodesic base radius caused camera and mesh scale disagreement. Permanent rule:
+
+- use `PlanetGenerator.radius`;
+- terrain values are offsets;
+- radius is applied exactly once.
+
+## 2.3 Recommended source organization
+
+Organize by feature rather than generic C# type:
+
+```text
+Assets/
+├── Scripts/
+│   ├── Core/
+│   │   ├── Startup/
+│   │   └── Simulation/
+│   ├── Planet/
+│   │   ├── Common/
+│   │   ├── LegacyCubeSphere/
+│   │   ├── Geodesic/
+│   │   │   ├── Grid/
+│   │   │   ├── Terrain/
+│   │   │   ├── Rendering/
+│   │   │   └── Diagnostics/
+│   │   ├── Environment/
+│   │   │   ├── Ocean/
+│   │   │   ├── Atmosphere/
+│   │   │   ├── Resources/
+│   │   │   ├── Temperature/
+│   │   │   ├── Vents/
+│   │   │   └── Sediments/
+│   │   └── Visuals/
+│   ├── Biology/
+│   │   └── Replicators/
+│   ├── Persistence/
+│   ├── UI/
+│   └── Utilities/
+├── Shaders/
+│   └── Geodesic/
+└── Tests/
+    ├── EditMode/
+    └── PlayMode/
+```
+
+Move `.meta` files with the assets. Folder organization should be a separate refactor commit. Do not add namespaces or assembly definitions in the same commit.
+
+---
+
+# 3. Implementation roadmap
+
+## Phase 0 — Project organization and shared generation contract
+
+### Goal
+
+Stabilize architecture before ocean and atmosphere work.
+
+### Work
+
+- organize geodesic files into feature folders;
+- centralize authoritative radius;
+- centralize stable seed derivation;
+- expose a compact generated-planet runtime descriptor;
+- make camera consume generated planet radius;
+- keep legacy and geodesic generation backends separate.
+
+Suggested descriptor:
+
+```csharp
+public sealed class PlanetRuntimeDescriptor
+{
+    public PlanetGridType GridType;
+    public int MasterSeed;
+    public int GenerationVersion;
+
+    public float BaseRadius;
+    public float MinimumSurfaceRadius;
+    public float MaximumSurfaceRadius;
+
+    public int SimulationCellCount;
+    public int CubeSphereResolution;
+    public int GeodesicSimulationSubdivision;
+    public int GeodesicRenderSubdivision;
+}
+```
+
+### Validation gate
+
+- no duplicate geodesic base-radius source;
+- camera and mesh agree on size;
+- derived terrain and visual seeds are stable;
+- changing visuals does not change terrain;
+- changing terrain does not change topology;
+- legacy mode still starts.
+
+---
+
+## Phase 1 — Geodesic terrain and topology prototype
+
+### Status
+
+Mostly implemented.
+
+### Required final validation
+
+- subdivisions 2–5 compile and run;
+- exactly 12 pentagons;
+- all remaining cells have 6 neighbors;
+- reciprocal adjacency and connected graph;
+- area sum approximately `4π`;
+- no visible mesh cracks or cube-face seam;
+- terrain remains stable across render subdivisions;
+- cell picking works;
+- outlines follow displaced terrain;
+- collider matches terrain;
+- runtime cleanup works.
+
+---
+
+## Phase 2 — Sea-level visual and authoritative land/ocean classification
+
+### Next implementation phase
+
+### Goal
+
+Add a simple geodesic ocean surface and authoritative land/ocean classification without resources or layered ocean chemistry.
+
+### Sea level
+
+```csharp
+seaLevelRadius = PlanetGenerator.radius + seaLevelOffset;
+```
+
+Ocean surface is a smooth sphere at `seaLevelRadius`.
+
+### Land/ocean classification
+
+For each simulation cell:
+
+```csharp
+terrainRadius = GetCellSurfaceRadius(cellIndex);
+isOcean = terrainRadius < seaLevelRadius;
+waterDepth = Mathf.Max(0f, seaLevelRadius - terrainRadius);
+```
+
+Derived arrays:
+
+- `bool[] geodesicOceanMask`;
+- `float[] geodesicWaterDepth`;
+- `byte[] geodesicOceanNeighborCount`;
+- `bool[] geodesicCoastlineMask`.
+
+A coastline cell has at least one real neighbor with the opposite classification.
+
+### Ocean rendering
+
+Create one coherent smooth ocean sphere with its own render subdivision and one runtime-owned material or dedicated material asset.
+
+Do not create one GameObject per cell. Do not use the legacy cube-face ocean path.
+
+### Selected-cell diagnostics
+
+Add:
+
+- land/ocean status;
+- sea-level radius;
+- terrain radius;
+- water depth;
+- ocean-neighbor count;
+- coastline status.
+
+### Out of scope
+
+- ocean resources;
+- ocean layers;
+- vertical mixing;
+- oxygen exchange;
+- vents;
+- temperature;
+- sediments;
+- replicators;
+- geodesic ocean save arrays.
+
+### Validation gate
+
+- changing sea-level offset changes ocean coverage;
+- classification is deterministic;
+- mask is independent of render subdivision;
+- ocean area is area weighted;
+- coastline uses actual 5/6-neighbor topology;
+- pentagons classify normally;
+- terrain picking remains usable;
+- legacy mode remains unchanged.
+
+---
+
+## Phase 3 — Atmosphere visual shell
+
+### Goal
+
+Add a rendering-only geodesic atmosphere shell.
+
+### Requirements
+
+- smooth sphere enclosing maximum terrain and ocean;
+- thickness as a visual offset;
+- runtime-owned material or dedicated asset;
+- no atmosphere chemistry yet;
+- correct cleanup and mode switching.
+
+---
+
+## Phase 4 — Geodesic environment-state container
+
+### Goal
+
+Introduce geodesic simulation arrays without migrating full chemistry.
+
+Suggested component:
+
+```csharp
+GeodesicEnvironmentState
+```
+
+Possible initial contents:
+
+- topology reference;
+- cell areas;
+- terrain radius;
+- land/ocean mask;
+- water depth;
+- one scalar test field;
+- temporary diffusion buffers.
+
+Use a non-production scalar or temperature preview first.
+
+### Validation gate
+
+- conservative diffusion;
+- no pentagon sinks or sources;
+- stable area-weighted totals;
+- simulation independent of render subdivision.
+
+---
+
+## Phase 5 — Temperature and ice
+
+- compute insolation from cell and sun directions;
+- store temperature per geodesic cell;
+- diffuse with area and edge metrics;
+- distinguish land and ocean heat capacity;
+- render via vertex sampling or projected texture;
+- add ice classification and visuals.
+
+---
+
+## Phase 6 — Vents and simple resources
+
+- derive a stable vent-domain seed;
+- choose geodesic vent cells;
+- bias to ocean/seafloor suitability;
+- place visuals using authoritative terrain radius;
+- add minimal resources such as H2, H2S, CO2, and Fe2+;
+- use area-aware inventories and source rates.
+
+---
+
+## Phase 7 — Layered geodesic ocean
+
+Must migrate together:
+
+- ocean mask and depth;
+- active layer count;
+- layer radii;
+- top/bottom lookup;
+- horizontal mixing;
+- vertical mixing;
+- layered resource arrays;
+- surface and seafloor source targets.
+
+Horizontal mixing must use actual neighbors, edge length, distance, and active-layer compatibility.
+
+Vertical mixing occurs only between adjacent active layers in the same cell.
+
+---
+
+## Phase 8 — O2/Fe2 chemistry, precipitates, and sediments
+
+Migrate as one group:
+
+- dissolved Fe2+;
+- local O2;
+- same-layer oxidation;
+- O2 consumption;
+- FeOx production;
+- suspended precipitate;
+- settling;
+- bottom sediment;
+- surface and seafloor overlays.
+
+Required per-layer diagnostics:
+
+- O2 inventory;
+- Fe2+ inventory;
+- Fe2+ oxidized;
+- O2 consumed;
+- FeOx produced and settled;
+- mass-balance error.
+
+---
+
+## Phase 9 — Replicator integration
+
+Start with:
+
+- spawn in a known cell;
+- surface placement;
+- movement across ordinary cells and a pentagon;
+- ocean-to-land and land-to-ocean transitions;
+- current/preferred ocean layer resolution;
+- simple replication.
+
+Then add metabolism, chemotaxis, scent, predation, mutation gates, and spawning systems.
+
+Important rules:
+
+- organisms keep continuous direction/position;
+- land uses `currentLayer = -1`;
+- ocean uses a valid active layer;
+- habitat replication checks occur before mutation selection;
+- mutation telemetry is aggregated rather than logged per attempt.
+
+---
+
+## Phase 10 — Full resource and ecosystem migration
+
+Migrate remaining production resources, exchange, scents, marine snow, sulfur/iron loops, metabolism, and population telemetry.
+
+Validation should focus on conservation and statistical behavior, not cell-for-cell equality with legacy runs.
+
+---
+
+## Phase 11 — Geodesic persistence
+
+Save identity should include:
+
+- schema version;
+- grid type;
+- master seed;
+- generation version;
+- base radius;
+- simulation subdivision;
+- topology version/hash;
+- terrain and sea-level settings;
+- resource and layered arrays;
+- vent and organism state.
+
+Rules:
+
+- save metadata determines grid type on load;
+- startup selection does not override save metadata;
+- old saves remain legacy;
+- topology mismatches are rejected or explicitly converted;
+- cell indices are never silently reinterpreted.
+
+---
+
+## Phase 12 — Visual parity and legacy dependency cleanup
+
+- migrate remaining overlays;
+- improve ocean and seafloor rendering;
+- improve atmosphere effects;
+- optimize nearest-cell lookup;
+- remove geodesic dependencies on legacy indexing;
+- retain or archive legacy mode only after geodesic parity.
+
+---
+
+# 4. Immediate next Codex prompt
+
+```text
+Read Docs/GEODESIC_PLANET_IMPLEMENTATION_PLAN.md first.
+Treat it as the current architecture and migration contract.
+
+Implement Phase 2: geodesic sea-level visual and authoritative land/ocean classification.
+
+This is an implementation task.
+Work only on the current geodesic feature branch.
+Do not merge to main.
+Preserve legacy cube-sphere behavior.
+Update the plan document when the implementation is complete.
+
+Current geodesic state
+
+The project already has:
+
+- a welded icosphere render mesh;
+- separate simulation and render subdivisions;
+- geodesic topology with exactly 12 pentagons;
+- deterministic terrain;
+- authoritative direction-based terrain and surface-radius queries;
+- cell outlines;
+- terrain-aware picking;
+- procedural vertex colours;
+- startup grid selection;
+- incomplete geodesic save/load intentionally disabled.
+
+Goal
+
+Add:
+
+1. a smooth ocean surface at one authoritative sea-level radius;
+2. deterministic geodesic land/ocean classification;
+3. per-cell water depth;
+4. coastline diagnostics.
+
+Do not add ocean resources, ocean layers, chemistry, temperature, vents, replicators, sediments, marine snow, or geodesic save-state arrays.
+
+1. Authoritative sea level
+
+Use:
+
+seaLevelRadius = PlanetGenerator.radius + geodesicSeaLevelOffset
+
+Do not introduce another planet base radius.
+
+Expose:
+
+- geodesicSeaLevelOffset;
+- GeodesicSeaLevelRadius;
+- GetWaterDepthAtDirection;
+- IsDirectionOcean;
+- IsGeodesicCellOcean;
+- GetGeodesicCellWaterDepth.
+
+Terrain remains authoritative through GetSurfaceRadiusAtDirection(direction).
+
+Water depth is:
+
+max(0, seaLevelRadius - terrainSurfaceRadius)
+
+2. Per-cell classification
+
+After geodesic terrain generation, derive arrays for the simulation topology:
+
+- bool[] geodesicOceanMask;
+- float[] geodesicWaterDepth;
+- byte[] geodesicOceanNeighborCount;
+- bool[] geodesicCoastlineMask.
+
+A coastline cell has at least one real neighbor with the opposite land/ocean classification.
+Use actual 5/6-neighbor topology and do not pad pentagons.
+
+3. Area-weighted diagnostics
+
+Calculate and log:
+
+- land cell count;
+- ocean cell count;
+- coastline cell count;
+- area-weighted land fraction;
+- area-weighted ocean fraction;
+- minimum/maximum/mean ocean depth;
+- sea-level radius;
+- terrain minimum/maximum radius.
+
+Do not use raw cell count as the authoritative ocean-area percentage.
+
+4. Ocean render mesh
+
+Create one coherent smooth ocean sphere.
+
+Use a configurable ocean render subdivision independent of the simulation subdivision.
+
+Requirements:
+
+- radius equals the authoritative sea-level radius;
+- no terrain displacement;
+- one indexed welded mesh;
+- one runtime-owned ocean material instance or dedicated material asset;
+- transparent/translucent URP-compatible rendering;
+- no cube-face ocean meshes in geodesic mode;
+- no one-GameObject-per-cell approach;
+- correct bounds and cleanup.
+
+5. Picking and layers
+
+Preserve terrain/simulation-cell picking.
+Do not let the transparent ocean collider block terrain picking accidentally.
+Prefer either no ocean collider for this phase, or a separate excluded layer/mask.
+Document the choice.
+
+6. Debug and popup
+
+Keep cell outlines following terrain.
+Extend selected-cell diagnostics with:
+
+- land/ocean;
+- coastline status;
+- terrain radius;
+- sea-level radius;
+- water depth;
+- ocean-neighbor count;
+- cell area.
+
+An optional coastline-highlight toggle may use the existing combined debug renderer.
+
+7. Startup and cleanup
+
+In geodesic mode:
+
+- create terrain first;
+- derive ocean classification;
+- create ocean visual;
+- keep resources, vents, replicators, and stepping disabled.
+
+When returning to the menu, regenerating, or switching to legacy mode:
+
+- clear the geodesic ocean mesh;
+- clear runtime ocean material state;
+- clear derived ocean arrays;
+- leave no stale child objects.
+
+8. Resolution independence
+
+Classification must use simulation-cell centre directions and the authoritative terrain sampler.
+Changing render subdivision must not change simulation-cell classification.
+
+9. Explicitly out of scope
+
+Do not implement:
+
+- active ocean layers;
+- ocean resource arrays;
+- atmosphere/ocean exchange;
+- temperature or ice;
+- vents;
+- O2/Fe2 chemistry;
+- precipitates or sediments;
+- marine snow;
+- replicators;
+- geodesic save/load arrays;
+- erosion, rivers, waves, or tides.
+
+10. Validation
+
+Test or report:
+
+- multiple sea-level offsets;
+- subdivisions 3, 4, and 5;
+- exactly 12 pentagons remain;
+- area-weighted land + ocean fraction approximately equals 1;
+- coastline classification uses actual neighbors;
+- ocean radius matches sea-level radius;
+- terrain picking still works;
+- no cube-face seams;
+- no stale ocean after returning to the menu;
+- legacy mode remains unchanged.
+
+Do not claim Unity play-mode validation unless it was actually performed.
+
+11. Plan update
+
+Update Docs/GEODESIC_PLANET_IMPLEMENTATION_PLAN.md:
+
+- mark completed items;
+- document files added/changed;
+- record architectural decisions;
+- add discovered risks;
+- identify the next recommended phase.
+```
+
+---
+
+# 5. Branch and commit strategy
+
+Keep changes stacked and reviewable:
+
+```text
+main
+└── geodesic integration branch
+    ├── runtime fixes
+    ├── surface visuals
+    ├── terrain
+    ├── mountain sampling
+    ├── project organization
+    ├── sea-level and ocean classification
+    ├── atmosphere visual
+    ├── scalar diffusion
+    └── later simulation phases
+```
+
+For each phase:
+
+1. branch from the latest working geodesic branch;
+2. implement one coherent feature;
+3. run Unity compilation and play-mode tests locally;
+4. commit;
+5. create PR metadata against the preceding geodesic branch, not `main`;
+6. merge into the geodesic integration branch only after validation;
+7. do not merge geodesic integration into `main` until the chosen milestone is stable.
+
+---
+
+# 6. Required update discipline
+
+Every future Codex prompt should begin with:
+
+```text
+Read Docs/GEODESIC_PLANET_IMPLEMENTATION_PLAN.md first.
+Treat it as the current architecture and migration contract.
+Update it only when implementation decisions or phase status actually change.
+```
+
+Every completed phase should record:
+
+- status;
+- files added and changed;
+- APIs introduced;
+- validation performed;
+- known limitations;
+- next recommended phase;
+- commit hash when available.
+
+Do not claim Unity compilation or play-mode validation unless it was actually run.
