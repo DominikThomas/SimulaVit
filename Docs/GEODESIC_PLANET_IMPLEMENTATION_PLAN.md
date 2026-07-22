@@ -335,7 +335,58 @@ Mostly implemented.
 
 ## Phase 2 — Sea-level visual and authoritative land/ocean classification
 
-### Next implementation phase
+### Status
+
+Implemented on the current geodesic child branch as a rendering/classification-only phase. This does not complete atmosphere, scalar diffusion, resources, layered oceans, chemistry, vents, biology, or geodesic save/load.
+
+### Files added
+
+- `Assets/Shaders/Geodesic/GeodesicOceanURP.shader` — dedicated transparent URP-compatible runtime geodesic ocean shader.
+
+### Files changed
+
+- `Assets/Scripts/Planet/Common/Generation/PlanetGenerator.cs` — authoritative geodesic sea-level offset/radius API, simulation-cell land/ocean/depth/coastline classification arrays, area-weighted diagnostics, welded smooth geodesic ocean visual, runtime ocean material cleanup, and debug mask handoff.
+- `Assets/Scripts/Planet/Geodesic/Diagnostics/GeodesicCellPicker.cs` — selected-cell land/ocean/coastline/depth/sea-level diagnostics while preserving normalized terrain-hit-direction picking.
+- `Assets/Scripts/Planet/Geodesic/Diagnostics/GeodesicGridDebugRenderer.cs` — bounded combined line mesh can colour ocean/coastline simulation-cell outlines without per-cell GameObjects.
+
+### APIs introduced
+
+```csharp
+float GeodesicSeaLevelRadius { get; }
+float GetWaterDepthAtDirection(Vector3 direction);
+bool IsDirectionOcean(Vector3 direction);
+bool IsGeodesicCellOcean(int cellIndex);
+float GetGeodesicCellWaterDepth(int cellIndex);
+byte GetGeodesicOceanNeighborCount(int cellIndex);
+bool IsGeodesicCellCoastline(int cellIndex);
+```
+
+`geodesicSeaLevelOffset` is exposed in `PlanetGenerator` and uses `seaLevelRadius = PlanetGenerator.radius + geodesicSeaLevelOffset`. Terrain remains authoritative through `GetSurfaceRadiusAtDirection(direction)`.
+
+### Ocean rendering architecture
+
+Geodesic mode creates one `Geodesic Ocean` child with one welded indexed icosphere mesh at `GeodesicSeaLevelRadius`, using separate `geodesicOceanRenderSubdivisionLevel`. It is smooth and undisplaced, uses 32-bit indices through the shared geodesic mesh builder when required, recalculates bounds, and uses a runtime-owned material based on `SimulaVit/GeodesicOceanURP`. Legacy cube-sphere ocean generation remains on the legacy path.
+
+### Picker collision/layer decision
+
+The geodesic ocean visual deliberately has no collider. The picker continues to target the terrain `MeshCollider` on the planet object and derives the selected cell from the normalized terrain hit direction.
+
+### Validation actually performed
+
+- Static source inspection for forbidden legacy routing/folder reorganization.
+- `git status --short` to verify the local change set.
+- Unity Play Mode was not run in this environment; geodesic/legacy startup, material transparency, terrain picking around the ocean, no stale ocean after menu return, and visual seam checks still require local Unity validation.
+
+### Known limitations
+
+- Ocean is a simple transparent sphere only; it has no waves, physical shoreline cuts, chemistry, resources, layers, save arrays, or simulation stepping.
+- Area-weighted diagnostics are logged during geodesic generation; numerical results should be captured from the Unity Console for each tested sea-level offset/subdivision combination.
+
+### Next recommended phase
+
+Proceed to Phase 3, a rendering-only geodesic atmosphere shell, after local Unity validation confirms Phase 2 startup, cleanup, picking, coastline classification around pentagons, and area-weighted land/ocean diagnostics.
+
+### Original contract
 
 ### Goal
 
