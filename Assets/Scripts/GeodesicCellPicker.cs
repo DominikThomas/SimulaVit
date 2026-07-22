@@ -286,10 +286,18 @@ public class GeodesicCellPicker : MonoBehaviour
 
         if (logSuccessfulSelection && bestIndex >= 0)
         {
+            string terrainDiagnostics = string.Empty;
+            if (planetGenerator != null)
+            {
+                Vector3 centreDirection = topology.CellDirections[selectedCellIndex];
+                PlanetTerrainSample terrainSample = planetGenerator.EvaluateGeodesicTerrainSample(centreDirection);
+                terrainDiagnostics = $", terrainHeight={terrainSample.HeightOffset:F6}, mountainMask={terrainSample.MountainMask:F4}, ridge={terrainSample.RidgeValue:F4}, continent={terrainSample.ContinentValue:F4}, finalSurfaceRadius={planetGenerator.GetSurfaceRadiusAtDirection(centreDirection):F6}";
+            }
+
             Debug.Log(
                 $"[GeodesicCellPicker] Selected cell={selectedCellIndex}, " +
                 $"neighbors={selectedNeighborCount}, pentagon={selectedIsPentagon}, " +
-                $"unitArea={selectedUnitArea:F8}.",
+                $"unitArea={selectedUnitArea:F8}{terrainDiagnostics}.",
                 this);
         }
 
@@ -343,9 +351,13 @@ public class GeodesicCellPicker : MonoBehaviour
             float surfaceRadius = planetGenerator.GetCellSurfaceRadius(selectedCellIndex);
             float normalizedHeight = planetGenerator.GetCellNormalizedTerrainHeight(selectedCellIndex);
             bool abovePreview = planetGenerator.IsAboveGeodesicSeaLevelPreview(selectedCellIndex);
+            PlanetTerrainSample sample = planetGenerator.EvaluateGeodesicTerrainSample(topology.CellDirections[selectedCellIndex]);
             GUILayout.Label($"Terrain height: {height:F5}");
             GUILayout.Label($"Surface radius: {surfaceRadius:F5}");
             GUILayout.Label($"Normalized terrain: {normalizedHeight:F3}");
+            GUILayout.Label($"Mountain mask: {sample.MountainMask:F3}");
+            GUILayout.Label($"Ridge value: {sample.RidgeValue:F3}");
+            GUILayout.Label($"Continent value: {sample.ContinentValue:F3}");
             GUILayout.Label($"Sea-level preview: {(abovePreview ? "above" : "below")}");
         }
 
