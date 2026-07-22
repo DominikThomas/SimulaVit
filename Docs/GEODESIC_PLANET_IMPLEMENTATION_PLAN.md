@@ -233,7 +233,7 @@ Assets/
 │   │   ├── Environment/
 │   │   │   ├── Ocean/
 │   │   │   ├── Atmosphere/
-│   │   │   ├── Resources/
+│   │   │   ├── ResourceSimulation/
 │   │   │   ├── Temperature/
 │   │   │   ├── Vents/
 │   │   │   └── Sediments/
@@ -250,7 +250,16 @@ Assets/
     └── PlayMode/
 ```
 
-Move `.meta` files with the assets. Folder organization should be a separate refactor commit. Do not add namespaces or assembly definitions in the same commit.
+This source organization is an organizational refactor, not completion of a simulation roadmap phase. Move `.meta` files with the assets so existing script, shader, and material GUIDs remain stable. If Unity needs metadata for newly introduced folders, let Unity generate only those missing folder `.meta` files on import rather than fabricating GUIDs by hand.
+
+Placement rules for this structure:
+
+- Do not add, remove, or rename C# namespaces as part of file movement; moving a C# file does not require a namespace change.
+- Do not add assembly definition files during this organization pass; dependency boundaries need a dedicated audit later.
+- Keep runtime geodesic diagnostics, picker scripts, validation used in builds, and debug renderers out of `Editor` folders.
+- Do not create Unity-special `Resources`, `Plugins`, or `StreamingAssets` folders merely for organization. `ResourceSimulation` is an ordinary runtime folder for resource-map code.
+- ShaderLab shader names should remain stable when shader files move, unless there is a demonstrated path-dependent reason to change them.
+- Only update hard-coded references that genuinely depend on physical paths.
 
 ---
 
