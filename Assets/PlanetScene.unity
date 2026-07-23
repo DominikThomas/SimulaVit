@@ -896,6 +896,35 @@ MonoBehaviour:
   highlightGeodesicPentagons: 1
   showGeodesicCellCentres: 0
   showSelectedGeodesicCell: 1
+  highlightGeodesicOceanCells: 0
+  highlightGeodesicCoastlineCells: 1
+  oceanAppearance:
+    baseWaterColor: {r: 0.49019608, g: 0.16078435, b: 0.19360328, a: 0.58}
+    shallowWaterColor: {r: 0.73590165, g: 0.10196076, b: 0.7490196, a: 0.58}
+    deepWaterColor: {r: 0.9433962, g: 0.88040704, b: 0.048949808, a: 0.58}
+    opacity: 0.58
+    smoothness: 0.876
+    fresnelStrength: 0.18
+    fresnelPower: 3
+    ambientResponse: 1
+    colorIntensity: 1
+    oxygenatedWaterColor: {r: 0, g: 0, b: 0, a: 0}
+    oxygenatedWaterBlendStrength: 0
+    dissolvedFe2Tint: {r: 0.18, g: 0.38, b: 0.52, a: 1}
+    suspendedFeOxTint: {r: 0.72, g: 0.36, b: 0.12, a: 1}
+    sulfurTint: {r: 0, g: 0, b: 0, a: 0}
+    dissolvedFe2TintStrength: 0
+    suspendedFeOxTurbidityStrength: 0
+    suspendedSulfurTintStrength: 0
+    organicTurbidityStrength: 0
+    temperatureTintStrength: 0
+    iceTintStrength: 0
+  deprecatedLegacyOxygenatedWaterColor: {r: 0, g: 0, b: 0, a: 0}
+  geodesicOceanRenderSubdivisionLevel: 5
+  deprecatedGeodesicOceanColour: {r: 0.02, g: 0.28, b: 0.55, a: 0.42}
+  deprecatedGeodesicOceanShallowTint: {r: 0.1, g: 0.55, b: 0.75, a: 0.42}
+  deprecatedGeodesicOceanOpacity: 0.42
+  deprecatedGeodesicOceanSmoothness: 0.82
   enableGeodesicTerrainDisplacement: 1
   usePlanetSeedForTerrain: 1
   customTerrainSeed: 67890
@@ -918,7 +947,7 @@ MonoBehaviour:
   geodesicTerrainHeightContrast: 3.78
   geodesicMinimumTerrainOffset: -0.937
   geodesicMaximumTerrainOffset: 0.941
-  geodesicSeaLevelPreviewOffset: 0.181
+  geodesicSeaLevelOffset: 0.181
   geodesicColoursUseTerrainHeight: 1
   geodesicOutlineRadialOffset: 0.003
   enableGeodesicProceduralSurfaceColours: 1
@@ -1122,8 +1151,8 @@ MonoBehaviour:
   m_TargetGraphic: {fileID: 1049548737}
   m_HandleRect: {fileID: 1049548736}
   m_Direction: 2
-  m_Value: 0
-  m_Size: 0.47368428
+  m_Value: 1
+  m_Size: 1
   m_NumberOfSteps: 0
   m_OnValueChanged:
     m_PersistentCalls:
@@ -51768,7 +51797,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 1}
   m_AnchorMax: {x: 1, y: 1}
-  m_AnchoredPosition: {x: 0, y: 0.000030517578}
+  m_AnchoredPosition: {x: 0, y: -0.000030517578}
   m_SizeDelta: {x: 0, y: 500}
   m_Pivot: {x: 0, y: 1}
 --- !u!114 &1582151553

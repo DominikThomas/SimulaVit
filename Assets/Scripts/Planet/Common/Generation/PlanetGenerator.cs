@@ -37,9 +37,14 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     public bool highlightGeodesicOceanCells;
     public bool highlightGeodesicCoastlineCells = true;
 
-    [Header("Ocean Visual Appearance")]
+    [Header("Ocean Appearance")]
     [Tooltip("Authoritative visual-only ocean appearance consumed by both legacy cube-sphere and geodesic ocean renderers.")]
-    public OceanAppearanceSettings oceanAppearance = OceanAppearanceSettings.LegacyDefaults;
+    [SerializeField]
+    private OceanAppearanceSettings oceanAppearance = new OceanAppearanceSettings();
+    [FormerlySerializedAs("oxygenatedWaterColor")]
+    [SerializeField, HideInInspector] private Color deprecatedLegacyOxygenatedWaterColor = default;
+
+    public OceanAppearanceSettings OceanAppearance => oceanAppearance;
 
     [Header("Geodesic Ocean Visual")]
     [Range(0, GeodesicGridTopology.MaxSupportedSubdivision)] public int geodesicOceanRenderSubdivisionLevel = 5;
@@ -240,27 +245,41 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
             radius = deprecatedGeodesicBaseRadius;
         }
 
-        if (IsUnsetOceanAppearance(oceanAppearance))
+        EnsureOceanAppearanceInitialized();
+        MigrateLegacyOxygenatedWaterColorIfNeeded();
+    }
+
+    void OnValidate()
+    {
+        EnsureOceanAppearanceInitialized();
+        MigrateLegacyOxygenatedWaterColorIfNeeded();
+    }
+
+    void EnsureOceanAppearanceInitialized()
+    {
+        if (oceanAppearance == null || IsUnsetOceanAppearance(oceanAppearance))
         {
             oceanAppearance = OceanAppearanceSettings.LegacyDefaults;
         }
     }
 
-    void OnValidate()
+    void MigrateLegacyOxygenatedWaterColorIfNeeded()
     {
-        if (IsUnsetOceanAppearance(oceanAppearance))
+        if (oceanAppearance == null || deprecatedLegacyOxygenatedWaterColor == default) return;
+        if (oceanAppearance.oxygenatedWaterColor == default || oceanAppearance.oxygenatedWaterColor == OceanAppearanceSettings.LegacyDefaults.oxygenatedWaterColor)
         {
-            oceanAppearance = OceanAppearanceSettings.LegacyDefaults;
+            oceanAppearance.oxygenatedWaterColor = deprecatedLegacyOxygenatedWaterColor;
         }
     }
 
     static bool IsUnsetOceanAppearance(OceanAppearanceSettings settings)
     {
-        return settings.baseWaterColor == default
-            && settings.shallowTint == default
-            && settings.deepTint == default
+        return settings == null
+            || (settings.baseWaterColor == default
+            && settings.shallowWaterColor == default
+            && settings.deepWaterColor == default
             && Mathf.Approximately(settings.opacity, 0f)
-            && Mathf.Approximately(settings.smoothness, 0f);
+            && Mathf.Approximately(settings.smoothness, 0f));
     }
 
     void Awake()
@@ -800,11 +819,12 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         geodesicOceanMeshRenderer.enabled = enableOcean;
         geodesicOceanMeshRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
         geodesicOceanMeshRenderer.receiveShadows = false;
-        LogOceanRendererDiagnostics("GeodesicIcosphere", geodesicOceanMeshRenderer.sharedMaterial, false);
+        LogOceanRendererDiagnostics("GeodesicIcosphere", geodesicOceanMeshRenderer.sharedMaterial, GetGeodesicOceanAppearanceSample(), false);
     }
 
     void EnsureLegacyOceanMaterial()
     {
+        EnsureOceanAppearanceInitialized();
         if (oceanMeshRenderer == null) return;
         if (runtimeOceanMaterial == null)
         {
@@ -813,7 +833,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
                 : new Material(Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard")) { name = "Legacy Ocean (Runtime)" };
         }
 
-        OceanAppearanceEvaluation evaluation = OceanAppearanceModel.Evaluate(oceanAppearance, OceanAppearanceSample.Default);
+        OceanAppearanceSample sample = GetLegacyOceanAppearanceSample();
+        OceanAppearanceEvaluation evaluation = OceanAppearanceModel.Evaluate(oceanAppearance, sample);
         OceanMaterialBinder.Apply(runtimeOceanMaterial, oceanAppearance, evaluation);
         oceanMeshRenderer.sharedMaterial = runtimeOceanMaterial;
     }
@@ -829,6 +850,12 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
     void EnsureGeodesicOceanMaterial()
     {
+        bool hadValidSharedSettings = oceanAppearance != null && !IsUnsetOceanAppearance(oceanAppearance);
+        EnsureOceanAppearanceInitialized();
+        if (!hadValidSharedSettings)
+        {
+            Debug.LogWarning("[OceanVisualDiagnostics] Geodesic ocean requested without valid shared PlanetGenerator.oceanAppearance; restored legacy shared defaults before binding.", this);
+        }
         if (geodesicOceanMeshRenderer == null) return;
         if (runtimeGeodesicOceanMaterial == null)
         {
@@ -836,7 +863,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
             if (shader == null) shader = Shader.Find("Universal Render Pipeline/Lit");
             runtimeGeodesicOceanMaterial = new Material(shader) { name = "Geodesic Ocean (Runtime)" };
         }
-        OceanAppearanceEvaluation evaluation = OceanAppearanceModel.Evaluate(oceanAppearance, OceanAppearanceSample.Default);
+        OceanAppearanceSample sample = GetGeodesicOceanAppearanceSample();
+        OceanAppearanceEvaluation evaluation = OceanAppearanceModel.Evaluate(oceanAppearance, sample);
         OceanMaterialBinder.Apply(runtimeGeodesicOceanMaterial, oceanAppearance, evaluation);
         geodesicOceanMeshRenderer.sharedMaterial = runtimeGeodesicOceanMaterial;
     }
@@ -850,11 +878,26 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         }
     }
 
-    void LogOceanRendererDiagnostics(string rendererType, Material material, bool chemistryInputsActive)
+    OceanAppearanceSample GetLegacyOceanAppearanceSample()
+    {
+        // Temporary compatibility path: legacy chemistry/resource rendering has not yet been
+        // migrated into the shared appearance model, so base ocean material binding uses the
+        // default zero-oxygenation sample while resource-driven overlays remain legacy-owned.
+        return OceanAppearanceSample.Default;
+    }
+
+    OceanAppearanceSample GetGeodesicOceanAppearanceSample()
+    {
+        // Geodesic mode has no migrated O2 state yet. Keep chemistry appearance inputs defaulted.
+        return OceanAppearanceSample.Default;
+    }
+
+    void LogOceanRendererDiagnostics(string rendererType, Material material, OceanAppearanceSample sample, bool deprecatedFallbackFieldsUsed)
     {
         string settingsSource = $"PlanetGenerator.oceanAppearance ({nameof(OceanAppearanceSettings)})";
         string shaderName = material != null && material.shader != null ? material.shader.name : "<none>";
-        Debug.Log($"[OceanVisualDiagnostics] renderer={rendererType}, settingsSource={settingsSource}, baseColor={oceanAppearance.baseWaterColor}, opacity={oceanAppearance.opacity:F3}, smoothness={oceanAppearance.smoothness:F3}, shader={shaderName}, chemistryVisualInputs={(chemistryInputsActive ? "active" : "defaulted")}", this);
+        OceanAppearanceEvaluation evaluation = OceanAppearanceModel.Evaluate(oceanAppearance, sample);
+        Debug.Log($"[OceanVisualDiagnostics] renderer={rendererType}, settingsSource={settingsSource}, baseColorBound={evaluation.finalColor}, opacityBound={evaluation.opacity:F3}, shader={shaderName}, oxygenation01={sample.oxygenation01:F3}, deprecatedFallbackFieldsUsed={deprecatedFallbackFieldsUsed}", this);
     }
 
     float GetGeodesicMinimumTerrainOffset() => Mathf.Min(geodesicMinimumTerrainOffset, geodesicMaximumTerrainOffset);
@@ -1121,7 +1164,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         {
             EnsureLegacyOceanMaterial();
             oceanMeshRenderer.enabled = enableOcean;
-            LogOceanRendererDiagnostics("LegacyCubeSphere", oceanMeshRenderer.sharedMaterial, false);
+            LogOceanRendererDiagnostics("LegacyCubeSphere", oceanMeshRenderer.sharedMaterial, GetLegacyOceanAppearanceSample(), false);
         }
 
         if (atmosphereMesh == null)
