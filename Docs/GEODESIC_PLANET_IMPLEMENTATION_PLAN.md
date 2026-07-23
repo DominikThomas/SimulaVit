@@ -946,3 +946,57 @@ Geodesic chemistry visual inputs are defaulted to zero in this phase. No geodesi
 - No material asset is modified globally at runtime.
 - No stale runtime ocean material or geodesic ocean object remains after returning to the main menu.
 - Terrain picking remains unaffected by the collider-free geodesic ocean.
+
+---
+
+## 2.5 Geodesic bathymetry foundation — implemented on this branch
+
+This phase is inserted after geodesic sea-level/ocean classification and before any future layered-ocean geometry. The legacy `BuildOceanBathymetry` path remains unchanged and continues to use cube-sphere cell indexing, six-slot legacy neighbors, graph-step shelf distance, shelf depth, continental slope, maximum ocean depth, basin noise, shoreline preservation, smoothing, visual deformation strength, and final terrain-radius storage in the legacy generated radius arrays.
+
+### Architecture
+
+- Geodesic terrain now separates raw procedural terrain radius from final seafloor radius. Land/ocean classification is performed once from raw radius versus `GeodesicSeaLevelRadius`; bathymetry only deepens cells already classified as ocean and must not convert additional land into ocean.
+- The authoritative generated geodesic bathymetry arrays are simulation-topology state, not resource or save-state arrays: raw terrain radius, final seafloor radius, base water depth, final water depth, distance to shore, ocean mask, coastline mask, basin-noise contribution, and shelf/slope/deep region classification.
+- Future layered-ocean active layer counts and volumes must use `GeodesicSeaLevelRadius`, final geodesic seafloor radius, final geodesic water depth, and geodesic cell area. Future replicator/resource code must not independently derive depth from raw terrain.
+
+### Shore distance units and algorithm
+
+- Geodesic shoreline distance is stored in planet-radius surface arc units.
+- Shoreline ocean cells are ocean cells with at least one real land neighbor.
+- Distance propagation uses weighted Dijkstra over `NeighborCounts`, `Neighbors6`, and `NeighborAngularDistances6`; pentagons use their five real neighbors and no fake sixth neighbor is added.
+
+### Depth profile and deterministic basins
+
+- The profile preserves raw coastline depth, ramps across an angular continental shelf toward `geodesicShelfDepth`, descends beyond the shelf with `geodesicContinentalSlopeExponent`, and approaches `geodesicMaximumOceanDepth` in offshore basins.
+- Low-frequency basin modulation is deterministic direction-based 3D noise seeded through the stable Bathymetry seed domain derived from the master planet seed.
+- `enableGeodesicBathymetry = false` leaves ocean depths at raw sea-level-minus-terrain values while preserving the raw ocean mask.
+
+### Simulation/render separation and visuals
+
+- The authoritative bathymetry field belongs to the geodesic simulation topology.
+- Render vertices sample final seafloor radius through a deterministic nearest-cell plus real-neighbor weighted interpolation. Land render vertices return raw terrain radius so coastline coverage is preserved and neighboring land is not carved below sea level.
+- The geodesic ocean shell writes normalized authoritative depth into vertex colour red and the geodesic ocean shader blends existing shared shallow/base/deep water colors spatially from that input. No ocean collider, resources, chemistry, waves, tides, sediments, temperature, biology, or save resource arrays were added.
+
+### Files changed
+
+- `Assets/Scripts/Planet/Common/Generation/PlanetGenerator.cs`
+- `Assets/Scripts/Planet/Common/Generation/PlanetRuntimeDescriptor.cs`
+- `Assets/Scripts/Planet/Geodesic/Diagnostics/GeodesicCellPicker.cs`
+- `Assets/Shaders/Geodesic/GeodesicOceanURP.shader`
+- `Docs/GEODESIC_PLANET_IMPLEMENTATION_PLAN.md`
+
+### Validation performed in this environment
+
+- Static repository inspection of legacy `BuildOceanBathymetry` confirmed the legacy cube-sphere implementation remains in place.
+- Text-level checks confirmed no new resource arrays, ocean layers, chemistry, vents, biology, atmosphere simulation, waves, tides, sediments, or save-state resource arrays were added by this phase.
+- Unity Play Mode validation was not run in this environment.
+
+### Known limitations
+
+- The direction sampler uses nearest simulation cell plus real neighbors rather than containing primal-triangle interpolation, so very high render subdivisions may still show subtle low-frequency topology influence offshore.
+- Dijkstra currently uses a simple deterministic O(N²) implementation, acceptable for current supported geodesic subdivisions but replaceable with a binary heap if larger simulation grids are added.
+- Visual screenshots and collider/picker runtime validation still require local Unity execution.
+
+### Next recommended phase
+
+Implement layered-ocean geometry/data contracts on top of the authoritative geodesic seafloor/water-depth arrays without adding independent depth derivation in resource or replicator systems.

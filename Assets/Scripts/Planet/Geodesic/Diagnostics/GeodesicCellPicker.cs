@@ -19,7 +19,7 @@ public class GeodesicCellPicker : MonoBehaviour
     [Header("Selection Display")]
     [SerializeField] private bool showSelectionPopup = true;
     [SerializeField] private bool logSuccessfulSelection = true;
-    [SerializeField] private Rect popupRect = new Rect(18f, 18f, 380f, 210f);
+    [SerializeField] private Rect popupRect = new Rect(18f, 18f, 380f, 2100f);
 
     [Header("Selected Cell (Runtime Debug)")]
     public int selectedCellIndex = -1;
@@ -291,7 +291,7 @@ public class GeodesicCellPicker : MonoBehaviour
             {
                 Vector3 centreDirection = topology.CellDirections[selectedCellIndex];
                 PlanetTerrainSample terrainSample = planetGenerator.EvaluateGeodesicTerrainSample(centreDirection);
-                terrainDiagnostics = $", classification={(planetGenerator.IsGeodesicCellOcean(selectedCellIndex) ? "ocean" : "land")}, coastline={planetGenerator.IsGeodesicCellCoastline(selectedCellIndex)}, terrainHeight={terrainSample.HeightOffset:F6}, mountainMask={terrainSample.MountainMask:F4}, ridge={terrainSample.RidgeValue:F4}, continent={terrainSample.ContinentValue:F4}, finalSurfaceRadius={planetGenerator.GetSurfaceRadiusAtDirection(centreDirection):F6}, seaLevelRadius={planetGenerator.GeodesicSeaLevelRadius:F6}, waterDepth={planetGenerator.GetGeodesicCellWaterDepth(selectedCellIndex):F6}, oceanNeighborCount={planetGenerator.GetGeodesicOceanNeighborCount(selectedCellIndex)}";
+                terrainDiagnostics = $", classification={(planetGenerator.IsGeodesicCellOcean(selectedCellIndex) ? "ocean" : "land")}, coastline={planetGenerator.IsGeodesicCellCoastline(selectedCellIndex)}, terrainHeight={terrainSample.HeightOffset:F6}, mountainMask={terrainSample.MountainMask:F4}, ridge={terrainSample.RidgeValue:F4}, continent={terrainSample.ContinentValue:F4}, rawTerrainRadius={planetGenerator.GetGeodesicCellRawTerrainRadius(selectedCellIndex):F6}, finalSeafloorRadius={planetGenerator.GetGeodesicCellSeafloorRadius(selectedCellIndex):F6}, finalSurfaceRadius={planetGenerator.GetSurfaceRadiusAtDirection(centreDirection):F6}, seaLevelRadius={planetGenerator.GeodesicSeaLevelRadius:F6}, baseDepth={planetGenerator.GetGeodesicCellBaseWaterDepth(selectedCellIndex):F6}, finalBathymetryDepth={planetGenerator.GetGeodesicCellWaterDepth(selectedCellIndex):F6}, distanceToShore={planetGenerator.GetGeodesicCellDistanceToShore(selectedCellIndex):F6}, depth01={planetGenerator.GetGeodesicCellNormalizedDepth(selectedCellIndex):F3}, bathymetryRegion={planetGenerator.GetGeodesicCellBathymetryRegion(selectedCellIndex)}, basinNoiseContribution={planetGenerator.GetGeodesicCellBasinNoiseContribution(selectedCellIndex):F4}, oceanNeighborCount={planetGenerator.GetGeodesicOceanNeighborCount(selectedCellIndex)}";
             }
 
             Debug.Log(
@@ -349,6 +349,7 @@ public class GeodesicCellPicker : MonoBehaviour
         {
             float height = planetGenerator.GetCellTerrainHeight(selectedCellIndex);
             float surfaceRadius = planetGenerator.GetCellSurfaceRadius(selectedCellIndex);
+            float rawRadius = planetGenerator.GetGeodesicCellRawTerrainRadius(selectedCellIndex);
             float normalizedHeight = planetGenerator.GetCellNormalizedTerrainHeight(selectedCellIndex);
             bool ocean = planetGenerator.IsGeodesicCellOcean(selectedCellIndex);
             bool coastline = planetGenerator.IsGeodesicCellCoastline(selectedCellIndex);
@@ -356,9 +357,15 @@ public class GeodesicCellPicker : MonoBehaviour
             GUILayout.Label($"Terrain height: {height:F5}");
             GUILayout.Label($"Land/ocean: {(ocean ? "Ocean" : "Land")}");
             GUILayout.Label($"Coastline: {coastline}");
-            GUILayout.Label($"Surface radius: {surfaceRadius:F5}");
+            GUILayout.Label($"Raw terrain radius: {rawRadius:F5}");
+            GUILayout.Label($"Final seafloor radius: {surfaceRadius:F5}");
             GUILayout.Label($"Sea-level radius: {planetGenerator.GeodesicSeaLevelRadius:F5}");
-            GUILayout.Label($"Water depth: {planetGenerator.GetGeodesicCellWaterDepth(selectedCellIndex):F5}");
+            GUILayout.Label($"Base depth: {planetGenerator.GetGeodesicCellBaseWaterDepth(selectedCellIndex):F5}");
+            GUILayout.Label($"Final bathymetry depth: {planetGenerator.GetGeodesicCellWaterDepth(selectedCellIndex):F5}");
+            GUILayout.Label($"Distance to shore: {planetGenerator.GetGeodesicCellDistanceToShore(selectedCellIndex):F5}");
+            GUILayout.Label($"Depth 01: {planetGenerator.GetGeodesicCellNormalizedDepth(selectedCellIndex):F3}");
+            GUILayout.Label($"Bathymetry region: {planetGenerator.GetGeodesicCellBathymetryRegion(selectedCellIndex)}");
+            GUILayout.Label($"Basin noise contribution: {planetGenerator.GetGeodesicCellBasinNoiseContribution(selectedCellIndex):F4}");
             GUILayout.Label($"Ocean-neighbor count: {planetGenerator.GetGeodesicOceanNeighborCount(selectedCellIndex)}");
             GUILayout.Label($"Geodesic cell area: {selectedUnitArea * planetGenerator.BasePlanetRadius * planetGenerator.BasePlanetRadius:F8}");
             GUILayout.Label($"Normalized terrain: {normalizedHeight:F3}");

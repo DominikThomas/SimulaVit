@@ -40,7 +40,9 @@ public enum PlanetSeedDomain
     Vents = 3,
     Climate = 4,
     Resources = 5,
-    Biology = 6
+    Biology = 6,
+    Ocean = 7,
+    Bathymetry = 8
 }
 
 public static class PlanetSeedUtility
