@@ -29,7 +29,13 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     [Range(0, GeodesicGridTopology.MaxSupportedSubdivision)]
     public int geodesicSimulationSubdivisionLevel = 4;
     [Range(0, GeodesicGridTopology.MaxSupportedSubdivision)]
-    public int geodesicRenderSubdivisionLevel = 5;
+    [Tooltip("Visual geodesic terrain subdivision. Each additional level approximately quadruples triangle count; level 8 can be expensive to generate.")]
+    public int geodesicRenderSubdivisionLevel = 7;
+    [Range(0, GeodesicGridTopology.MaxSupportedSubdivision)]
+    [Tooltip("Independent geodesic MeshCollider subdivision used only for interaction raycasts. Cell lookup still resolves from normalized hit direction.")]
+    public int geodesicColliderSubdivisionLevel = 6;
+    [Tooltip("Warn once per geodesic generation when an estimated render/collider triangle count exceeds this threshold.")]
+    public int geodesicDiagnosticTriangleWarningThreshold = 350000;
     public bool showGeodesicCellOutlines = true;
     public bool highlightGeodesicPentagons = true;
     public bool showGeodesicCellCentres;
@@ -68,7 +74,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     [Range(0f, 1f)] public float geodesicBathymetryStrength = 1f;
 
     [Header("Geodesic Ocean Visual")]
-    [Range(0, GeodesicGridTopology.MaxSupportedSubdivision)] public int geodesicOceanRenderSubdivisionLevel = 5;
+    [Range(0, GeodesicGridTopology.MaxSupportedSubdivision)]
+    [Tooltip("Smooth visual-only geodesic ocean subdivision. Uses cached render-only unit geometry and has no collider.")] public int geodesicOceanRenderSubdivisionLevel = 5;
     [FormerlySerializedAs("geodesicOceanColour")]
     [SerializeField, HideInInspector] private Color deprecatedGeodesicOceanColour = new Color(0.02f, 0.28f, 0.55f, 0.42f);
     [FormerlySerializedAs("geodesicOceanShallowTint")]
@@ -477,6 +484,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         geodesicSubdivisionLevel = Mathf.Clamp(geodesicSubdivision, 0, GeodesicGridTopology.MaxSupportedSubdivision);
         geodesicSimulationSubdivisionLevel = geodesicSubdivisionLevel;
         geodesicRenderSubdivisionLevel = Mathf.Clamp(Mathf.Max(geodesicSimulationSubdivisionLevel, geodesicRenderSubdivisionLevel), 0, GeodesicGridTopology.MaxSupportedSubdivision);
+        geodesicColliderSubdivisionLevel = Mathf.Clamp(geodesicColliderSubdivisionLevel, 0, GeodesicGridTopology.MaxSupportedSubdivision);
         int expected = gridType == PlanetGridType.GeodesicIcosphere
             ? GeodesicGridTopology.ExpectedCellCount(geodesicSubdivisionLevel)
             : PlanetGridIndexing.GetCellCount(resolution);
@@ -485,11 +493,25 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
     private void GenerateGeodesicPrototype()
     {
-        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var total = System.Diagnostics.Stopwatch.StartNew();
+        void LogStage(string stage, System.Diagnostics.Stopwatch stageWatch)
+        {
+            stageWatch.Stop();
+            Debug.Log($"[GeodesicGenerationProfile] stage={stage}, durationMs={stageWatch.Elapsed.TotalMilliseconds:F2}", this);
+        }
+
         int simulationSubdivision = Mathf.Clamp(geodesicSimulationSubdivisionLevel, 0, GeodesicGridTopology.MaxSupportedSubdivision);
         int renderSubdivision = Mathf.Clamp(geodesicRenderSubdivisionLevel, 0, GeodesicGridTopology.MaxSupportedSubdivision);
+        int colliderSubdivision = Mathf.Clamp(geodesicColliderSubdivisionLevel, 0, GeodesicGridTopology.MaxSupportedSubdivision);
+        int estimatedRenderTriangles = GeodesicGridTopology.ExpectedTriangleCount(renderSubdivision);
+        int estimatedColliderTriangles = GeodesicGridTopology.ExpectedTriangleCount(colliderSubdivision);
         geodesicSubdivisionLevel = simulationSubdivision;
+        geodesicColliderSubdivisionLevel = colliderSubdivision;
+        WarnForGeodesicSubdivisionCost(renderSubdivision, colliderSubdivision, estimatedRenderTriangles, estimatedColliderTriangles);
+
+        var stage = System.Diagnostics.Stopwatch.StartNew();
         GeodesicTopology = GeodesicGridTopology.Build(simulationSubdivision);
+        LogStage("simulation topology generation", stage);
         if (!GeodesicGridValidation.Validate(GeodesicTopology, out string validation))
         {
             Debug.LogError($"[GeodesicPrototype] Validation failed: {validation}", this);
@@ -498,26 +520,52 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         }
 
         RebuildGeodesicCellTerrainCache();
+        stage = System.Diagnostics.Stopwatch.StartNew();
         RebuildGeodesicOceanClassification();
-        GeodesicGridTopology renderTopology = GeodesicGridTopology.Build(renderSubdivision);
-        mesh = GeodesicSphereMeshBuilder.BuildSurfaceMesh(renderTopology, BasePlanetRadius, $"Geodesic Terrain Render L{renderSubdivision}");
-        ApplyGeodesicTerrainDisplacement(mesh);
+        LogStage("bathymetry sampling/interpolation", stage);
+
+        stage = System.Diagnostics.Stopwatch.StartNew();
+        IcosphereRenderGeometry renderGeometry = IcosphereRenderGeometryCache.GetOrBuild(renderSubdivision);
+        mesh = IcosphereRenderMeshBuilder.BuildSurfaceMesh(renderGeometry, BasePlanetRadius, $"Geodesic Terrain Render L{renderSubdivision}");
+        LogStage("render icosphere generation", stage);
+
+        stage = System.Diagnostics.Stopwatch.StartNew();
+        ApplyGeodesicTerrainDisplacement(mesh, false, false);
+        LogStage("terrain displacement", stage);
+        stage = System.Diagnostics.Stopwatch.StartNew();
         ApplyGeodesicSurfaceColours(mesh);
+        LogStage("vertex-colour generation", stage);
+        stage = System.Diagnostics.Stopwatch.StartNew();
+        mesh.RecalculateNormals();
+        LogStage("normal recalculation", stage);
+        stage = System.Diagnostics.Stopwatch.StartNew();
+        mesh.RecalculateBounds();
+        LogStage("bounds recalculation", stage);
+
+        stage = System.Diagnostics.Stopwatch.StartNew();
         meshFilter.sharedMesh = mesh;
-        if (meshRenderer != null)
-        {
-            meshRenderer.enabled = true;
-        }
+        if (meshRenderer != null) meshRenderer.enabled = true;
+        LogStage("terrain mesh assignment/upload", stage);
+
+        stage = System.Diagnostics.Stopwatch.StartNew();
+        IcosphereRenderGeometry colliderGeometry = IcosphereRenderGeometryCache.GetOrBuild(colliderSubdivision);
+        Mesh colliderMesh = IcosphereRenderMeshBuilder.BuildSurfaceMesh(colliderGeometry, BasePlanetRadius, $"Geodesic Terrain Collider L{colliderSubdivision}");
+        ApplyGeodesicTerrainDisplacement(colliderMesh, true, true);
         MeshCollider meshCollider = GetOrAddComponent<MeshCollider>(gameObject);
         meshCollider.sharedMesh = null;
-        meshCollider.sharedMesh = mesh;
+        meshCollider.sharedMesh = colliderMesh;
+        LogStage("MeshCollider assignment/cooking", stage);
+
         if (oceanMesh != null) oceanMesh.Clear();
         if (geodesicOceanMesh != null) geodesicOceanMesh.Clear();
         if (atmosphereMesh != null) atmosphereMesh.Clear();
         if (oceanMeshRenderer != null) oceanMeshRenderer.enabled = false;
         if (geodesicOceanMeshRenderer != null) geodesicOceanMeshRenderer.enabled = false;
         if (atmosphereMeshRenderer != null) atmosphereMeshRenderer.enabled = false;
+
+        stage = System.Diagnostics.Stopwatch.StartNew();
         BuildGeodesicOceanVisual();
+        LogStage("ocean mesh generation", stage);
         var picker = GetOrAddComponent<GeodesicCellPicker>(gameObject);
         picker.enabled = true;
         picker.SetTopology(GeodesicTopology);
@@ -537,13 +585,47 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         debug.coastlineMask = geodesicCoastlineMask;
         debug.surfaceRadiusSampler = GetSurfaceRadiusAtDirection;
         debug.radialOffset = geodesicOutlineRadialOffset;
+        stage = System.Diagnostics.Stopwatch.StartNew();
         debug.Render(GeodesicTopology, BasePlanetRadius);
+        LogStage("debug renderer generation", stage);
         PopulateRuntimeDescriptor(GeodesicTopology.CellCount);
         LogPlanetGenerationValidation(meshCollider);
-        sw.Stop();
+        total.Stop();
         LogGeodesicTerrainDiagnostics(mesh, simulationSubdivision, renderSubdivision);
         LogModeTransitionRendererInventory("after generation", PlanetGridType.GeodesicIcosphere);
-        Debug.Log($"[GeodesicPrototype] simulationSubdivision={simulationSubdivision}, renderSubdivision={renderSubdivision}, cells={GeodesicTopology.CellCount}, renderVertices={mesh.vertexCount}, renderTriangles={mesh.triangles.Length / 3}, simulationTriangles={GeodesicTopology.TriangleCount}, edges={GeodesicTopology.EdgeCount}, durationMs={sw.Elapsed.TotalMilliseconds:F2}, approxTopologyMemory={GeodesicTopology.ApproximateMemoryBytes} bytes. Validation: {validation}", this);
+        Debug.Log($"[GeodesicPrototype] simulationSubdivision={simulationSubdivision}, renderSubdivision={renderSubdivision}, colliderSubdivision={colliderSubdivision}, oceanSubdivision={geodesicOceanRenderSubdivisionLevel}, cells={GeodesicTopology.CellCount}, renderVertices={mesh.vertexCount}, renderTriangles={mesh.triangles.Length / 3}, colliderVertices={colliderMesh.vertexCount}, colliderTriangles={colliderMesh.triangles.Length / 3}, simulationTriangles={GeodesicTopology.TriangleCount}, edges={GeodesicTopology.EdgeCount}, durationMs={total.Elapsed.TotalMilliseconds:F2}, approxSimulationTopologyMemory={GeodesicTopology.ApproximateMemoryBytes} bytes, approxRenderGeometryMemory={renderGeometry.ApproximateManagedBytes} bytes, approxColliderGeometryMemory={colliderGeometry.ApproximateManagedBytes} bytes, renderGeometryCacheEntries={IcosphereRenderGeometryCache.CachedSubdivisionCount}. Validation: {validation}", this);
+    }
+
+
+
+    [ContextMenu("Clear Geodesic Render Geometry Cache")]
+    public void ClearGeodesicRenderGeometryCache()
+    {
+        IcosphereRenderGeometryCache.Clear();
+        Debug.Log("[GeodesicGenerationProfile] Cleared immutable geodesic render unit-geometry cache.", this);
+    }
+
+    void WarnForGeodesicSubdivisionCost(int renderSubdivision, int colliderSubdivision, int estimatedRenderTriangles, int estimatedColliderTriangles)
+    {
+        if (renderSubdivision >= 8)
+        {
+            Debug.LogWarning("[GeodesicGenerationProfile] Render subdivision 8 is available but can generate multi-million-triangle meshes and several-second main-thread stalls. Each additional icosphere subdivision approximately quadruples triangle count.", this);
+        }
+
+        if (colliderSubdivision >= 8 || (renderSubdivision >= 8 && colliderSubdivision >= renderSubdivision))
+        {
+            Debug.LogWarning($"[GeodesicGenerationProfile] Collider subdivision {colliderSubdivision} is at an extreme visual resolution. Prefer an interaction-only collider around subdivision 6 because picking resolves the authoritative cell from normalized hit direction.", this);
+        }
+
+        int threshold = Mathf.Max(1, geodesicDiagnosticTriangleWarningThreshold);
+        if (estimatedRenderTriangles > threshold)
+        {
+            Debug.LogWarning($"[GeodesicGenerationProfile] Estimated render triangle count {estimatedRenderTriangles:N0} exceeds diagnostic threshold {threshold:N0}. Every additional geodesic subdivision approximately quadruples triangle count.", this);
+        }
+        if (estimatedColliderTriangles > threshold)
+        {
+            Debug.LogWarning($"[GeodesicGenerationProfile] Estimated collider triangle count {estimatedColliderTriangles:N0} exceeds diagnostic threshold {threshold:N0}; lower geodesicColliderSubdivisionLevel unless high-resolution collision is intentionally required.", this);
+        }
     }
 
     void ApplyGeodesicSurfaceColours(Mesh targetMesh)
@@ -783,7 +865,9 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         geodesicMinimumTerrainOffset = -0.16f; geodesicMaximumTerrainOffset = 0.48f; geodesicRenderSubdivisionLevel = Mathf.Max(5, geodesicRenderSubdivisionLevel);
     }
 
-    void ApplyGeodesicTerrainDisplacement(Mesh targetMesh)
+    void ApplyGeodesicTerrainDisplacement(Mesh targetMesh) => ApplyGeodesicTerrainDisplacement(targetMesh, true, true);
+
+    void ApplyGeodesicTerrainDisplacement(Mesh targetMesh, bool recalculateNormals, bool recalculateBounds)
     {
         if (targetMesh == null) return;
         Vector3[] vertices = targetMesh.vertices;
@@ -793,8 +877,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
             vertices[i] = direction * GetSurfaceRadiusAtDirection(direction);
         }
         targetMesh.vertices = vertices;
-        targetMesh.RecalculateNormals();
-        targetMesh.RecalculateBounds();
+        if (recalculateNormals) targetMesh.RecalculateNormals();
+        if (recalculateBounds) targetMesh.RecalculateBounds();
     }
 
 
@@ -1026,8 +1110,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     void BuildGeodesicOceanVisual()
     {
         int oceanSubdivision = Mathf.Clamp(geodesicOceanRenderSubdivisionLevel, 0, GeodesicGridTopology.MaxSupportedSubdivision);
-        GeodesicGridTopology oceanTopology = GeodesicGridTopology.Build(oceanSubdivision);
-        geodesicOceanMesh = GeodesicSphereMeshBuilder.BuildSurfaceMesh(oceanTopology, GeodesicSeaLevelRadius, $"Geodesic Ocean Render L{oceanSubdivision}");
+        IcosphereRenderGeometry oceanGeometry = IcosphereRenderGeometryCache.GetOrBuild(oceanSubdivision);
+        geodesicOceanMesh = IcosphereRenderMeshBuilder.BuildSurfaceMesh(oceanGeometry, GeodesicSeaLevelRadius, $"Geodesic Ocean Render L{oceanSubdivision}");
         ApplyGeodesicOceanDepthColours(geodesicOceanMesh);
         Transform existing = transform.Find("Geodesic Ocean");
         geodesicOceanObject = existing != null ? existing.gameObject : new GameObject("Geodesic Ocean");
