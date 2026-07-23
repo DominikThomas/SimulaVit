@@ -178,6 +178,7 @@ This section is based on reported branch summaries and local runtime fixes. Unit
 - combined geodesic outline mesh;
 - brute-force direction-to-cell picking with deterministic tie-breaking;
 - visible runtime cell-selection popup;
+- runtime geodesic cell picker popup is resolution-aware, vertically scrollable, keeps its header/footer fixed, and blocks popup-local input from world picking; this diagnostics/UI-only refactor did not complete a new implementation phase;
 - new Input System support;
 - geodesic startup path that skips legacy resources, vents, replicators, and stepping;
 - geodesic vertex-colour shader and runtime-owned material;
