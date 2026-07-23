@@ -19,7 +19,36 @@ public class GeodesicCellPicker : MonoBehaviour
     [Header("Selection Display")]
     [SerializeField] private bool showSelectionPopup = true;
     [SerializeField] private bool logSuccessfulSelection = true;
-    [SerializeField] private Rect popupRect = new Rect(18f, 18f, 380f, 2100f);
+    [Tooltip("Current runtime popup rectangle in IMGUI screen-local coordinates.")]
+    [SerializeField] private Rect popupRect = new Rect(18f, 18f, 380f, 540f);
+
+    [Header("Diagnostic Popup UI")]
+    [Tooltip("Default popup width as a fraction of the current Game view width.")]
+    [Range(0.2f, 0.6f)]
+    [SerializeField] private float popupWidthFraction = 0.32f;
+    [Tooltip("Default popup height as a fraction of the current Game view height.")]
+    [Range(0.3f, 0.75f)]
+    [SerializeField] private float popupHeightFraction = 0.55f;
+    [Tooltip("Maximum popup width as a fraction of the current Game view width.")]
+    [Range(0.25f, 0.8f)]
+    [SerializeField] private float popupMaximumWidthFraction = 0.45f;
+    [Tooltip("Maximum popup height as a fraction of the current Game view height.")]
+    [Range(0.4f, 0.9f)]
+    [SerializeField] private float popupMaximumHeightFraction = 0.8f;
+    [Tooltip("Smallest allowed popup width in pixels before screen-margin clamping.")]
+    [Min(220f)]
+    [SerializeField] private float minimumPopupWidth = 300f;
+    [Tooltip("Smallest allowed popup height in pixels before screen-margin clamping.")]
+    [Min(160f)]
+    [SerializeField] private float minimumPopupHeight = 220f;
+    [Tooltip("Minimum distance in pixels between the popup and each Game view edge.")]
+    [Range(0f, 64f)]
+    [SerializeField] private float popupScreenMargin = 18f;
+    [Tooltip("Additional bounded multiplier for picker-specific popup font and spacing.")]
+    [Range(0.85f, 1.25f)]
+    [SerializeField] private float popupFontScale = 1f;
+    [Tooltip("Preserve dragged popup position between selected cells when possible.")]
+    [SerializeField] private bool rememberPopupPosition = true;
 
     [Header("Selected Cell (Runtime Debug)")]
     public int selectedCellIndex = -1;
@@ -32,6 +61,18 @@ public class GeodesicCellPicker : MonoBehaviour
     private PlanetGenerator planetGenerator;
     private bool warnedMissingCamera;
     private bool warnedNoPickSurface;
+    private Vector2 popupScrollPosition;
+    private int lastScreenWidth;
+    private int lastScreenHeight;
+    private bool popupPositionInitialized;
+    private GUIStyle popupLabelStyle;
+    private GUIStyle popupHeaderStyle;
+    private GUIStyle popupSectionStyle;
+    private GUIStyle popupSummaryStyle;
+    private GUIStyle popupWindowStyle;
+    private GUIStyle popupButtonStyle;
+    private float cachedUiScale = -1f;
+    private readonly StringBuilder neighborBuilder = new StringBuilder(96);
 
     private void Awake()
     {
@@ -53,6 +94,7 @@ public class GeodesicCellPicker : MonoBehaviour
         selectedIsPentagon = false;
         selectedUnitArea = 0f;
         selectedNeighborIndices = System.Array.Empty<int>();
+        popupScrollPosition = Vector2.zero;
     }
 
     private void Update()
@@ -64,14 +106,26 @@ public class GeodesicCellPicker : MonoBehaviour
             return;
         }
 
-        Pick(pointer.position.ReadValue());
+        Vector2 pointerPosition = pointer.position.ReadValue();
+        if (IsScreenPositionInsidePopup(pointerPosition))
+        {
+            return;
+        }
+
+        Pick(pointerPosition);
 #else
         if (!Input.GetMouseButtonDown(0))
         {
             return;
         }
 
-        Pick(Input.mousePosition);
+        Vector2 mousePosition = Input.mousePosition;
+        if (IsScreenPositionInsidePopup(mousePosition))
+        {
+            return;
+        }
+
+        Pick(mousePosition);
 #endif
     }
 
@@ -323,6 +377,9 @@ public class GeodesicCellPicker : MonoBehaviour
         {
             selectedNeighborIndices[slot] = topology.Neighbors6[index * 6 + slot];
         }
+
+        popupScrollPosition = Vector2.zero;
+        EnsurePopupRect(true);
     }
 
     private void OnGUI()
@@ -332,68 +389,231 @@ public class GeodesicCellPicker : MonoBehaviour
             return;
         }
 
+        EnsurePopupRect(false);
+        EnsurePopupStyles();
+
         popupRect = GUI.Window(
             GetInstanceID(),
             popupRect,
             DrawSelectionPopup,
-            "Geodesic Cell Selection");
+            GUIContent.none,
+            popupWindowStyle);
+        popupRect = ClampPopupRect(popupRect);
     }
 
     private void DrawSelectionPopup(int windowId)
     {
-        GUILayout.Label($"Cell index: {selectedCellIndex}");
-        GUILayout.Label($"Cell type: {(selectedIsPentagon ? "Pentagon" : "Hexagon")}");
-        GUILayout.Label($"Neighbor count: {selectedNeighborCount}");
-        GUILayout.Label($"Unit-sphere area: {selectedUnitArea:F8}");
+        GUILayout.BeginVertical(GUILayout.ExpandHeight(true));
+        DrawPopupHeader();
+
+        popupScrollPosition = GUILayout.BeginScrollView(
+            popupScrollPosition,
+            false,
+            true,
+            GUIStyle.none,
+            GUI.skin.verticalScrollbar,
+            GUILayout.ExpandWidth(true),
+            GUILayout.ExpandHeight(true));
+        DrawDiagnostics();
+        GUILayout.EndScrollView();
+
+        DrawPopupFooter();
+        GUILayout.EndVertical();
+
+        float dragHeight = Mathf.Clamp(36f * GetUiScale(), 30f, 48f);
+        GUI.DragWindow(new Rect(0f, 0f, popupRect.width, dragHeight));
+    }
+
+    private void DrawPopupHeader()
+    {
+        string type = selectedIsPentagon ? "Pentagon" : "Hexagon";
+        string classification = planetGenerator != null && planetGenerator.IsGeodesicCellOcean(selectedCellIndex) ? "Ocean" : "Land";
+        GUILayout.Label("Geodesic Cell Selection", popupHeaderStyle);
+        GUILayout.Label($"Cell {selectedCellIndex} — {classification} — {type}", popupSummaryStyle);
+    }
+
+    private void DrawDiagnostics()
+    {
+        DrawSection("Cell");
+        DrawLine("Index", selectedCellIndex.ToString());
+        DrawLine("Type", selectedIsPentagon ? "Pentagon" : "Hexagon");
+        DrawLine("Neighbors", selectedNeighborCount.ToString());
+        DrawLine("Unit area", selectedUnitArea.ToString("F8"));
         if (planetGenerator != null)
         {
-            float height = planetGenerator.GetCellTerrainHeight(selectedCellIndex);
-            float surfaceRadius = planetGenerator.GetCellSurfaceRadius(selectedCellIndex);
-            float rawRadius = planetGenerator.GetGeodesicCellRawTerrainRadius(selectedCellIndex);
-            float normalizedHeight = planetGenerator.GetCellNormalizedTerrainHeight(selectedCellIndex);
-            bool ocean = planetGenerator.IsGeodesicCellOcean(selectedCellIndex);
-            bool coastline = planetGenerator.IsGeodesicCellCoastline(selectedCellIndex);
-            PlanetTerrainSample sample = planetGenerator.EvaluateGeodesicTerrainSample(topology.CellDirections[selectedCellIndex]);
-            GUILayout.Label($"Terrain height: {height:F5}");
-            GUILayout.Label($"Land/ocean: {(ocean ? "Ocean" : "Land")}");
-            GUILayout.Label($"Coastline: {coastline}");
-            GUILayout.Label($"Raw terrain radius: {rawRadius:F5}");
-            GUILayout.Label($"Final seafloor radius: {surfaceRadius:F5}");
-            GUILayout.Label($"Sea-level radius: {planetGenerator.GeodesicSeaLevelRadius:F5}");
-            GUILayout.Label($"Base depth: {planetGenerator.GetGeodesicCellBaseWaterDepth(selectedCellIndex):F5}");
-            GUILayout.Label($"Final bathymetry depth: {planetGenerator.GetGeodesicCellWaterDepth(selectedCellIndex):F5}");
-            GUILayout.Label($"Distance to shore: {planetGenerator.GetGeodesicCellDistanceToShore(selectedCellIndex):F5}");
-            GUILayout.Label($"Depth 01: {planetGenerator.GetGeodesicCellNormalizedDepth(selectedCellIndex):F3}");
-            GUILayout.Label($"Bathymetry region: {planetGenerator.GetGeodesicCellBathymetryRegion(selectedCellIndex)}");
-            GUILayout.Label($"Basin noise contribution: {planetGenerator.GetGeodesicCellBasinNoiseContribution(selectedCellIndex):F4}");
-            GUILayout.Label($"Ocean-neighbor count: {planetGenerator.GetGeodesicOceanNeighborCount(selectedCellIndex)}");
-            GUILayout.Label($"Geodesic cell area: {selectedUnitArea * planetGenerator.BasePlanetRadius * planetGenerator.BasePlanetRadius:F8}");
-            GUILayout.Label($"Normalized terrain: {normalizedHeight:F3}");
-            GUILayout.Label($"Mountain mask: {sample.MountainMask:F3}");
-            GUILayout.Label($"Ridge value: {sample.RidgeValue:F3}");
-            GUILayout.Label($"Continent value: {sample.ContinentValue:F3}");
+            DrawLine("Physical area", (selectedUnitArea * planetGenerator.BasePlanetRadius * planetGenerator.BasePlanetRadius).ToString("F8"));
+        }
+        DrawLine("Neighbor IDs", BuildNeighborText());
+
+        if (planetGenerator == null)
+        {
+            return;
         }
 
-        StringBuilder neighbors = new StringBuilder();
+        float height = planetGenerator.GetCellTerrainHeight(selectedCellIndex);
+        float surfaceRadius = planetGenerator.GetCellSurfaceRadius(selectedCellIndex);
+        float rawRadius = planetGenerator.GetGeodesicCellRawTerrainRadius(selectedCellIndex);
+        float normalizedHeight = planetGenerator.GetCellNormalizedTerrainHeight(selectedCellIndex);
+        bool ocean = planetGenerator.IsGeodesicCellOcean(selectedCellIndex);
+        bool coastline = planetGenerator.IsGeodesicCellCoastline(selectedCellIndex);
+        PlanetTerrainSample sample = planetGenerator.EvaluateGeodesicTerrainSample(topology.CellDirections[selectedCellIndex]);
+        float baseDepth = planetGenerator.GetGeodesicCellBaseWaterDepth(selectedCellIndex);
+        float finalDepth = planetGenerator.GetGeodesicCellWaterDepth(selectedCellIndex);
+        float bathymetryAddedDepth = Mathf.Max(0f, finalDepth - baseDepth);
+        float radialDisplacement = surfaceRadius - rawRadius;
+        bool bathymetryModified = !Mathf.Approximately(finalDepth, baseDepth) || !Mathf.Approximately(radialDisplacement, 0f);
+
+        DrawSection("Terrain");
+        DrawLine("Height", height.ToString("F5"));
+        DrawLine("Normalized", normalizedHeight.ToString("F3"));
+        DrawLine("Raw radius", rawRadius.ToString("F5"));
+        DrawLine("Final radius", surfaceRadius.ToString("F5"));
+        DrawLine("Continent", sample.ContinentValue.ToString("F3"));
+        DrawLine("Mountain mask", sample.MountainMask.ToString("F3"));
+        DrawLine("Ridge", sample.RidgeValue.ToString("F3"));
+
+        DrawSection("Ocean");
+        DrawLine("Class", ocean ? "Ocean" : "Land");
+        DrawLine("Coastline", coastline.ToString());
+        DrawLine("Sea level", planetGenerator.GeodesicSeaLevelRadius.ToString("F5"));
+        DrawLine("Ocean neighbors", planetGenerator.GetGeodesicOceanNeighborCount(selectedCellIndex).ToString());
+        DrawLine("Base depth", baseDepth.ToString("F5"));
+        DrawLine("Final depth", finalDepth.ToString("F5"));
+        DrawLine("Depth 01", planetGenerator.GetGeodesicCellNormalizedDepth(selectedCellIndex).ToString("F3"));
+
+        DrawSection("Bathymetry");
+        DrawLine("Enabled", (finalDepth > 0f || baseDepth > 0f || radialDisplacement < 0f).ToString());
+        DrawLine("Region", planetGenerator.GetGeodesicCellBathymetryRegion(selectedCellIndex).ToString());
+        DrawLine("Distance shore", planetGenerator.GetGeodesicCellDistanceToShore(selectedCellIndex).ToString("F5"));
+        DrawLine("Added depth", bathymetryAddedDepth.ToString("F5"));
+        DrawLine("Radial disp.", radialDisplacement.ToString("F5"));
+        DrawLine("Basin noise", planetGenerator.GetGeodesicCellBasinNoiseContribution(selectedCellIndex).ToString("F4"));
+        DrawLine("Modified", bathymetryModified.ToString());
+    }
+
+    private void DrawPopupFooter()
+    {
+        GUILayout.BeginHorizontal();
+        GUILayout.FlexibleSpace();
+        if (GUILayout.Button("Close", popupButtonStyle, GUILayout.Width(Mathf.Clamp(90f * GetUiScale(), 78f, 118f))))
+        {
+            ClearSelection();
+        }
+        GUILayout.EndHorizontal();
+    }
+
+    private void DrawSection(string title)
+    {
+        GUILayout.Space(Mathf.Clamp(6f * GetUiScale(), 4f, 9f));
+        GUILayout.Label(title, popupSectionStyle);
+    }
+
+    private void DrawLine(string label, string value)
+    {
+        GUILayout.Label($"{label}: {value}", popupLabelStyle);
+    }
+
+    private string BuildNeighborText()
+    {
+        neighborBuilder.Clear();
         for (int i = 0; i < selectedNeighborIndices.Length; i++)
         {
             if (i > 0)
             {
-                neighbors.Append(", ");
+                neighborBuilder.Append(", ");
             }
 
-            neighbors.Append(selectedNeighborIndices[i]);
+            neighborBuilder.Append(selectedNeighborIndices[i]);
         }
 
-        GUILayout.Label($"Neighbors: {neighbors}");
+        return neighborBuilder.ToString();
+    }
 
-        GUILayout.FlexibleSpace();
+    private void EnsurePopupRect(bool selectedNewCell)
+    {
+        int screenWidth = Mathf.Max(1, Screen.width);
+        int screenHeight = Mathf.Max(1, Screen.height);
+        bool resolutionChanged = screenWidth != lastScreenWidth || screenHeight != lastScreenHeight;
+        lastScreenWidth = screenWidth;
+        lastScreenHeight = screenHeight;
 
-        if (GUILayout.Button("Clear selection"))
+        Vector2 size = CalculatePopupSize(screenWidth, screenHeight);
+        if (!popupPositionInitialized || !rememberPopupPosition)
         {
-            ClearSelection();
+            popupRect.x = popupScreenMargin;
+            popupRect.y = popupScreenMargin;
+            popupPositionInitialized = true;
         }
 
-        GUI.DragWindow(new Rect(0f, 0f, popupRect.width, 24f));
+        if (resolutionChanged || selectedNewCell || !Mathf.Approximately(popupRect.width, size.x) || !Mathf.Approximately(popupRect.height, size.y))
+        {
+            popupRect.width = size.x;
+            popupRect.height = size.y;
+        }
+
+        popupRect = ClampPopupRect(popupRect);
+    }
+
+    private Vector2 CalculatePopupSize(int screenWidth, int screenHeight)
+    {
+        float maxWidth = Mathf.Max(1f, screenWidth * Mathf.Clamp01(popupMaximumWidthFraction));
+        float maxHeight = Mathf.Max(1f, screenHeight * Mathf.Clamp01(popupMaximumHeightFraction));
+        float width = Mathf.Clamp(screenWidth * Mathf.Clamp01(popupWidthFraction), minimumPopupWidth, maxWidth);
+        float height = Mathf.Clamp(screenHeight * Mathf.Clamp01(popupHeightFraction), minimumPopupHeight, maxHeight);
+        float availableWidth = Mathf.Max(120f, screenWidth - (popupScreenMargin * 2f));
+        float availableHeight = Mathf.Max(120f, screenHeight - (popupScreenMargin * 2f));
+        return new Vector2(Mathf.Min(width, availableWidth), Mathf.Min(height, availableHeight));
+    }
+
+    private Rect ClampPopupRect(Rect rect)
+    {
+        float margin = Mathf.Max(0f, popupScreenMargin);
+        float maxWidth = Mathf.Max(120f, Screen.width - (margin * 2f));
+        float maxHeight = Mathf.Max(120f, Screen.height - (margin * 2f));
+        rect.width = Mathf.Min(rect.width, maxWidth);
+        rect.height = Mathf.Min(rect.height, maxHeight);
+        rect.x = Mathf.Clamp(rect.x, margin, Mathf.Max(margin, Screen.width - margin - rect.width));
+        rect.y = Mathf.Clamp(rect.y, margin, Mathf.Max(margin, Screen.height - margin - rect.height));
+        return rect;
+    }
+
+    private bool IsScreenPositionInsidePopup(Vector2 screenPosition)
+    {
+        if (!showSelectionPopup || selectedCellIndex < 0)
+        {
+            return false;
+        }
+
+        Vector2 imguiPosition = new Vector2(screenPosition.x, Screen.height - screenPosition.y);
+        return popupRect.Contains(imguiPosition);
+    }
+
+    private void EnsurePopupStyles()
+    {
+        float uiScale = GetUiScale();
+        if (popupLabelStyle != null && Mathf.Approximately(cachedUiScale, uiScale))
+        {
+            return;
+        }
+
+        cachedUiScale = uiScale;
+        int labelSize = Mathf.RoundToInt(13f * uiScale);
+        int headerSize = Mathf.RoundToInt(16f * uiScale);
+        int sectionSize = Mathf.RoundToInt(14f * uiScale);
+        popupWindowStyle = new GUIStyle(GUI.skin.window)
+        {
+            padding = new RectOffset(Mathf.RoundToInt(10f * uiScale), Mathf.RoundToInt(10f * uiScale), Mathf.RoundToInt(8f * uiScale), Mathf.RoundToInt(8f * uiScale))
+        };
+        popupLabelStyle = new GUIStyle(GUI.skin.label) { fontSize = labelSize, wordWrap = true };
+        popupHeaderStyle = new GUIStyle(GUI.skin.label) { fontSize = headerSize, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleLeft };
+        popupSectionStyle = new GUIStyle(GUI.skin.label) { fontSize = sectionSize, fontStyle = FontStyle.Bold };
+        popupSummaryStyle = new GUIStyle(GUI.skin.label) { fontSize = labelSize, fontStyle = FontStyle.Italic, wordWrap = true };
+        popupButtonStyle = new GUIStyle(GUI.skin.button) { fontSize = labelSize };
+    }
+
+    private float GetUiScale()
+    {
+        float resolutionScale = Mathf.Min(Screen.width / 1920f, Screen.height / 1080f);
+        return Mathf.Clamp(resolutionScale * popupFontScale, 0.85f, 1.25f);
     }
 }
