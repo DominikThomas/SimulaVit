@@ -53,6 +53,7 @@ Shader "SimulaVit/GeodesicOceanURP"
             {
                 float4 positionOS : POSITION;
                 float3 normalOS : NORMAL;
+                half4 color : COLOR;
             };
 
             struct Varyings
@@ -60,6 +61,7 @@ Shader "SimulaVit/GeodesicOceanURP"
                 float4 positionHCS : SV_POSITION;
                 half3 normalWS : TEXCOORD0;
                 half3 viewDirWS : TEXCOORD1;
+                half depth01 : TEXCOORD2;
             };
 
             Varyings vert(Attributes input)
@@ -69,6 +71,7 @@ Shader "SimulaVit/GeodesicOceanURP"
                 output.positionHCS = pos.positionCS;
                 output.normalWS = TransformObjectToWorldNormal(input.normalOS);
                 output.viewDirWS = GetWorldSpaceViewDir(pos.positionWS);
+                output.depth01 = saturate(input.color.r);
                 return output;
             }
 
@@ -77,7 +80,9 @@ Shader "SimulaVit/GeodesicOceanURP"
                 half3 normalWS = normalize(input.normalWS);
                 half3 viewDirWS = normalize(input.viewDirWS);
                 half fresnel = pow(1.0 - saturate(dot(normalWS, viewDirWS)), _FresnelPower);
-                half3 color = lerp(_ShallowColor.rgb, _BaseColor.rgb, saturate(0.35 + fresnel));
+                half depth01 = saturate(input.depth01);
+                half3 depthColor = lerp(_ShallowColor.rgb, _DeepColor.rgb, depth01);
+                half3 color = lerp(depthColor, _BaseColor.rgb, saturate(0.25 + fresnel * 0.35));
                 color = lerp(color, _DeepColor.rgb, saturate(_Turbidity * 0.35));
                 color *= _AmbientResponse * _ColorIntensity;
                 color += fresnel * _FresnelStrength;

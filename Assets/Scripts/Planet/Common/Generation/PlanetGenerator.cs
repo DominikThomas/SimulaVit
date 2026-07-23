@@ -46,6 +46,27 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
     public OceanAppearanceSettings OceanAppearance => oceanAppearance;
 
+    [Header("Geodesic Bathymetry")]
+    [Tooltip("Enable authoritative geodesic bathymetry after raw-terrain ocean classification. Legacy cube-sphere bathymetry is unaffected.")]
+    public bool enableGeodesicBathymetry = true;
+    [Tooltip("Continental shelf angular width in degrees from ocean shoreline cells.")]
+    [Min(0.01f)] public float geodesicShelfWidthDegrees = 12f;
+    [Tooltip("Target depth at the geodesic shelf edge in planet-radius units.")]
+    [Min(0f)] public float geodesicShelfDepth = 0.06f;
+    [Tooltip("Maximum geodesic ocean depth below sea level in planet-radius units.")]
+    [Min(0f)] public float geodesicMaximumOceanDepth = 0.22f;
+    [Tooltip("Exponent controlling geodesic continental slope descent beyond the shelf edge.")]
+    [Min(0.01f)] public float geodesicContinentalSlopeExponent = 1.35f;
+    [Tooltip("Low-frequency deterministic basin noise scale sampled by direction.")]
+    [Min(0.001f)] public float geodesicBasinNoiseScale = 1.35f;
+    [Tooltip("How strongly deterministic basin noise modulates deep geodesic basin depth.")]
+    [Range(0f, 1f)] public float geodesicBasinNoiseStrength = 0.25f;
+    [Tooltip("Angular shoreline preservation width in degrees where raw coastal terrain is kept dominant.")]
+    [Min(0f)] public float geodesicShorelinePreservationDegrees = 2.5f;
+    [Range(0, 8)] public int geodesicBathymetrySmoothPasses = 2;
+    [Range(0f, 1f)] public float geodesicBathymetrySmoothStrength = 0.35f;
+    [Range(0f, 1f)] public float geodesicBathymetryStrength = 1f;
+
     [Header("Geodesic Ocean Visual")]
     [Range(0, GeodesicGridTopology.MaxSupportedSubdivision)] public int geodesicOceanRenderSubdivisionLevel = 5;
     [FormerlySerializedAs("geodesicOceanColour")]
@@ -215,8 +236,14 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     private byte[] oceanMaskByCell;
     private float[] geodesicTerrainHeightByCell;
     private float[] geodesicNormalizedTerrainByCell;
-    private bool[] geodesicOceanMask;
+    private float[] geodesicRawTerrainRadius;
+    private float[] geodesicSeafloorRadius;
+    private float[] geodesicBaseWaterDepth;
     private float[] geodesicWaterDepth;
+    private float[] geodesicDistanceToShore;
+    private float[] geodesicBasinNoiseContribution;
+    private byte[] geodesicBathymetryRegion;
+    private bool[] geodesicOceanMask;
     private byte[] geodesicOceanNeighborCounts;
     private bool[] geodesicCoastlineMask;
 
@@ -235,6 +262,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     public float GeodesicSeaLevelRadius => BasePlanetRadius + geodesicSeaLevelOffset;
     public int DerivedTerrainSeed => usePlanetSeedForTerrain ? PlanetSeedUtility.DeriveSeed(randomSeed, PlanetSeedDomain.Terrain, GenerationVersion) : customTerrainSeed;
     public int DerivedVisualSeed => usePlanetSeedForVisuals ? PlanetSeedUtility.DeriveSeed(randomSeed, PlanetSeedDomain.SurfaceVisuals, GenerationVersion) : customVisualSeed;
+    public int DerivedBathymetrySeed => PlanetSeedUtility.DeriveSeed(randomSeed, PlanetSeedDomain.Bathymetry, GenerationVersion);
     public PlanetGridType CurrentGridType => generationMode == PlanetGenerationMode.GeodesicPrototype ? PlanetGridType.GeodesicIcosphere : PlanetGridType.LegacyCubeSphere;
 
     public void OnBeforeSerialize() { }
@@ -354,8 +382,14 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         oceanMaskByCell = null;
         geodesicTerrainHeightByCell = null;
         geodesicNormalizedTerrainByCell = null;
-        geodesicOceanMask = null;
+        geodesicRawTerrainRadius = null;
+        geodesicSeafloorRadius = null;
+        geodesicBaseWaterDepth = null;
         geodesicWaterDepth = null;
+        geodesicDistanceToShore = null;
+        geodesicBasinNoiseContribution = null;
+        geodesicBathymetryRegion = null;
+        geodesicOceanMask = null;
         geodesicOceanNeighborCounts = null;
         geodesicCoastlineMask = null;
 
@@ -416,11 +450,11 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
             return;
         }
 
+        RebuildGeodesicCellTerrainCache();
+        RebuildGeodesicOceanClassification();
         GeodesicGridTopology renderTopology = GeodesicGridTopology.Build(renderSubdivision);
         mesh = GeodesicSphereMeshBuilder.BuildSurfaceMesh(renderTopology, BasePlanetRadius, $"Geodesic Terrain Render L{renderSubdivision}");
         ApplyGeodesicTerrainDisplacement(mesh);
-        RebuildGeodesicCellTerrainCache();
-        RebuildGeodesicOceanClassification();
         ApplyGeodesicSurfaceColours(mesh);
         meshFilter.sharedMesh = mesh;
         if (meshRenderer != null)
@@ -549,7 +583,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     {
         if (CurrentGridType == PlanetGridType.GeodesicIcosphere)
         {
-            return BasePlanetRadius + EvaluateGeodesicTerrainHeight(direction);
+            return GetGeodesicSeafloorRadiusAtDirection(direction);
         }
 
         return GetSurfaceRadius(direction);
@@ -569,7 +603,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
     public float GetCellSurfaceRadius(int geodesicCellIndex)
     {
-        return BasePlanetRadius + GetCellTerrainHeight(geodesicCellIndex);
+        return GetGeodesicCellSeafloorRadius(geodesicCellIndex);
     }
 
     public float GetNormalizedTerrainHeightAtDirection(Vector3 direction)
@@ -594,6 +628,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
     public float GetWaterDepthAtDirection(Vector3 direction)
     {
+        if (CurrentGridType == PlanetGridType.GeodesicIcosphere) return Mathf.Max(0f, GeodesicSeaLevelRadius - GetGeodesicSeafloorRadiusAtDirection(direction));
         return Mathf.Max(0f, GeodesicSeaLevelRadius - GetSurfaceRadiusAtDirection(direction));
     }
 
@@ -746,62 +781,196 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         for (int i = 0; i < GeodesicTopology.CellCount; i++)
         {
             Vector3 direction = GeodesicTopology.CellDirections[i];
-            geodesicTerrainHeightByCell[i] = GetTerrainHeightAtDirection(direction);
+            geodesicTerrainHeightByCell[i] = EvaluateGeodesicTerrainHeight(direction);
             geodesicNormalizedTerrainByCell[i] = GetNormalizedTerrainHeightAtDirection(direction);
         }
+    }
+
+    public float EvaluateRawGeodesicTerrainRadius(Vector3 direction) => BasePlanetRadius + EvaluateGeodesicTerrainHeight(direction);
+
+    public float GetGeodesicCellRawTerrainRadius(int cellIndex)
+    {
+        if (geodesicRawTerrainRadius != null && cellIndex >= 0 && cellIndex < geodesicRawTerrainRadius.Length) return geodesicRawTerrainRadius[cellIndex];
+        return GeodesicTopology != null && cellIndex >= 0 && cellIndex < GeodesicTopology.CellCount ? EvaluateRawGeodesicTerrainRadius(GeodesicTopology.CellDirections[cellIndex]) : BasePlanetRadius;
+    }
+
+    public float GetGeodesicCellSeafloorRadius(int cellIndex)
+    {
+        if (geodesicSeafloorRadius != null && cellIndex >= 0 && cellIndex < geodesicSeafloorRadius.Length) return geodesicSeafloorRadius[cellIndex];
+        return GetGeodesicCellRawTerrainRadius(cellIndex);
+    }
+
+    public float GetGeodesicCellBaseWaterDepth(int cellIndex)
+    {
+        if (geodesicBaseWaterDepth != null && cellIndex >= 0 && cellIndex < geodesicBaseWaterDepth.Length) return geodesicBaseWaterDepth[cellIndex];
+        return Mathf.Max(0f, GeodesicSeaLevelRadius - GetGeodesicCellRawTerrainRadius(cellIndex));
+    }
+
+    public float GetGeodesicCellDistanceToShore(int cellIndex)
+    {
+        return geodesicDistanceToShore != null && cellIndex >= 0 && cellIndex < geodesicDistanceToShore.Length ? geodesicDistanceToShore[cellIndex] : -1f;
+    }
+
+    public float GetGeodesicCellNormalizedDepth(int cellIndex) => geodesicMaximumOceanDepth > 0f ? Mathf.Clamp01(GetGeodesicCellWaterDepth(cellIndex) / geodesicMaximumOceanDepth) : 0f;
+    public float GetGeodesicCellBasinNoiseContribution(int cellIndex) => geodesicBasinNoiseContribution != null && cellIndex >= 0 && cellIndex < geodesicBasinNoiseContribution.Length ? geodesicBasinNoiseContribution[cellIndex] : 0f;
+    public string GetGeodesicCellBathymetryRegion(int cellIndex)
+    {
+        if (geodesicBathymetryRegion == null || cellIndex < 0 || cellIndex >= geodesicBathymetryRegion.Length) return "unknown";
+        return geodesicBathymetryRegion[cellIndex] == 3 ? "deep-basin" : geodesicBathymetryRegion[cellIndex] == 2 ? "slope" : geodesicBathymetryRegion[cellIndex] == 1 ? "shelf" : "shallow/coast";
+    }
+
+    public float GetGeodesicSeafloorRadiusAtDirection(Vector3 direction)
+    {
+        Vector3 d = direction.sqrMagnitude > 1e-10f ? direction.normalized : Vector3.up;
+        float raw = EvaluateRawGeodesicTerrainRadius(d);
+        if (GeodesicTopology == null || geodesicSeafloorRadius == null || geodesicOceanMask == null || raw >= GeodesicSeaLevelRadius) return raw;
+        int nearest = DirectionToGeodesicCell(d);
+        if (nearest < 0 || !geodesicOceanMask[nearest]) return raw;
+        float weighted = geodesicSeafloorRadius[nearest];
+        float weightSum = 1f;
+        int baseIndex = nearest * 6;
+        for (int n = 0; n < GeodesicTopology.NeighborCounts[nearest]; n++)
+        {
+            int nb = GeodesicTopology.Neighbors6[baseIndex + n];
+            if (nb < 0 || nb >= geodesicSeafloorRadius.Length || !geodesicOceanMask[nb]) continue;
+            float dot = Mathf.Clamp(Vector3.Dot(d, GeodesicTopology.CellDirections[nb]), -1f, 1f);
+            float w = 1f / Mathf.Max(0.0001f, Mathf.Acos(dot));
+            weighted += geodesicSeafloorRadius[nb] * w; weightSum += w;
+        }
+        return Mathf.Min(raw, weighted / Mathf.Max(0.0001f, weightSum));
+    }
+
+    int DirectionToGeodesicCell(Vector3 direction)
+    {
+        if (GeodesicTopology == null) return -1;
+        int best = -1; float bestDot = -2f;
+        for (int i = 0; i < GeodesicTopology.CellCount; i++) { float dot = Vector3.Dot(direction, GeodesicTopology.CellDirections[i]); if (dot > bestDot) { bestDot = dot; best = i; } }
+        return best;
     }
 
     void RebuildGeodesicOceanClassification()
     {
         if (GeodesicTopology == null)
         {
-            geodesicOceanMask = null; geodesicWaterDepth = null; geodesicOceanNeighborCounts = null; geodesicCoastlineMask = null;
+            geodesicRawTerrainRadius = null; geodesicSeafloorRadius = null; geodesicBaseWaterDepth = null; geodesicWaterDepth = null; geodesicDistanceToShore = null; geodesicBasinNoiseContribution = null; geodesicBathymetryRegion = null; geodesicOceanMask = null; geodesicOceanNeighborCounts = null; geodesicCoastlineMask = null;
             return;
         }
 
         int count = GeodesicTopology.CellCount;
-        geodesicOceanMask = new bool[count];
-        geodesicWaterDepth = new float[count];
-        geodesicOceanNeighborCounts = new byte[count];
-        geodesicCoastlineMask = new bool[count];
-
-        int landCount = 0, oceanCount = 0, coastlineCount = 0;
-        float areaSum = 0f, landArea = 0f, oceanArea = 0f, depthAreaSum = 0f;
-        float minDepth = float.PositiveInfinity, maxDepth = 0f;
-        float minTerrainRadius = float.PositiveInfinity, maxTerrainRadius = float.NegativeInfinity;
-
+        geodesicRawTerrainRadius = new float[count]; geodesicSeafloorRadius = new float[count]; geodesicBaseWaterDepth = new float[count]; geodesicWaterDepth = new float[count]; geodesicDistanceToShore = new float[count]; geodesicBasinNoiseContribution = new float[count]; geodesicBathymetryRegion = new byte[count]; geodesicOceanMask = new bool[count]; geodesicOceanNeighborCounts = new byte[count]; geodesicCoastlineMask = new bool[count];
         for (int i = 0; i < count; i++)
         {
-            float terrainRadius = GetSurfaceRadiusAtDirection(GeodesicTopology.CellDirections[i]);
-            float depth = Mathf.Max(0f, GeodesicSeaLevelRadius - terrainRadius);
-            bool ocean = depth > 0f;
-            float area = GeodesicTopology.UnitCellAreas[i] * BasePlanetRadius * BasePlanetRadius;
-            geodesicOceanMask[i] = ocean; geodesicWaterDepth[i] = depth;
-            areaSum += area; minTerrainRadius = Mathf.Min(minTerrainRadius, terrainRadius); maxTerrainRadius = Mathf.Max(maxTerrainRadius, terrainRadius);
-            if (ocean) { oceanCount++; oceanArea += area; depthAreaSum += depth * area; minDepth = Mathf.Min(minDepth, depth); maxDepth = Mathf.Max(maxDepth, depth); }
-            else { landCount++; landArea += area; }
+            float raw = EvaluateRawGeodesicTerrainRadius(GeodesicTopology.CellDirections[i]);
+            geodesicRawTerrainRadius[i] = raw; geodesicSeafloorRadius[i] = raw; geodesicDistanceToShore[i] = -1f;
+            bool ocean = enableOcean && raw < GeodesicSeaLevelRadius;
+            geodesicOceanMask[i] = ocean; geodesicBaseWaterDepth[i] = ocean ? Mathf.Max(0f, GeodesicSeaLevelRadius - raw) : 0f; geodesicWaterDepth[i] = geodesicBaseWaterDepth[i];
         }
 
+        int oceanCountBefore = 0;
         for (int i = 0; i < count; i++)
         {
-            byte oceanNeighbors = 0; bool coastline = false; bool ocean = geodesicOceanMask[i];
+            if (geodesicOceanMask[i]) oceanCountBefore++;
+            byte oceanNeighbors = 0; bool coastline = false;
             for (int n = 0; n < GeodesicTopology.NeighborCounts[i]; n++)
             {
-                int neighbor = GeodesicTopology.Neighbors6[i * 6 + n];
-                if (neighbor < 0 || neighbor >= count) continue;
-                if (geodesicOceanMask[neighbor]) oceanNeighbors++;
-                if (geodesicOceanMask[neighbor] != ocean) coastline = true;
+                int nb = GeodesicTopology.Neighbors6[i * 6 + n]; if (nb < 0 || nb >= count) continue;
+                if (geodesicOceanMask[nb]) oceanNeighbors++;
+                if (geodesicOceanMask[nb] != geodesicOceanMask[i]) coastline = true;
             }
             geodesicOceanNeighborCounts[i] = oceanNeighbors;
-            geodesicCoastlineMask[i] = coastline;
-            if (coastline) coastlineCount++;
+            geodesicCoastlineMask[i] = geodesicOceanMask[i] && coastline;
+            if (geodesicCoastlineMask[i]) geodesicDistanceToShore[i] = 0f;
         }
 
-        if (oceanCount == 0) minDepth = 0f;
-        float landFraction = areaSum > 0f ? landArea / areaSum : 0f;
-        float oceanFraction = areaSum > 0f ? oceanArea / areaSum : 0f;
-        float meanDepth = oceanArea > 0f ? depthAreaSum / oceanArea : 0f;
-        Debug.Log($"[GeodesicOceanDiagnostics] cellsLandOceanCoast={landCount}/{oceanCount}/{coastlineCount}, totalGeodesicArea={areaSum:F8}, areaWeightedLandOcean={landFraction:F6}/{oceanFraction:F6}, areaFractionSum={(landFraction + oceanFraction):F6}, oceanDepthMinMaxMean={minDepth:F6}/{maxDepth:F6}/{meanDepth:F6}, seaLevelRadius={GeodesicSeaLevelRadius:F6}, terrainSurfaceRadiusMinMax={minTerrainRadius:F6}/{maxTerrainRadius:F6}", this);
+        ComputeGeodesicShoreDistances();
+        SmoothGeodesicDistanceField();
+        ApplyGeodesicBathymetryProfile();
+        LogGeodesicBathymetryDiagnostics(oceanCountBefore);
+    }
+
+    void ComputeGeodesicShoreDistances()
+    {
+        int count = GeodesicTopology.CellCount;
+        bool[] visited = new bool[count];
+        for (int iter = 0; iter < count; iter++)
+        {
+            int current = -1; float best = float.PositiveInfinity;
+            for (int i = 0; i < count; i++) if (geodesicOceanMask[i] && !visited[i] && geodesicDistanceToShore[i] >= 0f && geodesicDistanceToShore[i] < best) { best = geodesicDistanceToShore[i]; current = i; }
+            if (current < 0) break;
+            visited[current] = true;
+            for (int n = 0; n < GeodesicTopology.NeighborCounts[current]; n++)
+            {
+                int nb = GeodesicTopology.Neighbors6[current * 6 + n]; if (nb < 0 || nb >= count || !geodesicOceanMask[nb]) continue;
+                float edge = GeodesicTopology.NeighborAngularDistances6[current * 6 + n] * BasePlanetRadius;
+                float next = best + Mathf.Max(0.000001f, edge);
+                if (geodesicDistanceToShore[nb] < 0f || next < geodesicDistanceToShore[nb]) geodesicDistanceToShore[nb] = next;
+            }
+        }
+    }
+
+    void SmoothGeodesicDistanceField()
+    {
+        int passes = Mathf.Clamp(geodesicBathymetrySmoothPasses, 0, 8); float strength = Mathf.Clamp01(geodesicBathymetrySmoothStrength);
+        if (passes <= 0 || strength <= 0f) return;
+        int count = GeodesicTopology.CellCount; float[] temp = new float[count];
+        for (int pass = 0; pass < passes; pass++)
+        {
+            for (int i = 0; i < count; i++)
+            {
+                if (!geodesicOceanMask[i] || geodesicDistanceToShore[i] <= 0f) { temp[i] = geodesicDistanceToShore[i]; continue; }
+                float sum = geodesicDistanceToShore[i]; int c = 1;
+                for (int n = 0; n < GeodesicTopology.NeighborCounts[i]; n++) { int nb = GeodesicTopology.Neighbors6[i * 6 + n]; if (nb >= 0 && nb < count && geodesicOceanMask[nb] && geodesicDistanceToShore[nb] >= 0f) { sum += geodesicDistanceToShore[nb]; c++; } }
+                temp[i] = Mathf.Lerp(geodesicDistanceToShore[i], sum / c, strength);
+            }
+            System.Array.Copy(temp, geodesicDistanceToShore, count);
+        }
+    }
+
+    void ApplyGeodesicBathymetryProfile()
+    {
+        float shelfWidth = Mathf.Max(0.0001f, geodesicShelfWidthDegrees * Mathf.Deg2Rad * BasePlanetRadius);
+        float shelfDepthSafe = Mathf.Clamp(geodesicShelfDepth, 0f, geodesicMaximumOceanDepth);
+        float maxDepthSafe = Mathf.Max(shelfDepthSafe, geodesicMaximumOceanDepth);
+        float preserve = Mathf.Max(0f, geodesicShorelinePreservationDegrees * Mathf.Deg2Rad * BasePlanetRadius);
+        float strength = enableGeodesicBathymetry ? Mathf.Clamp01(geodesicBathymetryStrength) : 0f;
+        Vector3 noiseOffset = BuildGeodesicVisualSeedOffset(DerivedBathymetrySeed);
+        float maxShore = 0f; for (int i = 0; i < geodesicDistanceToShore.Length; i++) if (geodesicOceanMask[i]) maxShore = Mathf.Max(maxShore, geodesicDistanceToShore[i]);
+        float deepRange = Mathf.Max(shelfWidth, maxShore - shelfWidth);
+        for (int i = 0; i < geodesicOceanMask.Length; i++)
+        {
+            if (!geodesicOceanMask[i]) { geodesicSeafloorRadius[i] = geodesicRawTerrainRadius[i]; continue; }
+            float d = Mathf.Max(0f, geodesicDistanceToShore[i]);
+            float shelfT = Mathf.Clamp01(d / shelfWidth);
+            float shelfTarget = shelfDepthSafe * Mathf.SmoothStep(0f, 1f, shelfT);
+            float slopeT = Mathf.Pow(Mathf.Clamp01((d - shelfWidth) / deepRange), Mathf.Max(0.01f, geodesicContinentalSlopeExponent));
+            float target = Mathf.Lerp(shelfTarget, maxDepthSafe, slopeT);
+            float noise01 = 0.5f + 0.5f * SimpleNoise.Evaluate(GeodesicTopology.CellDirections[i] * Mathf.Max(0.001f, geodesicBasinNoiseScale) + noiseOffset);
+            float modulation = 1f + (noise01 - 0.5f) * 2f * Mathf.Clamp01(geodesicBasinNoiseStrength) * Mathf.Clamp01(slopeT + 0.25f * shelfT);
+            geodesicBasinNoiseContribution[i] = modulation - 1f;
+            target = Mathf.Clamp(target * modulation, 0f, maxDepthSafe);
+            float preserveBlend = preserve <= 0f ? 1f : Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(d / preserve));
+            float finalDepth = Mathf.Clamp(Mathf.Max(geodesicBaseWaterDepth[i], Mathf.Lerp(geodesicBaseWaterDepth[i], target, preserveBlend * strength)), 0f, maxDepthSafe);
+            geodesicWaterDepth[i] = finalDepth; geodesicSeafloorRadius[i] = Mathf.Max(0.01f, GeodesicSeaLevelRadius - finalDepth);
+            geodesicBathymetryRegion[i] = d <= preserve ? (byte)0 : d <= shelfWidth ? (byte)1 : finalDepth >= maxDepthSafe * 0.75f ? (byte)3 : (byte)2;
+        }
+    }
+
+    void LogGeodesicBathymetryDiagnostics(int oceanCountBefore)
+    {
+        int count = GeodesicTopology.CellCount, land = 0, ocean = 0, coast = 0, shallow = 0, shelf = 0, slope = 0, deep = 0; float areaSum = 0f, oceanArea = 0f, depthArea = 0f, minD = float.PositiveInfinity, maxD = 0f, minFloor = float.PositiveInfinity, maxFloor = float.NegativeInfinity, maxShore = 0f; List<float> depths = new List<float>();
+        for (int i = 0; i < count; i++)
+        {
+            float area = GeodesicTopology.UnitCellAreas[i] * BasePlanetRadius * BasePlanetRadius; areaSum += area;
+            if (!geodesicOceanMask[i]) { land++; continue; }
+            ocean++; oceanArea += area; coast += geodesicCoastlineMask[i] ? 1 : 0; float d = geodesicWaterDepth[i]; depths.Add(d); depthArea += d * area; minD = Mathf.Min(minD, d); maxD = Mathf.Max(maxD, d); minFloor = Mathf.Min(minFloor, geodesicSeafloorRadius[i]); maxFloor = Mathf.Max(maxFloor, geodesicSeafloorRadius[i]); maxShore = Mathf.Max(maxShore, geodesicDistanceToShore[i]); if (geodesicBathymetryRegion[i] == 0) shallow++; else if (geodesicBathymetryRegion[i] == 1) shelf++; else if (geodesicBathymetryRegion[i] == 2) slope++; else deep++;
+        }
+        depths.Sort(); float P(float q) => depths.Count == 0 ? 0f : depths[Mathf.Clamp(Mathf.RoundToInt((depths.Count - 1) * q), 0, depths.Count - 1)]; if (ocean == 0) minD = minFloor = maxFloor = 0f;
+        Debug.Log($"[GeodesicBathymetryDiagnostics] oceanCells={ocean}, coastlineOceanCells={coast}, areaWeightedOceanFraction={(areaSum > 0f ? oceanArea / areaSum : 0f):F6}, finalDepthMinMaxMean={minD:F6}/{maxD:F6}/{(oceanArea > 0f ? depthArea / oceanArea : 0f):F6}, percentilesP25P50P75P90={P(.25f):F6}/{P(.5f):F6}/{P(.75f):F6}/{P(.9f):F6}, categoryCounts(shallow/shelf/slope/deep)={shallow}/{shelf}/{slope}/{deep}, categoryAreaFractionApprox={shallow/(float)Mathf.Max(1,ocean):F3}/{shelf/(float)Mathf.Max(1,ocean):F3}/{slope/(float)Mathf.Max(1,ocean):F3}/{deep/(float)Mathf.Max(1,ocean):F3}, seafloorRadiusMinMax={minFloor:F6}/{maxFloor:F6}, maxShoreDistance={maxShore:F6}, bathymetrySeed={DerivedBathymetrySeed}, simulationSubdivision={geodesicSimulationSubdivisionLevel}, renderSubdivision={geodesicRenderSubdivisionLevel}", this);
+        if (ocean != oceanCountBefore) Debug.LogWarning("[GeodesicBathymetryDiagnostics] Bathymetry changed ocean classification count; this should not happen.", this);
+        if (ocean > 0 && shallow == ocean) Debug.LogWarning("[GeodesicBathymetryDiagnostics] All ocean cells are shallow.", this);
+        if (ocean > 0 && slope + deep == 0) Debug.LogWarning("[GeodesicBathymetryDiagnostics] No ocean cells reached slope/deep-basin categories.", this);
+        if (ocean > 0 && geodesicMaximumOceanDepth > 0f && maxD < geodesicMaximumOceanDepth * 0.85f) Debug.LogWarning("[GeodesicBathymetryDiagnostics] Configured maximum geodesic depth is not approached.", this);
+        if (land > 0) for (int i = 0; i < count; i++) if (!geodesicOceanMask[i] && !Mathf.Approximately(geodesicRawTerrainRadius[i], geodesicSeafloorRadius[i])) { Debug.LogWarning("[GeodesicBathymetryDiagnostics] Land cell was displaced by bathymetry pass.", this); break; }
     }
 
     void BuildGeodesicOceanVisual()
@@ -809,6 +978,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         int oceanSubdivision = Mathf.Clamp(geodesicOceanRenderSubdivisionLevel, 0, GeodesicGridTopology.MaxSupportedSubdivision);
         GeodesicGridTopology oceanTopology = GeodesicGridTopology.Build(oceanSubdivision);
         geodesicOceanMesh = GeodesicSphereMeshBuilder.BuildSurfaceMesh(oceanTopology, GeodesicSeaLevelRadius, $"Geodesic Ocean Render L{oceanSubdivision}");
+        ApplyGeodesicOceanDepthColours(geodesicOceanMesh);
         Transform existing = transform.Find("Geodesic Ocean");
         geodesicOceanObject = existing != null ? existing.gameObject : new GameObject("Geodesic Ocean");
         geodesicOceanObject.transform.SetParent(transform, false);
@@ -821,6 +991,21 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         geodesicOceanMeshRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
         geodesicOceanMeshRenderer.receiveShadows = false;
         LogOceanRendererDiagnostics("GeodesicIcosphere", geodesicOceanMeshRenderer.sharedMaterial, GetGeodesicOceanAppearanceSample(), false);
+    }
+
+    void ApplyGeodesicOceanDepthColours(Mesh oceanSurfaceMesh)
+    {
+        if (oceanSurfaceMesh == null) return;
+        Vector3[] vertices = oceanSurfaceMesh.vertices;
+        Color[] colors = new Color[vertices.Length];
+        float maxDepth = Mathf.Max(0.0001f, geodesicMaximumOceanDepth);
+        for (int i = 0; i < vertices.Length; i++)
+        {
+            Vector3 direction = vertices[i].sqrMagnitude > 1e-10f ? vertices[i].normalized : Vector3.up;
+            float depth01 = Mathf.Clamp01(GetWaterDepthAtDirection(direction) / maxDepth);
+            colors[i] = new Color(depth01, depth01, depth01, 1f);
+        }
+        oceanSurfaceMesh.colors = colors;
     }
 
     public void ApplySharedOceanAppearance()
