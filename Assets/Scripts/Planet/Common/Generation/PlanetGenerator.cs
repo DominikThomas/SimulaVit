@@ -388,6 +388,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
             picker.enabled = false;
         }
 
+        GetComponent<PlanetTemperatureIceVisuals>()?.ClearForGeodesicMode();
+
         GeodesicTopology = null;
         geodesicTerrainHeightByCell = null;
         geodesicNormalizedTerrainByCell = null;
@@ -1313,6 +1315,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
             oceanDistanceToShoreByCell = cachedData.OceanDistanceToShoreByCell;
             oceanMaskByCell = cachedData.OceanMaskByCell;
             ApplyGeneratedPlanetGeometry(cachedData.UnitVertices, cachedData.Triangles, cachedData.FinalTerrainRadii);
+            RefreshLegacyIceVisuals("legacy generation complete (cache)");
             PopulateRuntimeDescriptor(cellCount);
             LogPlanetGenerationValidation(GetComponent<MeshCollider>());
             AssertLegacyModeClean("legacy generation complete (cache)");
@@ -1368,6 +1371,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
         int[] triangles = allTriangles.ToArray();
         ApplyGeneratedPlanetGeometry(unitVertices.ToArray(), triangles, finalTerrainRadii);
+        RefreshLegacyIceVisuals("legacy generation complete");
         PlanetGenerationCache.SavePlanet(
             cachePath,
             new PlanetGenerationCache.PlanetData
@@ -1385,6 +1389,141 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         AssertLegacyModeClean("legacy generation complete");
         LogModeTransitionRendererInventory("after generation", PlanetGridType.LegacyCubeSphere);
         Debug.Log($"[PlanetGenerationCache] Regenerated planet and saved cache ({cachePath}).");
+    }
+
+    public void RefreshLegacyIceVisuals(string reason)
+    {
+        if (CurrentGridType != PlanetGridType.LegacyCubeSphere)
+        {
+            GetComponent<PlanetTemperatureIceVisuals>()?.ClearForGeodesicMode();
+            return;
+        }
+
+        PlanetTemperatureIceVisuals iceVisuals = GetComponent<PlanetTemperatureIceVisuals>();
+        if (iceVisuals != null)
+        {
+            iceVisuals.RebindAndRefreshLegacySurface(reason);
+        }
+
+        LogLegacySurfaceIntegrity(reason);
+        StartCoroutine(CheckLegacySurfaceIntegrityNextFrame(reason));
+    }
+
+    private void LogLegacySurfaceIntegrity(string reason)
+    {
+        Mesh terrainMesh = meshFilter != null ? meshFilter.sharedMesh : null;
+        Material rendererMaterial = meshRenderer != null ? meshRenderer.sharedMaterial : null;
+        Texture baseMap = runtimePlanetMaterial != null && runtimePlanetMaterial.HasProperty("_BaseMap") ? runtimePlanetMaterial.GetTexture("_BaseMap") : null;
+        Texture mainTex = runtimePlanetMaterial != null && runtimePlanetMaterial.HasProperty("_MainTex") ? runtimePlanetMaterial.GetTexture("_MainTex") : null;
+        PlanetTemperatureIceVisuals iceVisuals = GetComponent<PlanetTemperatureIceVisuals>();
+        string shaderName = rendererMaterial != null && rendererMaterial.shader != null ? rendererMaterial.shader.name : "<none>";
+        string baseMapInfo = DescribeTexture(baseMap);
+        string mainTexInfo = DescribeTexture(mainTex);
+        string runtimeTextureInfo = DescribeTexture(runtimeSurfaceTexture);
+        ColorStats colorStats = CalculateColorStats(terrainMesh);
+        int vertexCount = terrainMesh != null ? terrainMesh.vertexCount : 0;
+        int uvCount = terrainMesh != null && terrainMesh.uv != null ? terrainMesh.uv.Length : 0;
+        Debug.Log($"[LegacySurfaceIntegrity] reason={reason}, meshInstanceId={(terrainMesh != null ? terrainMesh.GetInstanceID() : 0)}, vertexCount={vertexCount}, uvCount={uvCount}, colorCount={colorStats.count}, colorRMinMaxMean={colorStats.minR:F4}/{colorStats.maxR:F4}/{colorStats.meanR:F4}, colorAMinMaxMean={colorStats.minA:F4}/{colorStats.maxA:F4}/{colorStats.meanA:F4}, rendererMaterialInstanceId={(rendererMaterial != null ? rendererMaterial.GetInstanceID() : 0)}, runtimePlanetMaterialInstanceId={(runtimePlanetMaterial != null ? runtimePlanetMaterial.GetInstanceID() : 0)}, shader={shaderName}, baseMap={baseMapInfo}, mainTex={mainTexInfo}, runtimeSurfaceTexture={runtimeTextureInfo}, baseMapMatchesRuntime={baseMap == runtimeSurfaceTexture}, iceVisualsEnabled={(iceVisuals != null && iceVisuals.enabled)}, iceBoundMeshInstanceId={(iceVisuals != null ? iceVisuals.BoundMeshInstanceId : 0)}, iceBoundVertexCount={(iceVisuals != null ? iceVisuals.BoundVertexCount : 0)}, iceAppliedAfterCurrentMeshBinding={(iceVisuals != null && iceVisuals.HasAppliedAfterCurrentMeshBinding)}", this);
+    }
+
+    private System.Collections.IEnumerator CheckLegacySurfaceIntegrityNextFrame(string reason)
+    {
+        yield return null;
+        if (CurrentGridType != PlanetGridType.LegacyCubeSphere)
+        {
+            yield break;
+        }
+
+        Mesh terrainMesh = meshFilter != null ? meshFilter.sharedMesh : null;
+        Texture baseMap = runtimePlanetMaterial != null && runtimePlanetMaterial.HasProperty("_BaseMap") ? runtimePlanetMaterial.GetTexture("_BaseMap") : null;
+        PlanetTemperatureIceVisuals iceVisuals = GetComponent<PlanetTemperatureIceVisuals>();
+        int vertexCount = terrainMesh != null ? terrainMesh.vertexCount : 0;
+        int uvCount = terrainMesh != null && terrainMesh.uv != null ? terrainMesh.uv.Length : 0;
+        ColorStats colorStats = CalculateColorStats(terrainMesh);
+        bool fullIceUniform = colorStats.count > 0 && colorStats.minA >= 0.999f && colorStats.maxA >= 0.999f;
+
+        if (meshRenderer != null && runtimePlanetMaterial != null && meshRenderer.sharedMaterial != runtimePlanetMaterial)
+        {
+            Debug.LogWarning($"[LegacySurfaceIntegrity] oneFrameLater reason={reason}, terrain renderer material drifted to {GetMaterialName(meshRenderer.sharedMaterial)}; expected {runtimePlanetMaterial.name}.", this);
+        }
+
+        if (runtimePlanetMaterial != null && baseMap != runtimeSurfaceTexture)
+        {
+            Debug.LogWarning($"[LegacySurfaceIntegrity] oneFrameLater reason={reason}, _BaseMap is not runtimeSurfaceTexture. baseMap={DescribeTexture(baseMap)}, runtimeSurfaceTexture={DescribeTexture(runtimeSurfaceTexture)}.", this);
+        }
+
+        if (vertexCount > 0 && uvCount != vertexCount)
+        {
+            Debug.LogWarning($"[LegacySurfaceIntegrity] oneFrameLater reason={reason}, UV count {uvCount} does not match vertex count {vertexCount}.", this);
+        }
+
+        if (vertexCount > 0 && colorStats.count != vertexCount)
+        {
+            Debug.LogWarning($"[LegacySurfaceIntegrity] oneFrameLater reason={reason}, color count {colorStats.count} does not match vertex count {vertexCount}; legacy ice shader needs alpha=0 for no ice and alpha=1 for full ice.", this);
+        }
+
+        if (fullIceUniform)
+        {
+            Debug.LogWarning($"[LegacySurfaceIntegrity] oneFrameLater reason={reason}, all legacy terrain vertices have full-ice alpha. Verify temperatures justify global ice before accepting this state.", this);
+        }
+
+        if (iceVisuals != null && terrainMesh != null && iceVisuals.BoundMeshInstanceId != terrainMesh.GetInstanceID())
+        {
+            Debug.LogWarning($"[LegacySurfaceIntegrity] oneFrameLater reason={reason}, ice visual binding references mesh {iceVisuals.BoundMeshInstanceId} while terrain mesh is {terrainMesh.GetInstanceID()}.", this);
+        }
+
+        if (runtimeGeodesicSurfaceMaterial != null && meshRenderer != null && meshRenderer.sharedMaterial == runtimeGeodesicSurfaceMaterial)
+        {
+            Debug.LogWarning($"[LegacySurfaceIntegrity] oneFrameLater reason={reason}, geodesic surface material remains assigned to legacy terrain.", this);
+        }
+    }
+
+    private struct ColorStats
+    {
+        public int count;
+        public float minR;
+        public float maxR;
+        public float meanR;
+        public float minA;
+        public float maxA;
+        public float meanA;
+    }
+
+    private static ColorStats CalculateColorStats(Mesh targetMesh)
+    {
+        Color[] colors = targetMesh != null ? targetMesh.colors : null;
+        ColorStats stats = new ColorStats { count = colors != null ? colors.Length : 0 };
+        if (stats.count == 0)
+        {
+            return stats;
+        }
+
+        stats.minR = stats.minA = float.PositiveInfinity;
+        stats.maxR = stats.maxA = float.NegativeInfinity;
+        for (int i = 0; i < colors.Length; i++)
+        {
+            Color color = colors[i];
+            stats.minR = Mathf.Min(stats.minR, color.r);
+            stats.maxR = Mathf.Max(stats.maxR, color.r);
+            stats.meanR += color.r;
+            stats.minA = Mathf.Min(stats.minA, color.a);
+            stats.maxA = Mathf.Max(stats.maxA, color.a);
+            stats.meanA += color.a;
+        }
+
+        stats.meanR /= stats.count;
+        stats.meanA /= stats.count;
+        return stats;
+    }
+
+    private static string DescribeTexture(Texture texture)
+    {
+        if (texture == null)
+        {
+            return "<none>";
+        }
+
+        return $"id={texture.GetInstanceID()}, name={texture.name}, size={texture.width}x{texture.height}";
     }
 
     private void RestoreLegacyTerrainMaterial()
@@ -1506,7 +1645,6 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         }
 
         mesh.Clear();
-        mesh.colors = null;
         RestoreLegacyTerrainMaterial();
         mesh.vertices = terrainVertices;
         mesh.uv = BuildSphereUvs(new List<Vector3>(unitVertices));

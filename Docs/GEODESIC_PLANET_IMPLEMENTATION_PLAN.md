@@ -1026,3 +1026,25 @@ Validation sequences for this contract:
 For `Geodesic → Main Menu → Legacy`, compare against `Fresh Play → Legacy` with the same seed/settings. The terrain mesh, legacy texture/material, legacy ocean/atmosphere, and child-renderer inventory should match; no geodesic debug lines, selected-cell highlight/popup, coastline/ocean-cell highlighting, filled polygon overlays, or geodesic ocean shell should remain.
 
 Surface texture cache audit: the legacy surface-texture key already includes the planet-generation key, seed/noise offset, large/medium/detail noise scales, rock palette colors, contrast, crack darkening, texture width/height/format, linear color-space flag, and `SurfaceTextureCacheFormatVersion`. This cache can explain broad legacy surface coloration if inputs or versions are wrong, but it does not create discrete geodesic-shaped polygon overlays because the legacy render path applies it as a single texture on the terrain material rather than as separate polygon renderers. No cache-version bump is required for the geodesic visual-cleanup fix.
+
+## Legacy surface texture and ice-mask lifecycle contract
+
+Legacy cube-sphere terrain appearance has two separate owners:
+
+- `PlanetGenerator` owns legacy terrain geometry, UVs, the runtime planet material, and the generated `_BaseMap` surface rock texture.
+- `PlanetTemperatureIceVisuals` owns the legacy mesh vertex-colour ice mask. The `SimulaVit/PlanetSurfaceIceVertexURP` shader reads vertex colour alpha as land-ice amount: alpha `0` means no ice and alpha `1` means full ice. The red channel is also written to the same value for CPU-side/debug inspection parity, but the shader surface blend and force-preview output both read alpha.
+
+Mode switches must invalidate persistent ice-visual mesh bindings because the terrain mesh can be cleared, replaced, or rebound without restarting the `PlanetTemperatureIceVisuals` component. Entering geodesic mode suspends the legacy ice visual path so it cannot overwrite geodesic procedural vertex colours. Returning to legacy mode must rebind to the current `PlanetGenerator` terrain `MeshFilter.sharedMesh`, rebuild cached vertices/colour arrays when mesh instance ID or vertex count changes, and write either temperature-derived ice colours or the shader-neutral no-ice baseline before final visual integrity diagnostics.
+
+Required legacy lifecycle order after geodesic cleanup:
+
+1. restore the legacy runtime terrain material;
+2. build or load legacy terrain geometry;
+3. assign legacy UVs;
+4. build or load and bind the runtime surface texture;
+5. refresh/rebind `PlanetTemperatureIceVisuals` to write the vertex-colour ice mask;
+6. initialize/reinitialize resources and temperatures through the existing startup lifecycle;
+7. refresh the ice mask again when resources report ready;
+8. run immediate and one-frame-later integrity checks for material, texture, UV count, colour count/range, and ice binding.
+
+The legacy surface texture cache remains owned by `PlanetGenerator`; do not clear or version-bump it for mode-switch ice-mask fixes unless diagnostics prove `_BaseMap` is missing or bound to the wrong runtime texture.

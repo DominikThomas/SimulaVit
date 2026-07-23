@@ -483,11 +483,13 @@ public class SimulationStartupController : MonoBehaviour
             planetResourceMap.ventH2SPerTick = Mathf.Max(0f, config.ventH2SPerTick);
             planetResourceMap.ventCO2PerTick = Mathf.Max(0f, config.ventCO2PerTick);
             planetResourceMap.ReinitializeResources();
+            planetGenerator?.RefreshLegacyIceVisuals("resources initialized after legacy startup config");
         }
         else if (config.gridType == PlanetGridType.GeodesicIcosphere)
         {
             Debug.Log("[StartupLifecycle] Geodesic prototype mode: skipping PlanetResourceMap resource initialization and vent/resource overlays once.", this);
             ventVisualizer?.ClearRuntimeVisuals("geodesic prototype mode selected");
+            planetGenerator?.GetComponent<PlanetTemperatureIceVisuals>()?.ClearForGeodesicMode();
         }
 
         if (replicatorManager != null)
