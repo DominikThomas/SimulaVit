@@ -21,8 +21,8 @@ public static class OceanMaterialBinder
         if (material == null) return;
         SetColorIfPresent(material, BaseColor, evaluation.finalColor);
         SetColorIfPresent(material, "_Color", evaluation.finalColor);
-        SetColorIfPresent(material, ShallowColor, WithAlpha(settings.shallowTint, evaluation.opacity));
-        SetColorIfPresent(material, DeepColor, WithAlpha(settings.deepTint, evaluation.opacity));
+        SetColorIfPresent(material, ShallowColor, WithAlpha(settings.shallowWaterColor, evaluation.opacity));
+        SetColorIfPresent(material, DeepColor, WithAlpha(settings.deepWaterColor, evaluation.opacity));
         SetFloatIfPresent(material, Opacity, evaluation.opacity);
         SetFloatIfPresent(material, Smoothness, Mathf.Clamp01(settings.smoothness));
         SetFloatIfPresent(material, FresnelStrength, Mathf.Max(0f, settings.fresnelStrength));
@@ -31,7 +31,7 @@ public static class OceanMaterialBinder
         SetFloatIfPresent(material, ColorIntensity, Mathf.Max(0f, settings.colorIntensity));
         SetColorIfPresent(material, Fe2Tint, settings.dissolvedFe2Tint);
         SetColorIfPresent(material, FeOxTint, settings.suspendedFeOxTint);
-        SetColorIfPresent(material, SulfurTint, settings.suspendedSulfurTint);
+        SetColorIfPresent(material, SulfurTint, settings.sulfurTint);
         SetFloatIfPresent(material, Turbidity, evaluation.turbidity);
     }
 

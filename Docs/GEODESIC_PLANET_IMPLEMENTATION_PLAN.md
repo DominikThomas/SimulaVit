@@ -377,6 +377,17 @@ The geodesic ocean visual deliberately has no collider. The picker continues to 
 - `git status --short` to verify the local change set.
 - Unity Play Mode was not run in this environment; geodesic/legacy startup, material transparency, terrain picking around the ocean, no stale ocean after menu return, and visual seam checks still require local Unity validation.
 
+
+### Shared ocean appearance Inspector and renderer wiring correction
+
+`PlanetGenerator` is the authoritative visible Inspector owner for shared ocean appearance. It owns one serialized `OceanAppearanceSettings` instance drawn as the **Ocean Appearance** foldout in the normal Inspector; custom editor drawing must include the nested property children so `baseWaterColor`, `shallowWaterColor`, `deepWaterColor`, `opacity`, `smoothness`, `fresnelStrength`, and `fresnelPower` are visible without Debug Inspector mode.
+
+Base water colour is distinct from oxygenated water colour. `baseWaterColor` is the renderer baseline consumed by both legacy cube-sphere and geodesic ocean runtime materials through `OceanMaterialBinder`; `oxygenatedWaterColor` is a future chemistry endpoint in the shared settings, blended only through `OceanAppearanceSample.oxygenation01`. Geodesic chemistry inputs are still defaulted, so normal geodesic generation binds `oxygenation01 = 0` and must not use hidden deprecated geodesic colour fields as runtime authority.
+
+Legacy oxygenation has not been fully migrated into a shared per-cell ocean chemistry sample. The current compatibility path preserves old serialized `oxygenatedWaterColor` values by migrating them into `OceanAppearanceSettings.oxygenatedWaterColor`, while the shared base ocean material binding uses a default zero-oxygenation sample and legacy resource/chemistry visual paths remain legacy-owned until a dedicated migration.
+
+Runtime ocean materials remain instance-owned. Legacy cube-sphere ocean material creation clones the configured material or creates a runtime fallback before binding shared appearance. Geodesic ocean material creation creates a runtime `Geodesic Ocean (Runtime)` material and binds the same `PlanetGenerator.oceanAppearance` with a default sample. No global material asset is modified.
+
 ### Known limitations
 
 - Ocean is a simple transparent sphere only; it has no waves, physical shoreline cuts, chemistry, resources, layers, save arrays, or simulation stepping.
