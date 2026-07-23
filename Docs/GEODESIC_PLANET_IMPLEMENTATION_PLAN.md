@@ -1048,3 +1048,88 @@ Required legacy lifecycle order after geodesic cleanup:
 8. run immediate and one-frame-later integrity checks for material, texture, UV count, colour count/range, and ice binding.
 
 The legacy surface texture cache remains owned by `PlanetGenerator`; do not clear or version-bump it for mode-switch ice-mask fixes unless diagnostics prove `_BaseMap` is missing or bound to the wrong runtime texture.
+
+---
+
+## Performance refactor note — render-only geometry and collider split
+
+This focused refactor keeps the authoritative geodesic simulation topology unchanged while removing simulation-only topology construction from the visual render path.
+
+### Render-only geometry ownership
+
+Terrain and ocean rendering now use an immutable render-only unit icosphere representation (`IcosphereRenderGeometry`) containing only welded unit-sphere vertex directions and indexed triangles. It deliberately does not include simulation-cell data such as neighbor arrays, dual polygons, cell areas, shared-edge lengths, neighbor angular distances, or validation state. Those remain owned by `GeodesicGridTopology` for the authoritative simulation grid.
+
+`IcosphereRenderMeshBuilder.BuildUnitGeometry(subdivision)` preserves deterministic welded midpoint subdivision and indexed triangle order for the visible icosphere. Unity `Mesh` instances are still generated per terrain/ocean/collider use because terrain vertices are displaced, ocean vertices stay smooth at sea level, and collider vertices may use a different subdivision.
+
+### Base-geometry caching
+
+`IcosphereRenderGeometryCache` owns a process-local cache of immutable unit icosphere geometry keyed only by subdivision. The cache is safe to reuse for terrain rendering, ocean rendering, collider mesh generation, regeneration with another seed, and returning to the menu before starting another geodesic planet because it contains no terrain, bathymetry, sea-level, colour, seed, or resource data.
+
+Cached arrays must not be mutated. Mesh construction copies unit vertices into new mutable Unity mesh vertex arrays and clones triangle indices before assignment. Cleanup is explicit through `IcosphereRenderGeometryCache.Clear()` and the `PlanetGenerator` context menu item **Clear Geodesic Render Geometry Cache**.
+
+### Separate collider subdivision
+
+Geodesic terrain now exposes an independent `geodesicColliderSubdivisionLevel` with default 6. The collider samples the same authoritative terrain/seafloor radius function as the render mesh but is used only as an interaction approximation. Geodesic picking still resolves the selected simulation cell from normalized hit direction against the authoritative simulation topology, so lowering collider subdivision does not change cell lookup semantics.
+
+Do not assign a subdivision-8 terrain render mesh to the `MeshCollider` by default. If collider subdivision is intentionally raised to extreme visual resolutions, expect high MeshCollider cooking cost.
+
+### Recommended defaults
+
+- simulation subdivision: 5 for production-equivalent 10,242-cell geodesic simulation comparisons;
+- terrain render subdivision: 7 as a guarded visual default when startup time matters;
+- collider subdivision: 6;
+- ocean render subdivision: 5 or 6 unless the ocean silhouette needs to match very high terrain render subdivisions.
+
+Every additional icosphere subdivision approximately quadruples triangle count. Current diagnostics warn when render subdivision 8 is selected, when collider subdivision is unnecessarily extreme, and when estimated render/collider triangle counts exceed the configured diagnostic threshold.
+
+### Performance diagnostics
+
+Geodesic generation now logs one scoped stopwatch entry per generation for:
+
+- simulation topology generation;
+- render icosphere generation;
+- terrain displacement;
+- bathymetry sampling/interpolation;
+- vertex-colour generation;
+- normal recalculation;
+- bounds recalculation;
+- terrain mesh assignment/upload;
+- MeshCollider assignment/cooking;
+- ocean mesh generation;
+- debug renderer generation.
+
+The summary log also includes simulation/render/collider/ocean subdivision levels, vertex and triangle counts, approximate managed geometry/topology byte counts where practical, cache entry count, validation status, and total generation duration.
+
+### Audit finding
+
+Before this refactor, the terrain render path built `GeodesicGridTopology.Build(renderSubdivision)`, and the geodesic ocean path independently built `GeodesicGridTopology.Build(oceanSubdivision)`. That means render-only meshes paid for simulation-oriented data that rendering did not need: neighbor counts, 6-slot neighbor arrays, pentagon flags, dual polygon corners, spherical cell areas, neighbor angular distances, shared dual-edge angular lengths, and validation inputs. Terrain and ocean could also rebuild identical unit icospheres independently when their subdivisions matched.
+
+### Measurements obtained
+
+No Unity Play Mode timing was captured in this environment. The new diagnostics are designed to capture comparable timings for render subdivisions 5, 6, 7, and 8 with simulation subdivision 5, including topology build time, displacement time, colour time, normal time, collider time, and total time. Record actual Unity Console measurements here after local runs before making performance claims.
+
+### Remaining potential optimizations
+
+Potential future work, not completed by this refactor:
+
+- Jobs/Burst terrain displacement and colour sampling;
+- asynchronous or incremental generation to avoid main-thread stalls;
+- chunked render meshes for culling/upload granularity;
+- runtime LOD for distant planets;
+- faster nearest-cell lookup acceleration for very high simulation subdivisions.
+
+These are intentionally deferred until the lightweight render-only builder and collider separation are validated in Unity.
+
+### Direction-to-surface sampling optimization note
+
+A subsequent profiling pass found terrain displacement, collider vertex generation, ocean colour sampling, and debug line generation all cost about 0.283 ms per sampled direction. The common path was `GetSurfaceRadiusAtDirection(direction)` in geodesic mode, which evaluates raw terrain, checks ocean/bathymetry state, calls `DirectionToGeodesicCell(direction)`, and then interpolates seafloor radius from the nearest ocean simulation cell and its real 5/6 neighbors.
+
+Before optimization, each uncached geodesic query performed an O(simulationCellCount) scan over every simulation-cell direction inside `DirectionToGeodesicCell`. With simulation subdivision 6, that meant up to 40,962 dot-product candidates per output vertex before the bounded neighbor interpolation. Debug rendering amplified the issue because shared dual-corner endpoints were sampled repeatedly while emitting line vertices.
+
+The optimized render/collider/ocean generation path uses immutable `IcosphereDirectionMapping` data cached by `(simulationSubdivision, targetSubdivision, mappingVersion)`. Each target vertex stores its nearest authoritative simulation cell plus the bounded neighbor indices and precomputed angular weights needed to reproduce the existing seafloor interpolation. Runtime sampling for mapped geometry is therefore O(1) plus at most the real neighbor count of the mapped cell, rather than O(simulationCellCount). When target subdivision equals simulation subdivision, the mapping validates one-to-one unit direction identity before using direct cell-index correspondence.
+
+For target subdivisions higher than the simulation subdivision, mappings are built by starting from the simulation subdivision unit icosphere and carrying compact candidate simulation-cell sets through deterministic midpoint subdivision. Each target direction resolves its nearest cell from that small carried candidate set, preserving deterministic tie order without scanning all simulation cells per vertex. Lower-than-simulation target subdivisions validate prefix identity against the authoritative simulation topology and use direct cell-index correspondence where possible; only unexpected geometry ordering falls back to a one-time brute-force mapping build, after which sampling remains bounded.
+
+The mapping cache is topology-only and independent of terrain seed, terrain settings, sea level, bathymetry values, ocean masks, colours, and generated Unity meshes. Seed/settings-dependent displaced positions are regenerated each planet generation. Debug rendering now caches unique sampled debug directions for the current line mesh build so repeated shared dual-corner endpoints no longer repeat the full surface-radius query.
+
+Development diagnostics now aggregate surface-radius query counts, direction-to-cell query counts, candidate cells inspected, terrain-noise evaluations, bathymetry interpolations, mapping cache hits, and mapping cache misses once per generation. Unity Play Mode before/after timings and maximum surface-radius deviation still need to be recorded locally; do not claim runtime speedups until those measurements exist.

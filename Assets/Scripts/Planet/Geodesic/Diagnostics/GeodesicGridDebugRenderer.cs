@@ -18,6 +18,7 @@ public class GeodesicGridDebugRenderer : MonoBehaviour
     public Color oceanLineColor = new Color(0.05f, 0.45f, 1f, 1f);
     public Color coastlineLineColor = new Color(1f, 0.95f, 0.1f, 1f);
     [NonSerialized] public Func<Vector3, float> surfaceRadiusSampler;
+    [NonSerialized] public Func<Vector3, Vector3> surfacePositionSampler;
     [NonSerialized] public bool[] oceanMask;
     [NonSerialized] public bool[] coastlineMask;
     [Range(0f, 0.05f)] public float radialOffset = 0.003f;
@@ -33,6 +34,7 @@ public class GeodesicGridDebugRenderer : MonoBehaviour
         oceanMask = null;
         coastlineMask = null;
         surfaceRadiusSampler = null;
+        surfacePositionSampler = null;
         selectedCellIndex = -1;
         cachedVertices.Clear();
         cachedIndices.Clear();
@@ -75,6 +77,24 @@ public class GeodesicGridDebugRenderer : MonoBehaviour
         var verts = cachedVertices;
         var indices = cachedIndices;
         var colors = cachedColors;
+        var sampledPositionByDirection = new System.Collections.Generic.Dictionary<Vector3, Vector3>();
+        int AddDebugVertex(Vector3 direction, Color color)
+        {
+            Vector3 unit = direction.normalized;
+            if (!sampledPositionByDirection.TryGetValue(unit, out Vector3 position))
+            {
+                position = surfacePositionSampler != null
+                    ? surfacePositionSampler(unit)
+                    : unit * ((surfaceRadiusSampler != null ? surfaceRadiusSampler(unit) : radius) + radialOffset);
+                sampledPositionByDirection[unit] = position;
+            }
+
+            int index = verts.Count;
+            verts.Add(position);
+            colors.Add(color);
+            return index;
+        }
+
         for (int c = 0; c < t.CellCount; c++)
         {
             var p = t.DualCorners[c];
@@ -82,14 +102,8 @@ public class GeodesicGridDebugRenderer : MonoBehaviour
             Color color = ResolveCellColor(t, c);
             for (int i = 0; i < p.Length; i++)
             {
-                Vector3 a = p[i].normalized;
-                Vector3 b = p[(i + 1) % p.Length].normalized;
-                indices.Add(verts.Count);
-                verts.Add(a * ((surfaceRadiusSampler != null ? surfaceRadiusSampler(a) : radius) + radialOffset));
-                colors.Add(color);
-                indices.Add(verts.Count);
-                verts.Add(b * ((surfaceRadiusSampler != null ? surfaceRadiusSampler(b) : radius) + radialOffset));
-                colors.Add(color);
+                indices.Add(AddDebugVertex(p[i], color));
+                indices.Add(AddDebugVertex(p[(i + 1) % p.Length], color));
             }
         }
         mesh.indexFormat = verts.Count > 65535 ? IndexFormat.UInt32 : IndexFormat.UInt16;

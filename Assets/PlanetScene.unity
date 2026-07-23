@@ -889,15 +889,17 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   replicatorManager: {fileID: 0}
   generationMode: 0
-  geodesicSubdivisionLevel: 5
-  geodesicSimulationSubdivisionLevel: 5
-  geodesicRenderSubdivisionLevel: 5
+  geodesicSubdivisionLevel: 6
+  geodesicSimulationSubdivisionLevel: 6
+  geodesicRenderSubdivisionLevel: 7
+  geodesicColliderSubdivisionLevel: 6
+  geodesicDiagnosticTriangleWarningThreshold: 350000
   showGeodesicCellOutlines: 0
-  highlightGeodesicPentagons: 1
+  highlightGeodesicPentagons: 0
   showGeodesicCellCentres: 0
   showSelectedGeodesicCell: 1
   highlightGeodesicOceanCells: 0
-  highlightGeodesicCoastlineCells: 1
+  highlightGeodesicCoastlineCells: 0
   oceanAppearance:
     baseWaterColor: {r: 0.15966536, g: 0.30129746, b: 0.49056602, a: 0.58}
     shallowWaterColor: {r: 0.1, g: 0.55, b: 0.75, a: 0.58}
@@ -1162,7 +1164,7 @@ MonoBehaviour:
   m_TargetGraphic: {fileID: 1049548737}
   m_HandleRect: {fileID: 1049548736}
   m_Direction: 2
-  m_Value: 1
+  m_Value: 0
   m_Size: 1
   m_NumberOfSteps: 0
   m_OnValueChanged:
