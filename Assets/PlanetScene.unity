@@ -899,9 +899,9 @@ MonoBehaviour:
   highlightGeodesicOceanCells: 0
   highlightGeodesicCoastlineCells: 1
   oceanAppearance:
-    baseWaterColor: {r: 0.49019608, g: 0.16078435, b: 0.19360328, a: 0.58}
-    shallowWaterColor: {r: 0.73590165, g: 0.10196076, b: 0.7490196, a: 0.58}
-    deepWaterColor: {r: 0.9433962, g: 0.88040704, b: 0.048949808, a: 0.58}
+    baseWaterColor: {r: 0.15966536, g: 0.30129746, b: 0.49056602, a: 0.58}
+    shallowWaterColor: {r: 0.1, g: 0.55, b: 0.75, a: 0.58}
+    deepWaterColor: {r: 0.02, g: 0.12, b: 0.28, a: 0.58}
     opacity: 0.58
     smoothness: 0.876
     fresnelStrength: 0.18
@@ -920,6 +920,17 @@ MonoBehaviour:
     temperatureTintStrength: 0
     iceTintStrength: 0
   deprecatedLegacyOxygenatedWaterColor: {r: 0, g: 0, b: 0, a: 0}
+  enableGeodesicBathymetry: 1
+  geodesicShelfWidthDegrees: 5
+  geodesicShelfDepth: 0.06
+  geodesicMaximumOceanDepth: 0.32
+  geodesicContinentalSlopeExponent: 0.1
+  geodesicBasinNoiseScale: 1.35
+  geodesicBasinNoiseStrength: 0.25
+  geodesicShorelinePreservationDegrees: 0.7
+  geodesicBathymetrySmoothPasses: 2
+  geodesicBathymetrySmoothStrength: 0.35
+  geodesicBathymetryStrength: 1
   geodesicOceanRenderSubdivisionLevel: 5
   deprecatedGeodesicOceanColour: {r: 0.02, g: 0.28, b: 0.55, a: 0.42}
   deprecatedGeodesicOceanShallowTint: {r: 0.1, g: 0.55, b: 0.75, a: 0.42}

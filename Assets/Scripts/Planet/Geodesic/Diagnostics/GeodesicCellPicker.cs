@@ -19,7 +19,7 @@ public class GeodesicCellPicker : MonoBehaviour
     [Header("Selection Display")]
     [SerializeField] private bool showSelectionPopup = true;
     [SerializeField] private bool logSuccessfulSelection = true;
-    [SerializeField] private Rect popupRect = new Rect(18f, 18f, 380f, 210f);
+    [SerializeField] private Rect popupRect = new Rect(18f, 18f, 380f, 2100f);
 
     [Header("Selected Cell (Runtime Debug)")]
     public int selectedCellIndex = -1;
