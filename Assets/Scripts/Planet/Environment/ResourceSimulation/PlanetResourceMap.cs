@@ -307,8 +307,6 @@ public class PlanetResourceMap : MonoBehaviour
     private Material oceanMaterialInstance;
     private Color currentOceanColor;
 
-    private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
-    private static readonly int ColorId = Shader.PropertyToID("_Color");
     private static readonly Color ClearPrecipitateOverlayColor = new Color(0f, 0f, 0f, 0f);
 
     [Header("Temperature Model")]
@@ -3629,7 +3627,13 @@ public class PlanetResourceMap : MonoBehaviour
         if (planetGenerator == null || planetGenerator.OceanRenderer == null)
             return;
 
-        oceanMaterialInstance = planetGenerator.OceanRenderer.material;
+        oceanMaterialInstance = planetGenerator.LegacyRuntimeOceanMaterial;
+        if (oceanMaterialInstance == null)
+        {
+            planetGenerator.ApplySharedOceanAppearance();
+            oceanMaterialInstance = planetGenerator.LegacyRuntimeOceanMaterial;
+        }
+
         currentOceanColor = GetTargetOceanColor();
         ApplyOceanColor(currentOceanColor);
         EnsurePrecipitateOverlayVisual();
@@ -3666,16 +3670,20 @@ public class PlanetResourceMap : MonoBehaviour
 
     private void ApplyOceanColor(Color color)
     {
+        oceanMaterialInstance = planetGenerator != null ? planetGenerator.LegacyRuntimeOceanMaterial : null;
         if (oceanMaterialInstance == null)
             return;
 
         color.a = Mathf.Clamp01(oceanAlpha);
+        float legacyInfluence = updateOceanColorFromDissolvedFe2Plus ? Mathf.Clamp01(debugDissolvedFe2PlusRemainingFraction) : 0f;
+        if (enablePrecipitateVisuals)
+        {
+            float sulfur = Mathf.Clamp01(debugSurfaceVisibleSulfurPrecipitateTotal / Mathf.Max(0.0001f, CountOceanCells() * precipitateVisualSaturation));
+            float iron = Mathf.Clamp01(debugSurfaceVisibleIronOxidePrecipitateTotal / Mathf.Max(0.0001f, CountOceanCells() * precipitateVisualSaturation));
+            legacyInfluence = Mathf.Clamp01(legacyInfluence + sulfur * precipitateOceanTintStrength + iron * precipitateOceanTintStrength);
+        }
 
-        if (oceanMaterialInstance.HasProperty(BaseColorId))
-            oceanMaterialInstance.SetColor(BaseColorId, color);
-
-        if (oceanMaterialInstance.HasProperty(ColorId))
-            oceanMaterialInstance.SetColor(ColorId, color);
+        planetGenerator.ApplyLegacyOceanResourceTint(color, legacyInfluence);
     }
 
 
