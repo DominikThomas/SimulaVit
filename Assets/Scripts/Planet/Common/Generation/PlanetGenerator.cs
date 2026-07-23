@@ -373,13 +373,22 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         InitializeAuthoritativePlanet("RegeneratePlanet explicit request");
     }
 
-    public void ClearGeneratedPlanetRuntime()
+    private void ClearGeodesicRuntimeVisuals(string reason = null)
     {
-        IsPlanetInitialized = false;
-        generatedSurfaceRadiusByCell = null;
-        localOceanDepthByCell = null;
-        oceanDistanceToShoreByCell = null;
-        oceanMaskByCell = null;
+        GeodesicGridDebugRenderer debugRenderer = transform.Find("Geodesic Debug Lines")?.GetComponent<GeodesicGridDebugRenderer>();
+        if (debugRenderer != null)
+        {
+            debugRenderer.ClearAndDisable();
+        }
+
+        GeodesicCellPicker picker = GetComponent<GeodesicCellPicker>();
+        if (picker != null)
+        {
+            picker.SetTopology(null);
+            picker.enabled = false;
+        }
+
+        GeodesicTopology = null;
         geodesicTerrainHeightByCell = null;
         geodesicNormalizedTerrainByCell = null;
         geodesicRawTerrainRadius = null;
@@ -393,6 +402,51 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         geodesicOceanNeighborCounts = null;
         geodesicCoastlineMask = null;
 
+        if (geodesicOceanMeshRenderer != null)
+        {
+            geodesicOceanMeshRenderer.enabled = false;
+            geodesicOceanMeshRenderer.sharedMaterial = null;
+        }
+
+        if (geodesicOceanMeshFilter != null)
+        {
+            geodesicOceanMeshFilter.sharedMesh = null;
+        }
+
+        if (geodesicOceanMesh != null)
+        {
+            geodesicOceanMesh.Clear();
+        }
+
+        if (geodesicOceanObject != null)
+        {
+            geodesicOceanObject.SetActive(false);
+            Destroy(geodesicOceanObject);
+        }
+
+        ReleaseGeodesicSurfaceMaterial();
+        ReleaseGeodesicOceanMaterial();
+        geodesicOceanObject = null;
+        geodesicOceanMeshFilter = null;
+        geodesicOceanMeshRenderer = null;
+
+        if (meshRenderer != null && runtimePlanetMaterial != null && meshRenderer.sharedMaterial == null)
+        {
+            meshRenderer.sharedMaterial = runtimePlanetMaterial;
+        }
+
+        LogModeTransitionRendererInventory($"after geodesic cleanup{(string.IsNullOrEmpty(reason) ? string.Empty : " - " + reason)}", CurrentGridType);
+    }
+
+    public void ClearGeneratedPlanetRuntime()
+    {
+        IsPlanetInitialized = false;
+        generatedSurfaceRadiusByCell = null;
+        localOceanDepthByCell = null;
+        oceanDistanceToShoreByCell = null;
+        oceanMaskByCell = null;
+        ClearGeodesicRuntimeVisuals("ClearGeneratedPlanetRuntime");
+
         if (mesh != null) mesh.Clear();
         if (oceanMesh != null) oceanMesh.Clear();
         if (geodesicOceanMesh != null) geodesicOceanMesh.Clear();
@@ -405,18 +459,9 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         if (oceanMeshRenderer != null) oceanMeshRenderer.enabled = false;
         if (geodesicOceanMeshRenderer != null) geodesicOceanMeshRenderer.enabled = false;
         if (atmosphereMeshRenderer != null) atmosphereMeshRenderer.enabled = false;
-        GeodesicTopology = null;
-        GetComponent<GeodesicCellPicker>()?.SetTopology(null);
         HasRuntimeDescriptor = false;
         RuntimeDescriptor = default;
-        transform.Find("Geodesic Debug Lines")?.GetComponent<GeodesicGridDebugRenderer>()?.Render(null, BasePlanetRadius);
-        ReleaseGeodesicSurfaceMaterial();
         ReleaseRuntimeOceanMaterial();
-        ReleaseGeodesicOceanMaterial();
-        if (geodesicOceanObject != null) Destroy(geodesicOceanObject);
-        geodesicOceanObject = null;
-        geodesicOceanMeshFilter = null;
-        geodesicOceanMeshRenderer = null;
         if (meshRenderer != null && runtimePlanetMaterial != null)
         {
             meshRenderer.sharedMaterial = runtimePlanetMaterial;
@@ -472,10 +517,12 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         if (atmosphereMeshRenderer != null) atmosphereMeshRenderer.enabled = false;
         BuildGeodesicOceanVisual();
         var picker = GetOrAddComponent<GeodesicCellPicker>(gameObject);
+        picker.enabled = true;
         picker.SetTopology(GeodesicTopology);
         Transform debugTransform = transform.Find("Geodesic Debug Lines");
         GameObject debugObject = debugTransform != null ? debugTransform.gameObject : new GameObject("Geodesic Debug Lines");
         debugObject.transform.SetParent(transform, false);
+        debugObject.SetActive(true);
         debugObject.layer = gameObject.layer;
         var debug = GetOrAddComponent<GeodesicGridDebugRenderer>(debugObject);
         debug.showCellOutlines = showGeodesicCellOutlines;
@@ -493,6 +540,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         LogPlanetGenerationValidation(meshCollider);
         sw.Stop();
         LogGeodesicTerrainDiagnostics(mesh, simulationSubdivision, renderSubdivision);
+        LogModeTransitionRendererInventory("after generation", PlanetGridType.GeodesicIcosphere);
         Debug.Log($"[GeodesicPrototype] simulationSubdivision={simulationSubdivision}, renderSubdivision={renderSubdivision}, cells={GeodesicTopology.CellCount}, renderVertices={mesh.vertexCount}, renderTriangles={mesh.triangles.Length / 3}, simulationTriangles={GeodesicTopology.TriangleCount}, edges={GeodesicTopology.EdgeCount}, durationMs={sw.Elapsed.TotalMilliseconds:F2}, approxTopologyMemory={GeodesicTopology.ApproximateMemoryBytes} bytes. Validation: {validation}", this);
     }
 
@@ -982,6 +1030,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         Transform existing = transform.Find("Geodesic Ocean");
         geodesicOceanObject = existing != null ? existing.gameObject : new GameObject("Geodesic Ocean");
         geodesicOceanObject.transform.SetParent(transform, false);
+        geodesicOceanObject.SetActive(true);
         geodesicOceanObject.layer = gameObject.layer; // no collider is added; terrain MeshCollider remains the explicit picking target.
         geodesicOceanMeshFilter = GetOrAddComponent<MeshFilter>(geodesicOceanObject);
         geodesicOceanMeshRenderer = GetOrAddComponent<MeshRenderer>(geodesicOceanObject);
@@ -1154,6 +1203,11 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     {
         if (runtimeGeodesicSurfaceMaterial != null)
         {
+            if (meshRenderer != null && meshRenderer.sharedMaterial == runtimeGeodesicSurfaceMaterial)
+            {
+                meshRenderer.sharedMaterial = runtimePlanetMaterial;
+            }
+
             Destroy(runtimeGeodesicSurfaceMaterial);
             runtimeGeodesicSurfaceMaterial = null;
         }
@@ -1245,6 +1299,9 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
     void GeneratePlanet()
     {
+        ClearGeodesicRuntimeVisuals("before legacy generation");
+        RestoreLegacyTerrainMaterial();
+        AssertLegacyModeClean("legacy generation start");
         int cellCount = PlanetGridIndexing.GetCellCount(resolution);
         string cacheKey = PlanetGenerationCache.BuildPlanetCacheKeyString(this);
         string cachePath = PlanetGenerationCache.BuildPlanetCachePath(cacheKey);
@@ -1258,6 +1315,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
             ApplyGeneratedPlanetGeometry(cachedData.UnitVertices, cachedData.Triangles, cachedData.FinalTerrainRadii);
             PopulateRuntimeDescriptor(cellCount);
             LogPlanetGenerationValidation(GetComponent<MeshCollider>());
+            AssertLegacyModeClean("legacy generation complete (cache)");
+            LogModeTransitionRendererInventory("after generation", PlanetGridType.LegacyCubeSphere);
             Debug.Log($"[PlanetGenerationCache] Loaded planet generation cache ({cachePath}).");
             return;
         }
@@ -1323,7 +1382,104 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
             });
         PopulateRuntimeDescriptor(cellCount);
         LogPlanetGenerationValidation(GetComponent<MeshCollider>());
+        AssertLegacyModeClean("legacy generation complete");
+        LogModeTransitionRendererInventory("after generation", PlanetGridType.LegacyCubeSphere);
         Debug.Log($"[PlanetGenerationCache] Regenerated planet and saved cache ({cachePath}).");
+    }
+
+    private void RestoreLegacyTerrainMaterial()
+    {
+        if (meshRenderer == null || runtimePlanetMaterial == null)
+        {
+            return;
+        }
+
+        meshRenderer.sharedMaterial = runtimePlanetMaterial;
+        runtimePlanetMaterial.SetColor("_BaseColor", Color.white);
+    }
+
+    private void AssertLegacyModeClean(string stage)
+    {
+        bool stale = false;
+        GeodesicGridDebugRenderer debugRenderer = transform.Find("Geodesic Debug Lines")?.GetComponent<GeodesicGridDebugRenderer>();
+        MeshRenderer debugMeshRenderer = debugRenderer != null ? debugRenderer.GetComponent<MeshRenderer>() : null;
+        if (debugMeshRenderer != null && debugMeshRenderer.enabled)
+        {
+            stale = true;
+            debugRenderer.ClearAndDisable();
+        }
+
+        if (geodesicOceanMeshRenderer != null && geodesicOceanMeshRenderer.enabled)
+        {
+            stale = true;
+            geodesicOceanMeshRenderer.enabled = false;
+        }
+
+        GeodesicCellPicker picker = GetComponent<GeodesicCellPicker>();
+        if (picker != null && picker.enabled)
+        {
+            picker.SetTopology(null);
+            picker.enabled = false;
+        }
+
+        if (GeodesicTopology != null)
+        {
+            stale = true;
+            GeodesicTopology = null;
+        }
+
+        if (meshRenderer != null && runtimePlanetMaterial != null && meshRenderer.sharedMaterial != runtimePlanetMaterial)
+        {
+            stale = true;
+            meshRenderer.sharedMaterial = runtimePlanetMaterial;
+        }
+
+        bool geodesicRendererStillActive = false;
+        Renderer[] renderers = GetComponentsInChildren<Renderer>(true);
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            Renderer renderer = renderers[i];
+            if (renderer == null || !renderer.enabled || !renderer.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            if (renderer.GetComponent<GeodesicGridDebugRenderer>() != null || renderer.name.Contains("Geodesic"))
+            {
+                geodesicRendererStillActive = true;
+                break;
+            }
+        }
+
+        if (stale)
+        {
+            Debug.LogWarning($"[PlanetModeTransitionDiagnostics] Corrected stale geodesic runtime state during {stage}.", this);
+        }
+
+        if (geodesicRendererStillActive)
+        {
+            Debug.LogWarning($"[PlanetModeTransitionDiagnostics] Legacy generation completed with an active geodesic-only renderer during {stage}.", this);
+        }
+    }
+
+    private void LogModeTransitionRendererInventory(string stage, PlanetGridType targetGridMode)
+    {
+        Renderer[] renderers = GetComponentsInChildren<Renderer>(true);
+        System.Text.StringBuilder sb = new System.Text.StringBuilder(1024);
+        sb.Append($"[PlanetModeTransitionDiagnostics] stage={stage}, targetGridMode={targetGridMode}, childRenderers=");
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            Renderer renderer = renderers[i];
+            Mesh meshForRenderer = null;
+            MeshFilter filter = renderer.GetComponent<MeshFilter>();
+            if (filter != null) meshForRenderer = filter.sharedMesh;
+            string owner = renderer.GetComponent<GeodesicGridDebugRenderer>() != null || renderer.name.Contains("Geodesic") ? "geodesic" : (renderer.transform == transform || renderer.name.Contains("Ocean") || renderer.name.Contains("Atmosphere") ? "shared" : "legacy");
+            Material material = renderer.sharedMaterial;
+            string materialName = material != null ? material.name : "<none>";
+            string shaderName = material != null && material.shader != null ? material.shader.name : "<none>";
+            sb.Append($" [{i}] name={renderer.name}, owner={owner}, active={renderer.gameObject.activeInHierarchy}, enabled={renderer.enabled}, vertices={(meshForRenderer != null ? meshForRenderer.vertexCount : 0)}, material={materialName}, shader={shaderName};");
+        }
+        Debug.Log(sb.ToString(), this);
     }
 
     void ApplyGeneratedPlanetGeometry(Vector3[] unitVertices, int[] triangles, float[] finalTerrainRadii)
@@ -1350,6 +1506,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         }
 
         mesh.Clear();
+        mesh.colors = null;
+        RestoreLegacyTerrainMaterial();
         mesh.vertices = terrainVertices;
         mesh.uv = BuildSphereUvs(new List<Vector3>(unitVertices));
         mesh.triangles = triangles;
@@ -1629,6 +1787,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
     void OnDestroy()
     {
+        ClearGeodesicRuntimeVisuals("OnDestroy");
         if (runtimePlanetMaterial != null)
         {
             Destroy(runtimePlanetMaterial);
