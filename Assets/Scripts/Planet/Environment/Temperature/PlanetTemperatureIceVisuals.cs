@@ -29,8 +29,18 @@ public class PlanetTemperatureIceVisuals : MonoBehaviour
     private Material planetMaterial;
     private MeshFilter meshFilter;
     private Mesh planetMesh;
+    private int boundMeshInstanceId;
+    private int boundVertexCount;
     private Vector3[] meshVertices;
+    private int[] vertexResourceCells;
     private Color[] meshVertexColors;
+    private bool legacySurfaceBindingSuspended;
+    private bool appliedAfterCurrentMeshBinding;
+
+    public int BoundMeshInstanceId => boundMeshInstanceId;
+    public int BoundVertexCount => boundVertexCount;
+    public bool HasAppliedAfterCurrentMeshBinding => appliedAfterCurrentMeshBinding;
+    public bool IsLegacySurfaceBindingSuspended => legacySurfaceBindingSuspended;
 
     private double lastSimulationTime = double.NegativeInfinity;
     private double nextUpdateSimulationTime;
@@ -42,6 +52,7 @@ public class PlanetTemperatureIceVisuals : MonoBehaviour
     private void Awake()
     {
         ResolveReferences();
+        SubscribeResourceReadyEvent();
         TryBindPlanetVisuals();
         EnsureMeshBuffers();
         PushStaticMaterialParams();
@@ -51,15 +62,26 @@ public class PlanetTemperatureIceVisuals : MonoBehaviour
     private void OnEnable()
     {
         ResolveReferences();
+        SubscribeResourceReadyEvent();
         TryBindPlanetVisuals();
         EnsureMeshBuffers();
         PushStaticMaterialParams();
         RefreshNow();
     }
 
+    private void OnDisable()
+    {
+        UnsubscribeResourceReadyEvent();
+    }
+
+    private void OnDestroy()
+    {
+        UnsubscribeResourceReadyEvent();
+    }
+
     private void Update()
     {
-        if (!enableTemperatureLandIce || planetResourceMap == null || planetGenerator == null)
+        if (!enableTemperatureLandIce || planetResourceMap == null || planetGenerator == null || legacySurfaceBindingSuspended || planetGenerator.CurrentGridType != PlanetGridType.LegacyCubeSphere)
         {
             return;
         }
@@ -102,20 +124,90 @@ public class PlanetTemperatureIceVisuals : MonoBehaviour
     [ContextMenu("Refresh Vertex Ice Now")]
     public void RefreshNow()
     {
+        RebindAndRefreshLegacySurface("RefreshNow");
+    }
+
+    public void InvalidateMeshBinding()
+    {
+        planetMesh = null;
+        boundMeshInstanceId = 0;
+        boundVertexCount = 0;
+        meshVertices = null;
+        vertexResourceCells = null;
+        meshVertexColors = null;
+        appliedAfterCurrentMeshBinding = false;
+    }
+
+    public void ClearForGeodesicMode()
+    {
+        legacySurfaceBindingSuspended = true;
+        InvalidateMeshBinding();
+    }
+
+    public void RebindAndRefreshLegacySurface(string reason)
+    {
+        legacySurfaceBindingSuspended = false;
         ResolveReferences();
-        if (planetResourceMap == null || planetGenerator == null)
+        SubscribeResourceReadyEvent();
+        if (planetGenerator == null || planetGenerator.CurrentGridType != PlanetGridType.LegacyCubeSphere)
         {
+            ClearForGeodesicMode();
             return;
         }
 
         TryBindPlanetVisuals();
-        EnsureMeshBuffers();
+        bool rebound = EnsureMeshBuffers();
         PushStaticMaterialParams();
 
-        UpdateLandIceVertexColors();
+        if (planetMesh == null || meshVertices == null || meshVertexColors == null)
+        {
+            return;
+        }
 
+        if (planetResourceMap != null && enableTemperatureLandIce)
+        {
+            UpdateLandIceVertexColors();
+        }
+        else
+        {
+            ApplyNeutralNoIceVertexColors();
+        }
+
+        appliedAfterCurrentMeshBinding = true;
         lastSimulationTime = GetSimulationTimeSeconds();
         nextUpdateSimulationTime = lastSimulationTime + iceVisualUpdateIntervalSeconds;
+        LogLegacyIceDiagnostics(reason, rebound);
+    }
+
+
+    private void SubscribeResourceReadyEvent()
+    {
+        if (planetResourceMap == null)
+        {
+            return;
+        }
+
+        planetResourceMap.ResourcesReadyForVisualization -= HandleResourcesReadyForVisualization;
+        planetResourceMap.ResourcesReadyForVisualization += HandleResourcesReadyForVisualization;
+    }
+
+    private void UnsubscribeResourceReadyEvent()
+    {
+        if (planetResourceMap != null)
+        {
+            planetResourceMap.ResourcesReadyForVisualization -= HandleResourcesReadyForVisualization;
+        }
+    }
+
+    private void HandleResourcesReadyForVisualization(PlanetResourceMap source, string reason)
+    {
+        if (source != planetResourceMap)
+        {
+            return;
+        }
+
+        vertexResourceCells = null;
+        RebindAndRefreshLegacySurface($"resources ready - {reason}");
     }
 
     private void ResolveReferences()
@@ -153,37 +245,57 @@ public class PlanetTemperatureIceVisuals : MonoBehaviour
         meshFilter = planetGenerator.GetComponent<MeshFilter>();
     }
 
-    private void EnsureMeshBuffers()
+    private bool EnsureMeshBuffers()
     {
         if (meshFilter == null)
         {
-            return;
+            InvalidateMeshBinding();
+            return false;
         }
 
-        if (planetMesh == null)
+        Mesh currentMesh = meshFilter.sharedMesh;
+        if (currentMesh == null)
         {
-            planetMesh = meshFilter.mesh;
+            InvalidateMeshBinding();
+            return false;
         }
 
-        if (planetMesh == null)
+        int currentInstanceId = currentMesh.GetInstanceID();
+        int currentVertexCount = currentMesh.vertexCount;
+        bool meshChanged = planetMesh != currentMesh || boundMeshInstanceId != currentInstanceId || boundVertexCount != currentVertexCount;
+
+        if (meshChanged)
         {
-            return;
+            planetMesh = currentMesh;
+            boundMeshInstanceId = currentInstanceId;
+            boundVertexCount = currentVertexCount;
+            meshVertices = null;
+            vertexResourceCells = null;
+            meshVertexColors = null;
+            appliedAfterCurrentMeshBinding = false;
         }
 
-        if (meshVertices == null || meshVertices.Length != planetMesh.vertexCount)
+        if (meshVertices == null || meshVertices.Length != currentVertexCount)
         {
-            meshVertices = planetMesh.vertices;
+            meshVertices = currentMesh.vertices;
         }
 
-        if (meshVertexColors == null || meshVertexColors.Length != planetMesh.vertexCount)
+        if (vertexResourceCells == null || vertexResourceCells.Length != currentVertexCount)
         {
-            meshVertexColors = new Color[planetMesh.vertexCount];
-            for (int i = 0; i < meshVertexColors.Length; i++)
+            vertexResourceCells = new int[currentVertexCount];
+            for (int i = 0; i < currentVertexCount; i++)
             {
-                meshVertexColors[i] = new Color(0f, 0f, 0f, 0f);
+                vertexResourceCells[i] = planetResourceMap != null ? planetResourceMap.GetCellIndexFromDirection(meshVertices[i].normalized) : -1;
             }
         }
 
+        if (meshVertexColors == null || meshVertexColors.Length != currentVertexCount)
+        {
+            meshVertexColors = new Color[currentVertexCount];
+            ApplyNeutralNoIceBaseline(meshVertexColors);
+        }
+
+        return meshChanged;
     }
 
     private void PushStaticMaterialParams()
@@ -200,6 +312,22 @@ public class PlanetTemperatureIceVisuals : MonoBehaviour
         planetMaterial.SetColor(IceColorId, landIceColor);
         planetMaterial.SetFloat(IceStrengthId, landIceStrength);
         planetMaterial.SetFloat(ForceVertexIcePreviewId, forceVertexIcePreview ? 1f : 0f);
+    }
+
+    private static void ApplyNeutralNoIceBaseline(Color[] colors)
+    {
+        if (colors == null) return;
+        for (int i = 0; i < colors.Length; i++)
+        {
+            colors[i] = new Color(0f, 0f, 0f, 0f);
+        }
+    }
+
+    private void ApplyNeutralNoIceVertexColors()
+    {
+        if (planetMesh == null || meshVertexColors == null) return;
+        ApplyNeutralNoIceBaseline(meshVertexColors);
+        planetMesh.colors = meshVertexColors;
     }
 
     private void UpdateLandIceVertexColors()
@@ -219,7 +347,7 @@ public class PlanetTemperatureIceVisuals : MonoBehaviour
 
             if (!planetGenerator.IsOceanAtDirection(dir))
             {
-                int cell = planetResourceMap.GetCellIndexFromDirection(dir);
+                int cell = vertexResourceCells != null && i < vertexResourceCells.Length ? vertexResourceCells[i] : planetResourceMap.GetCellIndexFromDirection(dir);
                 float tempKelvin = planetResourceMap.GetTemperature(dir, cell);
                 iceValue = Mathf.Clamp01(Mathf.InverseLerp(threshold + fade, threshold - fade, tempKelvin));
             }
@@ -231,6 +359,33 @@ public class PlanetTemperatureIceVisuals : MonoBehaviour
         }
 
         planetMesh.colors = meshVertexColors;
+    }
+
+    private void LogLegacyIceDiagnostics(string reason, bool rebound)
+    {
+        if (planetMesh == null)
+        {
+            Debug.LogWarning($"[LegacyIceVisualDiagnostics] reason={reason}, no bound legacy terrain mesh.", this);
+            return;
+        }
+
+        Color[] colors = planetMesh.colors;
+        int colorCount = colors != null ? colors.Length : 0;
+        float minA = float.PositiveInfinity, maxA = float.NegativeInfinity, sumA = 0f;
+        for (int i = 0; i < colorCount; i++)
+        {
+            float a = colors[i].a;
+            minA = Mathf.Min(minA, a);
+            maxA = Mathf.Max(maxA, a);
+            sumA += a;
+        }
+
+        if (colorCount == 0)
+        {
+            minA = maxA = 0f;
+        }
+
+        Debug.Log($"[LegacyIceVisualDiagnostics] reason={reason}, rebound={rebound}, enabled={enabled}, suspended={legacySurfaceBindingSuspended}, meshInstanceId={boundMeshInstanceId}, vertexCount={boundVertexCount}, resourceCellMappingCount={(vertexResourceCells != null ? vertexResourceCells.Length : 0)}, colorCount={colorCount}, alphaMinMaxMean={minA:F4}/{maxA:F4}/{(colorCount > 0 ? sumA / colorCount : 0f):F4}, appliedAfterCurrentMeshBinding={appliedAfterCurrentMeshBinding}", this);
     }
 
     private double GetSimulationTimeSeconds()

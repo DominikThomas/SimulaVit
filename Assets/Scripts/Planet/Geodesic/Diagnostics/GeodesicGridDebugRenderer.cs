@@ -22,14 +22,59 @@ public class GeodesicGridDebugRenderer : MonoBehaviour
     [NonSerialized] public bool[] coastlineMask;
     [Range(0f, 0.05f)] public float radialOffset = 0.003f;
     private Mesh mesh;
+    private GeodesicGridTopology topology;
+    private readonly System.Collections.Generic.List<Vector3> cachedVertices = new System.Collections.Generic.List<Vector3>();
+    private readonly System.Collections.Generic.List<int> cachedIndices = new System.Collections.Generic.List<int>();
+    private readonly System.Collections.Generic.List<Color> cachedColors = new System.Collections.Generic.List<Color>();
+
+    public void ClearAndDisable()
+    {
+        topology = null;
+        oceanMask = null;
+        coastlineMask = null;
+        surfaceRadiusSampler = null;
+        selectedCellIndex = -1;
+        cachedVertices.Clear();
+        cachedIndices.Clear();
+        cachedColors.Clear();
+
+        if (mesh != null)
+        {
+            mesh.Clear();
+        }
+
+        MeshFilter mf = GetComponent<MeshFilter>();
+        if (mf != null)
+        {
+            mf.sharedMesh = null;
+        }
+
+        MeshRenderer mr = GetComponent<MeshRenderer>();
+        if (mr != null)
+        {
+            mr.enabled = false;
+        }
+
+        gameObject.SetActive(false);
+    }
 
     public void Render(GeodesicGridTopology t, float radius)
     {
+        if (t == null || !showCellOutlines)
+        {
+            ClearAndDisable();
+            return;
+        }
+
+        gameObject.SetActive(true);
+        topology = t;
         if (mesh == null) mesh = new Mesh { name = "Geodesic Cell Debug Lines" }; else mesh.Clear();
-        if (t == null || !showCellOutlines) { GetComponent<MeshFilter>().sharedMesh = mesh; return; }
-        var verts = new System.Collections.Generic.List<Vector3>();
-        var indices = new System.Collections.Generic.List<int>();
-        var colors = new System.Collections.Generic.List<Color>();
+        cachedVertices.Clear();
+        cachedIndices.Clear();
+        cachedColors.Clear();
+        var verts = cachedVertices;
+        var indices = cachedIndices;
+        var colors = cachedColors;
         for (int c = 0; c < t.CellCount; c++)
         {
             var p = t.DualCorners[c];
@@ -47,7 +92,7 @@ public class GeodesicGridDebugRenderer : MonoBehaviour
                 colors.Add(color);
             }
         }
-        if (verts.Count > 65535) mesh.indexFormat = IndexFormat.UInt32;
+        mesh.indexFormat = verts.Count > 65535 ? IndexFormat.UInt32 : IndexFormat.UInt16;
         mesh.SetVertices(verts);
         mesh.SetColors(colors);
         mesh.SetIndices(indices, MeshTopology.Lines, 0);
@@ -61,6 +106,7 @@ public class GeodesicGridDebugRenderer : MonoBehaviour
 
     private Color ResolveCellColor(GeodesicGridTopology t, int cellIndex)
     {
+        if (topology == null) return defaultLineColor;
         if (highlightCoastlineCells && coastlineMask != null && cellIndex < coastlineMask.Length && coastlineMask[cellIndex]) return coastlineLineColor;
         if (highlightOceanCells && oceanMask != null && cellIndex < oceanMask.Length && oceanMask[cellIndex]) return oceanLineColor;
         if (highlightPentagons && t.IsPentagon[cellIndex]) return pentagonLineColor;

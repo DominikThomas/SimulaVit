@@ -4,7 +4,7 @@ using UnityEngine;
 
 public sealed class GeodesicGridTopology
 {
-    public const int MaxSupportedSubdivision = 5;
+    public const int MaxSupportedSubdivision = 8;
     public int SubdivisionLevel { get; private set; }
     public Vector3[] CellDirections { get; private set; }
     public int[] Triangles { get; private set; }
