@@ -221,6 +221,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     private bool[] geodesicCoastlineMask;
 
     public MeshRenderer OceanRenderer => oceanMeshRenderer;
+    public Material LegacyRuntimeOceanMaterial => runtimeOceanMaterial;
     public IReadOnlyList<float> LocalOceanDepths => localOceanDepthByCell;
     public int VisualResolution => Mathf.Max(1, resolution);
     public bool IsPlanetInitialized { get; private set; }
@@ -822,6 +823,28 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         LogOceanRendererDiagnostics("GeodesicIcosphere", geodesicOceanMeshRenderer.sharedMaterial, GetGeodesicOceanAppearanceSample(), false);
     }
 
+    public void ApplySharedOceanAppearance()
+    {
+        EnsureLegacyOceanMaterial();
+    }
+
+    public void ApplyLegacyOceanResourceTint(Color resourceTint, float blend01)
+    {
+        EnsureOceanAppearanceInitialized();
+        if (runtimeOceanMaterial == null) EnsureLegacyOceanMaterial();
+        if (runtimeOceanMaterial == null) return;
+
+        OceanAppearanceEvaluation evaluation = OceanAppearanceModel.Evaluate(oceanAppearance, GetLegacyOceanAppearanceSample());
+        Color finalColor = Color.Lerp(evaluation.finalColor, resourceTint, Mathf.Clamp01(blend01));
+        finalColor.a = evaluation.opacity;
+        OceanMaterialBinder.ApplyFinalBaseColor(runtimeOceanMaterial, finalColor);
+        if (oceanMeshRenderer != null && oceanMeshRenderer.sharedMaterial != runtimeOceanMaterial)
+        {
+            Debug.LogWarning($"[OceanVisualDiagnostics] Legacy ocean renderer material was replaced by {GetMaterialName(oceanMeshRenderer.sharedMaterial)}; restoring {runtimeOceanMaterial.name} before applying resource tint.", this);
+            oceanMeshRenderer.sharedMaterial = runtimeOceanMaterial;
+        }
+    }
+
     void EnsureLegacyOceanMaterial()
     {
         EnsureOceanAppearanceInitialized();
@@ -838,6 +861,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         OceanMaterialBinder.Apply(runtimeOceanMaterial, oceanAppearance, evaluation);
         oceanMeshRenderer.sharedMaterial = runtimeOceanMaterial;
     }
+
+    static string GetMaterialName(Material material) => material != null ? material.name : "<none>";
 
     void ReleaseRuntimeOceanMaterial()
     {
@@ -897,7 +922,22 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         string settingsSource = $"PlanetGenerator.oceanAppearance ({nameof(OceanAppearanceSettings)})";
         string shaderName = material != null && material.shader != null ? material.shader.name : "<none>";
         OceanAppearanceEvaluation evaluation = OceanAppearanceModel.Evaluate(oceanAppearance, sample);
-        Debug.Log($"[OceanVisualDiagnostics] renderer={rendererType}, settingsSource={settingsSource}, baseColorBound={evaluation.finalColor}, opacityBound={evaluation.opacity:F3}, shader={shaderName}, oxygenation01={sample.oxygenation01:F3}, deprecatedFallbackFieldsUsed={deprecatedFallbackFieldsUsed}", this);
+        string materialName = material != null ? material.name : "<none>";
+        string sharedMaterialName = rendererType == "LegacyCubeSphere" && oceanMeshRenderer != null ? GetMaterialName(oceanMeshRenderer.sharedMaterial) : materialName;
+        string writtenColors = OceanMaterialBinder.DescribeColorWrites(material, evaluation.finalColor);
+        string missingProperties = OceanMaterialBinder.DescribeMissingExpectedProperties(material);
+        bool legacyMaterialIntact = rendererType != "LegacyCubeSphere" || oceanMeshRenderer == null || oceanMeshRenderer.sharedMaterial == runtimeOceanMaterial;
+        Debug.Log($"[OceanVisualDiagnostics] renderer={rendererType}, material={materialName}, shader={shaderName}, evaluatedFinalColor={evaluation.finalColor}, opacityBound={evaluation.opacity:F3}, shaderColorPropertiesWritten={writtenColors}, expectedPropertiesMissing={missingProperties}, rendererSharedMaterial={sharedMaterialName}, legacyRuntimeMaterialIntact={legacyMaterialIntact}, oxygenation01={sample.oxygenation01:F3}, deprecatedFallbackFieldsUsed={deprecatedFallbackFieldsUsed}", this);
+        if (rendererType == "LegacyCubeSphere") StartCoroutine(CheckLegacyOceanMaterialNextFrame(evaluation.finalColor));
+    }
+
+    System.Collections.IEnumerator CheckLegacyOceanMaterialNextFrame(Color expectedColor)
+    {
+        yield return null;
+        if (oceanMeshRenderer == null || runtimeOceanMaterial == null) yield break;
+        bool materialStillBound = oceanMeshRenderer.sharedMaterial == runtimeOceanMaterial;
+        string currentWrites = OceanMaterialBinder.DescribeColorWrites(runtimeOceanMaterial, expectedColor);
+        Debug.Log($"[OceanVisualDiagnostics] oneFrameLater materialStillBound={materialStillBound}, runtimeMaterial={runtimeOceanMaterial.name}, rendererSharedMaterial={GetMaterialName(oceanMeshRenderer.sharedMaterial)}, finalColorProperties={currentWrites}", this);
     }
 
     float GetGeodesicMinimumTerrainOffset() => Mathf.Min(geodesicMinimumTerrainOffset, geodesicMaximumTerrainOffset);
