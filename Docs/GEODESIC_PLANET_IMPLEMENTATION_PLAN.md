@@ -1119,3 +1119,17 @@ Potential future work, not completed by this refactor:
 - faster nearest-cell lookup acceleration for very high simulation subdivisions.
 
 These are intentionally deferred until the lightweight render-only builder and collider separation are validated in Unity.
+
+### Direction-to-surface sampling optimization note
+
+A subsequent profiling pass found terrain displacement, collider vertex generation, ocean colour sampling, and debug line generation all cost about 0.283 ms per sampled direction. The common path was `GetSurfaceRadiusAtDirection(direction)` in geodesic mode, which evaluates raw terrain, checks ocean/bathymetry state, calls `DirectionToGeodesicCell(direction)`, and then interpolates seafloor radius from the nearest ocean simulation cell and its real 5/6 neighbors.
+
+Before optimization, each uncached geodesic query performed an O(simulationCellCount) scan over every simulation-cell direction inside `DirectionToGeodesicCell`. With simulation subdivision 6, that meant up to 40,962 dot-product candidates per output vertex before the bounded neighbor interpolation. Debug rendering amplified the issue because shared dual-corner endpoints were sampled repeatedly while emitting line vertices.
+
+The optimized render/collider/ocean generation path uses immutable `IcosphereDirectionMapping` data cached by `(simulationSubdivision, targetSubdivision, mappingVersion)`. Each target vertex stores its nearest authoritative simulation cell plus the bounded neighbor indices and precomputed angular weights needed to reproduce the existing seafloor interpolation. Runtime sampling for mapped geometry is therefore O(1) plus at most the real neighbor count of the mapped cell, rather than O(simulationCellCount). When target subdivision equals simulation subdivision, the mapping validates one-to-one unit direction identity before using direct cell-index correspondence.
+
+For target subdivisions higher than the simulation subdivision, mappings are built by starting from the simulation subdivision unit icosphere and carrying compact candidate simulation-cell sets through deterministic midpoint subdivision. Each target direction resolves its nearest cell from that small carried candidate set, preserving deterministic tie order without scanning all simulation cells per vertex. Lower-than-simulation target subdivisions validate prefix identity against the authoritative simulation topology and use direct cell-index correspondence where possible; only unexpected geometry ordering falls back to a one-time brute-force mapping build, after which sampling remains bounded.
+
+The mapping cache is topology-only and independent of terrain seed, terrain settings, sea level, bathymetry values, ocean masks, colours, and generated Unity meshes. Seed/settings-dependent displaced positions are regenerated each planet generation. Debug rendering now caches unique sampled debug directions for the current line mesh build so repeated shared dual-corner endpoints no longer repeat the full surface-radius query.
+
+Development diagnostics now aggregate surface-radius query counts, direction-to-cell query counts, candidate cells inspected, terrain-noise evaluations, bathymetry interpolations, mapping cache hits, and mapping cache misses once per generation. Unity Play Mode before/after timings and maximum surface-radius deviation still need to be recorded locally; do not claim runtime speedups until those measurements exist.
