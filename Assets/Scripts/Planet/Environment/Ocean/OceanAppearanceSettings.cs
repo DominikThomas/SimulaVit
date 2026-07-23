@@ -99,7 +99,7 @@ public static class OceanAppearanceModel
         Color finalColor = baseColor;
         finalColor = Color.Lerp(finalColor, settings.dissolvedFe2Tint, SaturatingContribution(fe2, settings.dissolvedFe2TintStrength));
         finalColor = Color.Lerp(finalColor, settings.suspendedFeOxTint, SaturatingContribution(feOx, settings.suspendedFeOxTurbidityStrength));
-        finalColor = Color.Lerp(finalColor, settings.sulfurTint, SaturatingContribution(sulfur, settings.sulfurTintStrength));
+        finalColor = Color.Lerp(finalColor, settings.sulfurTint, SaturatingContribution(sulfur, settings.suspendedSulfurTintStrength));
         if (ice > 0f && settings.iceTintStrength > 0f)
         {
             finalColor = Color.Lerp(finalColor, Color.white, Mathf.Clamp01(ice * settings.iceTintStrength));
