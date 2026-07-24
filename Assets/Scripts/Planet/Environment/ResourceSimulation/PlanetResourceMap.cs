@@ -4487,6 +4487,11 @@ public class PlanetResourceMap : MonoBehaviour
 
         ResolveSunReferences();
 
+        if (sunSkyRotator != null && sunSkyRotator.IsSunDirectionValid)
+        {
+            return sunSkyRotator.PlanetToSunDirectionWorld;
+        }
+
         if (sunLight != null && sunLight.type == LightType.Directional)
         {
             return (-sunLight.transform.forward).normalized;

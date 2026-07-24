@@ -1447,3 +1447,45 @@ Not implemented in the OceanWorld phase:
 ## 18.5 Acceptance criteria for the next phase
 
 After OceanWorld lands, the next architectural task is the isolated geodesic surface-temperature field, not another bathymetry expansion, unless testing reveals a concrete bathymetry defect that blocks later temperature, resource-grid, or layered-ocean work.
+
+---
+
+# 19. Authoritative sun direction and geodesic main-light prerequisite
+
+## 19.1 Confirmed pre-correction architecture and cause
+
+`SunSkyRotator` on the PlanetScene `Directional Light` already owned the apparent solar orbit. At runtime it created a separate quad named `Sun Visual`, placed that quad relative to the planet, and billboarded the quad toward the camera in `LateUpdate`. The visual had no light component. The scene contained one enabled directional light, but `RenderSettings.sun` was unassigned in scene serialization. The legacy cube-sphere used its existing URP-lit runtime material and therefore responded to that scene light.
+
+The static geodesic illumination had two confirmed causes. `GeodesicVertexColorURP` was a custom shader using a fixed material `_LightDirection` rather than URP main-light data, while `GeodesicOceanURP` applied only depth colour, ambient response, and Fresnel. Moving/billboarding the generated visual therefore could not change either shader's illumination. The visual transform's forward direction was also camera-dependent and was not a valid physical-light input.
+
+Legacy `PlanetResourceMap` temperature/insolation code already used `max(0, dot(surfaceDirection, sunDirection))`. Its normal runtime fallback interpreted `-DirectionalLight.transform.forward` as planet-to-sun, while day-phase sampling from `SunSkyRotator` previously returned the opposite ray direction. The provider now makes that sign convention explicit and the legacy consumer prefers the authoritative property. This work does not add or migrate a geodesic temperature field.
+
+## 19.2 Ownership and synchronization contract
+
+`SunSkyRotator` is the single authoritative owner because it already owns orbit phase, seasonal declination, simulation-speed/pause coupling, sky rotation, and visible-sun placement. Future code must read `PlanetToSunDirectionWorld` for world-space insolation normals. `SunToPlanetDirectionWorld` is the opposite world-space direction in which parallel sunlight rays travel. `CurrentDirectionalLight` identifies the physical light, and `IsSunDirectionValid` guards use before initialization.
+
+After orbit movement, `LateUpdate` derives planet-to-sun from `Sun Visual.position - planetCenter.position`; it never reads the billboard's forward vector. The controller rotates the separate directional light so its transform forward equals `SunToPlanetDirectionWorld`, using a stable alternate up vector near the world-up poles. Unity/URP's convention is verified by both the existing legacy calculation and URP's main-light API: a directional light emits along transform forward, while shader `Light.direction` points from the surface toward the light. Colour, intensity, and shadow configuration are untouched. The controller assigns its light to `RenderSettings.sun` when that slot is unassigned or already references the same light.
+
+This synchronization changes only transform rotation and compact diagnostic state. It performs no mesh regeneration, vertex-colour recalculation, material instantiation, or repeated scene search per frame. Scene-wide light discovery occurs once during initialization solely to warn about competing enabled directional lights.
+
+## 19.3 Terrain, ocean, and diagnostics
+
+Both geodesic shaders now transform normals into world space and consume URP `GetMainLight`, including main-light colour, Lambertian N-dot-L diffuse response, attenuation, and available main-light shadow attenuation. Terrain vertex colour remains its albedo. Its default ambient strength is a low visual nightside floor and its diffuse strength defaults to one; ambient is not thermal energy and must never feed temperature. Ocean depth colour, transparency, opacity, Fresnel, runtime material ownership, and future chemistry property bindings remain intact while the same main light darkens its nightside.
+
+Optional, non-per-frame diagnostics report both authoritative directions, physical-light forward, angular error, light names, `RenderSettings.sun`, terrain/ocean runtime material and shader names, and main-light support. The Inspector exposes read-only provider/light/direction/error/support state and warnings for a missing physical light or excessive mismatch. Initialization also warns when multiple enabled directional lights compete.
+
+The spherical day/night boundary is normal-based and therefore works when the planet rotates in world space, when the apparent sun direction moves, and when both are stationary. Camera motion only changes the visual billboard. URP main-light shadow variants and existing light shadow settings are preserved, but detailed terrain self-shadowing is not an acceptance requirement and depends on URP shadow-map configuration and mesh casting. No atmospheric scattering is implemented; the existing atmosphere path is unchanged.
+
+This visual and architectural correction is a prerequisite to the next major phase, **Isolated geodesic surface-temperature scalar**. That phase should compute `max(0, dot(surfaceNormalWorld, sunSkyRotator.PlanetToSunDirectionWorld))` and must not infer energy from shader ambient strength.
+
+## 19.4 Visible-sun apparent horizon correction
+
+The original sunset appearance did calculate a camera-relative angular separation, but it defined the planet limb with the serialized `SunSkyRotator.planetRadius`. That value was refreshed only from `PlanetGenerator.radius`, the base radius, and therefore ignored the current generated terrain maximum and visible ocean shell. A broad fixed angular transition was then also used for colour and brightness on both sides of that estimated limb. It happened to match the legacy camera composition, but a differently sized geodesic silhouette made the warm transition and centre-brightness change occur at the wrong apparent position. The billboard orientation was not used for this calculation, and normal depth testing already provided exact per-pixel clipping against opaque terrain.
+
+`PlanetGenerator.CurrentVisibleOuterRadius` is now the grid-independent opaque/liquid silhouette API. For either legacy or geodesic generation it uses the current generated render-terrain maximum and, when ocean rendering is enabled, the greater of that terrain radius and the current water-shell radius. Thus ManualOffset and TargetAreaCoverage use their resolved sea level, OceanWorld uses its global ocean-shell radius, ocean-disabled planets use terrain alone, and the atmosphere shell is deliberately excluded. Mode selection resets the cached generated maximum so the previous mode cannot temporarily supply a stale horizon.
+
+Every visual update uses degrees consistently. It computes camera-to-planet and camera-to-sun directions from positions, their angular separation, `asin(visibleWorldRadius / cameraPlanetDistance)` for apparent planet radius, and separation minus planet angular radius for signed sun-centre height above the limb. The bright disc's apparent angular radius is derived from the existing billboard scale, procedural texture `coreRadius`, and current camera-to-sun distance; no grid-specific or fixed apparent-size constant is required.
+
+Sunset colour, central-disc visibility, and glow are separate factors. Colour warms over the configurable horizon-relative band while the centre is still above the limb. Central-disc visibility uses a smoothstep spanning one derived sun-core radius on either side of the limb, giving approximately one, one-half, and zero at one radius above, centred on, and one radius below the limb. Existing depth testing remains authoritative for the actual partial-disc shape rather than uniformly cutting the whole billboard. A separately configurable glow factor can fade the textured outer glow after the centre passes behind the limb, and the minimum sunset centre brightness prevents redness alone from erasing a still-visible core. These visual factors never modify the authoritative physical Directional Light direction, colour, or intensity.
+
+Compact optional diagnostics report grid mode, camera distance, resolved visible radius, both apparent angular radii, signed limb height, and the three appearance factors once after visual initialization and whenever grid mode changes. Per-frame work is constant-size vector/scalar math plus existing material-property writes: it performs no scene search, allocation, material creation, texture rebuild, or mesh regeneration. Sunset redness remains an artistic visual approximation, not atmospheric scattering or radiative transfer.
