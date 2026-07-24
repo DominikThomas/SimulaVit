@@ -1317,3 +1317,31 @@ Generation diagnostics now report separate timings for oceanic relief generation
 - Seamount chains are procedural approximations, not plate-tectonic hotspot tracks.
 - Vent/hotspot coupling is deliberately deferred, though relief fields are structured for future use.
 - Default new relief strengths are zero/disabled where necessary so existing default planets remain compatible within floating-point tolerance.
+
+## Corrective note: shelf profile ownership and independent variation ranges
+
+A follow-up audit found two issues in the first bathymetry-relief implementation:
+
+- enabling oceanic-island margins blended every coastline toward the island profile through a generic continental-influence value, so broad continental shelves could disappear even when no coastline was truly classified as `OceanicIsland`;
+- continental width variation was centered around a modest nonzero multiplier, so strength and scale changes could move the pattern but could not create coastline reaches with effectively absent shelves.
+
+The corrected profile-selection rule is explicit:
+
+- `ContinentalMargin` uses the continental shelf profile;
+- `ContinentalFragmentOrPlateau` uses the broad continental/fragment profile;
+- `OceanicIsland` uses the oceanic-island margin profile;
+- `MixedMargin` receives only a conservative local island blend from `geodesicMixedMarginOceanicBlendStrength`, and that blend is further gated by actual oceanic relief;
+- `None` does not receive an island profile.
+
+The enable checkbox now only permits island-profile application where coast ownership already supports it; it no longer globally selects or suppresses shelf profiles.
+
+Continental shelf width and shelf-break depth now have independent variation controls:
+
+```text
+localShelfWidth = geodesicShelfWidthDegrees * interpolatedWidthMultiplier
+localShelfBreakDepth = geodesicShelfDepth * interpolatedDepthMultiplier
+```
+
+Width and depth multipliers are bounded by their configured min/max ranges. Strength 0 forces multiplier 1 everywhere; strength 1 uses the complete configured range. Width and depth use separate low-frequency spherical fields and separate scale controls, so changing scale changes patch size/geographic wavelength rather than amplitude. `geodesicShelfWidthDepthCorrelation` can optionally correlate or anticorrelate the two fields.
+
+Diagnostics now report profile usage counts, min/mean/max applied shelf width by profile, applied shelf-break depth min/mean/max, configured multiplier ranges, variation scales, approximate local cell spacing, and coastline counts whose shelf width is below one cell or one-quarter cell. At simulation subdivision 6, deliberately small island widths such as 0.3 degrees may be below cell spacing and render as shelf-free steep margins; generation logs a warning instead of silently clamping them upward.

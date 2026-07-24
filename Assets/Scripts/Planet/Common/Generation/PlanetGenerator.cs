@@ -28,6 +28,15 @@ public enum GeodesicBathymetryRegion : byte
     Basin
 }
 
+public enum GeodesicShelfProfileType : byte
+{
+    None,
+    Continental,
+    FragmentOrPlateau,
+    Mixed,
+    OceanicIsland
+}
+
 public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializationCallbackReceiver
 {
     /// <summary>
@@ -139,11 +148,19 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     [Tooltip("Shallow-break depth for narrow oceanic-island margins.")] [Min(0f)] public float geodesicOceanicIslandShelfDepth = 0.025f;
     [Tooltip("Higher values make oceanic island margins descend more steeply immediately offshore.")] [Min(0.01f)] public float geodesicOceanicIslandSlopeExponent = 0.55f;
     [Range(0f,1f)] public float geodesicOceanicIslandShelfVariationStrength = 0.25f;
+    [Tooltip("Conservative local blend for MixedMargin coastlines. ContinentalMargin and FragmentOrPlateau remain continental; only OceanicIsland receives the full island profile.")] [Range(0f,1f)] public float geodesicMixedMarginOceanicBlendStrength = 0.15f;
     [Header("Geodesic Bathymetry / Continental Shelf Variation")]
-    [Range(0f,1f)] public float geodesicContinentalShelfWidthVariationStrength = 0f;
-    [Range(0f,1f)] public float geodesicContinentalShelfDepthVariationStrength = 0f;
+    [Tooltip("Minimum continental shelf width multiplier used at full width-variation strength. Values near zero allow effectively absent continental shelves.")] [Min(0f)] public float geodesicContinentalShelfMinWidthMultiplier = 0.75f;
+    [Tooltip("Maximum continental shelf width multiplier used at full width-variation strength.")] [Min(0f)] public float geodesicContinentalShelfMaxWidthMultiplier = 1.25f;
+    [Tooltip("Blends shelf width multipliers from exactly 1 at strength 0 to the configured min/max range at strength 1.")] [Range(0f,1f)] public float geodesicContinentalShelfWidthVariationStrength = 0f;
+    [Tooltip("Geographic wavelength control for width variation; changes patch size, not amplitude.")] [Min(0.001f)] public float geodesicContinentalShelfWidthVariationScale = 0.55f;
+    [Tooltip("Minimum continental shelf-break depth multiplier used at full depth-variation strength.")] [Min(0f)] public float geodesicContinentalShelfMinDepthMultiplier = 0.75f;
+    [Tooltip("Maximum continental shelf-break depth multiplier used at full depth-variation strength.")] [Min(0f)] public float geodesicContinentalShelfMaxDepthMultiplier = 1.25f;
+    [Tooltip("Blends shelf-break depth multipliers from exactly 1 at strength 0 to the configured min/max range at strength 1.")] [Range(0f,1f)] public float geodesicContinentalShelfDepthVariationStrength = 0f;
+    [Tooltip("Geographic wavelength control for depth variation; changes patch size, not amplitude.")] [Min(0.001f)] public float geodesicContinentalShelfDepthVariationScale = 0.55f;
     [Range(0f,1f)] public float geodesicContinentalSlopeVariationStrength = 0f;
-    [Min(0.001f)] public float geodesicShelfVariationScale = 0.55f;
+    [Tooltip("Legacy/shared variation scale retained for slope variation and older scenes; width/depth now have independent scales.")] [Min(0.001f)] public float geodesicShelfVariationScale = 0.55f;
+    [Tooltip("Positive values make broad shelves tend to be deeper; negative values make broad shelves tend to be shallower. Zero keeps width and depth independent.")] [Range(-1f,1f)] public float geodesicShelfWidthDepthCorrelation = 0f;
     [Header("Geodesic Bathymetry / Oceanic Ridges and Plateaus")]
     [Min(0f)] public float geodesicOceanicRidgeStrength = 0f;
     [Min(0.001f)] public float geodesicOceanicRidgeScale = 1.8f;
@@ -368,7 +385,12 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     private float[] geodesicContinentalShelfInfluenceByCell;
     private float[] geodesicLocalShelfWidthMultiplierByCell;
     private float[] geodesicLocalShelfDepthByCell;
+    private float[] geodesicOceanicIslandShelfInfluenceByCell;
+    private float[] geodesicContinentalProfileShelfWidthByCell;
+    private float[] geodesicFinalShelfWidthByCell;
+    private float[] geodesicApproxCellSpacingDegreesByCell;
     private GeodesicCoastType[] geodesicCoastTypeByCell;
+    private GeodesicShelfProfileType[] geodesicShelfProfileTypeByCell;
     private GeodesicBathymetryRegion[] geodesicBathymetryRegion;
     private bool[] geodesicOceanMask;
     private byte[] geodesicOceanNeighborCounts;
@@ -1268,9 +1290,15 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     }
     public float GetGeodesicCellContinentalInfluence01(int cellIndex) => geodesicContinentalInfluenceByCell != null && cellIndex >= 0 && cellIndex < geodesicContinentalInfluenceByCell.Length ? geodesicContinentalInfluenceByCell[cellIndex] : 0f;
     public string GetGeodesicCellCoastType(int cellIndex) => geodesicCoastTypeByCell != null && cellIndex >= 0 && cellIndex < geodesicCoastTypeByCell.Length ? geodesicCoastTypeByCell[cellIndex].ToString() : "None";
+    public float GetGeodesicCellContinentalShelfInfluence01(int cellIndex) => geodesicContinentalShelfInfluenceByCell != null && cellIndex >= 0 && cellIndex < geodesicContinentalShelfInfluenceByCell.Length ? geodesicContinentalShelfInfluenceByCell[cellIndex] : 1f;
     public int GetGeodesicCellLandComponentId(int cellIndex) => geodesicLandComponentIdByCell != null && cellIndex >= 0 && cellIndex < geodesicLandComponentIdByCell.Length ? geodesicLandComponentIdByCell[cellIndex] : -1;
     public float GetGeodesicCellLocalShelfWidthMultiplier(int cellIndex) => geodesicLocalShelfWidthMultiplierByCell != null && cellIndex >= 0 && cellIndex < geodesicLocalShelfWidthMultiplierByCell.Length ? geodesicLocalShelfWidthMultiplierByCell[cellIndex] : 1f;
     public float GetGeodesicCellLocalShelfDepth(int cellIndex) => geodesicLocalShelfDepthByCell != null && cellIndex >= 0 && cellIndex < geodesicLocalShelfDepthByCell.Length ? geodesicLocalShelfDepthByCell[cellIndex] : geodesicShelfDepth;
+    public string GetGeodesicCellShelfProfileType(int cellIndex) => geodesicShelfProfileTypeByCell != null && cellIndex >= 0 && cellIndex < geodesicShelfProfileTypeByCell.Length ? geodesicShelfProfileTypeByCell[cellIndex].ToString() : "None";
+    public float GetGeodesicCellOceanicIslandShelfInfluence01(int cellIndex) => geodesicOceanicIslandShelfInfluenceByCell != null && cellIndex >= 0 && cellIndex < geodesicOceanicIslandShelfInfluenceByCell.Length ? geodesicOceanicIslandShelfInfluenceByCell[cellIndex] : 0f;
+    public float GetGeodesicCellContinentalProfileShelfWidthDegrees(int cellIndex) => geodesicContinentalProfileShelfWidthByCell != null && cellIndex >= 0 && cellIndex < geodesicContinentalProfileShelfWidthByCell.Length ? geodesicContinentalProfileShelfWidthByCell[cellIndex] / Mathf.Max(0.0001f, BasePlanetRadius) * Mathf.Rad2Deg : geodesicShelfWidthDegrees;
+    public float GetGeodesicCellFinalShelfWidthDegrees(int cellIndex) => geodesicFinalShelfWidthByCell != null && cellIndex >= 0 && cellIndex < geodesicFinalShelfWidthByCell.Length ? geodesicFinalShelfWidthByCell[cellIndex] / Mathf.Max(0.0001f, BasePlanetRadius) * Mathf.Rad2Deg : geodesicShelfWidthDegrees;
+    public float GetGeodesicCellApproxCellSpacingDegrees(int cellIndex) => geodesicApproxCellSpacingDegreesByCell != null && cellIndex >= 0 && cellIndex < geodesicApproxCellSpacingDegreesByCell.Length ? geodesicApproxCellSpacingDegreesByCell[cellIndex] : EstimateMeanGeodesicCellSpacingDegrees();
     public float GetGeodesicCellRidgeContribution(int cellIndex) => geodesicOceanicRidgeReliefByCell != null && cellIndex >= 0 && cellIndex < geodesicOceanicRidgeReliefByCell.Length ? geodesicOceanicRidgeReliefByCell[cellIndex] : 0f;
     public float GetGeodesicCellPlateauContribution(int cellIndex) => geodesicOceanicPlateauReliefByCell != null && cellIndex >= 0 && cellIndex < geodesicOceanicPlateauReliefByCell.Length ? geodesicOceanicPlateauReliefByCell[cellIndex] : 0f;
     public float GetGeodesicCellSeamountContribution(int cellIndex) => geodesicSeamountReliefByCell != null && cellIndex >= 0 && cellIndex < geodesicSeamountReliefByCell.Length ? geodesicSeamountReliefByCell[cellIndex] : 0f;
@@ -1411,7 +1439,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
         int count = GeodesicTopology.CellCount;
         geodesicSeafloorRadius = new float[count]; geodesicBaseWaterDepth = new float[count]; geodesicWaterDepth = new float[count]; geodesicDistanceToShore = new float[count]; geodesicBasinNoiseContribution = new float[count]; geodesicBathymetryRegion = new GeodesicBathymetryRegion[count]; geodesicOceanMask = new bool[count]; geodesicOceanNeighborCounts = new byte[count]; geodesicCoastlineMask = new bool[count];
-        geodesicContinentalInfluenceByCell = new float[count]; geodesicLandComponentIdByCell = new int[count]; geodesicContinentalShelfInfluenceByCell = new float[count]; geodesicLocalShelfWidthMultiplierByCell = new float[count]; geodesicLocalShelfDepthByCell = new float[count]; geodesicCoastTypeByCell = new GeodesicCoastType[count];
+        geodesicContinentalInfluenceByCell = new float[count]; geodesicLandComponentIdByCell = new int[count]; geodesicContinentalShelfInfluenceByCell = new float[count]; geodesicLocalShelfWidthMultiplierByCell = new float[count]; geodesicLocalShelfDepthByCell = new float[count]; geodesicOceanicIslandShelfInfluenceByCell = new float[count]; geodesicContinentalProfileShelfWidthByCell = new float[count]; geodesicFinalShelfWidthByCell = new float[count]; geodesicApproxCellSpacingDegreesByCell = new float[count]; geodesicCoastTypeByCell = new GeodesicCoastType[count]; geodesicShelfProfileTypeByCell = new GeodesicShelfProfileType[count];
         for (int i = 0; i < count; i++) { geodesicLandComponentIdByCell[i] = -1; geodesicDistanceToShore[i] = -1f; }
 
         var reliefWatch = System.Diagnostics.Stopwatch.StartNew();
@@ -1532,19 +1560,44 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         int count = GeodesicTopology.CellCount;
         for (int i = 0; i < count; i++)
         {
-            float influence = 0f; GeodesicCoastType type = GeodesicCoastType.None; int samples = 0;
-            if (!geodesicOceanMask[i]) { influence = geodesicContinentalInfluenceByCell[i]; type = influence > .55f ? GeodesicCoastType.ContinentalMargin : GeodesicCoastType.OceanicIsland; samples = 1; }
+            geodesicCoastTypeByCell[i] = GeodesicCoastType.None;
+            geodesicContinentalShelfInfluenceByCell[i] = 1f;
+            if (geodesicOceanMask[i] && !geodesicCoastlineMask[i]) continue;
+
+            float sumContinent = 0f, maxContinent = 0f, sumPlateau = 0f, sumOceanic = 0f;
+            int adjacentLand = 0;
+            if (!geodesicOceanMask[i])
+            {
+                sumContinent += geodesicContinentalInfluenceByCell[i];
+                maxContinent = geodesicContinentalInfluenceByCell[i];
+                sumPlateau += geodesicOceanicPlateauReliefByCell != null ? geodesicOceanicPlateauReliefByCell[i] : 0f;
+                sumOceanic += geodesicTotalOceanicReliefByCell != null ? geodesicTotalOceanicReliefByCell[i] : 0f;
+                adjacentLand = 1;
+            }
             for (int n = 0; n < GeodesicTopology.NeighborCounts[i]; n++)
             {
                 int nb = GeodesicTopology.Neighbors6[i * 6 + n]; if (nb < 0 || nb >= count || geodesicOceanMask[nb]) continue;
-                float ci = geodesicContinentalInfluenceByCell[nb]; float oi = geodesicTotalOceanicReliefByCell != null ? geodesicTotalOceanicReliefByCell[nb] : 0f;
-                float local = Mathf.Clamp01(ci * 1.25f + geodesicOceanicPlateauReliefByCell[nb] * 6f - oi * 1.5f);
-                influence += local; samples++;
+                float ci = geodesicContinentalInfluenceByCell[nb];
+                sumContinent += ci; maxContinent = Mathf.Max(maxContinent, ci);
+                sumPlateau += geodesicOceanicPlateauReliefByCell != null ? geodesicOceanicPlateauReliefByCell[nb] : 0f;
+                sumOceanic += geodesicTotalOceanicReliefByCell != null ? geodesicTotalOceanicReliefByCell[nb] : 0f;
+                adjacentLand++;
             }
-            if (samples > 0) influence /= samples;
-            geodesicContinentalShelfInfluenceByCell[i] = Mathf.SmoothStep(0f, 1f, influence);
-            if (samples == 0) type = GeodesicCoastType.None; else if (influence > .68f) type = GeodesicCoastType.ContinentalMargin; else if (influence > .42f) type = GeodesicCoastType.ContinentalFragmentOrPlateau; else if (influence > .25f) type = GeodesicCoastType.MixedMargin; else type = GeodesicCoastType.OceanicIsland;
+            if (adjacentLand <= 0) continue;
+            float meanContinent = sumContinent / adjacentLand;
+            float meanPlateau = sumPlateau / adjacentLand;
+            float meanOceanic = sumOceanic / adjacentLand;
+            bool strongContinental = meanContinent >= .52f || maxContinent >= .68f;
+            bool broadPlateau = meanPlateau >= .01f;
+            bool trueOceanicFeature = meanOceanic >= .015f && meanContinent < .38f && !broadPlateau;
+            GeodesicCoastType type;
+            float continentalInfluence;
+            if (strongContinental) { type = GeodesicCoastType.ContinentalMargin; continentalInfluence = 1f; }
+            else if (broadPlateau) { type = GeodesicCoastType.ContinentalFragmentOrPlateau; continentalInfluence = .9f; }
+            else if (trueOceanicFeature) { type = GeodesicCoastType.OceanicIsland; continentalInfluence = 0f; }
+            else { type = GeodesicCoastType.MixedMargin; continentalInfluence = .75f; }
             geodesicCoastTypeByCell[i] = type;
+            geodesicContinentalShelfInfluenceByCell[i] = continentalInfluence;
         }
     }
 
@@ -1692,20 +1745,38 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         float preserve = Mathf.Max(0f, geodesicShorelinePreservationDegrees * Mathf.Deg2Rad * BasePlanetRadius);
         float strength = enableGeodesicBathymetry ? Mathf.Clamp01(geodesicBathymetryStrength) : 0f;
         Vector3 basinOffset = BuildGeodesicVisualSeedOffset(DerivedBathymetrySeed);
-        Vector3 variationOffset = BuildGeodesicVisualSeedOffset(DerivedBathymetrySeed + 313);
+        Vector3 widthOffset = BuildGeodesicVisualSeedOffset(DerivedBathymetrySeed + 313);
+        Vector3 depthOffset = BuildGeodesicVisualSeedOffset(DerivedBathymetrySeed + 719);
+        float meanSpacingDegrees = EstimateMeanGeodesicCellSpacingDegrees();
         var variationWatch = System.Diagnostics.Stopwatch.StartNew();
         for (int i = 0; i < geodesicOceanMask.Length; i++)
         {
             Vector3 dir = GeodesicTopology.CellDirections[i];
-            float var01 = .5f + .5f * SimpleNoise.Evaluate(dir * Mathf.Max(.001f, geodesicShelfVariationScale) + variationOffset);
-            float signed = (var01 - .5f) * 2f;
-            float continentalWidthMul = Mathf.Max(.15f, 1f + signed * geodesicContinentalShelfWidthVariationStrength);
-            float islandWidthMul = Mathf.Max(.15f, 1f + signed * geodesicOceanicIslandShelfVariationStrength);
-            float continentalInfluence = enableGeodesicOceanicIslandMargins && geodesicContinentalShelfInfluenceByCell != null ? geodesicContinentalShelfInfluenceByCell[i] : 1f;
-            float width = Mathf.Lerp(islandWidthMean * islandWidthMul, continentalWidthMean * continentalWidthMul, continentalInfluence);
-            float depth = Mathf.Lerp(geodesicOceanicIslandShelfDepth, geodesicShelfDepth * Mathf.Max(.15f, 1f + signed * geodesicContinentalShelfDepthVariationStrength), continentalInfluence);
-            geodesicLocalShelfWidthMultiplierByCell[i] = width / continentalWidthMean;
-            geodesicLocalShelfDepthByCell[i] = depth;
+            float widthNoise01 = 0.5f + 0.5f * SimpleNoise.Evaluate(dir * Mathf.Max(.001f, geodesicContinentalShelfWidthVariationScale) + widthOffset);
+            float independentDepthNoise01 = 0.5f + 0.5f * SimpleNoise.Evaluate(dir * Mathf.Max(.001f, geodesicContinentalShelfDepthVariationScale) + depthOffset);
+            float corr = Mathf.Clamp(geodesicShelfWidthDepthCorrelation, -1f, 1f);
+            float depthNoise01 = corr >= 0f ? Mathf.Lerp(independentDepthNoise01, widthNoise01, corr) : Mathf.Lerp(independentDepthNoise01, 1f - widthNoise01, -corr);
+            float minWidthMul = Mathf.Min(geodesicContinentalShelfMinWidthMultiplier, geodesicContinentalShelfMaxWidthMultiplier);
+            float maxWidthMul = Mathf.Max(geodesicContinentalShelfMinWidthMultiplier, geodesicContinentalShelfMaxWidthMultiplier);
+            float minDepthMul = Mathf.Min(geodesicContinentalShelfMinDepthMultiplier, geodesicContinentalShelfMaxDepthMultiplier);
+            float maxDepthMul = Mathf.Max(geodesicContinentalShelfMinDepthMultiplier, geodesicContinentalShelfMaxDepthMultiplier);
+            float variedWidthMul = Mathf.Lerp(minWidthMul, maxWidthMul, widthNoise01);
+            float variedDepthMul = Mathf.Lerp(minDepthMul, maxDepthMul, depthNoise01);
+            float widthMul = Mathf.Lerp(1f, variedWidthMul, Mathf.Clamp01(geodesicContinentalShelfWidthVariationStrength));
+            float depthMul = Mathf.Lerp(1f, variedDepthMul, Mathf.Clamp01(geodesicContinentalShelfDepthVariationStrength));
+            float continentalWidth = continentalWidthMean * Mathf.Max(0f, widthMul);
+            float continentalDepth = geodesicShelfDepth * Mathf.Max(0f, depthMul);
+            float oceanicBlend = ResolveOceanicIslandProfileInfluence(i);
+            float islandVarNoise = 0.5f + 0.5f * SimpleNoise.Evaluate(dir * Mathf.Max(.001f, geodesicContinentalShelfWidthVariationScale) + widthOffset * .41f);
+            float islandWidthMul = Mathf.Max(0f, 1f + (islandVarNoise - 0.5f) * 2f * geodesicOceanicIslandShelfVariationStrength);
+            float finalWidth = Mathf.Lerp(continentalWidth, islandWidthMean * islandWidthMul, oceanicBlend);
+            float finalDepth = Mathf.Lerp(continentalDepth, geodesicOceanicIslandShelfDepth, oceanicBlend);
+            geodesicOceanicIslandShelfInfluenceByCell[i] = oceanicBlend;
+            geodesicContinentalProfileShelfWidthByCell[i] = continentalWidth;
+            geodesicFinalShelfWidthByCell[i] = finalWidth;
+            geodesicApproxCellSpacingDegreesByCell[i] = EstimateLocalGeodesicCellSpacingDegrees(i, meanSpacingDegrees);
+            geodesicLocalShelfWidthMultiplierByCell[i] = finalWidth / continentalWidthMean;
+            geodesicLocalShelfDepthByCell[i] = finalDepth;
         }
         variationWatch.Stop(); geodesicLastShelfVariationMilliseconds = variationWatch.Elapsed.TotalMilliseconds;
         float maxShore = 0f; for (int i = 0; i < geodesicDistanceToShore.Length; i++) if (geodesicOceanMask[i]) maxShore = Mathf.Max(maxShore, geodesicDistanceToShore[i]);
@@ -1713,12 +1784,12 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         {
             if (!geodesicOceanMask[i]) { geodesicSeafloorRadius[i] = geodesicRawTerrainRadius[i]; geodesicBathymetryRegion[i] = GeodesicBathymetryRegion.Land; continue; }
             float d = Mathf.Max(0f, geodesicDistanceToShore[i]);
-            float shelfWidth = Mathf.Max(.0001f, geodesicLocalShelfWidthMultiplierByCell[i] * continentalWidthMean);
+            float shelfWidth = Mathf.Max(.000001f, geodesicFinalShelfWidthByCell[i]);
             float shelfDepthSafe = Mathf.Clamp(geodesicLocalShelfDepthByCell[i], 0f, maxDepthSafe);
-            float continentalInfluence = enableGeodesicOceanicIslandMargins && geodesicContinentalShelfInfluenceByCell != null ? geodesicContinentalShelfInfluenceByCell[i] : 1f;
-            float exponentNoise = SimpleNoise.Evaluate(GeodesicTopology.CellDirections[i] * Mathf.Max(.001f, geodesicShelfVariationScale) + variationOffset * .53f);
+            float oceanicBlend = geodesicOceanicIslandShelfInfluenceByCell != null ? geodesicOceanicIslandShelfInfluenceByCell[i] : 0f;
+            float exponentNoise = SimpleNoise.Evaluate(GeodesicTopology.CellDirections[i] * Mathf.Max(.001f, geodesicShelfVariationScale) + widthOffset * .53f);
             float continentalExponent = Mathf.Max(.01f, geodesicContinentalSlopeExponent * (1f + exponentNoise * geodesicContinentalSlopeVariationStrength));
-            float exponent = Mathf.Lerp(geodesicOceanicIslandSlopeExponent, continentalExponent, continentalInfluence);
+            float exponent = Mathf.Lerp(continentalExponent, geodesicOceanicIslandSlopeExponent, oceanicBlend);
             float shelfT = Mathf.Clamp01(d / shelfWidth);
             float shelfTarget = shelfDepthSafe * Mathf.SmoothStep(0f, 1f, shelfT);
             float deepRange = Mathf.Max(shelfWidth, maxShore - shelfWidth);
@@ -1735,10 +1806,51 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
             if (sm > .001f) geodesicBathymetryRegion[i] = GeodesicBathymetryRegion.Seamount;
             else if (plateau > .001f) geodesicBathymetryRegion[i] = GeodesicBathymetryRegion.OceanicBankOrPlateau;
             else if (ridge > .001f) geodesicBathymetryRegion[i] = GeodesicBathymetryRegion.Ridge;
-            else if (d <= shelfWidth && continentalInfluence > .5f) geodesicBathymetryRegion[i] = GeodesicBathymetryRegion.ContinentalShelf;
+            else if (d <= shelfWidth && oceanicBlend < .5f) geodesicBathymetryRegion[i] = GeodesicBathymetryRegion.ContinentalShelf;
             else if (d <= shelfWidth) geodesicBathymetryRegion[i] = GeodesicBathymetryRegion.OceanicIslandMargin;
             else geodesicBathymetryRegion[i] = GeodesicBathymetryRegion.Basin;
         }
+    }
+
+    float ResolveOceanicIslandProfileInfluence(int cellIndex)
+    {
+        GeodesicCoastType coastType = geodesicCoastTypeByCell != null && cellIndex >= 0 && cellIndex < geodesicCoastTypeByCell.Length ? geodesicCoastTypeByCell[cellIndex] : GeodesicCoastType.None;
+        if (!enableGeodesicOceanicIslandMargins || coastType == GeodesicCoastType.None) { SetShelfProfile(cellIndex, GeodesicShelfProfileType.Continental); return 0f; }
+        if (coastType == GeodesicCoastType.OceanicIsland) { SetShelfProfile(cellIndex, GeodesicShelfProfileType.OceanicIsland); return 1f; }
+        if (coastType == GeodesicCoastType.MixedMargin)
+        {
+            float relief = geodesicTotalOceanicReliefByCell != null ? Mathf.Clamp01(geodesicTotalOceanicReliefByCell[cellIndex] / Mathf.Max(0.0001f, geodesicSeamountAmplitude + geodesicOceanicRidgeStrength + geodesicOceanicPlateauStrength)) : 0f;
+            float blend = Mathf.Clamp01(geodesicMixedMarginOceanicBlendStrength) * relief;
+            SetShelfProfile(cellIndex, blend > 0.001f ? GeodesicShelfProfileType.Mixed : GeodesicShelfProfileType.Continental);
+            return blend;
+        }
+        SetShelfProfile(cellIndex, coastType == GeodesicCoastType.ContinentalFragmentOrPlateau ? GeodesicShelfProfileType.FragmentOrPlateau : GeodesicShelfProfileType.Continental);
+        return 0f;
+    }
+
+    void SetShelfProfile(int cellIndex, GeodesicShelfProfileType profile)
+    {
+        if (geodesicShelfProfileTypeByCell != null && cellIndex >= 0 && cellIndex < geodesicShelfProfileTypeByCell.Length) geodesicShelfProfileTypeByCell[cellIndex] = profile;
+    }
+
+    float EstimateMeanGeodesicCellSpacingDegrees()
+    {
+        if (GeodesicTopology == null || GeodesicTopology.CellCount <= 0) return 0f;
+        float meanArea = (4f * Mathf.PI) / GeodesicTopology.CellCount;
+        return Mathf.Sqrt(meanArea) * Mathf.Rad2Deg;
+    }
+
+    float EstimateLocalGeodesicCellSpacingDegrees(int cellIndex, float fallbackDegrees)
+    {
+        if (GeodesicTopology == null || cellIndex < 0 || cellIndex >= GeodesicTopology.CellCount) return fallbackDegrees;
+        float sum = 0f; int c = 0;
+        for (int n = 0; n < GeodesicTopology.NeighborCounts[cellIndex]; n++)
+        {
+            int nb = GeodesicTopology.Neighbors6[cellIndex * 6 + n];
+            if (nb < 0 || nb >= GeodesicTopology.CellCount) continue;
+            sum += GeodesicTopology.NeighborAngularDistances6[cellIndex * 6 + n] * Mathf.Rad2Deg; c++;
+        }
+        return c > 0 ? sum / c : fallbackDegrees;
     }
 
     void LogGeodesicBathymetryDiagnostics(int oceanCountBefore)
@@ -1751,24 +1863,35 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
             ocean++; oceanArea += area; coast += geodesicCoastlineMask[i] ? 1 : 0; float d = geodesicWaterDepth[i]; depths.Add(d); depthArea += d * area; minD = Mathf.Min(minD, d); maxD = Mathf.Max(maxD, d); minFloor = Mathf.Min(minFloor, geodesicSeafloorRadius[i]); maxFloor = Mathf.Max(maxFloor, geodesicSeafloorRadius[i]); maxShore = Mathf.Max(maxShore, geodesicDistanceToShore[i]); if (geodesicBathymetryRegion[i] == GeodesicBathymetryRegion.ContinentalShelf) shelf++; else if (geodesicBathymetryRegion[i] == GeodesicBathymetryRegion.OceanicIslandMargin) shallow++; else if (geodesicBathymetryRegion[i] == GeodesicBathymetryRegion.Basin) deep++; else slope++;
         }
         depths.Sort(); float P(float q) => depths.Count == 0 ? 0f : depths[Mathf.Clamp(Mathf.RoundToInt((depths.Count - 1) * q), 0, depths.Count - 1)]; if (ocean == 0) minD = minFloor = maxFloor = 0f;
-        int components = 0, continentalCoasts = 0, fragmentCoasts = 0, islandCoasts = 0, ridgeCells = 0, plateauCells = 0, seamountCells = 0, openOceanShallows = 0; float minWidth = float.PositiveInfinity, maxWidth = 0f, sumWidth = 0f;
+        int components = 0, continentalCoasts = 0, fragmentCoasts = 0, mixedCoasts = 0, islandCoasts = 0, ridgeCells = 0, plateauCells = 0, seamountCells = 0, openOceanShallows = 0; float minWidth = float.PositiveInfinity, maxWidth = 0f, sumWidth = 0f, minDepthApplied = float.PositiveInfinity, maxDepthApplied = 0f, sumDepthApplied = 0f;
+        int belowOneCell = 0, belowQuarterCell = 0; int[] profileCounts = new int[5]; float[] profileMin = new float[5], profileMax = new float[5], profileSum = new float[5]; for (int p = 0; p < profileMin.Length; p++) profileMin[p] = float.PositiveInfinity;
         for (int i = 0; i < count; i++)
         {
             if (geodesicLandComponentIdByCell != null && geodesicLandComponentIdByCell[i] >= components) components = geodesicLandComponentIdByCell[i] + 1;
-            if (geodesicCoastlineMask[i]) { if (geodesicCoastTypeByCell[i] == GeodesicCoastType.ContinentalMargin) continentalCoasts++; else if (geodesicCoastTypeByCell[i] == GeodesicCoastType.ContinentalFragmentOrPlateau || geodesicCoastTypeByCell[i] == GeodesicCoastType.MixedMargin) fragmentCoasts++; else if (geodesicCoastTypeByCell[i] == GeodesicCoastType.OceanicIsland) islandCoasts++; }
+            if (geodesicCoastlineMask[i])
+            {
+                if (geodesicCoastTypeByCell[i] == GeodesicCoastType.ContinentalMargin) continentalCoasts++; else if (geodesicCoastTypeByCell[i] == GeodesicCoastType.ContinentalFragmentOrPlateau) fragmentCoasts++; else if (geodesicCoastTypeByCell[i] == GeodesicCoastType.MixedMargin) mixedCoasts++; else if (geodesicCoastTypeByCell[i] == GeodesicCoastType.OceanicIsland) islandCoasts++;
+                float widthDeg = geodesicFinalShelfWidthByCell != null ? geodesicFinalShelfWidthByCell[i] / Mathf.Max(.0001f, BasePlanetRadius) * Mathf.Rad2Deg : geodesicShelfWidthDegrees;
+                float spacing = geodesicApproxCellSpacingDegreesByCell != null ? geodesicApproxCellSpacingDegreesByCell[i] : EstimateMeanGeodesicCellSpacingDegrees();
+                if (widthDeg < spacing) belowOneCell++;
+                if (widthDeg < spacing * .25f) belowQuarterCell++;
+                int profile = geodesicShelfProfileTypeByCell != null ? Mathf.Clamp((int)geodesicShelfProfileTypeByCell[i], 0, profileCounts.Length - 1) : 0; profileCounts[profile]++; profileMin[profile] = Mathf.Min(profileMin[profile], widthDeg); profileMax[profile] = Mathf.Max(profileMax[profile], widthDeg); profileSum[profile] += widthDeg;
+            }
             if (!geodesicOceanMask[i]) continue;
             float width = geodesicLocalShelfWidthMultiplierByCell != null ? geodesicLocalShelfWidthMultiplierByCell[i] : 1f; minWidth = Mathf.Min(minWidth, width); maxWidth = Mathf.Max(maxWidth, width); sumWidth += width;
+            float depthApplied = geodesicLocalShelfDepthByCell != null ? geodesicLocalShelfDepthByCell[i] : geodesicShelfDepth; minDepthApplied = Mathf.Min(minDepthApplied, depthApplied); maxDepthApplied = Mathf.Max(maxDepthApplied, depthApplied); sumDepthApplied += depthApplied;
             if (geodesicOceanicRidgeReliefByCell != null && geodesicOceanicRidgeReliefByCell[i] > .001f) ridgeCells++;
             if (geodesicOceanicPlateauReliefByCell != null && geodesicOceanicPlateauReliefByCell[i] > .001f) plateauCells++;
             if (geodesicSeamountReliefByCell != null && geodesicSeamountReliefByCell[i] > .001f) seamountCells++;
             if (!geodesicCoastlineMask[i] && geodesicWaterDepth[i] < geodesicMaximumOceanDepth * .5f && geodesicDistanceToShore[i] > geodesicShelfWidthDegrees * Mathf.Deg2Rad * BasePlanetRadius) openOceanShallows++;
         }
-        if (ocean == 0) minWidth = 0f;
+        if (ocean == 0) { minWidth = 0f; minDepthApplied = 0f; }
+        string ProfileStats(GeodesicShelfProfileType profile) { int idx = (int)profile; return profileCounts[idx] > 0 ? $"{profileCounts[idx]}:{profileMin[idx]:F3}/{profileSum[idx] / profileCounts[idx]:F3}/{profileMax[idx]:F3}" : "0:0/0/0"; }
         geodesicOceanCellCount = ocean;
         geodesicCoastlineOceanCellCount = coast;
         achievedGeodesicOceanCellCoveragePercent = count > 0 ? ocean * 100f / count : 0f;
         achievedGeodesicOceanAreaCoveragePercent = areaSum > 0f ? oceanArea * 100f / areaSum : 0f;
-        Debug.Log($"[GeodesicBathymetryDiagnostics] mode={geodesicSeaLevelControlMode}, manualOffset={geodesicSeaLevelOffset:F6}, requestedTargetPercent={geodesicTargetOceanCoveragePercent:F3}, resolvedSeaLevelRadius={resolvedGeodesicSeaLevelRadius:F6}, resolvedSeaLevelOffset={resolvedGeodesicSeaLevelOffset:F6}, oceanCells={ocean}, coastlineOceanCells={coast}, cellCountOceanPercent={achievedGeodesicOceanCellCoveragePercent:F3}, areaWeightedOceanPercent={achievedGeodesicOceanAreaCoveragePercent:F3}, areaWeightedOceanFraction={(areaSum > 0f ? oceanArea / areaSum : 0f):F6}, finalDepthMinMaxMean={minD:F6}/{maxD:F6}/{(oceanArea > 0f ? depthArea / oceanArea : 0f):F6}, percentilesP25P50P75P90={P(.25f):F6}/{P(.5f):F6}/{P(.75f):F6}/{P(.9f):F6}, categoryCounts(islandMargin/continentalShelf/oceanicRelief/basin)={shallow}/{shelf}/{slope}/{deep}, categoryAreaFractionApprox={shallow / (float)Mathf.Max(1, ocean):F3}/{shelf / (float)Mathf.Max(1, ocean):F3}/{slope / (float)Mathf.Max(1, ocean):F3}/{deep / (float)Mathf.Max(1, ocean):F3}, seafloorRadiusMinMax={minFloor:F6}/{maxFloor:F6}, maxShoreDistance={maxShore:F6}, bathymetrySeed={DerivedBathymetrySeed}, simulationSubdivision={geodesicSimulationSubdivisionLevel}, renderSubdivision={geodesicRenderSubdivisionLevel}, landComponents={components}, coastlineByType(continental/fragmentOrMixed/oceanicIsland)={continentalCoasts}/{fragmentCoasts}/{islandCoasts}, shelfWidthMultiplierMinMeanMax={minWidth:F3}/{(ocean > 0 ? sumWidth / ocean : 0f):F3}/{maxWidth:F3}, ridgePlateauSeamountCells={ridgeCells}/{plateauCells}/{seamountCells}, openOceanShallowCells={openOceanShallows}, timingsMs(oceanicRelief/landComponents/coastTypes/shelfVariation/finalBathymetry)={geodesicLastOceanicReliefMilliseconds:F2}/{geodesicLastLandComponentMilliseconds:F2}/{geodesicLastCoastTypeMilliseconds:F2}/{geodesicLastShelfVariationMilliseconds:F2}/{geodesicLastFinalBathymetryMilliseconds:F2}", this);
+        Debug.Log($"[GeodesicBathymetryDiagnostics] mode={geodesicSeaLevelControlMode}, manualOffset={geodesicSeaLevelOffset:F6}, requestedTargetPercent={geodesicTargetOceanCoveragePercent:F3}, resolvedSeaLevelRadius={resolvedGeodesicSeaLevelRadius:F6}, resolvedSeaLevelOffset={resolvedGeodesicSeaLevelOffset:F6}, oceanCells={ocean}, coastlineOceanCells={coast}, cellCountOceanPercent={achievedGeodesicOceanCellCoveragePercent:F3}, areaWeightedOceanPercent={achievedGeodesicOceanAreaCoveragePercent:F3}, areaWeightedOceanFraction={(areaSum > 0f ? oceanArea / areaSum : 0f):F6}, finalDepthMinMaxMean={minD:F6}/{maxD:F6}/{(oceanArea > 0f ? depthArea / oceanArea : 0f):F6}, percentilesP25P50P75P90={P(.25f):F6}/{P(.5f):F6}/{P(.75f):F6}/{P(.9f):F6}, categoryCounts(islandMargin/continentalShelf/oceanicRelief/basin)={shallow}/{shelf}/{slope}/{deep}, categoryAreaFractionApprox={shallow / (float)Mathf.Max(1, ocean):F3}/{shelf / (float)Mathf.Max(1, ocean):F3}/{slope / (float)Mathf.Max(1, ocean):F3}/{deep / (float)Mathf.Max(1, ocean):F3}, seafloorRadiusMinMax={minFloor:F6}/{maxFloor:F6}, maxShoreDistance={maxShore:F6}, bathymetrySeed={DerivedBathymetrySeed}, simulationSubdivision={geodesicSimulationSubdivisionLevel}, renderSubdivision={geodesicRenderSubdivisionLevel}, landComponents={components}, coastlineByType(continental/fragment/mixed/oceanicIsland)={continentalCoasts}/{fragmentCoasts}/{mixedCoasts}/{islandCoasts}, shelfProfileCountsWidthDegMinMeanMax(none/continental/fragment/mixed/island)={ProfileStats(GeodesicShelfProfileType.None)}|{ProfileStats(GeodesicShelfProfileType.Continental)}|{ProfileStats(GeodesicShelfProfileType.FragmentOrPlateau)}|{ProfileStats(GeodesicShelfProfileType.Mixed)}|{ProfileStats(GeodesicShelfProfileType.OceanicIsland)}, shelfWidthMultiplierMinMeanMax={minWidth:F3}/{(ocean > 0 ? sumWidth / ocean : 0f):F3}/{maxWidth:F3}, shelfBreakDepthMinMeanMax={minDepthApplied:F4}/{(ocean > 0 ? sumDepthApplied / ocean : 0f):F4}/{maxDepthApplied:F4}, configuredWidthMultiplierRange={Mathf.Min(geodesicContinentalShelfMinWidthMultiplier, geodesicContinentalShelfMaxWidthMultiplier):F3}-{Mathf.Max(geodesicContinentalShelfMinWidthMultiplier, geodesicContinentalShelfMaxWidthMultiplier):F3}, configuredDepthMultiplierRange={Mathf.Min(geodesicContinentalShelfMinDepthMultiplier, geodesicContinentalShelfMaxDepthMultiplier):F3}-{Mathf.Max(geodesicContinentalShelfMinDepthMultiplier, geodesicContinentalShelfMaxDepthMultiplier):F3}, widthDepthVariationScales={geodesicContinentalShelfWidthVariationScale:F3}/{geodesicContinentalShelfDepthVariationScale:F3}, coastCellsBelowOneCellShelfWidth={belowOneCell}, coastCellsBelowQuarterCellShelfWidth={belowQuarterCell}, ridgePlateauSeamountCells={ridgeCells}/{plateauCells}/{seamountCells}, openOceanShallowCells={openOceanShallows}, timingsMs(oceanicRelief/landComponents/coastTypes/shelfVariation/finalBathymetry)={geodesicLastOceanicReliefMilliseconds:F2}/{geodesicLastLandComponentMilliseconds:F2}/{geodesicLastCoastTypeMilliseconds:F2}/{geodesicLastShelfVariationMilliseconds:F2}/{geodesicLastFinalBathymetryMilliseconds:F2}", this);
         if (geodesicSeaLevelControlMode == GeodesicSeaLevelControlMode.ManualOffset && Mathf.Abs(Mathf.Clamp(geodesicTargetOceanCoveragePercent, 0f, 100f) - achievedGeodesicOceanAreaCoveragePercent) > 0.05f)
         {
             Debug.LogWarning($"[GeodesicSeaLevelDiagnostics] Geodesic Target Ocean Coverage is inactive because mode=ManualOffset; classification is controlled by manualOffset={geodesicSeaLevelOffset:F6}, resolvedSeaLevelRadius={resolvedGeodesicSeaLevelRadius:F6}, achievedAreaWeightedOceanPercent={achievedGeodesicOceanAreaCoveragePercent:F3}.", this);
@@ -1777,6 +1900,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         {
             Debug.LogWarning($"[GeodesicSeaLevelDiagnostics] Geodesic Sea Level Offset is inactive because mode=TargetAreaCoverage; the resolved offset is calculated automatically as {resolvedGeodesicSeaLevelOffset:F6}.", this);
         }
+        if (belowOneCell > 0) Debug.LogWarning($"[GeodesicBathymetryDiagnostics] {belowOneCell} coastline cells have shelf widths below approximate local simulation-cell spacing; meanSpacingDegrees={EstimateMeanGeodesicCellSpacingDegrees():F3}. Narrow values such as 0.3 degrees may intentionally render as effectively shelf-free at subdivision {geodesicSimulationSubdivisionLevel}.", this);
         if (ocean != oceanCountBefore) Debug.LogWarning("[GeodesicBathymetryDiagnostics] Bathymetry changed ocean classification count; this should not happen.", this);
         if (ocean > 0 && shallow == ocean) Debug.LogWarning("[GeodesicBathymetryDiagnostics] All ocean cells are shallow.", this);
         if (ocean > 0 && slope + deep == 0) Debug.LogWarning("[GeodesicBathymetryDiagnostics] No ocean cells reached slope/deep-basin categories.", this);
