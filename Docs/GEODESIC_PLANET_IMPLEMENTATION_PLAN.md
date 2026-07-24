@@ -1190,3 +1190,50 @@ Direction-mapping diagnostics now distinguish original cache-build work from wor
 No Unity Play Mode timings were captured in this non-Unity environment. The code now logs the stages needed to record cold, warm, outlines-disabled, outlines-enabled, menu/regeneration, and legacy/geodesic transition measurements locally, including shoreline distance time and terrain evaluation counts.
 
 Remaining bottlenecks should be re-measured in Unity before making speedup claims. Expected remaining main-thread costs are terrain/noise evaluation for render and collider vertices, MeshCollider cooking, mesh normal recalculation/upload, and any enabled debug-outline mesh construction.
+
+## 2.7 Geodesic ocean classification controls — implemented on `feature/geodesic-ocean-controls`
+
+This pass clarifies ownership of ocean controls without adding ocean layers, chemistry, atmosphere, replicator, or save/load migration work.
+
+### Ocean-control ownership audit
+
+- `enableOcean` remains the shared, serialized ocean enable switch. Legacy cube-sphere generation uses it to enable the legacy ocean mask/mesh and geodesic generation uses it to gate geodesic ocean classification and the geodesic ocean renderer.
+- `oceanCoveragePercent`, `oceanDepth`, `shelfDistance`, `shelfDepth`, `slopeStrength`, `maxOceanDepth`, `basinNoiseScale`, `basinNoiseStrength`, `basinNoiseOffset`, `bathymetrySmoothPasses`, `bathymetrySmoothStrength`, `shorelinePreservationDistance`, and `bathymetryVisualStrength` are legacy cube-sphere ocean and bathymetry controls. Their Inspector tooltips now identify them as legacy where ownership was ambiguous.
+- `geodesicSeaLevelControlMode`, `geodesicSeaLevelOffset`, and `geodesicTargetOceanCoveragePercent` are the geodesic ocean classification controls. They determine the single resolved geodesic sea-level radius used by simulation classification and rendering.
+- `enableGeodesicBathymetry`, `geodesicShelfWidthDegrees`, `geodesicShelfDepth`, `geodesicMaximumOceanDepth`, `geodesicContinentalSlopeExponent`, `geodesicBasinNoiseScale`, `geodesicBasinNoiseStrength`, `geodesicShorelinePreservationDegrees`, `geodesicBathymetrySmoothPasses`, `geodesicBathymetrySmoothStrength`, and `geodesicBathymetryStrength` are geodesic-only bathymetry controls. `geodesicMaximumOceanDepth` is the geodesic maximum ocean-depth authority.
+- `OceanAppearanceSettings` is rendering/appearance ownership shared by legacy and geodesic ocean renderers; it does not classify land or ocean.
+- `oceanCoverageRange` remains a legacy randomization input for `oceanCoveragePercent`. Its randomization clamp is now 0–100 rather than the old hidden 20–70 range.
+
+### Control modes
+
+`GeodesicSeaLevelControlMode.ManualOffset` is the default and preserves prior geodesic behavior:
+
+```csharp
+seaLevelRadius = PlanetGenerator.radius + geodesicSeaLevelOffset
+isOcean = enableOcean && rawTerrainRadius < seaLevelRadius
+```
+
+`geodesicSeaLevelOffset` is a normal float Inspector field rather than a restrictive ranged slider. Zero means sea level is at `BasePlanetRadius`, positive values raise sea level and increase ocean coverage, negative values lower sea level and decrease ocean coverage, and sufficiently large values can intentionally produce no-ocean or all-ocean test planets.
+
+`GeodesicSeaLevelControlMode.TargetAreaCoverage` resolves a sea-level radius from `geodesicTargetOceanCoveragePercent`. The target is approximate physical spherical area, not cell-index percentage. Generation evaluates raw terrain radius once for every simulation cell, sorts cells by raw radius, accumulates `UnitCellAreas * BasePlanetRadius^2`, selects the submerged cumulative area closest to the requested target, and then classifies all cells against one resolved radius. Target 0% explicitly resolves below all raw terrain and classifies every cell as land; target 100% resolves above all raw terrain and classifies every cell as ocean.
+
+### Resolved sea-level ownership and cache rules
+
+`resolvedGeodesicSeaLevelRadius` is runtime generation state owned by `PlanetGenerator`, not by immutable topology, direction-mapping, or render-geometry caches. It is regenerated with the geodesic terrain/classification/bathymetry arrays whenever geodesic generation runs. The same resolved value feeds ocean/land classification, coastline detection, base water depth, final bathymetry depth, geodesic terrain render interpolation, ocean visual depth colouring, collider sampling, picker diagnostics, and generation diagnostics.
+
+Immutable topology and direction-mapping caches remain keyed only by subdivision/topological inputs and must not include sea-level settings. Mutable ocean classification, bathymetry, render displacement, and diagnostics regenerate when control mode, manual offset, target coverage, `enableOcean`, seed, terrain settings, or terrain subdivisions change.
+
+Legacy cache correctness was preserved by including `PlanetGenerator.GenerationVersion` in the legacy planet cache key after legacy coverage endpoints were made explicit. This avoids loading a legacy cache generated under the previous hidden 20–70% threshold semantics.
+
+### Diagnostics and validation status
+
+Generation now logs `GeodesicSeaLevelDiagnostics` with the selected mode, manual offset, requested target coverage, resolved sea-level radius/offset, endpoint status where applicable, selected target cell count where applicable, and target-resolution time. `GeodesicBathymetryDiagnostics` now also logs selected mode, manual offset, requested target coverage, resolved sea-level radius/offset, ocean cell count, coastline ocean cell count, achieved cell-count ocean percentage, and achieved area-weighted ocean percentage.
+
+Static/code-path validation in this non-Unity environment confirmed the following expected edge-case behavior by inspection:
+
+- ManualOffset with a strongly negative offset resolves below terrain, yielding `oceanCells=0` and `coastlineOceanCells=0`; the shoreline-distance heap has no sources and exits without exception, and bathymetry skips all land cells.
+- ManualOffset with a strongly positive offset resolves above terrain, yielding `oceanCells == total cell count` and `coastlineOceanCells=0`; the shoreline-distance heap has no coastline sources and exits without exception, and bathymetry treats missing shore distance as offshore depth input.
+- TargetAreaCoverage 0% uses an explicit all-land endpoint; TargetAreaCoverage 100% uses an explicit all-ocean endpoint.
+- TargetAreaCoverage 10%, 50%, and 90% are resolved by area accumulation, so achieved area-weighted coverage is limited by the area of the last selected simulation cell.
+
+Unity Play Mode validation at simulation subdivisions 5 and 6 still needs to be captured locally for exact requested-versus-achieved coverage tables, picker confirmation, pentagon count confirmation, and before/after phase-2 performance measurements.

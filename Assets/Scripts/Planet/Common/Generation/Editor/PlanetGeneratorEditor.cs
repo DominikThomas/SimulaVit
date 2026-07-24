@@ -4,6 +4,14 @@ using UnityEditor;
 public class PlanetGeneratorEditor : Editor
 {
     private SerializedProperty oceanAppearanceProperty;
+    private static readonly string[] ReadOnlyDiagnostics =
+    {
+        "resolvedGeodesicSeaLevelRadius",
+        "achievedGeodesicOceanCellCoveragePercent",
+        "achievedGeodesicOceanAreaCoveragePercent",
+        "geodesicOceanCellCount",
+        "geodesicCoastlineOceanCellCount"
+    };
 
     private void OnEnable()
     {
@@ -34,9 +42,22 @@ public class PlanetGeneratorEditor : Editor
                 continue;
             }
 
-            EditorGUILayout.PropertyField(property, true);
+            using (new EditorGUI.DisabledScope(IsReadOnlyDiagnostic(property.propertyPath)))
+            {
+                EditorGUILayout.PropertyField(property, true);
+            }
         }
 
         serializedObject.ApplyModifiedProperties();
+    }
+
+    private static bool IsReadOnlyDiagnostic(string propertyPath)
+    {
+        for (int i = 0; i < ReadOnlyDiagnostics.Length; i++)
+        {
+            if (propertyPath == ReadOnlyDiagnostics[i]) return true;
+        }
+
+        return false;
     }
 }
