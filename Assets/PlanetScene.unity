@@ -888,7 +888,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   replicatorManager: {fileID: 0}
-  generationMode: 0
+  generationMode: 1
   geodesicSubdivisionLevel: 6
   geodesicSimulationSubdivisionLevel: 6
   geodesicRenderSubdivisionLevel: 7
@@ -928,6 +928,36 @@ MonoBehaviour:
   geodesicShelfDepth: 0.06
   geodesicMaximumOceanDepth: 0.32
   geodesicContinentalSlopeExponent: 0.1
+  enableGeodesicOceanicIslandMargins: 1
+  geodesicOceanicIslandShelfWidthDegrees: 0.01
+  geodesicOceanicIslandShelfDepth: 0.025
+  geodesicOceanicIslandSlopeExponent: 0.55
+  geodesicOceanicIslandShelfVariationStrength: 0.25
+  geodesicMixedMarginOceanicBlendStrength: 0.15
+  geodesicContinentalShelfMinWidthMultiplier: 0.05
+  geodesicContinentalShelfMaxWidthMultiplier: 1.25
+  geodesicContinentalShelfWidthVariationStrength: 1
+  geodesicContinentalShelfWidthVariationScale: 0.55
+  geodesicContinentalShelfMinDepthMultiplier: 0.75
+  geodesicContinentalShelfMaxDepthMultiplier: 1.25
+  geodesicContinentalShelfDepthVariationStrength: 0.1
+  geodesicContinentalShelfDepthVariationScale: 0.55
+  geodesicContinentalSlopeVariationStrength: 0
+  geodesicShelfVariationScale: 0.55
+  geodesicShelfWidthDepthCorrelation: 0
+  geodesicOceanicRidgeStrength: 0
+  geodesicOceanicRidgeScale: 1.8
+  geodesicOceanicRidgeThreshold: 0.72
+  geodesicOceanicPlateauStrength: 0
+  geodesicOceanicPlateauScale: 0.65
+  enableGeodesicSeamounts: 1
+  geodesicSeamountDensity: 0.18
+  geodesicSeamountAmplitude: 0.12
+  geodesicSeamountRadiusDegrees: 1.5
+  geodesicSeamountChainProbability: 0.35
+  geodesicSeamountChainLength: 4
+  geodesicSeamountChainSpacingDegrees: 3
+  geodesicSeamountEmergenceBias: -0.35
   geodesicBasinNoiseScale: 1.35
   geodesicBasinNoiseStrength: 0.25
   geodesicShorelinePreservationDegrees: 0.7
