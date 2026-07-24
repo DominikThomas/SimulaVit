@@ -12,7 +12,10 @@ public class PlanetGeneratorEditor : Editor
         "achievedGeodesicOceanCellCoveragePercent",
         "achievedGeodesicOceanAreaCoveragePercent",
         "geodesicOceanCellCount",
-        "geodesicCoastlineOceanCellCount"
+        "geodesicCoastlineOceanCellCount",
+        "geodesicMinimumLocalOceanDepth",
+        "geodesicAreaWeightedMeanLocalOceanDepth",
+        "geodesicMaximumLocalOceanDepth"
     };
 
     private void OnEnable()
@@ -54,6 +57,10 @@ public class PlanetGeneratorEditor : Editor
             {
                 EditorGUILayout.HelpBox(GetInactiveSeaLevelHelp(property.propertyPath), MessageType.Info);
             }
+            if (property.propertyPath == "geodesicSeaLevelControlMode" && CurrentSeaLevelControlMode == GeodesicSeaLevelControlMode.OceanWorld)
+            {
+                EditorGUILayout.HelpBox("Global ocean mode: coastline and shelf controls are inactive. If Enable Ocean is false, OceanWorld is inactive and no ocean will be generated.", MessageType.Info);
+            }
         }
 
         serializedObject.ApplyModifiedProperties();
@@ -81,8 +88,9 @@ public class PlanetGeneratorEditor : Editor
     private bool IsInactiveSeaLevelControl(string propertyPath)
     {
         GeodesicSeaLevelControlMode mode = CurrentSeaLevelControlMode;
-        return (mode == GeodesicSeaLevelControlMode.ManualOffset && propertyPath == "geodesicTargetOceanCoveragePercent")
-            || (mode == GeodesicSeaLevelControlMode.TargetAreaCoverage && propertyPath == "geodesicSeaLevelOffset");
+        return (mode == GeodesicSeaLevelControlMode.ManualOffset && (propertyPath == "geodesicTargetOceanCoveragePercent" || propertyPath == "geodesicOceanWorldMinimumDepth"))
+            || (mode == GeodesicSeaLevelControlMode.TargetAreaCoverage && (propertyPath == "geodesicSeaLevelOffset" || propertyPath == "geodesicOceanWorldMinimumDepth"))
+            || (mode == GeodesicSeaLevelControlMode.OceanWorld && (propertyPath == "geodesicSeaLevelOffset" || propertyPath == "geodesicTargetOceanCoveragePercent"));
     }
 
     private GUIContent GetLabel(SerializedProperty property)
@@ -92,9 +100,14 @@ public class PlanetGeneratorEditor : Editor
             return new GUIContent(property.displayName, "Ignored while Geodesic Sea Level Control Mode is Manual Offset; manual sea-level offset is authoritative.");
         }
 
-        if (property.propertyPath == "geodesicSeaLevelOffset" && CurrentSeaLevelControlMode == GeodesicSeaLevelControlMode.TargetAreaCoverage)
+        if (property.propertyPath == "geodesicSeaLevelOffset" && CurrentSeaLevelControlMode != GeodesicSeaLevelControlMode.ManualOffset)
         {
-            return new GUIContent(property.displayName, "Inactive while Geodesic Sea Level Control Mode is Target Area Coverage; the resolved offset is calculated automatically.");
+            return new GUIContent(property.displayName, "Inactive unless Geodesic Sea Level Control Mode is Manual Offset; the resolved offset is calculated automatically.");
+        }
+
+        if (property.propertyPath == "geodesicOceanWorldMinimumDepth")
+        {
+            return new GUIContent("Ocean World Minimum Cover Depth", property.tooltip);
         }
 
         return new GUIContent(property.displayName, property.tooltip);
@@ -104,12 +117,17 @@ public class PlanetGeneratorEditor : Editor
     {
         if (propertyPath == "geodesicTargetOceanCoveragePercent")
         {
-            return "Target ocean coverage is ignored in Manual Offset mode. Change Geodesic Sea Level Control Mode to Target Area Coverage to use this slider.";
+            return "Target ocean coverage is active only in Target Area Coverage mode. Target Area Coverage 100% remains distinct from Ocean World.";
         }
 
         if (propertyPath == "geodesicSeaLevelOffset")
         {
-            return "Manual sea-level offset is inactive in Target Area Coverage mode. The resolved offset is calculated automatically from the requested area coverage.";
+            return "Manual sea-level offset is active only in Manual Offset mode. The resolved offset is calculated automatically in the other modes.";
+        }
+
+        if (propertyPath == "geodesicOceanWorldMinimumDepth")
+        {
+            return "Ocean World minimum cover depth is active only in Ocean World mode. Global ocean mode: coastline and shelf controls are inactive.";
         }
 
         return string.Empty;

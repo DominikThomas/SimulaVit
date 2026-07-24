@@ -1345,3 +1345,105 @@ localShelfBreakDepth = geodesicShelfDepth * interpolatedDepthMultiplier
 Width and depth multipliers are bounded by their configured min/max ranges. Strength 0 forces multiplier 1 everywhere; strength 1 uses the complete configured range. Width and depth use separate low-frequency spherical fields and separate scale controls, so changing scale changes patch size/geographic wavelength rather than amplitude. `geodesicShelfWidthDepthCorrelation` can optionally correlate or anticorrelate the two fields.
 
 Diagnostics now report profile usage counts, min/mean/max applied shelf width by profile, applied shelf-break depth min/mean/max, configured multiplier ranges, variation scales, approximate local cell spacing, and coastline counts whose shelf width is below one cell or one-quarter cell. At simulation subdivision 6, deliberately small island widths such as 0.3 degrees may be below cell spacing and render as shelf-free steep margins; generation logs a warning instead of silently clamping them upward.
+
+---
+
+# 18. OceanWorld sea-level control update
+
+## 18.1 Current implementation status after bathymetry-relief and shelf-variation work
+
+The geodesic migration now has the following completed or substantially implemented pieces, subject to normal Unity Play Mode validation on target hardware:
+
+- geodesic topology, adjacency, pentagon handling, ordered dual corners, spherical cell areas, neighbor metrics, and logical cell picking;
+- independent simulation, render, collider, and ocean subdivisions;
+- topology, render-unit-geometry, and direction-mapping caches, with runtime sea-level and depth data kept out of immutable subdivision-only caches;
+- generation profiling and performance-oriented cache reuse, including optimized shoreline-distance calculation for coastline-bearing oceans;
+- deterministic geodesic terrain generation, displacement, render colouring, terrain diagnostics, collider refresh, and terrain-aware outlines;
+- `ManualOffset` and `TargetAreaCoverage` geodesic sea-level controls, with `TargetAreaCoverage = 100%` retained as its percentage-based all-ocean endpoint rather than an OceanWorld alias;
+- geodesic bathymetry arrays for raw solid radius, final seafloor radius, water depth, shore distance, coastline mask, ocean mask, basin noise, and bathymetry region;
+- shelf width and shelf-break depth variation for coastline-bearing geodesic oceans;
+- continental-margin versus oceanic-island-margin architecture, including coast ownership, shelf profiles, and margin diagnostics;
+- ridge, plateau/bank, seamount, and island-chain relief architecture sampled into the solid geodesic terrain before sea-level classification;
+- depth-driven geodesic ocean visuals based on final local water depth;
+- legacy/geodesic menu transitions that preserve the legacy cube-sphere path while rebuilding geodesic runtime state when selected.
+
+Chemistry-driven ocean or seafloor visuals are **not** complete. Existing depth-driven visuals are terrain/bathymetry visuals only.
+
+## 18.2 OceanWorld design
+
+`GeodesicSeaLevelControlMode.OceanWorld` is a dedicated global-ocean mode for geodesic planets. It is distinct from `TargetAreaCoverage = 100%`: target coverage remains a percentage resolver that chooses a sea level from simulation-cell area ordering, while OceanWorld guarantees a water shell above the highest solid-surface feature using an explicit minimum cover depth.
+
+OceanWorld semantics:
+
+- when `enableOcean` is true, every simulation cell is classified as ocean;
+- land cells, coastline cells, and connected land components are all zero;
+- no fake coastline source cells are created;
+- shore distance uses the explicit no-shore sentinel and UI/diagnostics should present it as `N/A — OceanWorld`;
+- coastline detection, shoreline-distance Dijkstra, shelf smoothing, continental-shelf shaping, oceanic-island-margin shaping, shelf-width variation, shelf-depth variation, and continental/oceanic margin classification are bypassed;
+- raw solid-surface terrain variation remains intact, including base terrain, mountains, ridges, plateaus/banks, seamounts, and island-chain relief;
+- the global water-surface radius is resolved from the highest solid radius plus `geodesicOceanWorldMinimumDepth` and a conservative fine-detail safety margin for render/collider peaks between simulation-cell centres;
+- local water depth is `resolvedWaterSurfaceRadius - finalSeafloorRadius`, so basins and submerged peaks remain nonuniform and OceanWorld must never flatten every cell to one uniform depth;
+- `geodesicMaximumOceanDepth` remains a generated bathymetric basin-lowering control where appropriate; it must not clamp OceanWorld total water-column depth or lift the seafloor to invalidate minimum cover.
+
+The initial OceanWorld surface state is a globally liquid ocean. Future cryosphere work may add climate-driven partial sea ice, complete surface ice cover, or a global ice shell over a liquid ocean, but those states are separate from OceanWorld's water-distribution and depth controls. Future biology can remain compatible with vents, seafloor gradients, ice-water interfaces, cracks, or oxidant-delivery regions without adding placeholder gameplay fields in this phase.
+
+OceanWorld runtime state is seed- and generation-dependent. Changing `geodesicOceanWorldMinimumDepth` must regenerate the resolved water-surface radius, ocean/depth arrays, render sampling, collider sampling, ocean visual data, and diagnostics. It must not invalidate immutable topology, render-unit-geometry, or direction-mapping caches unnecessarily.
+
+Startup persistence audit: current startup config applies grid, seed, timing, and pause settings, but does not persist the existing geodesic ManualOffset/TargetAreaCoverage sea-level controls. OceanWorld therefore does not add a partial-only startup persistence path in this phase; geodesic config/save migration remains deferred.
+
+Current limitations:
+
+- OceanWorld is geodesic-only;
+- no sea ice, ice shell, climate, layered ocean, chemistry, vents, replicators, biology, or save/load migration is implemented here;
+- render/collider sub-cell peak coverage is protected by the current conservative terrain fine-detail margin and validated by diagnostics; a later implementation may resolve the water surface after temporary render/collider terrain sampling if stronger guarantees are required.
+
+## 18.3 Revised dependency-aware roadmap
+
+1. OceanWorld mode.
+2. Isolated geodesic surface-temperature scalar.
+3. Geodesic resource-grid foundation:
+   - authoritative cell/layer indexing;
+   - areas, neighbor metrics and conservative diffusion;
+   - save-schema/versioning groundwork.
+4. Geodesic layered ocean:
+   - local active-layer counts;
+   - horizontal and vertical mixing;
+   - light and thermal profiles.
+5. Atmosphere and area-weighted air-sea exchange.
+6. Full temperature integration and cryosphere/sea ice.
+7. Geodesic vents and geothermal sources.
+8. Ocean chemistry and inorganic Fe/S precipitates and sediments.
+9. Chemistry-driven ocean and seafloor visuals.
+10. Replicator placement, layer resolution and movement.
+11. Biology, metabolisms, mutations and ecological interactions.
+12. Marine snow and biology-driven sediment.
+13. Full geodesic save/load round trip:
+    - environment;
+    - layers;
+    - atmosphere;
+    - vents;
+    - sediments;
+    - replicators.
+14. Optional hotspot, vent and island-chain coupling.
+
+Save/load work has two stages: schema/versioning groundwork during resource-grid migration, then complete round-trip serialization after the major environment, layer, atmosphere, vent, sediment, and population structures stabilize.
+
+## 18.4 Explicitly deferred features
+
+Not implemented in the OceanWorld phase:
+
+- full geodesic resource simulation;
+- ocean layers;
+- air-sea chemistry;
+- sea ice or ice shells;
+- vents;
+- chemistry reactions;
+- replicators;
+- biology;
+- marine snow;
+- complete geodesic save/load;
+- dynamic tectonics or hotspot evolution.
+
+## 18.5 Acceptance criteria for the next phase
+
+After OceanWorld lands, the next architectural task is the isolated geodesic surface-temperature field, not another bathymetry expansion, unless testing reveals a concrete bathymetry defect that blocks later temperature, resource-grid, or layered-ocean work.
