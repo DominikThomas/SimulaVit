@@ -49,6 +49,7 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
     private bool warnedDiffusionClamp;
 
     public bool IsInitialized => initialized;
+    public int CellCount => runtimeCellCount;
     public IReadOnlyList<float> SurfaceTemperaturesKelvin => surfaceTemperatureKelvinByCell ?? Array.Empty<float>();
     public float MinimumTemperatureKelvin => minimumTemperatureKelvin;
     public float MaximumTemperatureKelvin => maximumTemperatureKelvin;
