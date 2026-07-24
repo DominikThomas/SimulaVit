@@ -1245,3 +1245,75 @@ A follow-up corrected the Inspector affordance for geodesic sea-level modes. In 
 The read-only runtime diagnostics now include both `resolvedGeodesicSeaLevelRadius` and `resolvedGeodesicSeaLevelOffset`, plus achieved cell-count coverage, achieved area-weighted coverage, ocean cell count, and coastline ocean cell count in both modes. Generation diagnostics warn when ManualOffset mode has an inactive target coverage value that differs from achieved coverage, and warn in TargetAreaCoverage mode that the manual offset field is inactive.
 
 Unity Play Mode validation for ManualOffset 0.05 and TargetAreaCoverage 0/10/50/90/100 remains to be captured locally because this CLI environment still has no Unity runtime.
+
+---
+
+# Geodesic bathymetry relief branch notes
+
+## Current bathymetry audit
+
+The pre-existing geodesic ocean path generated simulation-cell terrain, resolved the geodesic sea level, classified land/ocean, flagged ocean coastline cells, ran the optimized Dijkstra shore-distance pass, smoothed that distance field, then applied one bathymetry profile before render/collider/ocean meshes sampled the authoritative simulation-cell seafloor through cached direction mappings. Because the profile used only `geodesicShelfWidthDegrees`, `geodesicShelfDepth`, distance to the nearest coastline, and one shared `geodesicContinentalSlopeExponent`, every land/ocean boundary received the same mean shelf and slope treatment. Small isolated islands therefore gained the same broad shallow ring as continental coastlines.
+
+Legacy cube-sphere bathymetry remains separate and unchanged.
+
+## Updated generation order
+
+Geodesic generation now treats the authoritative pre-bathymetry solid radius as:
+
+```text
+preBathymetrySolidRadius =
+    base continental/mountain terrain radius
+    + oceanic ridge relief
+    + oceanic plateau relief
+    + seamount relief
+```
+
+The required order is now:
+
+1. build/reuse the geodesic topology and base terrain cache;
+2. generate deterministic oceanic ridge, plateau, and seamount relief per simulation cell;
+3. combine those fields into `geodesicRawTerrainRadius` before sea-level resolution;
+4. resolve ManualOffset or TargetAreaCoverage sea level;
+5. classify ocean and land cells;
+6. run connected land-component analysis;
+7. classify coast ownership and continuous continental-shelf influence;
+8. calculate shore distance with the existing optimized graph pass;
+9. generate smooth shelf variation and final bathymetry;
+10. sample final render, collider, picker, and ocean visuals through existing direction mappings.
+
+TargetAreaCoverage therefore includes potentially emergent ridge/plateau/seamount relief before selecting sea level, so enabled oceanic islands do not silently change the achieved ocean percentage after coverage resolution.
+
+## Continental versus oceanic margin ownership
+
+Coast cells now carry a `GeodesicCoastType` diagnostic classification:
+
+- `ContinentalMargin`;
+- `ContinentalFragmentOrPlateau`;
+- `OceanicIsland`;
+- `MixedMargin`;
+- `None`.
+
+Bathymetry blends with a continuous `geodesicContinentalShelfInfluenceByCell` instead of a hard shelf/no-shelf switch. Continental margins use the existing shelf width, shelf-break depth, and slope exponent as mean/default values. Oceanic islands use separate narrow shelf width, shallower shelf depth, and steeper slope controls so small volcanic islands do not automatically get broad continental shelves. Continental fragments and plateau islands may still receive broader shallows when continent influence or plateau relief supports that interpretation.
+
+## Connected land-component analysis
+
+After ocean classification an O(V + E) breadth-first traversal assigns connected land-component IDs over the geodesic neighbor graph. The initial implementation exposes the component ID to diagnostics and picker data and combines local component adjacency, continent influence, and oceanic relief when deciding coastline type. Future refinement can store richer per-component summaries for continent-scale ownership thresholds without changing the traversal order.
+
+## Open-ocean relief and submerged shallows
+
+A deterministic bathymetry-domain relief layer generates broad ridged highs and plateau/bank fields directly on simulation cells using spherical direction noise, avoiding cube-face seams. These contributions are included in sea-level resolution when non-zero and are preserved as part of the raw solid surface rather than being erased by shore-distance shaping. Diagnostic bathymetry regions distinguish continental shelves, oceanic island margins, banks/plateaus, ridges, seamounts, and basins, so shallow water no longer implies nearby continental shelf.
+
+## Seamount and island-chain architecture
+
+The seamount layer is deterministic from the bathymetry seed and supports isolated peaks and short chains. Feature centers are generated on the sphere and sampled once into authoritative simulation-cell relief; render, collider, picker, and ocean visual paths continue using cached cell-direction mappings instead of feature-to-render-vertex searches. The data layout keeps separate ridge, plateau, seamount, and total oceanic-relief arrays so future hotspot or vent systems can query ridge influence, plateau influence, seamount feature influence, and chain ordering concepts. This branch intentionally does not implement tectonics, hydrothermal vents, chemistry, atmosphere, or replicator coupling.
+
+## Performance and diagnostics
+
+Generation diagnostics now report separate timings for oceanic relief generation, land-component analysis, coast-type classification, shelf-variation generation, and final bathymetry. The implementation preserves the phase-1/phase-2 optimized shore-distance and cached direction-mapping paths. Connected components remain O(V + E). The current lightweight seamount implementation bounds feature count from simulation-cell count and samples relief into cells only, but its per-feature cell pass is a known remaining limitation for very high density settings.
+
+## Remaining limitations
+
+- Connected-component summaries are currently diagnostic-oriented; richer persisted component records can be added later if simulation systems need them.
+- Seamount chains are procedural approximations, not plate-tectonic hotspot tracks.
+- Vent/hotspot coupling is deliberately deferred, though relief fields are structured for future use.
+- Default new relief strengths are zero/disabled where necessary so existing default planets remain compatible within floating-point tolerance.
