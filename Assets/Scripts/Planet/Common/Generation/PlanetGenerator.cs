@@ -725,7 +725,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
         stage = System.Diagnostics.Stopwatch.StartNew();
         geodesicCurrentRenderTerrainData = ApplyGeodesicTerrainDisplacement(mesh, renderGeometry, renderMapping, false, false, true);
-        maximumGeneratedOpaqueSurfaceRadius = Mathf.Max(BasePlanetRadius, MaxRenderSurfaceRadius(geodesicCurrentRenderTerrainData));
+        maximumGeneratedOpaqueSurfaceRadius = Mathf.Max(BasePlanetRadius, MaxRadiusFromTerrainData(geodesicCurrentRenderTerrainData));
         LogStage("terrain displacement", stage);
         stage = System.Diagnostics.Stopwatch.StartNew();
         ApplyGeodesicSurfaceColours(mesh, geodesicCurrentRenderTerrainData);

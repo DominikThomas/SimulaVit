@@ -648,10 +648,13 @@ MonoBehaviour:
   planetCenter: {fileID: 382753103}
   viewer: {fileID: 370080327}
   planetRadius: 8
-  horizonTransitionDegrees: 18
+  horizonTransitionDegrees: 15
   horizonColor: {r: 0.6431373, g: 0, b: 0, a: 1}
   dayColor: {r: 1, g: 0.95, b: 0.75, a: 1}
-  colorShiftStrength: 1
+  colorShiftStrength: 0.77
+  minimumSunsetCentreBrightness: 0.8
+  afterHorizonGlowPersistenceDegrees: 8
+  sunOcclusionSoftness: 1
   dayEmissionMultiplier: 1
   behindPlanetEmissionMultiplier: 0.8
   horizonEmissionBoost: 0.3
@@ -660,6 +663,22 @@ MonoBehaviour:
   skyboxOverride: {fileID: 0}
   scaleRotationWithSimulationSpeed: 1
   replicatorManager: {fileID: 0}
+  logSunLightingDiagnostics: 0
+  angularMismatchWarningDegrees: 1
+  currentDirectionalLight: {fileID: 313342985}
+  planetToSunDirectionWorld: {x: 0, y: 0, z: 0}
+  sunToPlanetDirectionWorld: {x: 0, y: 0, z: 0}
+  lightDirectionAngularError: 0
+  terrainMainLightSupport: 1
+  oceanMainLightSupport: 1
+  cameraToPlanetDistance: 0
+  resolvedVisiblePlanetRadius: 0
+  apparentPlanetAngularRadiusDegrees: 0
+  apparentSunAngularRadiusDegrees: 0
+  sunCentreHeightAboveLimbDegrees: 0
+  sunsetColourFactor: 0
+  visibleDiscFactor: 0
+  glowFactor: 0
 --- !u!1 &370080324
 GameObject:
   m_ObjectHideFlags: 0
@@ -968,6 +987,8 @@ MonoBehaviour:
   deprecatedGeodesicOceanShallowTint: {r: 0.1, g: 0.55, b: 0.75, a: 0.42}
   deprecatedGeodesicOceanOpacity: 0.42
   deprecatedGeodesicOceanSmoothness: 0.82
+  geodesicSurfaceAmbientStrength: 0.08
+  geodesicSurfaceDiffuseStrength: 1
   enableGeodesicTerrainDisplacement: 1
   usePlanetSeedForTerrain: 1
   customTerrainSeed: 67890
@@ -993,12 +1014,16 @@ MonoBehaviour:
   geodesicSeaLevelControlMode: 1
   geodesicSeaLevelOffset: 0.181
   geodesicTargetOceanCoveragePercent: 70
+  geodesicOceanWorldMinimumDepth: 0.06
   resolvedGeodesicSeaLevelRadius: 0
   resolvedGeodesicSeaLevelOffset: 0
   achievedGeodesicOceanCellCoveragePercent: 0
   achievedGeodesicOceanAreaCoveragePercent: 0
   geodesicOceanCellCount: 0
   geodesicCoastlineOceanCellCount: 0
+  geodesicMinimumLocalOceanDepth: 0
+  geodesicAreaWeightedMeanLocalOceanDepth: 0
+  geodesicMaximumLocalOceanDepth: 0
   geodesicColoursUseTerrainHeight: 1
   geodesicOutlineRadialOffset: 0.003
   enableGeodesicProceduralSurfaceColours: 1
