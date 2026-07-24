@@ -1447,3 +1447,33 @@ Not implemented in the OceanWorld phase:
 ## 18.5 Acceptance criteria for the next phase
 
 After OceanWorld lands, the next architectural task is the isolated geodesic surface-temperature field, not another bathymetry expansion, unless testing reveals a concrete bathymetry defect that blocks later temperature, resource-grid, or layered-ocean work.
+
+---
+
+# 19. Authoritative sun direction and geodesic main-light prerequisite
+
+## 19.1 Confirmed pre-correction architecture and cause
+
+`SunSkyRotator` on the PlanetScene `Directional Light` already owned the apparent solar orbit. At runtime it created a separate quad named `Sun Visual`, placed that quad relative to the planet, and billboarded the quad toward the camera in `LateUpdate`. The visual had no light component. The scene contained one enabled directional light, but `RenderSettings.sun` was unassigned in scene serialization. The legacy cube-sphere used its existing URP-lit runtime material and therefore responded to that scene light.
+
+The static geodesic illumination had two confirmed causes. `GeodesicVertexColorURP` was a custom shader using a fixed material `_LightDirection` rather than URP main-light data, while `GeodesicOceanURP` applied only depth colour, ambient response, and Fresnel. Moving/billboarding the generated visual therefore could not change either shader's illumination. The visual transform's forward direction was also camera-dependent and was not a valid physical-light input.
+
+Legacy `PlanetResourceMap` temperature/insolation code already used `max(0, dot(surfaceDirection, sunDirection))`. Its normal runtime fallback interpreted `-DirectionalLight.transform.forward` as planet-to-sun, while day-phase sampling from `SunSkyRotator` previously returned the opposite ray direction. The provider now makes that sign convention explicit and the legacy consumer prefers the authoritative property. This work does not add or migrate a geodesic temperature field.
+
+## 19.2 Ownership and synchronization contract
+
+`SunSkyRotator` is the single authoritative owner because it already owns orbit phase, seasonal declination, simulation-speed/pause coupling, sky rotation, and visible-sun placement. Future code must read `PlanetToSunDirectionWorld` for world-space insolation normals. `SunToPlanetDirectionWorld` is the opposite world-space direction in which parallel sunlight rays travel. `CurrentDirectionalLight` identifies the physical light, and `IsSunDirectionValid` guards use before initialization.
+
+After orbit movement, `LateUpdate` derives planet-to-sun from `Sun Visual.position - planetCenter.position`; it never reads the billboard's forward vector. The controller rotates the separate directional light so its transform forward equals `SunToPlanetDirectionWorld`, using a stable alternate up vector near the world-up poles. Unity/URP's convention is verified by both the existing legacy calculation and URP's main-light API: a directional light emits along transform forward, while shader `Light.direction` points from the surface toward the light. Colour, intensity, and shadow configuration are untouched. The controller assigns its light to `RenderSettings.sun` when that slot is unassigned or already references the same light.
+
+This synchronization changes only transform rotation and compact diagnostic state. It performs no mesh regeneration, vertex-colour recalculation, material instantiation, or repeated scene search per frame. Scene-wide light discovery occurs once during initialization solely to warn about competing enabled directional lights.
+
+## 19.3 Terrain, ocean, and diagnostics
+
+Both geodesic shaders now transform normals into world space and consume URP `GetMainLight`, including main-light colour, Lambertian N-dot-L diffuse response, attenuation, and available main-light shadow attenuation. Terrain vertex colour remains its albedo. Its default ambient strength is a low visual nightside floor and its diffuse strength defaults to one; ambient is not thermal energy and must never feed temperature. Ocean depth colour, transparency, opacity, Fresnel, runtime material ownership, and future chemistry property bindings remain intact while the same main light darkens its nightside.
+
+Optional, non-per-frame diagnostics report both authoritative directions, physical-light forward, angular error, light names, `RenderSettings.sun`, terrain/ocean runtime material and shader names, and main-light support. The Inspector exposes read-only provider/light/direction/error/support state and warnings for a missing physical light or excessive mismatch. Initialization also warns when multiple enabled directional lights compete.
+
+The spherical day/night boundary is normal-based and therefore works when the planet rotates in world space, when the apparent sun direction moves, and when both are stationary. Camera motion only changes the visual billboard. URP main-light shadow variants and existing light shadow settings are preserved, but detailed terrain self-shadowing is not an acceptance requirement and depends on URP shadow-map configuration and mesh casting. No atmospheric scattering is implemented; the existing atmosphere path is unchanged.
+
+This visual and architectural correction is a prerequisite to the next major phase, **Isolated geodesic surface-temperature scalar**. That phase should compute `max(0, dot(surfaceNormalWorld, sunSkyRotator.PlanetToSunDirectionWorld))` and must not infer energy from shader ambient strength.

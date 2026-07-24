@@ -201,6 +201,10 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     [SerializeField, HideInInspector] private float deprecatedGeodesicOceanSmoothness = 0.82f;
 
     [Header("Geodesic Terrain")]
+    [Tooltip("Visual nightside floor for the geodesic terrain shader. This is not thermal energy and must not be used as temperature input.")]
+    [Range(0f, 1f)] public float geodesicSurfaceAmbientStrength = 0.08f;
+    [Tooltip("Multiplier for URP main-light diffuse illumination of geodesic terrain.")]
+    [Range(0f, 2f)] public float geodesicSurfaceDiffuseStrength = 1f;
     [Tooltip("Displace only the welded geodesic prototype mesh radially with deterministic direction-sampled terrain. Legacy cube-sphere generation is unaffected.")]
     public bool enableGeodesicTerrainDisplacement = true;
     [Tooltip("When enabled, a deterministic Terrain-domain seed derived from the master planet seed is used.")]
@@ -2227,6 +2231,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         }
 
         meshRenderer.sharedMaterial = runtimeGeodesicSurfaceMaterial;
+        runtimeGeodesicSurfaceMaterial.SetFloat("_AmbientStrength", geodesicSurfaceAmbientStrength);
+        runtimeGeodesicSurfaceMaterial.SetFloat("_DiffuseStrength", geodesicSurfaceDiffuseStrength);
     }
 
     void ReleaseGeodesicSurfaceMaterial()

@@ -3,8 +3,8 @@ Shader "SimulaVit/GeodesicVertexColorURP"
     Properties
     {
         _BaseColor("Base Color", Color) = (1,1,1,1)
-        _LightDirection("Light Direction", Vector) = (0.35,0.75,0.55,0)
-        _AmbientStrength("Ambient Strength", Range(0,1)) = 0.35
+        _AmbientStrength("Geodesic Surface Ambient Strength", Range(0,1)) = 0.08
+        _DiffuseStrength("Geodesic Surface Diffuse Strength", Range(0,2)) = 1
     }
     SubShader
     {
@@ -16,7 +16,10 @@ Shader "SimulaVit/GeodesicVertexColorURP"
             HLSLPROGRAM
             #pragma vertex vert
             #pragma fragment frag
+            #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
+            #pragma multi_compile_fragment _ _SHADOWS_SOFT
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
 
             struct Attributes
             {
@@ -29,13 +32,14 @@ Shader "SimulaVit/GeodesicVertexColorURP"
             {
                 float4 positionHCS : SV_POSITION;
                 float3 normalWS : TEXCOORD0;
+                float3 positionWS : TEXCOORD1;
                 float4 color : COLOR;
             };
 
             CBUFFER_START(UnityPerMaterial)
             float4 _BaseColor;
-            float4 _LightDirection;
             float _AmbientStrength;
+            float _DiffuseStrength;
             CBUFFER_END
 
             Varyings vert(Attributes IN)
@@ -43,6 +47,7 @@ Shader "SimulaVit/GeodesicVertexColorURP"
                 Varyings OUT;
                 OUT.positionHCS = TransformObjectToHClip(IN.positionOS.xyz);
                 OUT.normalWS = TransformObjectToWorldNormal(IN.normalOS);
+                OUT.positionWS = TransformObjectToWorld(IN.positionOS.xyz);
                 OUT.color = IN.color;
                 return OUT;
             }
@@ -50,11 +55,13 @@ Shader "SimulaVit/GeodesicVertexColorURP"
             half4 frag(Varyings IN) : SV_Target
             {
                 half3 normalWS = normalize(IN.normalWS);
-                half3 lightDir = normalize(_LightDirection.xyz);
-                half diffuse = saturate(dot(normalWS, lightDir));
-                half light = saturate(_AmbientStrength + diffuse * (1.0h - _AmbientStrength));
+                float4 shadowCoord = TransformWorldToShadowCoord(IN.positionWS);
+                Light mainLight = GetMainLight(shadowCoord);
+                half diffuse = saturate(dot(normalWS, mainLight.direction));
+                half3 illumination = _AmbientStrength.xxx
+                    + mainLight.color * (diffuse * _DiffuseStrength * mainLight.distanceAttenuation * mainLight.shadowAttenuation);
                 half4 col = IN.color * _BaseColor;
-                return half4(col.rgb * light, col.a);
+                return half4(col.rgb * illumination, col.a);
             }
             ENDHLSL
         }

@@ -11,6 +11,8 @@ Shader "SimulaVit/GeodesicOceanURP"
         _FresnelPower ("Fresnel Power", Range(0.001, 8)) = 3
         _AmbientResponse ("Ambient Response", Range(0, 2)) = 1
         _ColorIntensity ("Color Intensity", Range(0, 3)) = 1
+        _LightingAmbientStrength ("Lighting Ambient Strength", Range(0, 1)) = 0.08
+        _LightingDiffuseStrength ("Lighting Diffuse Strength", Range(0, 2)) = 1
         _Fe2Tint ("Dissolved Fe2 Tint", Color) = (0.18, 0.38, 0.52, 1)
         _FeOxTint ("Suspended FeOx Tint", Color) = (0.72, 0.36, 0.12, 1)
         _SulfurTint ("Suspended Sulfur Tint", Color) = (0.95, 0.82, 0.20, 1)
@@ -31,7 +33,10 @@ Shader "SimulaVit/GeodesicOceanURP"
             HLSLPROGRAM
             #pragma vertex vert
             #pragma fragment frag
+            #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
+            #pragma multi_compile_fragment _ _SHADOWS_SOFT
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
 
             CBUFFER_START(UnityPerMaterial)
                 half4 _BaseColor;
@@ -43,6 +48,8 @@ Shader "SimulaVit/GeodesicOceanURP"
                 half _FresnelPower;
                 half _AmbientResponse;
                 half _ColorIntensity;
+                half _LightingAmbientStrength;
+                half _LightingDiffuseStrength;
                 half4 _Fe2Tint;
                 half4 _FeOxTint;
                 half4 _SulfurTint;
@@ -62,6 +69,7 @@ Shader "SimulaVit/GeodesicOceanURP"
                 half3 normalWS : TEXCOORD0;
                 half3 viewDirWS : TEXCOORD1;
                 half depth01 : TEXCOORD2;
+                float3 positionWS : TEXCOORD3;
             };
 
             Varyings vert(Attributes input)
@@ -72,6 +80,7 @@ Shader "SimulaVit/GeodesicOceanURP"
                 output.normalWS = TransformObjectToWorldNormal(input.normalOS);
                 output.viewDirWS = GetWorldSpaceViewDir(pos.positionWS);
                 output.depth01 = saturate(input.color.r);
+                output.positionWS = pos.positionWS;
                 return output;
             }
 
@@ -85,7 +94,11 @@ Shader "SimulaVit/GeodesicOceanURP"
                 half3 color = lerp(depthColor, _BaseColor.rgb, saturate(0.25 + fresnel * 0.35));
                 color = lerp(color, _DeepColor.rgb, saturate(_Turbidity * 0.35));
                 color *= _AmbientResponse * _ColorIntensity;
-                color += fresnel * _FresnelStrength;
+                Light mainLight = GetMainLight(TransformWorldToShadowCoord(input.positionWS));
+                half diffuse = saturate(dot(normalWS, mainLight.direction));
+                half3 illumination = _LightingAmbientStrength.xxx
+                    + mainLight.color * (diffuse * _LightingDiffuseStrength * mainLight.distanceAttenuation * mainLight.shadowAttenuation);
+                color = color * illumination + fresnel * _FresnelStrength * illumination;
                 return half4(color, _Opacity);
             }
             ENDHLSL

@@ -4,6 +4,8 @@ using UnityEngine.Rendering;
 [RequireComponent(typeof(Light))]
 public class SunSkyRotator : MonoBehaviour
 {
+    private const float DirectionEpsilon = 0.000001f;
+
     [Header("Orbit")]
     public float orbitDegreesPerSecond = 0.75f;
     public Vector3 orbitAxis = Vector3.up;
@@ -58,6 +60,26 @@ public class SunSkyRotator : MonoBehaviour
     public bool scaleRotationWithSimulationSpeed = true;
     public ReplicatorManager replicatorManager;
 
+    [Header("Sun Lighting Diagnostics")]
+    [Tooltip("Emit one compact lighting report after initialization and warnings when synchronization is invalid.")]
+    public bool logSunLightingDiagnostics;
+    [Min(0.01f)] public float angularMismatchWarningDegrees = 1f;
+    [SerializeField, Tooltip("Read-only: physical directional light synchronized with the visible sun.")] private Light currentDirectionalLight;
+    [SerializeField, Tooltip("Read-only: planet-to-sun direction in world space.")] private Vector3 planetToSunDirectionWorld;
+    [SerializeField, Tooltip("Read-only: direction in which sunlight rays travel in world space.")] private Vector3 sunToPlanetDirectionWorld;
+    [SerializeField, Tooltip("Read-only: angular difference between expected ray direction and the light transform forward.")] private float lightDirectionAngularError;
+    [SerializeField, Tooltip("Read-only: whether the terrain shader consumes the URP main light.")] private bool terrainMainLightSupport;
+    [SerializeField, Tooltip("Read-only: whether the ocean shader consumes the URP main light.")] private bool oceanMainLightSupport;
+
+    public Vector3 PlanetToSunDirectionWorld => planetToSunDirectionWorld;
+    public Vector3 SunToPlanetDirectionWorld => sunToPlanetDirectionWorld;
+    public Light CurrentDirectionalLight => currentDirectionalLight;
+    public bool IsSunDirectionValid { get; private set; }
+    public float LightDirectionAngularError => lightDirectionAngularError;
+    public bool TerrainMainLightSupport => terrainMainLightSupport;
+    public bool OceanMainLightSupport => oceanMainLightSupport;
+    public Transform VisibleSunTransform => generatedSunObject != null ? generatedSunObject.transform : null;
+
     private Quaternion initialRotation;
     private float accumulatedOrbitAngle;
     private Vector3 initialOrbitForward;
@@ -72,9 +94,19 @@ public class SunSkyRotator : MonoBehaviour
     private Texture2D runtimeSunTexture;
     private MeshFilter sunMeshFilter;
     private MeshRenderer sunMeshRenderer;
+    private bool angularMismatchWarningActive;
+
+    void OnValidate()
+    {
+        Light attachedLight = GetComponent<Light>();
+        currentDirectionalLight = attachedLight != null && attachedLight.type == LightType.Directional ? attachedLight : null;
+        angularMismatchWarningDegrees = Mathf.Max(0.01f, angularMismatchWarningDegrees);
+        RefreshShaderDiagnostics();
+    }
 
     void Start()
     {
+        ResolvePhysicalLight();
         initialRotation = transform.rotation;
         CacheInitialOrbitForward();
         SetupViewerReference();
@@ -84,6 +116,7 @@ public class SunSkyRotator : MonoBehaviour
         CreateSunVisual();
         UpdateSunVisualPosition();
         UpdateSunVisualAppearance();
+        SynchronizePhysicalLight(true);
     }
 
 
@@ -225,6 +258,95 @@ public class SunSkyRotator : MonoBehaviour
     void LateUpdate()
     {
         BillboardSunVisual();
+        SynchronizePhysicalLight(false);
+    }
+
+    void ResolvePhysicalLight()
+    {
+        currentDirectionalLight = GetComponent<Light>();
+        if (currentDirectionalLight != null && currentDirectionalLight.type != LightType.Directional)
+        {
+            Debug.LogWarning("[SunLighting] SunSkyRotator requires its Light to be Directional; the visible sun will not be synchronized to a point or spot light.", this);
+            currentDirectionalLight = null;
+        }
+
+        if (currentDirectionalLight != null && (RenderSettings.sun == null || RenderSettings.sun == currentDirectionalLight))
+        {
+            RenderSettings.sun = currentDirectionalLight;
+        }
+
+        Light[] lights = FindObjectsByType<Light>(FindObjectsSortMode.None);
+        int enabledDirectionalCount = 0;
+        for (int i = 0; i < lights.Length; i++)
+        {
+            if (lights[i].isActiveAndEnabled && lights[i].type == LightType.Directional) enabledDirectionalCount++;
+        }
+        if (enabledDirectionalCount > 1)
+        {
+            Debug.LogWarning($"[SunLighting] Found {enabledDirectionalCount} enabled Directional Lights. Disable competing sun lights or explicitly retain only the SunSkyRotator light.", this);
+        }
+        if (currentDirectionalLight == null)
+        {
+            Debug.LogWarning("[SunLighting] A visible sun exists but no physical Directional Light is synchronized.", this);
+        }
+    }
+
+    void SynchronizePhysicalLight(bool initializationReport)
+    {
+        Vector3 center = planetCenter != null ? planetCenter.position : Vector3.zero;
+        if (generatedSunObject == null)
+        {
+            IsSunDirectionValid = false;
+            return;
+        }
+
+        Vector3 planetToSun = generatedSunObject.transform.position - center;
+        IsSunDirectionValid = planetToSun.sqrMagnitude > DirectionEpsilon;
+        if (!IsSunDirectionValid) return;
+
+        planetToSunDirectionWorld = planetToSun.normalized;
+        sunToPlanetDirectionWorld = -planetToSunDirectionWorld;
+        if (currentDirectionalLight != null)
+        {
+            Vector3 up = Mathf.Abs(Vector3.Dot(sunToPlanetDirectionWorld, Vector3.up)) < 0.98f ? Vector3.up : Vector3.forward;
+            currentDirectionalLight.transform.rotation = Quaternion.LookRotation(sunToPlanetDirectionWorld, up);
+            lightDirectionAngularError = Vector3.Angle(sunToPlanetDirectionWorld, currentDirectionalLight.transform.forward);
+        }
+        else
+        {
+            lightDirectionAngularError = 180f;
+        }
+
+        if (initializationReport)
+        {
+            RefreshShaderDiagnostics();
+            if (logSunLightingDiagnostics) LogLightingDiagnostics();
+        }
+        bool mismatchNow = currentDirectionalLight != null && lightDirectionAngularError > angularMismatchWarningDegrees;
+        if (mismatchNow && !angularMismatchWarningActive)
+        {
+            Debug.LogWarning($"[SunLighting] Directional Light mismatch is {lightDirectionAngularError:F3} degrees (threshold {angularMismatchWarningDegrees:F3}).", this);
+        }
+        angularMismatchWarningActive = mismatchNow;
+    }
+
+    void RefreshShaderDiagnostics()
+    {
+        terrainMainLightSupport = Shader.Find("SimulaVit/GeodesicVertexColorURP") != null;
+        oceanMainLightSupport = Shader.Find("SimulaVit/GeodesicOceanURP") != null;
+    }
+
+    [ContextMenu("Log Sun Lighting Diagnostics")]
+    public void LogLightingDiagnostics()
+    {
+        RefreshShaderDiagnostics();
+        PlanetGenerator generator = planetCenter != null ? planetCenter.GetComponent<PlanetGenerator>() : null;
+        Renderer terrainRenderer = generator != null ? generator.GetComponent<Renderer>() : null;
+        Transform ocean = generator != null ? generator.transform.Find("Geodesic Ocean") : null;
+        Renderer oceanRenderer = ocean != null ? ocean.GetComponent<Renderer>() : null;
+        string terrainMaterial = terrainRenderer != null && terrainRenderer.sharedMaterial != null ? $"{terrainRenderer.sharedMaterial.name}/{terrainRenderer.sharedMaterial.shader.name}" : "<none>";
+        string oceanMaterial = oceanRenderer != null && oceanRenderer.sharedMaterial != null ? $"{oceanRenderer.sharedMaterial.name}/{oceanRenderer.sharedMaterial.shader.name}" : "<none>";
+        Debug.Log($"[SunLighting] planetToSunWS={planetToSunDirectionWorld}, sunRayWS={sunToPlanetDirectionWorld}, lightForward={(currentDirectionalLight != null ? currentDirectionalLight.transform.forward.ToString() : "<none>")}, angularError={lightDirectionAngularError:F3}, directionalLight={(currentDirectionalLight != null ? currentDirectionalLight.name : "<none>")}, renderSettingsSun={(RenderSettings.sun != null ? RenderSettings.sun.name : "<none>")}, terrain={terrainMaterial}, terrainMainLight={terrainMainLightSupport}, ocean={oceanMaterial}, oceanMainLight={oceanMainLightSupport}", this);
     }
 
     void CacheInitialOrbitForward()
@@ -337,11 +459,13 @@ public class SunSkyRotator : MonoBehaviour
 
             Quaternion declinationRotation = Quaternion.AngleAxis(-declinationDegrees, east.normalized);
             Vector3 tiltedForward = declinationRotation * orbitForward;
-            return tiltedForward.normalized;
+            // The public API is planet -> sun. The controller/light forward is the
+            // opposite direction: the direction in which directional-light rays travel.
+            return -tiltedForward.normalized;
         }
 
         Quaternion rotation = orbitRotation * initialRotation;
-        return (rotation * Vector3.forward).normalized;
+        return -(rotation * Vector3.forward).normalized;
     }
 
     float GetYearLengthSeconds()
