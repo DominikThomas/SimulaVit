@@ -1489,3 +1489,45 @@ Every visual update uses degrees consistently. It computes camera-to-planet and 
 Sunset colour, central-disc visibility, and glow are separate factors. Colour warms over the configurable horizon-relative band while the centre is still above the limb. Central-disc visibility uses a smoothstep spanning one derived sun-core radius on either side of the limb, giving approximately one, one-half, and zero at one radius above, centred on, and one radius below the limb. Existing depth testing remains authoritative for the actual partial-disc shape rather than uniformly cutting the whole billboard. A separately configurable glow factor can fade the textured outer glow after the centre passes behind the limb, and the minimum sunset centre brightness prevents redness alone from erasing a still-visible core. These visual factors never modify the authoritative physical Directional Light direction, colour, or intensity.
 
 Compact optional diagnostics report grid mode, camera distance, resolved visible radius, both apparent angular radii, signed limb height, and the three appearance factors once after visual initialization and whenever grid mode changes. Per-frame work is constant-size vector/scalar math plus existing material-property writes: it performs no scene search, allocation, material creation, texture rebuild, or mesh regeneration. Sunset redness remains an artistic visual approximation, not atmospheric scattering or radiative transfer.
+# 20. Isolated geodesic surface-temperature scalar
+
+## Scope and prerequisite
+
+The authoritative-sun prerequisite is complete: `SunSkyRotator.PlanetToSunDirectionWorld` is shared by synchronized directional lighting and geodesic insolation. Camera direction, the billboard, shader ambient light, and independently reconstructed solar positions are not temperature inputs.
+
+This phase adds exactly one Kelvin surface value per geodesic simulation cell, independent of render subdivision, with area-aware horizontal diffusion and land/ocean response categories. It adds no ice, ocean layers, vertical profile, atmosphere exchange, chemistry, currents, vents, biology, or full geodesic save/load.
+
+## Ownership audit
+
+Legacy cube-sphere temperature remains authoritative in `PlanetResourceMap`: its temperature arrays and lookup are cube-face/cell-indexed, and its legacy biology, resource simulation, layered estimates, and HUD consume them. Startup's existing **Base Temp Kelvin** and **Insolation Temp Gain** configure it. `PlanetTemperatureIceVisuals` is a legacy-only visual consumer, not a physical owner; it reads resource-map temperatures and retains its 273.15 K land and 269.15 K sea thresholds. It is cleared in geodesic mode.
+
+Geodesic ownership is focused in `GeodesicSurfaceTemperatureField`. It owns `surfaceTemperatureKelvinByCell` plus preallocated target, working, energy-delta, and heat-capacity buffers. Its length always equals `PlanetGenerator.GeodesicTopology.CellCount`. It initializes after topology, terrain, and ocean classification and clears on legacy generation/cleanup. The existing startup temperature controls are reused rather than duplicated.
+
+## Initialization, update, and diffusion
+
+Initialization deterministically uses the instantaneous legacy-style additive target:
+
+```text
+insolation = max(0, dot(planet.TransformDirection(cellDirectionLocal), PlanetToSunDirectionWorld))
+targetKelvin = baseTempKelvin + insolationTempGain * pow(insolation, insolationExponent)
+```
+
+This is an interim surface-energy approximation, not a radiative climate model. Updates accumulate authoritative `ReplicatorManager.FrameSimulationDeltaTime`; zero delta while paused advances nothing, and the accumulator is bounded. Heating/cooling use `1-exp(-dt/timescale)` with distinct timescales and local land/ocean capacity multipliers. OceanWorld consequently uses ocean response everywhere, ocean-disabled planets use land everywhere, and sea-level reclassification changes only the response category.
+
+Diffusion processes each real edge once using `NeighborCounts`, `Neighbors6`, cell areas, angular center distances, and shared dual-edge lengths. Equal-and-opposite energy increments are accumulated before committing; temperature change divides by `UnitCellAreas[cell] * localHeatCapacityMultiplier`. This conserves effective area-weighted thermal energy for unequal cells and naturally supports five-neighbor pentagons. A cell-wise explicit stability limit selects substeps and warns/clamps pathological settings. Steady-state work is O(V + E), without LINQ or per-tick managed allocation.
+
+The context-menu validation covers a uniform field, one hot cell (including real five/six-neighbor traversal), and before/after weighted-energy error. Subdivision 5/6 Play Mode behavior, allocations, tick timing, and generation impact still require measurement in Unity; static inspection does not justify performance claims.
+
+## API, diagnostics, and persistence groundwork
+
+The public API exposes initialization, the read-only temperature list, cell lookup, explicitly named local/world direction queries, area-weighted min/mean/max, last tick data, insolation, target, thermal category, and neighbor statistics. Direction queries seed from the base icosahedron and ascend actual neighbors rather than scanning all cells. World-direction queries accept a world-space normal vector; local-direction queries accept planet-local coordinates.
+
+The picker displays Kelvin/Celsius, insolation, day/night, target, response multiplier, land/ocean category, and neighbor min/mean/max in its scrollable body. The HUD conditionally reads the geodesic owner and otherwise preserves its legacy resource-map source and unit toggle. Default production visuals remain unchanged; the serialized debug-visualization flag is off by default and does not recolour terrain.
+
+Future serialization must include the temperature array, last simulation tick/time, parameter/schema version, subdivision/cell count, and initialization state. The save schema is unchanged in this phase.
+
+## Limitations and next phase
+
+This phase does not model atmospheric greenhouse feedback, ocean vertical heat storage, currents, latent heat, ice-albedo feedback, geothermal heat, or chemistry-driven climate.
+
+After validation the next task remains **Geodesic resource-grid foundation**: authoritative cell/layer indexing, area and neighbor metrics, conservative resource diffusion, and save-schema/versioning groundwork. The broader migration order is unchanged.

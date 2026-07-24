@@ -504,6 +504,22 @@ public class GeodesicCellPicker : MonoBehaviour
         DrawLine("Seamount relief", planetGenerator.GetGeodesicCellSeamountContribution(selectedCellIndex).ToString("F5"));
         DrawLine("Ocean relief", planetGenerator.GetGeodesicCellTotalOceanicReliefContribution(selectedCellIndex).ToString("F5"));
         DrawLine("Modified", bathymetryModified.ToString());
+
+        GeodesicSurfaceTemperatureField temperature = planetGenerator.GetComponent<GeodesicSurfaceTemperatureField>();
+        if (temperature != null && temperature.IsInitialized)
+        {
+            float kelvin = temperature.GetCellTemperatureKelvin(selectedCellIndex);
+            float insolation = temperature.GetCellInsolationCosine(selectedCellIndex);
+            temperature.GetNeighborTemperatureStats(selectedCellIndex, out float neighborMin, out float neighborMean, out float neighborMax);
+            DrawSection("Surface Temperature");
+            DrawLine("Temperature", $"{kelvin:F2} K / {kelvin - 273.15f:F2} °C");
+            DrawLine("Insolation cosine", insolation.ToString("F4"));
+            DrawLine("Illumination", insolation > 0f ? "Day" : "Night");
+            DrawLine("Target equilibrium", $"{temperature.GetCellTargetTemperatureKelvin(selectedCellIndex):F2} K");
+            DrawLine("Response multiplier", temperature.GetCellEffectiveThermalResponseMultiplier(selectedCellIndex).ToString("F3"));
+            DrawLine("Thermal category", temperature.GetCellThermalCategory(selectedCellIndex));
+            DrawLine("Neighbor min/mean/max", $"{neighborMin:F2} / {neighborMean:F2} / {neighborMax:F2} K");
+        }
     }
 
     private void DrawPopupFooter()
