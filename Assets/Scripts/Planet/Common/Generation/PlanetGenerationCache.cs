@@ -71,6 +71,7 @@ public static class PlanetGenerationCache
     {
         StringBuilder sb = new StringBuilder(512);
         AppendKey(sb, "format", PlanetCacheFormatVersion);
+        AppendKey(sb, "generationVersion", PlanetGenerator.GenerationVersion);
         AppendKey(sb, "seed", generator.randomSeed);
         AppendKey(sb, "resolution", generator.resolution);
         AppendKey(sb, "radius", generator.radius);
