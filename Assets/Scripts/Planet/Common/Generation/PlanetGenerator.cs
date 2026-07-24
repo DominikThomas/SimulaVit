@@ -40,11 +40,41 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     private long geodesicDirectionToCellQueryCount;
     private long geodesicDirectionCandidateCellsInspected;
     private long geodesicTerrainNoiseEvaluationCount;
+    private long geodesicSimulationCellTerrainEvaluationCount;
+    private long geodesicRenderVertexTerrainEvaluationCount;
+    private long geodesicDiagnosticOnlyTerrainEvaluationCount;
     private long geodesicBathymetryInterpolationCount;
     private long geodesicDirectionMappingCacheHits;
     private long geodesicDirectionMappingCacheMisses;
     private double geodesicSurfaceRadiusQueryMilliseconds;
-    private Dictionary<Vector3, float> geodesicDebugSurfaceRadiusCache;
+    private Dictionary<GeodesicDebugDirectionKey, float> geodesicDebugSurfaceRadiusCache;
+    private GeodesicRenderTerrainData geodesicCurrentRenderTerrainData;
+    private double geodesicLastShorelineDistanceMilliseconds;
+    private double geodesicLastCoreGenerationMilliseconds;
+    private double geodesicLastFullSynchronousGenerationMilliseconds;
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+    [SerializeField] private bool validateOptimizedGeodesicShoreDistances;
+#endif
+    private readonly struct GeodesicDebugDirectionKey
+    {
+        private readonly int x; private readonly int y; private readonly int z;
+        private const float Scale = 1000000f;
+        private GeodesicDebugDirectionKey(int x, int y, int z) { this.x = x; this.y = y; this.z = z; }
+        public static GeodesicDebugDirectionKey From(Vector3 direction)
+        {
+            Vector3 unit = direction.sqrMagnitude > 1e-10f ? direction.normalized : Vector3.up;
+            return new GeodesicDebugDirectionKey(Mathf.RoundToInt(unit.x * Scale), Mathf.RoundToInt(unit.y * Scale), Mathf.RoundToInt(unit.z * Scale));
+        }
+    }
+
+    private struct GeodesicRenderTerrainData
+    {
+        public float[] RawRadii;
+        public float[] SurfaceRadii;
+        public float[] Heights;
+        public float[] NormalizedHeights;
+        public float[] MountainMasks;
+    }
     public bool showGeodesicCellOutlines = true;
     public bool highlightGeodesicPentagons = true;
     public bool showGeodesicCellCentres;
@@ -419,6 +449,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         geodesicOceanMask = null;
         geodesicOceanNeighborCounts = null;
         geodesicCoastlineMask = null;
+        geodesicDebugSurfaceRadiusCache = null;
+        geodesicCurrentRenderTerrainData = default;
 
         if (geodesicOceanMeshRenderer != null)
         {
@@ -520,8 +552,9 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         WarnForGeodesicSubdivisionCost(renderSubdivision, colliderSubdivision, estimatedRenderTriangles, estimatedColliderTriangles);
 
         var stage = System.Diagnostics.Stopwatch.StartNew();
-        GeodesicTopology = GeodesicGridTopology.Build(simulationSubdivision);
-        LogStage("simulation topology generation", stage);
+        GeodesicTopology = GeodesicTopologyCache.GetOrBuild(simulationSubdivision, out bool topologyCacheHit);
+        LogStage(topologyCacheHit ? "simulation topology cache retrieval" : "simulation topology generation", stage);
+        Debug.Log($"[GeodesicTopologyCache] subdivision={simulationSubdivision}, cacheHit={topologyCacheHit}, cachedSubdivisions={GeodesicTopologyCache.CachedSubdivisionCount}, approxTopologyMemory={GeodesicTopology.ApproximateMemoryBytes} bytes", this);
         if (!GeodesicGridValidation.Validate(GeodesicTopology, out string validation))
         {
             Debug.LogError($"[GeodesicPrototype] Validation failed: {validation}", this);
@@ -529,7 +562,9 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
             return;
         }
 
+        stage = System.Diagnostics.Stopwatch.StartNew();
         RebuildGeodesicCellTerrainCache();
+        LogStage("simulation-cell terrain cache", stage);
         stage = System.Diagnostics.Stopwatch.StartNew();
         RebuildGeodesicOceanClassification();
         LogStage("bathymetry sampling/interpolation", stage);
@@ -541,10 +576,10 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         LogStage("render icosphere generation", stage);
 
         stage = System.Diagnostics.Stopwatch.StartNew();
-        ApplyGeodesicTerrainDisplacement(mesh, renderGeometry, renderMapping, false, false);
+        geodesicCurrentRenderTerrainData = ApplyGeodesicTerrainDisplacement(mesh, renderGeometry, renderMapping, false, false, true);
         LogStage("terrain displacement", stage);
         stage = System.Diagnostics.Stopwatch.StartNew();
-        ApplyGeodesicSurfaceColours(mesh);
+        ApplyGeodesicSurfaceColours(mesh, geodesicCurrentRenderTerrainData);
         LogStage("vertex-colour generation", stage);
         stage = System.Diagnostics.Stopwatch.StartNew();
         mesh.RecalculateNormals();
@@ -562,7 +597,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         IcosphereRenderGeometry colliderGeometry = IcosphereRenderGeometryCache.GetOrBuild(colliderSubdivision);
         IcosphereDirectionMapping colliderMapping = GetOrBuildDirectionMapping(colliderGeometry);
         Mesh colliderMesh = IcosphereRenderMeshBuilder.BuildSurfaceMesh(colliderGeometry, BasePlanetRadius, $"Geodesic Terrain Collider L{colliderSubdivision}");
-        ApplyGeodesicTerrainDisplacement(colliderMesh, colliderGeometry, colliderMapping, true, true);
+        ApplyGeodesicTerrainDisplacement(colliderMesh, colliderGeometry, colliderMapping, true, true, false);
         MeshCollider meshCollider = GetOrAddComponent<MeshCollider>(gameObject);
         meshCollider.sharedMesh = null;
         meshCollider.sharedMesh = colliderMesh;
@@ -603,11 +638,15 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         LogStage("debug renderer generation", stage);
         PopulateRuntimeDescriptor(GeodesicTopology.CellCount);
         LogPlanetGenerationValidation(meshCollider);
-        total.Stop();
-        LogGeodesicTerrainDiagnostics(mesh, simulationSubdivision, renderSubdivision);
+        geodesicLastCoreGenerationMilliseconds = total.Elapsed.TotalMilliseconds;
+        stage = System.Diagnostics.Stopwatch.StartNew();
+        LogGeodesicTerrainDiagnostics(mesh, simulationSubdivision, renderSubdivision, geodesicCurrentRenderTerrainData);
+        LogStage("terrain diagnostics", stage);
         LogGeodesicQueryDiagnostics();
         LogModeTransitionRendererInventory("after generation", PlanetGridType.GeodesicIcosphere);
-        Debug.Log($"[GeodesicPrototype] simulationSubdivision={simulationSubdivision}, renderSubdivision={renderSubdivision}, colliderSubdivision={colliderSubdivision}, oceanSubdivision={geodesicOceanRenderSubdivisionLevel}, cells={GeodesicTopology.CellCount}, renderVertices={mesh.vertexCount}, renderTriangles={mesh.triangles.Length / 3}, colliderVertices={colliderMesh.vertexCount}, colliderTriangles={colliderMesh.triangles.Length / 3}, simulationTriangles={GeodesicTopology.TriangleCount}, edges={GeodesicTopology.EdgeCount}, durationMs={total.Elapsed.TotalMilliseconds:F2}, approxSimulationTopologyMemory={GeodesicTopology.ApproximateMemoryBytes} bytes, approxRenderGeometryMemory={renderGeometry.ApproximateManagedBytes} bytes, approxColliderGeometryMemory={colliderGeometry.ApproximateManagedBytes} bytes, approxRenderMappingMemory={renderMapping.ApproximateManagedBytes} bytes, approxColliderMappingMemory={colliderMapping.ApproximateManagedBytes} bytes, mappingCacheEntries={IcosphereDirectionMappingCache.CachedMappingCount}, renderGeometryCacheEntries={IcosphereRenderGeometryCache.CachedSubdivisionCount}. Validation: {validation}", this);
+        total.Stop();
+        geodesicLastFullSynchronousGenerationMilliseconds = total.Elapsed.TotalMilliseconds;
+        Debug.Log($"[GeodesicPrototype] coreGenerationDurationMs={geodesicLastCoreGenerationMilliseconds:F2}, fullSynchronousGenerationDurationMs={geodesicLastFullSynchronousGenerationMilliseconds:F2}, profilingBoundaryDifferenceMs={(geodesicLastFullSynchronousGenerationMilliseconds - geodesicLastCoreGenerationMilliseconds):F2}, profilingBoundaryDifference=post-core synchronous diagnostics/query logging/inventory reporting,  simulationSubdivision={simulationSubdivision}, renderSubdivision={renderSubdivision}, colliderSubdivision={colliderSubdivision}, oceanSubdivision={geodesicOceanRenderSubdivisionLevel}, cells={GeodesicTopology.CellCount}, renderVertices={mesh.vertexCount}, renderTriangles={mesh.triangles.Length / 3}, colliderVertices={colliderMesh.vertexCount}, colliderTriangles={colliderMesh.triangles.Length / 3}, simulationTriangles={GeodesicTopology.TriangleCount}, edges={GeodesicTopology.EdgeCount}, durationMs={geodesicLastFullSynchronousGenerationMilliseconds:F2}, approxSimulationTopologyMemory={GeodesicTopology.ApproximateMemoryBytes} bytes, approxRenderGeometryMemory={renderGeometry.ApproximateManagedBytes} bytes, approxColliderGeometryMemory={colliderGeometry.ApproximateManagedBytes} bytes, approxRenderMappingMemory={renderMapping.ApproximateManagedBytes} bytes, approxColliderMappingMemory={colliderMapping.ApproximateManagedBytes} bytes, mappingCacheEntries={IcosphereDirectionMappingCache.CachedMappingCount}, renderGeometryCacheEntries={IcosphereRenderGeometryCache.CachedSubdivisionCount}. Validation: {validation}", this);
     }
 
 
@@ -620,14 +659,21 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         Debug.Log("[GeodesicGenerationProfile] Cleared immutable geodesic render unit-geometry and direction-mapping caches.", this);
     }
 
+    [ContextMenu("Clear Geodesic Topology Cache")]
+    public void ClearGeodesicTopologyCache()
+    {
+        GeodesicTopologyCache.Clear();
+        Debug.Log("[GeodesicGenerationProfile] Cleared immutable geodesic simulation-topology cache.", this);
+    }
+
 
     IcosphereDirectionMapping GetOrBuildDirectionMapping(IcosphereRenderGeometry geometry)
     {
-        int before = IcosphereDirectionMappingCache.CachedMappingCount;
-        IcosphereDirectionMapping mapping = IcosphereDirectionMappingCache.GetOrBuild(GeodesicTopology, geometry);
-        if (IcosphereDirectionMappingCache.CachedMappingCount == before) geodesicDirectionMappingCacheHits++; else geodesicDirectionMappingCacheMisses++;
-        geodesicDirectionCandidateCellsInspected += mapping.CandidateCellsInspected;
-        Debug.Log($"[GeodesicDirectionMapping] simulationSubdivision={mapping.SimulationSubdivision}, targetSubdivision={mapping.TargetSubdivision}, samples={mapping.SampleCount}, identity={mapping.UsedIdentityMapping}, candidateCellsInspectedDuringBuild={mapping.CandidateCellsInspected}, approxMappingMemory={mapping.ApproximateManagedBytes} bytes, cacheHit={IcosphereDirectionMappingCache.CachedMappingCount == before}", this);
+        IcosphereDirectionMapping mapping = IcosphereDirectionMappingCache.GetOrBuild(GeodesicTopology, geometry, out bool cacheHit);
+        if (cacheHit) geodesicDirectionMappingCacheHits++; else geodesicDirectionMappingCacheMisses++;
+        long currentCandidateCellsInspected = cacheHit ? 0L : mapping.CandidateCellsInspected;
+        geodesicDirectionCandidateCellsInspected += currentCandidateCellsInspected;
+        Debug.Log($"[GeodesicDirectionMapping] simulationSubdivision={mapping.SimulationSubdivision}, targetSubdivision={mapping.TargetSubdivision}, samples={mapping.SampleCount}, identity={mapping.UsedIdentityMapping}, originalCandidateCellsInspectedDuringBuild={mapping.CandidateCellsInspected}, currentRequestCandidateCellsInspected={currentCandidateCellsInspected}, approxMappingMemory={mapping.ApproximateManagedBytes} bytes, cacheHit={cacheHit}", this);
         return mapping;
     }
 
@@ -635,7 +681,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     {
         Vector3 unit = direction.sqrMagnitude > 1e-10f ? direction.normalized : Vector3.up;
         if (geodesicDebugSurfaceRadiusCache == null) BuildGeodesicDebugSurfaceRadiusCache();
-        if (geodesicDebugSurfaceRadiusCache != null && geodesicDebugSurfaceRadiusCache.TryGetValue(unit, out float cachedRadius))
+        if (geodesicDebugSurfaceRadiusCache != null && geodesicDebugSurfaceRadiusCache.TryGetValue(GeodesicDebugDirectionKey.From(unit), out float cachedRadius))
         {
             geodesicSurfaceRadiusQueryCount++;
             return unit * (cachedRadius + geodesicOutlineRadialOffset);
@@ -649,11 +695,11 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     {
         if (GeodesicTopology == null || GeodesicTopology.Triangles == null)
         {
-            geodesicDebugSurfaceRadiusCache = new Dictionary<Vector3, float>();
+            geodesicDebugSurfaceRadiusCache = new Dictionary<GeodesicDebugDirectionKey, float>();
             return;
         }
 
-        geodesicDebugSurfaceRadiusCache = new Dictionary<Vector3, float>(GeodesicTopology.TriangleCount);
+        geodesicDebugSurfaceRadiusCache = new Dictionary<GeodesicDebugDirectionKey, float>(GeodesicTopology.TriangleCount);
         for (int triangleIndex = 0; triangleIndex < GeodesicTopology.TriangleCount; triangleIndex++)
         {
             int a = GeodesicTopology.Triangles[triangleIndex * 3];
@@ -661,7 +707,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
             int c = GeodesicTopology.Triangles[triangleIndex * 3 + 2];
             Vector3 direction = (GeodesicTopology.CellDirections[a] + GeodesicTopology.CellDirections[b] + GeodesicTopology.CellDirections[c]).normalized;
             int nearest = FindNearestDebugCandidate(direction, a, b, c);
-            geodesicDebugSurfaceRadiusCache[direction] = SampleGeodesicSurfaceRadiusFromNearestCell(direction, nearest);
+            geodesicDebugSurfaceRadiusCache[GeodesicDebugDirectionKey.From(direction)] = SampleGeodesicSurfaceRadiusFromNearestCell(direction, nearest);
         }
     }
 
@@ -680,7 +726,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     float SampleGeodesicSurfaceRadiusFromNearestCell(Vector3 direction, int nearest)
     {
         geodesicSurfaceRadiusQueryCount++;
-        geodesicTerrainNoiseEvaluationCount++;
+        if (enableGeodesicTerrainDisplacement) geodesicTerrainNoiseEvaluationCount++;
         float raw = EvaluateRawGeodesicTerrainRadiusUncounted(direction);
         if (GeodesicTopology == null || geodesicSeafloorRadius == null || geodesicOceanMask == null || raw >= GeodesicSeaLevelRadius || nearest < 0 || nearest >= geodesicOceanMask.Length || !geodesicOceanMask[nearest]) return raw;
         geodesicBathymetryInterpolationCount++;
@@ -706,16 +752,20 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         geodesicDirectionToCellQueryCount = 0;
         geodesicDirectionCandidateCellsInspected = 0;
         geodesicTerrainNoiseEvaluationCount = 0;
+        geodesicSimulationCellTerrainEvaluationCount = 0;
+        geodesicRenderVertexTerrainEvaluationCount = 0;
+        geodesicDiagnosticOnlyTerrainEvaluationCount = 0;
         geodesicBathymetryInterpolationCount = 0;
         geodesicDirectionMappingCacheHits = 0;
         geodesicDirectionMappingCacheMisses = 0;
         geodesicSurfaceRadiusQueryMilliseconds = 0d;
+        geodesicLastShorelineDistanceMilliseconds = 0d;
         geodesicDebugSurfaceRadiusCache = null;
     }
 
     void LogGeodesicQueryDiagnostics()
     {
-        Debug.Log($"[GeodesicSurfaceQueryDiagnostics] surfaceRadiusQueries={geodesicSurfaceRadiusQueryCount}, directionToCellQueries={geodesicDirectionToCellQueryCount}, candidateCellsInspected={geodesicDirectionCandidateCellsInspected}, terrainNoiseEvaluations={geodesicTerrainNoiseEvaluationCount}, bathymetryInterpolations={geodesicBathymetryInterpolationCount}, directionMappingCacheHits={geodesicDirectionMappingCacheHits}, directionMappingCacheMisses={geodesicDirectionMappingCacheMisses}, surfaceRadiusQueryMs={geodesicSurfaceRadiusQueryMilliseconds:F2}", this);
+        Debug.Log($"[GeodesicSurfaceQueryDiagnostics] surfaceRadiusQueries={geodesicSurfaceRadiusQueryCount}, directionToCellQueries={geodesicDirectionToCellQueryCount}, candidateCellsInspected={geodesicDirectionCandidateCellsInspected}, terrainNoiseEvaluations={geodesicTerrainNoiseEvaluationCount}, simulationCellTerrainEvaluations={geodesicSimulationCellTerrainEvaluationCount}, renderVertexTerrainEvaluations={geodesicRenderVertexTerrainEvaluationCount}, diagnosticOnlyTerrainEvaluations={geodesicDiagnosticOnlyTerrainEvaluationCount}, shorelineDistanceMs={geodesicLastShorelineDistanceMilliseconds:F2}, bathymetryInterpolations={geodesicBathymetryInterpolationCount}, directionMappingCacheHits={geodesicDirectionMappingCacheHits}, directionMappingCacheMisses={geodesicDirectionMappingCacheMisses}, surfaceRadiusQueryMs={geodesicSurfaceRadiusQueryMilliseconds:F2}", this);
     }
 
     void WarnForGeodesicSubdivisionCost(int renderSubdivision, int colliderSubdivision, int estimatedRenderTriangles, int estimatedColliderTriangles)
@@ -741,7 +791,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         }
     }
 
-    void ApplyGeodesicSurfaceColours(Mesh targetMesh)
+    void ApplyGeodesicSurfaceColours(Mesh targetMesh, GeodesicRenderTerrainData terrainData)
     {
         if (targetMesh == null || !enableGeodesicProceduralSurfaceColours)
         {
@@ -765,7 +815,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
             float value = SampleGeodesicVisualNoise(direction, seedOffset, scale, octaves, persistenceSafe, lacunaritySafe);
             if (geodesicColoursUseTerrainHeight)
             {
-                float terrainValue = GetNormalizedTerrainHeightAtDirection(direction);
+                float terrainValue = terrainData.NormalizedHeights != null && i < terrainData.NormalizedHeights.Length ? terrainData.NormalizedHeights[i] : GetNormalizedTerrainHeightAtDirection(direction);
                 value = Mathf.Lerp(value, terrainValue, 0.55f);
             }
             value = Mathf.Clamp01(Mathf.Pow(value, contrastSafe));
@@ -987,29 +1037,52 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         geodesicMinimumTerrainOffset = -0.16f; geodesicMaximumTerrainOffset = 0.48f; geodesicRenderSubdivisionLevel = Mathf.Max(5, geodesicRenderSubdivisionLevel);
     }
 
-    void ApplyGeodesicTerrainDisplacement(Mesh targetMesh) => ApplyGeodesicTerrainDisplacement(targetMesh, default(IcosphereRenderGeometry), null, true, true);
+    void ApplyGeodesicTerrainDisplacement(Mesh targetMesh) => ApplyGeodesicTerrainDisplacement(targetMesh, default(IcosphereRenderGeometry), null, true, true, false);
 
-    void ApplyGeodesicTerrainDisplacement(Mesh targetMesh, IcosphereRenderGeometry geometry, IcosphereDirectionMapping mapping, bool recalculateNormals, bool recalculateBounds)
+    GeodesicRenderTerrainData ApplyGeodesicTerrainDisplacement(Mesh targetMesh, IcosphereRenderGeometry geometry, IcosphereDirectionMapping mapping, bool recalculateNormals, bool recalculateBounds, bool captureTerrainData)
     {
-        if (targetMesh == null) return;
+        GeodesicRenderTerrainData data = default;
+        if (targetMesh == null) return data;
         Vector3[] vertices = targetMesh.vertices;
+        if (captureTerrainData)
+        {
+            data.RawRadii = new float[vertices.Length]; data.SurfaceRadii = new float[vertices.Length]; data.Heights = new float[vertices.Length]; data.NormalizedHeights = new float[vertices.Length]; data.MountainMasks = new float[vertices.Length];
+        }
         bool hasGeometryDirections = geometry.UnitVertices != null;
+        PlanetTerrainSettings settings = GetGeodesicTerrainSettings();
+        float min = GetGeodesicMinimumTerrainOffset(); float max = GetGeodesicMaximumTerrainOffset();
         for (int i = 0; i < vertices.Length; i++)
         {
             Vector3 direction = hasGeometryDirections && i < geometry.VertexCount ? geometry.UnitVertices[i] : (vertices[i].sqrMagnitude > 1e-10f ? vertices[i].normalized : Vector3.up);
-            vertices[i] = direction * SampleGeodesicSurfaceRadiusMapped(direction, i, mapping);
+            PlanetTerrainSample sample = enableGeodesicTerrainDisplacement ? PlanetTerrainSampler.Evaluate(direction, DerivedTerrainSeed, settings) : default;
+            if (enableGeodesicTerrainDisplacement) geodesicTerrainNoiseEvaluationCount++;
+            geodesicRenderVertexTerrainEvaluationCount++;
+            float height = enableGeodesicTerrainDisplacement ? sample.HeightOffset : 0f;
+            float raw = BasePlanetRadius + height;
+            float surface = SampleGeodesicSurfaceRadiusMappedWithRaw(direction, i, mapping, raw);
+            vertices[i] = direction * surface;
+            if (captureTerrainData)
+            {
+                data.RawRadii[i] = raw; data.SurfaceRadii[i] = surface; data.Heights[i] = height; data.NormalizedHeights[i] = max > min ? Mathf.InverseLerp(min, max, height) : 0.5f; data.MountainMasks[i] = sample.MountainMask;
+            }
         }
         targetMesh.vertices = vertices;
         if (recalculateNormals) targetMesh.RecalculateNormals();
         if (recalculateBounds) targetMesh.RecalculateBounds();
+        return data;
     }
 
     float SampleGeodesicSurfaceRadiusMapped(Vector3 direction, int sampleIndex, IcosphereDirectionMapping mapping)
     {
-        geodesicSurfaceRadiusQueryCount++;
-        geodesicTerrainNoiseEvaluationCount++;
+        if (enableGeodesicTerrainDisplacement) geodesicTerrainNoiseEvaluationCount++;
         Vector3 d = direction.sqrMagnitude > 1e-10f ? direction.normalized : Vector3.up;
         float raw = EvaluateRawGeodesicTerrainRadiusUncounted(d);
+        return SampleGeodesicSurfaceRadiusMappedWithRaw(d, sampleIndex, mapping, raw);
+    }
+
+    float SampleGeodesicSurfaceRadiusMappedWithRaw(Vector3 d, int sampleIndex, IcosphereDirectionMapping mapping, float raw)
+    {
+        geodesicSurfaceRadiusQueryCount++;
         if (CurrentGridType != PlanetGridType.GeodesicIcosphere || mapping == null)
         {
             return GetGeodesicSeafloorRadiusAtDirectionUnprofiled(d, raw);
@@ -1020,22 +1093,32 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     }
 
 
-    void LogGeodesicTerrainDiagnostics(Mesh renderMesh, int simulationSubdivision, int renderSubdivision)
+    void LogGeodesicTerrainDiagnostics(Mesh renderMesh, int simulationSubdivision, int renderSubdivision, GeodesicRenderTerrainData terrainData)
     {
         if (renderMesh == null) return;
         Vector3[] vertices = renderMesh.vertices;
         if (vertices == null || vertices.Length == 0) return;
         float min = float.PositiveInfinity, max = float.NegativeInfinity, sum = 0f, sumSq = 0f, maskAbove = 0f;
         float minRadius = float.PositiveInfinity, maxRadius = float.NegativeInfinity;
-        PlanetTerrainSettings settings = GetGeodesicTerrainSettings();
+        bool hasGeneratedData = terrainData.Heights != null && terrainData.Heights.Length == vertices.Length && terrainData.RawRadii != null && terrainData.RawRadii.Length == vertices.Length;
+        PlanetTerrainSettings settings = hasGeneratedData ? default : GetGeodesicTerrainSettings();
         for (int i = 0; i < vertices.Length; i++)
         {
-            Vector3 direction = vertices[i].sqrMagnitude > 1e-10f ? vertices[i].normalized : Vector3.up;
-            PlanetTerrainSample sample = PlanetTerrainSampler.Evaluate(direction, DerivedTerrainSeed, settings);
-            float h = sample.HeightOffset;
+            float h; float r; float mountainMask;
+            if (hasGeneratedData)
+            {
+                h = terrainData.Heights[i]; r = terrainData.RawRadii[i]; mountainMask = terrainData.MountainMasks != null && i < terrainData.MountainMasks.Length ? terrainData.MountainMasks[i] : 0f;
+            }
+            else
+            {
+                Vector3 direction = vertices[i].sqrMagnitude > 1e-10f ? vertices[i].normalized : Vector3.up;
+                PlanetTerrainSample sample = PlanetTerrainSampler.Evaluate(direction, DerivedTerrainSeed, settings);
+                geodesicTerrainNoiseEvaluationCount++; geodesicDiagnosticOnlyTerrainEvaluationCount++;
+                h = enableGeodesicTerrainDisplacement ? sample.HeightOffset : 0f; r = BasePlanetRadius + h; mountainMask = sample.MountainMask;
+            }
             min = Mathf.Min(min, h); max = Mathf.Max(max, h); sum += h; sumSq += h * h;
-            if (sample.MountainMask > 0f) maskAbove += 1f;
-            float r = BasePlanetRadius + h; minRadius = Mathf.Min(minRadius, r); maxRadius = Mathf.Max(maxRadius, r);
+            if (mountainMask > 0f) maskAbove += 1f;
+            minRadius = Mathf.Min(minRadius, r); maxRadius = Mathf.Max(maxRadius, r);
         }
         float count = vertices.Length;
         float mean = sum / count;
@@ -1050,11 +1133,16 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         if (GeodesicTopology == null) { geodesicTerrainHeightByCell = null; geodesicNormalizedTerrainByCell = null; return; }
         geodesicTerrainHeightByCell = new float[GeodesicTopology.CellCount];
         geodesicNormalizedTerrainByCell = new float[GeodesicTopology.CellCount];
+        geodesicRawTerrainRadius = new float[GeodesicTopology.CellCount];
+        float min = GetGeodesicMinimumTerrainOffset(); float max = GetGeodesicMaximumTerrainOffset();
         for (int i = 0; i < GeodesicTopology.CellCount; i++)
         {
             Vector3 direction = GeodesicTopology.CellDirections[i];
-            geodesicTerrainHeightByCell[i] = EvaluateGeodesicTerrainHeight(direction);
-            geodesicNormalizedTerrainByCell[i] = GetNormalizedTerrainHeightAtDirection(direction);
+            float height = EvaluateGeodesicTerrainHeight(direction);
+            geodesicSimulationCellTerrainEvaluationCount++;
+            geodesicTerrainHeightByCell[i] = height;
+            geodesicNormalizedTerrainByCell[i] = max > min ? Mathf.InverseLerp(min, max, height) : 0.5f;
+            geodesicRawTerrainRadius[i] = BasePlanetRadius + height;
         }
     }
 
@@ -1094,7 +1182,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
     public float GetGeodesicSeafloorRadiusAtDirection(Vector3 direction)
     {
-        geodesicTerrainNoiseEvaluationCount++;
+        if (enableGeodesicTerrainDisplacement) geodesicTerrainNoiseEvaluationCount++;
         Vector3 d = direction.sqrMagnitude > 1e-10f ? direction.normalized : Vector3.up;
         float raw = EvaluateRawGeodesicTerrainRadiusUncounted(d);
         return GetGeodesicSeafloorRadiusAtDirectionUnprofiled(d, raw);
@@ -1139,10 +1227,10 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         }
 
         int count = GeodesicTopology.CellCount;
-        geodesicRawTerrainRadius = new float[count]; geodesicSeafloorRadius = new float[count]; geodesicBaseWaterDepth = new float[count]; geodesicWaterDepth = new float[count]; geodesicDistanceToShore = new float[count]; geodesicBasinNoiseContribution = new float[count]; geodesicBathymetryRegion = new byte[count]; geodesicOceanMask = new bool[count]; geodesicOceanNeighborCounts = new byte[count]; geodesicCoastlineMask = new bool[count];
+        if (geodesicRawTerrainRadius == null || geodesicRawTerrainRadius.Length != count) geodesicRawTerrainRadius = new float[count]; geodesicSeafloorRadius = new float[count]; geodesicBaseWaterDepth = new float[count]; geodesicWaterDepth = new float[count]; geodesicDistanceToShore = new float[count]; geodesicBasinNoiseContribution = new float[count]; geodesicBathymetryRegion = new byte[count]; geodesicOceanMask = new bool[count]; geodesicOceanNeighborCounts = new byte[count]; geodesicCoastlineMask = new bool[count];
         for (int i = 0; i < count; i++)
         {
-            float raw = EvaluateRawGeodesicTerrainRadius(GeodesicTopology.CellDirections[i]);
+            float raw = geodesicRawTerrainRadius != null && i < geodesicRawTerrainRadius.Length ? geodesicRawTerrainRadius[i] : EvaluateRawGeodesicTerrainRadius(GeodesicTopology.CellDirections[i]);
             geodesicRawTerrainRadius[i] = raw; geodesicSeafloorRadius[i] = raw; geodesicDistanceToShore[i] = -1f;
             bool ocean = enableOcean && raw < GeodesicSeaLevelRadius;
             geodesicOceanMask[i] = ocean; geodesicBaseWaterDepth[i] = ocean ? Mathf.Max(0f, GeodesicSeaLevelRadius - raw) : 0f; geodesicWaterDepth[i] = geodesicBaseWaterDepth[i];
@@ -1172,12 +1260,84 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
     void ComputeGeodesicShoreDistances()
     {
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        float[] legacyDistances = null;
+        double legacyMs = 0d;
+        if (validateOptimizedGeodesicShoreDistances)
+        {
+            legacyDistances = (float[])geodesicDistanceToShore.Clone();
+            var legacyWatch = System.Diagnostics.Stopwatch.StartNew();
+            ComputeGeodesicShoreDistancesLegacy(legacyDistances);
+            legacyWatch.Stop();
+            legacyMs = legacyWatch.Elapsed.TotalMilliseconds;
+        }
+#endif
+        ComputeGeodesicShoreDistancesDijkstra(geodesicDistanceToShore);
+        watch.Stop();
+        geodesicLastShorelineDistanceMilliseconds = watch.Elapsed.TotalMilliseconds;
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        if (validateOptimizedGeodesicShoreDistances && legacyDistances != null)
+        {
+            const float tolerance = 0.0001f;
+            double sumDeviation = 0d;
+            float maxDeviation = 0f;
+            int compared = 0;
+            int exceeding = 0;
+            for (int i = 0; i < geodesicDistanceToShore.Length; i++)
+            {
+                if (!geodesicOceanMask[i]) continue;
+                float a = legacyDistances[i];
+                float b = geodesicDistanceToShore[i];
+                float deviation = (a < 0f && b < 0f) ? 0f : Mathf.Abs(a - b);
+                sumDeviation += deviation;
+                if (deviation > maxDeviation) maxDeviation = deviation;
+                if (deviation > tolerance) exceeding++;
+                compared++;
+            }
+            double meanDeviation = compared > 0 ? sumDeviation / compared : 0d;
+            Debug.Log($"[GeodesicShoreDistanceValidation] oldMs={legacyMs:F2}, newMs={geodesicLastShorelineDistanceMilliseconds:F2}, maxAbsDeviation={maxDeviation:G9}, meanDeviation={meanDeviation:G9}, cellsExceedingTolerance={exceeding}, tolerance={tolerance:G9}", this);
+        }
+#endif
+    }
+
+    void ComputeGeodesicShoreDistancesDijkstra(float[] distances)
+    {
+        int count = GeodesicTopology.CellCount;
+        var heap = new GeodesicDistanceMinHeap(Mathf.Max(16, count / 8));
+        for (int i = 0; i < count; i++)
+        {
+            if (geodesicOceanMask[i] && distances[i] == 0f) heap.Push(i, 0f);
+        }
+        while (heap.TryPop(out int current, out float best))
+        {
+            if (current < 0 || current >= count || !geodesicOceanMask[current]) continue;
+            if (distances[current] < 0f || best > distances[current] + 0.000001f) continue;
+            int baseIndex = current * 6;
+            for (int n = 0; n < GeodesicTopology.NeighborCounts[current]; n++)
+            {
+                int nb = GeodesicTopology.Neighbors6[baseIndex + n];
+                if (nb < 0 || nb >= count || !geodesicOceanMask[nb]) continue;
+                float edge = GeodesicTopology.NeighborAngularDistances6[baseIndex + n] * BasePlanetRadius;
+                float next = best + Mathf.Max(0.000001f, edge);
+                if (distances[nb] < 0f || next < distances[nb])
+                {
+                    distances[nb] = next;
+                    heap.Push(nb, next);
+                }
+            }
+        }
+    }
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+    void ComputeGeodesicShoreDistancesLegacy(float[] distances)
+    {
         int count = GeodesicTopology.CellCount;
         bool[] visited = new bool[count];
         for (int iter = 0; iter < count; iter++)
         {
             int current = -1; float best = float.PositiveInfinity;
-            for (int i = 0; i < count; i++) if (geodesicOceanMask[i] && !visited[i] && geodesicDistanceToShore[i] >= 0f && geodesicDistanceToShore[i] < best) { best = geodesicDistanceToShore[i]; current = i; }
+            for (int i = 0; i < count; i++) if (geodesicOceanMask[i] && !visited[i] && distances[i] >= 0f && distances[i] < best) { best = distances[i]; current = i; }
             if (current < 0) break;
             visited[current] = true;
             for (int n = 0; n < GeodesicTopology.NeighborCounts[current]; n++)
@@ -1185,9 +1345,35 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
                 int nb = GeodesicTopology.Neighbors6[current * 6 + n]; if (nb < 0 || nb >= count || !geodesicOceanMask[nb]) continue;
                 float edge = GeodesicTopology.NeighborAngularDistances6[current * 6 + n] * BasePlanetRadius;
                 float next = best + Mathf.Max(0.000001f, edge);
-                if (geodesicDistanceToShore[nb] < 0f || next < geodesicDistanceToShore[nb]) geodesicDistanceToShore[nb] = next;
+                if (distances[nb] < 0f || next < distances[nb]) distances[nb] = next;
             }
         }
+    }
+#endif
+
+    private sealed class GeodesicDistanceMinHeap
+    {
+        private struct Entry { public int Cell; public float Distance; public long Order; }
+        private Entry[] entries;
+        private int count;
+        private long nextOrder;
+        public GeodesicDistanceMinHeap(int capacity) { entries = new Entry[Mathf.Max(4, capacity)]; }
+        public void Push(int cell, float distance)
+        {
+            if (count == entries.Length) System.Array.Resize(ref entries, entries.Length * 2);
+            entries[count] = new Entry { Cell = cell, Distance = distance, Order = nextOrder++ };
+            SiftUp(count++);
+        }
+        public bool TryPop(out int cell, out float distance)
+        {
+            if (count == 0) { cell = -1; distance = 0f; return false; }
+            Entry root = entries[0]; count--; entries[0] = entries[count]; SiftDown(0);
+            cell = root.Cell; distance = root.Distance; return true;
+        }
+        private static bool Less(Entry a, Entry b) => a.Distance < b.Distance || (Mathf.Approximately(a.Distance, b.Distance) && a.Order < b.Order);
+        private void Swap(int a, int b) { Entry temp = entries[a]; entries[a] = entries[b]; entries[b] = temp; }
+        private void SiftUp(int i) { while (i > 0) { int p = (i - 1) >> 1; if (!Less(entries[i], entries[p])) break; Swap(i, p); i = p; } }
+        private void SiftDown(int i) { while (true) { int l = i * 2 + 1, r = l + 1, s = i; if (l < count && Less(entries[l], entries[s])) s = l; if (r < count && Less(entries[r], entries[s])) s = r; if (s == i) break; Swap(i, s); i = s; } }
     }
 
     void SmoothGeodesicDistanceField()

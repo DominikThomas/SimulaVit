@@ -1133,3 +1133,60 @@ For target subdivisions higher than the simulation subdivision, mappings are bui
 The mapping cache is topology-only and independent of terrain seed, terrain settings, sea level, bathymetry values, ocean masks, colours, and generated Unity meshes. Seed/settings-dependent displaced positions are regenerated each planet generation. Debug rendering now caches unique sampled debug directions for the current line mesh build so repeated shared dual-corner endpoints no longer repeat the full surface-radius query.
 
 Development diagnostics now aggregate surface-radius query counts, direction-to-cell query counts, candidate cells inspected, terrain-noise evaluations, bathymetry interpolations, mapping cache hits, and mapping cache misses once per generation. Unity Play Mode before/after timings and maximum surface-radius deviation still need to be recorded locally; do not claim runtime speedups until those measurements exist.
+
+---
+
+## Geodesic generation performance pass 2 — algorithmic and duplicate-work cleanup
+
+This pass preserves terrain appearance, seed semantics, ocean/coastline classification, bathymetry profile inputs, topology, picker behavior, legacy cube-sphere behavior, save formats, and simulation values. It does not complete or start a new simulation-functionality phase.
+
+### Profiling boundary
+
+`GenerateGeodesicPrototype` now keeps the full synchronous-generation stopwatch running through post-core terrain diagnostics, query diagnostics, validation/inventory logging, and debug mesh construction. The summary reports both:
+
+- `coreGenerationDurationMs`: work through mesh/ocean/debug generation, picker setup, runtime descriptor population, and generation validation;
+- `fullSynchronousGenerationDurationMs`: core generation plus the synchronous diagnostics/log preparation that runs before the generated planet is considered fully reported/usable.
+
+The difference is expected to be the remaining synchronous diagnostics and reporting boundary. Expensive diagnostic sampling must not be moved after the total timer just to make generation appear faster.
+
+### Bathymetry shoreline distances
+
+`ComputeGeodesicShoreDistances` now uses a deterministic multi-source Dijkstra traversal instead of the previous complete scan for the next minimum-distance ocean cell. Ocean coastline cells are initialized at distance zero, only ocean cells are expanded, each edge uses `NeighborAngularDistances6 * BasePlanetRadius`, and disconnected oceans remain represented by cells that are never reached from a coastline source.
+
+The normal path is now approximately `O((V + E) log V)` rather than the former `O(V²)` scan. A Unity-compatible internal binary min-heap is used so the code does not depend on newer .NET priority-queue APIs. Duplicate heap entries are allowed and stale entries are skipped deterministically.
+
+For temporary development validation, editor/development builds can enable shoreline-distance validation. That path runs the legacy scan against the same input distances and logs old/new execution time, maximum absolute deviation, mean deviation, and the count of ocean cells exceeding tolerance. This validation path is not the normal generation algorithm.
+
+### Terrain-sample ownership
+
+Simulation-cell terrain ownership is centralized in `RebuildGeodesicCellTerrainCache`. Each authoritative simulation-cell direction is evaluated once per generation, then the cached height is normalized directly from the authoritative min/max terrain offsets and converted to raw terrain radius. Ocean classification reuses those raw radii instead of evaluating the terrain sampler again.
+
+Generation diagnostics now separate terrain evaluation counts into simulation-cell, render-vertex, and diagnostic-only categories so redundant sampling is visible in the console.
+
+### Temporary render-generation data ownership
+
+Terrain displacement can now produce a temporary per-generation render terrain data block containing raw terrain radius, final surface radius, height offset, normalized height, and mountain-mask values for the current render mesh. The data is regenerated with the mesh when seed/settings change, is not stored in immutable render geometry caches, and is not exposed as mutable shared cache state.
+
+Vertex-colour generation consumes the normalized heights from this temporary data instead of re-running normalized terrain sampling for every render vertex. Terrain diagnostics also consume the generated height/radius/mountain-mask data by default, removing the extra full render-vertex diagnostic terrain-noise pass.
+
+### Debug-outline lookup
+
+Debug-outline generation still builds a single combined line mesh, but now keys sampled directions with stable quantized direction keys and reuses sampled positions and same-colour vertices for shared line endpoints. Debug rendering remains skipped and cleared when cell outlines are disabled. Normal generation with outlines disabled should remain effectively zero-cost for the debug renderer.
+
+The remaining debug surface sampling uses bounded local nearest-cell knowledge from topology triangle corners instead of calling the brute-force `DirectionToGeodesicCell` full-cell scan.
+
+### Topology-cache decision
+
+`GeodesicGridTopology` is treated as immutable after `Build` completes: its arrays are populated during construction and consumed read-only by generation, picking, debug rendering, bathymetry, and validation. Terrain, ocean masks, bathymetry arrays, and generation diagnostics remain separately owned by `PlanetGenerator` and are never stored in the topology cache.
+
+A subdivision-keyed `GeodesicTopologyCache` now reuses built simulation topology across menu/start cycles. It includes explicit diagnostics in generation logs and an explicit clear operation. Callers must continue to treat topology arrays as immutable; any future runtime system that needs mutable topology-derived state must allocate separate arrays.
+
+### Cache diagnostics
+
+Direction-mapping diagnostics now distinguish original cache-build work from work performed by the current request. On cache hits, `currentRequestCandidateCellsInspected` is zero; `originalCandidateCellsInspectedDuringBuild` remains available only as historical information about the cached mapping.
+
+### Profiling results and remaining bottlenecks
+
+No Unity Play Mode timings were captured in this non-Unity environment. The code now logs the stages needed to record cold, warm, outlines-disabled, outlines-enabled, menu/regeneration, and legacy/geodesic transition measurements locally, including shoreline distance time and terrain evaluation counts.
+
+Remaining bottlenecks should be re-measured in Unity before making speedup claims. Expected remaining main-thread costs are terrain/noise evaluation for render and collider vertices, MeshCollider cooking, mesh normal recalculation/upload, and any enabled debug-outline mesh construction.

@@ -77,21 +77,26 @@ public class GeodesicGridDebugRenderer : MonoBehaviour
         var verts = cachedVertices;
         var indices = cachedIndices;
         var colors = cachedColors;
-        var sampledPositionByDirection = new System.Collections.Generic.Dictionary<Vector3, Vector3>();
+        var sampledPositionByDirection = new System.Collections.Generic.Dictionary<QuantizedDirectionKey, Vector3>();
+        var vertexByDirectionAndColor = new System.Collections.Generic.Dictionary<DebugVertexKey, int>();
         int AddDebugVertex(Vector3 direction, Color color)
         {
             Vector3 unit = direction.normalized;
-            if (!sampledPositionByDirection.TryGetValue(unit, out Vector3 position))
+            var directionKey = QuantizedDirectionKey.From(unit);
+            var vertexKey = new DebugVertexKey(directionKey, color);
+            if (vertexByDirectionAndColor.TryGetValue(vertexKey, out int existingIndex)) return existingIndex;
+            if (!sampledPositionByDirection.TryGetValue(directionKey, out Vector3 position))
             {
                 position = surfacePositionSampler != null
                     ? surfacePositionSampler(unit)
                     : unit * ((surfaceRadiusSampler != null ? surfaceRadiusSampler(unit) : radius) + radialOffset);
-                sampledPositionByDirection[unit] = position;
+                sampledPositionByDirection[directionKey] = position;
             }
 
             int index = verts.Count;
             verts.Add(position);
             colors.Add(color);
+            vertexByDirectionAndColor[vertexKey] = index;
             return index;
         }
 
@@ -116,6 +121,20 @@ public class GeodesicGridDebugRenderer : MonoBehaviour
         if (lineMaterial != null) mr.sharedMaterial = lineMaterial;
         else if (mr.sharedMaterial == null) mr.sharedMaterial = new Material(Shader.Find("Sprites/Default")) { color = Color.white };
         mr.enabled = true;
+    }
+
+    private readonly struct QuantizedDirectionKey
+    {
+        private readonly int x; private readonly int y; private readonly int z;
+        private const float Scale = 1000000f;
+        private QuantizedDirectionKey(int x, int y, int z) { this.x = x; this.y = y; this.z = z; }
+        public static QuantizedDirectionKey From(Vector3 direction) => new QuantizedDirectionKey(Mathf.RoundToInt(direction.x * Scale), Mathf.RoundToInt(direction.y * Scale), Mathf.RoundToInt(direction.z * Scale));
+    }
+
+    private readonly struct DebugVertexKey
+    {
+        private readonly QuantizedDirectionKey direction; private readonly Color color;
+        public DebugVertexKey(QuantizedDirectionKey direction, Color color) { this.direction = direction; this.color = color; }
     }
 
     private Color ResolveCellColor(GeodesicGridTopology t, int cellIndex)
