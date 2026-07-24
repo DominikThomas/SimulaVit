@@ -85,6 +85,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     private double geodesicSurfaceRadiusQueryMilliseconds;
     private Dictionary<GeodesicDebugDirectionKey, float> geodesicDebugSurfaceRadiusCache;
     private GeodesicRenderTerrainData geodesicCurrentRenderTerrainData;
+    private float maximumGeneratedOpaqueSurfaceRadius;
     private double geodesicLastShorelineDistanceMilliseconds;
     private double geodesicLastCoreGenerationMilliseconds;
     private double geodesicLastFullSynchronousGenerationMilliseconds;
@@ -427,6 +428,20 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     public float BasePlanetRadius => Mathf.Max(0.001f, radius);
     public float MinimumSurfaceRadius => CurrentGridType == PlanetGridType.GeodesicIcosphere ? BasePlanetRadius + GetGeodesicMinimumTerrainOffset() : GetGeneratedRadiusExtrema().min;
     public float MaximumSurfaceRadius => CurrentGridType == PlanetGridType.GeodesicIcosphere ? BasePlanetRadius + GetGeodesicMaximumTerrainOffset() : GetGeneratedRadiusExtrema().max;
+    /// <summary>
+    /// Outer opaque/liquid silhouette radius for the currently generated mode, in planet-local units.
+    /// Atmosphere is deliberately excluded. When ocean is visible, the greater of terrain and water is used.
+    /// </summary>
+    public float CurrentVisibleOuterRadius
+    {
+        get
+        {
+            float terrainRadius = maximumGeneratedOpaqueSurfaceRadius > 0f ? maximumGeneratedOpaqueSurfaceRadius : BasePlanetRadius;
+            if (!enableOcean) return terrainRadius;
+            float waterRadius = CurrentGridType == PlanetGridType.GeodesicIcosphere ? GeodesicSeaLevelRadius : GetOceanRadius();
+            return Mathf.Max(terrainRadius, waterRadius);
+        }
+    }
     public float GeodesicSeaLevelRadius => resolvedGeodesicSeaLevelRadius > 0f ? resolvedGeodesicSeaLevelRadius : BasePlanetRadius + geodesicSeaLevelOffset;
     public float ResolvedGeodesicSeaLevelRadius => GeodesicSeaLevelRadius;
     public float ResolvedGeodesicSeaLevelOffset => GeodesicSeaLevelRadius - BasePlanetRadius;
@@ -580,6 +595,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         geodesicCoastlineMask = null;
         geodesicDebugSurfaceRadiusCache = null;
         geodesicCurrentRenderTerrainData = default;
+        maximumGeneratedOpaqueSurfaceRadius = BasePlanetRadius;
 
         if (geodesicOceanMeshRenderer != null)
         {
@@ -650,6 +666,9 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     public void ApplyStartupGrid(PlanetGridType gridType, int cubeSphereResolution, int geodesicSubdivision)
     {
         generationMode = gridType == PlanetGridType.GeodesicIcosphere ? PlanetGenerationMode.GeodesicPrototype : PlanetGenerationMode.LegacyCubeSphere;
+        // Prevent the apparent-horizon API from exposing the previous mode's generated maximum
+        // during the short interval before the newly selected mode finishes generation.
+        maximumGeneratedOpaqueSurfaceRadius = BasePlanetRadius;
         resolution = Mathf.Clamp(cubeSphereResolution, 3, 240);
         geodesicSubdivisionLevel = Mathf.Clamp(geodesicSubdivision, 0, GeodesicGridTopology.MaxSupportedSubdivision);
         geodesicSimulationSubdivisionLevel = geodesicSubdivisionLevel;
@@ -706,6 +725,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
         stage = System.Diagnostics.Stopwatch.StartNew();
         geodesicCurrentRenderTerrainData = ApplyGeodesicTerrainDisplacement(mesh, renderGeometry, renderMapping, false, false, true);
+        maximumGeneratedOpaqueSurfaceRadius = Mathf.Max(BasePlanetRadius, MaxRenderSurfaceRadius(geodesicCurrentRenderTerrainData));
         LogStage("terrain displacement", stage);
         stage = System.Diagnostics.Stopwatch.StartNew();
         ApplyGeodesicSurfaceColours(mesh, geodesicCurrentRenderTerrainData);
@@ -2664,6 +2684,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
         int cellCount = unitVertices.Length;
         float seaRadius = GetOceanRadius();
+        maximumGeneratedOpaqueSurfaceRadius = BasePlanetRadius;
         Vector3[] terrainVertices = new Vector3[cellCount];
         Vector3[] oceanVertices = new Vector3[cellCount];
         Vector3[] atmosphereVertices = new Vector3[cellCount];
@@ -2674,6 +2695,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
             float shellBaseRadius = enableOcean ? seaRadius : radius;
             float atmosphereRadius = shellBaseRadius * atmosphereRadiusMultiplier;
             terrainVertices[i] = dir * finalTerrainRadii[i];
+            maximumGeneratedOpaqueSurfaceRadius = Mathf.Max(maximumGeneratedOpaqueSurfaceRadius, finalTerrainRadii[i]);
             oceanVertices[i] = dir * seaRadius;
             atmosphereVertices[i] = dir * atmosphereRadius;
         }

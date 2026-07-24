@@ -648,7 +648,6 @@ MonoBehaviour:
   planetCenter: {fileID: 382753103}
   viewer: {fileID: 370080327}
   planetRadius: 8
-  horizonTriggerOffsetDegrees: 0
   horizonTransitionDegrees: 18
   horizonColor: {r: 0.6431373, g: 0, b: 0, a: 1}
   dayColor: {r: 1, g: 0.95, b: 0.75, a: 1}

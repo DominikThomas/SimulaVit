@@ -40,11 +40,17 @@ public class SunSkyRotator : MonoBehaviour
     public Transform planetCenter;
     public Transform viewer;
     [Min(0.001f)] public float planetRadius = 8f;
-    public float horizonTriggerOffsetDegrees = 0f;
+    [Tooltip("Sunset colour transition band above the apparent planet limb, in degrees. This is horizon-relative apparent angular geometry.")]
     [Range(0.1f, 25f)] public float horizonTransitionDegrees = 6f;
     public Color horizonColor = new Color(1f, 0.45f, 0.2f, 1f);
     public Color dayColor = new Color(1f, 0.95f, 0.75f, 1f);
     [Range(0f, 1f)] public float colorShiftStrength = 1f;
+    [Tooltip("Minimum central-disc brightness at the apparent limb, before the separate geometric occultation factor is applied.")]
+    [Range(0f, 2f)] public float minimumSunsetCentreBrightness = 0.8f;
+    [Tooltip("How many degrees below the apparent limb the visual red glow may persist after the central disc is occulted.")]
+    [Range(0f, 10f)] public float afterHorizonGlowPersistenceDegrees = 1f;
+    [Tooltip("Multiplier for the derived apparent sun-disc radius used to soften partial occultation. One spans exactly one core-disc radius either side of the limb.")]
+    [Range(0.25f, 3f)] public float sunOcclusionSoftness = 1f;
 
     [Header("Emission Balancing")]
     [Range(0f, 2f)] public float dayEmissionMultiplier = 1f;
@@ -70,6 +76,14 @@ public class SunSkyRotator : MonoBehaviour
     [SerializeField, Tooltip("Read-only: angular difference between expected ray direction and the light transform forward.")] private float lightDirectionAngularError;
     [SerializeField, Tooltip("Read-only: whether the terrain shader consumes the URP main light.")] private bool terrainMainLightSupport;
     [SerializeField, Tooltip("Read-only: whether the ocean shader consumes the URP main light.")] private bool oceanMainLightSupport;
+    [SerializeField, Tooltip("Read-only apparent-horizon diagnostic, in world units.")] private float cameraToPlanetDistance;
+    [SerializeField, Tooltip("Read-only current opaque/liquid silhouette radius, in world units; atmosphere excluded.")] private float resolvedVisiblePlanetRadius;
+    [SerializeField, Tooltip("Read-only apparent planet angular radius, in degrees.")] private float apparentPlanetAngularRadiusDegrees;
+    [SerializeField, Tooltip("Read-only apparent bright sun-disc angular radius, in degrees.")] private float apparentSunAngularRadiusDegrees;
+    [SerializeField, Tooltip("Read-only signed sun-centre height above the apparent planet limb, in degrees.")] private float sunCentreHeightAboveLimbDegrees;
+    [SerializeField, Tooltip("Read-only sunset colour factor.")] private float sunsetColourFactor;
+    [SerializeField, Tooltip("Read-only geometric central-disc visibility factor.")] private float visibleDiscFactor;
+    [SerializeField, Tooltip("Read-only after-horizon glow factor.")] private float glowFactor;
 
     public Vector3 PlanetToSunDirectionWorld => planetToSunDirectionWorld;
     public Vector3 SunToPlanetDirectionWorld => sunToPlanetDirectionWorld;
@@ -95,6 +109,10 @@ public class SunSkyRotator : MonoBehaviour
     private MeshFilter sunMeshFilter;
     private MeshRenderer sunMeshRenderer;
     private bool angularMismatchWarningActive;
+    private PlanetGenerator planetGenerator;
+    private PlanetGridType lastAppearanceGridMode;
+    private bool hasAppearanceGridMode;
+    private bool appearanceGeometryWarningActive;
 
     void OnValidate()
     {
@@ -507,10 +525,10 @@ public class SunSkyRotator : MonoBehaviour
     {
         if (planetCenter == null) return;
 
-        PlanetGenerator generator = planetCenter.GetComponent<PlanetGenerator>();
-        if (generator != null)
+        planetGenerator = planetCenter.GetComponent<PlanetGenerator>();
+        if (planetGenerator != null)
         {
-            planetRadius = Mathf.Max(0.001f, generator.radius);
+            planetRadius = Mathf.Max(0.001f, planetGenerator.radius);
         }
     }
 
@@ -710,10 +728,10 @@ public class SunSkyRotator : MonoBehaviour
     {
         if (runtimeSunMaterial == null) return;
 
-        EvaluateSunAppearance(out Color shiftedColor, out float emissionMultiplier);
+        EvaluateSunAppearance(out Color shiftedColor, out float emissionMultiplier, out float visualAlpha);
 
         Color finalColor = shiftedColor * Mathf.Max(0f, sunEmissionIntensity * emissionMultiplier);
-        finalColor.a = 1f;
+        finalColor.a = visualAlpha;
 
         if (runtimeSunMaterial.HasProperty("_BaseColor"))
         {
@@ -726,7 +744,7 @@ public class SunSkyRotator : MonoBehaviour
         }
     }
 
-    void EvaluateSunAppearance(out Color shiftedColor, out float emissionMultiplier)
+    void EvaluateSunAppearance(out Color shiftedColor, out float emissionMultiplier, out float visualAlpha)
     {
         SetupViewerReference();
 
@@ -735,6 +753,7 @@ public class SunSkyRotator : MonoBehaviour
         {
             shiftedColor = Color.Lerp(sunColor, dayColor * sunColor, colorShiftStrength);
             emissionMultiplier = dayEmissionMultiplier;
+            visualAlpha = 1f;
             return;
         }
 
@@ -746,27 +765,67 @@ public class SunSkyRotator : MonoBehaviour
         Vector3 sunPosition = center - transform.forward * sunDistance;
         Vector3 sunDir = (sunPosition - cameraPos).normalized;
 
-        float angleToSunFromCenterDir = Vector3.Angle(centerDir, sunDir);
-        float planetAngularRadius = Mathf.Asin(Mathf.Clamp01(planetRadius / Mathf.Max(distanceToCenter, planetRadius + 0.001f))) * Mathf.Rad2Deg;
-        float horizonAngle = planetAngularRadius + horizonTriggerOffsetDegrees;
-        float deltaFromHorizon = angleToSunFromCenterDir - horizonAngle;
+        cameraToPlanetDistance = distanceToCenter;
+        resolvedVisiblePlanetRadius = ResolveVisiblePlanetRadiusWorld();
+        bool radiusValid = float.IsFinite(resolvedVisiblePlanetRadius) && resolvedVisiblePlanetRadius > 0f;
+        bool cameraOutside = radiusValid && distanceToCenter > resolvedVisiblePlanetRadius;
+        float sunCameraDistance = (sunPosition - cameraPos).magnitude;
+        float sunCoreWorldRadius = Mathf.Max(0f, sunScale * 0.5f * Mathf.Clamp01(coreRadius));
+        bool sunRadiusValid = sunCameraDistance > 0.0001f && sunCoreWorldRadius > 0f;
 
-        bool behindPlanet = deltaFromHorizon < 0f;
+        apparentPlanetAngularRadiusDegrees = radiusValid
+            ? Mathf.Asin(Mathf.Clamp01(resolvedVisiblePlanetRadius / Mathf.Max(distanceToCenter, 0.0001f))) * Mathf.Rad2Deg
+            : 0f;
+        apparentSunAngularRadiusDegrees = sunRadiusValid
+            ? Mathf.Asin(Mathf.Clamp01(sunCoreWorldRadius / sunCameraDistance)) * Mathf.Rad2Deg
+            : 0f;
+        float separationDegrees = Vector3.Angle(centerDir, sunDir);
+        sunCentreHeightAboveLimbDegrees = separationDegrees - apparentPlanetAngularRadiusDegrees;
+
         float transition = Mathf.Max(0.1f, horizonTransitionDegrees);
+        sunsetColourFactor = 1f - Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(sunCentreHeightAboveLimbDegrees / transition));
+        float occultationHalfBand = Mathf.Max(0.0001f, apparentSunAngularRadiusDegrees * sunOcclusionSoftness);
+        visibleDiscFactor = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(-occultationHalfBand, occultationHalfBand, sunCentreHeightAboveLimbDegrees));
+        float glowStart = -apparentSunAngularRadiusDegrees - Mathf.Max(0f, afterHorizonGlowPersistenceDegrees);
+        glowFactor = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(glowStart, apparentSunAngularRadiusDegrees, sunCentreHeightAboveLimbDegrees));
 
-        float horizonFactor = 1f - Mathf.Clamp01(Mathf.Abs(deltaFromHorizon) / transition);
-        float dayAmount = Mathf.Clamp01(deltaFromHorizon / transition);
+        Color horizonShiftedColor = horizonColor * sunColor;
+        Color daylightShiftedColor = dayColor * sunColor;
+        shiftedColor = Color.Lerp(sunColor, Color.Lerp(daylightShiftedColor, horizonShiftedColor, sunsetColourFactor), colorShiftStrength);
 
-        Color visibleColor = Color.Lerp(dayColor, horizonColor, horizonFactor);
-        Color finalColor = behindPlanet ? horizonColor : Color.Lerp(horizonColor, visibleColor, dayAmount);
+        float centreBrightness = Mathf.Lerp(Mathf.Max(0f, minimumSunsetCentreBrightness), Mathf.Max(0f, dayEmissionMultiplier), 1f - sunsetColourFactor);
+        float styledVisibility = Mathf.Max(visibleDiscFactor, glowFactor * Mathf.Clamp01(behindPlanetEmissionMultiplier));
+        emissionMultiplier = centreBrightness * styledVisibility + sunsetColourFactor * glowFactor * Mathf.Max(0f, horizonEmissionBoost);
+        visualAlpha = glowFactor;
 
-        shiftedColor = Color.Lerp(sunColor, finalColor * sunColor, colorShiftStrength);
+        bool invalidGeometry = !radiusValid || !cameraOutside || !sunRadiusValid;
+        if (invalidGeometry && !appearanceGeometryWarningActive)
+        {
+            if (!radiusValid) Debug.LogWarning("[SunAppearance] Current visible planet radius is invalid.", this);
+            else if (!cameraOutside) Debug.LogWarning("[SunAppearance] Camera is inside the resolved visible planet radius; apparent horizon geometry is undefined.", this);
+            if (!sunRadiusValid) Debug.LogWarning("[SunAppearance] Apparent sun radius could not be resolved from sun scale, core radius, and camera distance.", this);
+        }
+        appearanceGeometryWarningActive = invalidGeometry;
+        LogAppearanceDiagnosticsIfModeChanged();
+    }
 
-        emissionMultiplier = behindPlanet
-            ? behindPlanetEmissionMultiplier
-            : Mathf.Lerp(behindPlanetEmissionMultiplier, dayEmissionMultiplier, dayAmount);
+    float ResolveVisiblePlanetRadiusWorld()
+    {
+        float localRadius = planetGenerator != null ? planetGenerator.CurrentVisibleOuterRadius : planetRadius;
+        if (planetCenter == null) return localRadius;
+        Vector3 scale = planetCenter.lossyScale;
+        float maximumScale = Mathf.Max(Mathf.Abs(scale.x), Mathf.Abs(scale.y), Mathf.Abs(scale.z));
+        return localRadius * maximumScale;
+    }
 
-        emissionMultiplier += horizonFactor * horizonEmissionBoost;
+    void LogAppearanceDiagnosticsIfModeChanged()
+    {
+        PlanetGridType mode = planetGenerator != null ? planetGenerator.CurrentGridType : PlanetGridType.LegacyCubeSphere;
+        if (hasAppearanceGridMode && mode == lastAppearanceGridMode) return;
+        hasAppearanceGridMode = true;
+        lastAppearanceGridMode = mode;
+        if (!logSunLightingDiagnostics) return;
+        Debug.Log($"[SunAppearance] gridMode={mode}, cameraPlanetDistance={cameraToPlanetDistance:F4}, visiblePlanetRadius={resolvedVisiblePlanetRadius:F4}, planetAngularRadiusDeg={apparentPlanetAngularRadiusDegrees:F4}, sunAngularRadiusDeg={apparentSunAngularRadiusDegrees:F4}, sunCentreHeightAboveLimbDeg={sunCentreHeightAboveLimbDegrees:F4}, sunsetColourFactor={sunsetColourFactor:F3}, visibleDiscFactor={visibleDiscFactor:F3}, glowFactor={glowFactor:F3}", this);
     }
 
     void DestroyRuntimeObject(Object obj)

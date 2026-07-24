@@ -11,7 +11,15 @@ public class SunSkyRotatorEditor : Editor
         "sunToPlanetDirectionWorld",
         "lightDirectionAngularError",
         "terrainMainLightSupport",
-        "oceanMainLightSupport"
+        "oceanMainLightSupport",
+        "cameraToPlanetDistance",
+        "resolvedVisiblePlanetRadius",
+        "apparentPlanetAngularRadiusDegrees",
+        "apparentSunAngularRadiusDegrees",
+        "sunCentreHeightAboveLimbDegrees",
+        "sunsetColourFactor",
+        "visibleDiscFactor",
+        "glowFactor"
     };
 
     public override void OnInspectorGUI()
