@@ -21,10 +21,16 @@ public static class IcosphereDirectionMappingCache
 
     public static IcosphereDirectionMapping GetOrBuild(GeodesicGridTopology simulationTopology, IcosphereRenderGeometry targetGeometry)
     {
+        return GetOrBuild(simulationTopology, targetGeometry, out _);
+    }
+
+    public static IcosphereDirectionMapping GetOrBuild(GeodesicGridTopology simulationTopology, IcosphereRenderGeometry targetGeometry, out bool cacheHit)
+    {
         int simulationSubdivision = simulationTopology != null ? simulationTopology.SubdivisionLevel : 0;
         int targetSubdivision = targetGeometry.SubdivisionLevel;
         Key key = new Key(simulationSubdivision, targetSubdivision, IcosphereDirectionMapping.Version);
-        if (!Cache.TryGetValue(key, out IcosphereDirectionMapping mapping))
+        cacheHit = Cache.TryGetValue(key, out IcosphereDirectionMapping mapping);
+        if (!cacheHit)
         {
             mapping = IcosphereDirectionMappingBuilder.Build(simulationTopology, targetGeometry);
             Cache[key] = mapping;
