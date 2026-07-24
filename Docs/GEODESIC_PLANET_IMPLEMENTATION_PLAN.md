@@ -1237,3 +1237,11 @@ Static/code-path validation in this non-Unity environment confirmed the followin
 - TargetAreaCoverage 10%, 50%, and 90% are resolved by area accumulation, so achieved area-weighted coverage is limited by the area of the last selected simulation cell.
 
 Unity Play Mode validation at simulation subdivisions 5 and 6 still needs to be captured locally for exact requested-versus-achieved coverage tables, picker confirmation, pentagon count confirmation, and before/after phase-2 performance measurements.
+
+### Inspector mode UX follow-up
+
+A follow-up corrected the Inspector affordance for geodesic sea-level modes. In `ManualOffset` mode, `geodesicSeaLevelOffset` remains enabled and `geodesicTargetOceanCoveragePercent` is disabled with an explanatory help box because target coverage is ignored. In `TargetAreaCoverage` mode, `geodesicTargetOceanCoveragePercent` remains enabled and `geodesicSeaLevelOffset` is disabled with an explanatory help box because the resolved offset is calculated automatically from the target area coverage.
+
+The read-only runtime diagnostics now include both `resolvedGeodesicSeaLevelRadius` and `resolvedGeodesicSeaLevelOffset`, plus achieved cell-count coverage, achieved area-weighted coverage, ocean cell count, and coastline ocean cell count in both modes. Generation diagnostics warn when ManualOffset mode has an inactive target coverage value that differs from achieved coverage, and warn in TargetAreaCoverage mode that the manual offset field is inactive.
+
+Unity Play Mode validation for ManualOffset 0.05 and TargetAreaCoverage 0/10/50/90/100 remains to be captured locally because this CLI environment still has no Unity runtime.

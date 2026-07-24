@@ -161,12 +161,13 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     [Header("Geodesic Ocean Classification")]
     [Tooltip("Select how geodesic ocean cells resolve their single authoritative sea-level radius. Manual Offset preserves the original default behavior.")]
     public GeodesicSeaLevelControlMode geodesicSeaLevelControlMode = GeodesicSeaLevelControlMode.ManualOffset;
-    [Tooltip("Manual geodesic sea-level offset relative to PlanetGenerator.radius. Zero places sea level at BasePlanetRadius; positive values raise sea level and increase ocean coverage; negative values lower sea level and decrease ocean coverage. Large values can intentionally create all-ocean or no-ocean test planets.")]
+    [Tooltip("Manual geodesic sea-level offset relative to PlanetGenerator.radius. Zero places sea level at BasePlanetRadius; positive values raise sea level and increase ocean coverage; negative values lower sea level and decrease ocean coverage. Large values can intentionally create all-ocean or no-ocean test planets. In Target Area Coverage mode this field is inactive because the offset is calculated automatically.")]
     [FormerlySerializedAs("geodesicSeaLevelPreviewOffset")]
     public float geodesicSeaLevelOffset = 0f;
-    [Tooltip("Target approximate physical spherical surface-area coverage for geodesic oceans. Used only when Geodesic Sea Level Control Mode is Target Area Coverage.")]
+    [Tooltip("Target approximate physical spherical surface-area coverage for geodesic oceans. Used only when Geodesic Sea Level Control Mode is Target Area Coverage; ignored in Manual Offset mode.")]
     [Range(0f, 100f)] public float geodesicTargetOceanCoveragePercent = 45f;
     [SerializeField, Tooltip("Read-only runtime diagnostic: resolved geodesic sea-level radius from the last generation.")] private float resolvedGeodesicSeaLevelRadius;
+    [SerializeField, Tooltip("Read-only runtime diagnostic: resolved geodesic sea-level offset from BasePlanetRadius from the last generation.")] private float resolvedGeodesicSeaLevelOffset;
     [SerializeField, Tooltip("Read-only runtime diagnostic: achieved geodesic ocean coverage by cell count from the last generation.")] private float achievedGeodesicOceanCellCoveragePercent;
     [SerializeField, Tooltip("Read-only runtime diagnostic: achieved geodesic ocean coverage by physical spherical cell area from the last generation.")] private float achievedGeodesicOceanAreaCoveragePercent;
     [SerializeField, Tooltip("Read-only runtime diagnostic: geodesic ocean cell count from the last generation.")] private int geodesicOceanCellCount;
@@ -325,6 +326,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     public float MaximumSurfaceRadius => CurrentGridType == PlanetGridType.GeodesicIcosphere ? BasePlanetRadius + GetGeodesicMaximumTerrainOffset() : GetGeneratedRadiusExtrema().max;
     public float GeodesicSeaLevelRadius => resolvedGeodesicSeaLevelRadius > 0f ? resolvedGeodesicSeaLevelRadius : BasePlanetRadius + geodesicSeaLevelOffset;
     public float ResolvedGeodesicSeaLevelRadius => GeodesicSeaLevelRadius;
+    public float ResolvedGeodesicSeaLevelOffset => GeodesicSeaLevelRadius - BasePlanetRadius;
     public float AchievedGeodesicOceanCellCoveragePercent => achievedGeodesicOceanCellCoveragePercent;
     public float AchievedGeodesicOceanAreaCoveragePercent => achievedGeodesicOceanAreaCoveragePercent;
     public int GeodesicOceanCellCount => geodesicOceanCellCount;
@@ -1252,11 +1254,12 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     {
         var watch = System.Diagnostics.Stopwatch.StartNew();
         resolvedGeodesicSeaLevelRadius = BasePlanetRadius + geodesicSeaLevelOffset;
+        resolvedGeodesicSeaLevelOffset = resolvedGeodesicSeaLevelRadius - BasePlanetRadius;
 
         if (GeodesicTopology == null || geodesicRawTerrainRadius == null || geodesicRawTerrainRadius.Length == 0 || geodesicSeaLevelControlMode != GeodesicSeaLevelControlMode.TargetAreaCoverage)
         {
             watch.Stop();
-            Debug.Log($"[GeodesicSeaLevelDiagnostics] mode={geodesicSeaLevelControlMode}, manualOffset={geodesicSeaLevelOffset:F6}, requestedTargetPercent={geodesicTargetOceanCoveragePercent:F3}, resolvedSeaLevelRadius={resolvedGeodesicSeaLevelRadius:F6}, resolvedSeaLevelOffset={resolvedGeodesicSeaLevelRadius - BasePlanetRadius:F6}, targetResolveMs={watch.Elapsed.TotalMilliseconds:F3}", this);
+            Debug.Log($"[GeodesicSeaLevelDiagnostics] mode={geodesicSeaLevelControlMode}, manualOffset={geodesicSeaLevelOffset:F6}, requestedTargetPercent={geodesicTargetOceanCoveragePercent:F3}, resolvedSeaLevelRadius={resolvedGeodesicSeaLevelRadius:F6}, resolvedSeaLevelOffset={resolvedGeodesicSeaLevelOffset:F6}, targetResolveMs={watch.Elapsed.TotalMilliseconds:F3}", this);
             return;
         }
 
@@ -1265,15 +1268,17 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         if (targetPercent <= 0f)
         {
             resolvedGeodesicSeaLevelRadius = MinGeodesicRawTerrainRadius() - 0.000001f;
+            resolvedGeodesicSeaLevelOffset = resolvedGeodesicSeaLevelRadius - BasePlanetRadius;
             watch.Stop();
-            Debug.Log($"[GeodesicSeaLevelDiagnostics] mode={geodesicSeaLevelControlMode}, manualOffset={geodesicSeaLevelOffset:F6}, requestedTargetPercent={targetPercent:F3}, resolvedSeaLevelRadius={resolvedGeodesicSeaLevelRadius:F6}, resolvedSeaLevelOffset={resolvedGeodesicSeaLevelRadius - BasePlanetRadius:F6}, endpoint=all-land, targetResolveMs={watch.Elapsed.TotalMilliseconds:F3}", this);
+            Debug.Log($"[GeodesicSeaLevelDiagnostics] mode={geodesicSeaLevelControlMode}, manualOffset={geodesicSeaLevelOffset:F6}, requestedTargetPercent={targetPercent:F3}, resolvedSeaLevelRadius={resolvedGeodesicSeaLevelRadius:F6}, resolvedSeaLevelOffset={resolvedGeodesicSeaLevelOffset:F6}, endpoint=all-land, targetResolveMs={watch.Elapsed.TotalMilliseconds:F3}", this);
             return;
         }
         if (targetPercent >= 100f)
         {
             resolvedGeodesicSeaLevelRadius = MaxGeodesicRawTerrainRadius() + 0.000001f;
+            resolvedGeodesicSeaLevelOffset = resolvedGeodesicSeaLevelRadius - BasePlanetRadius;
             watch.Stop();
-            Debug.Log($"[GeodesicSeaLevelDiagnostics] mode={geodesicSeaLevelControlMode}, manualOffset={geodesicSeaLevelOffset:F6}, requestedTargetPercent={targetPercent:F3}, resolvedSeaLevelRadius={resolvedGeodesicSeaLevelRadius:F6}, resolvedSeaLevelOffset={resolvedGeodesicSeaLevelRadius - BasePlanetRadius:F6}, endpoint=all-ocean, targetResolveMs={watch.Elapsed.TotalMilliseconds:F3}", this);
+            Debug.Log($"[GeodesicSeaLevelDiagnostics] mode={geodesicSeaLevelControlMode}, manualOffset={geodesicSeaLevelOffset:F6}, requestedTargetPercent={targetPercent:F3}, resolvedSeaLevelRadius={resolvedGeodesicSeaLevelRadius:F6}, resolvedSeaLevelOffset={resolvedGeodesicSeaLevelOffset:F6}, endpoint=all-ocean, targetResolveMs={watch.Elapsed.TotalMilliseconds:F3}", this);
             return;
         }
 
@@ -1305,9 +1310,10 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         if (bestSubmergedCount <= 0) resolvedGeodesicSeaLevelRadius = candidates[0].Radius - 0.000001f;
         else if (bestSubmergedCount >= count) resolvedGeodesicSeaLevelRadius = candidates[count - 1].Radius + 0.000001f;
         else resolvedGeodesicSeaLevelRadius = (candidates[bestSubmergedCount - 1].Radius + candidates[bestSubmergedCount].Radius) * 0.5f;
+        resolvedGeodesicSeaLevelOffset = resolvedGeodesicSeaLevelRadius - BasePlanetRadius;
 
         watch.Stop();
-        Debug.Log($"[GeodesicSeaLevelDiagnostics] mode={geodesicSeaLevelControlMode}, manualOffset={geodesicSeaLevelOffset:F6}, requestedTargetPercent={targetPercent:F3}, resolvedSeaLevelRadius={resolvedGeodesicSeaLevelRadius:F6}, resolvedSeaLevelOffset={resolvedGeodesicSeaLevelRadius - BasePlanetRadius:F6}, selectedCells={bestSubmergedCount}/{count}, targetResolveMs={watch.Elapsed.TotalMilliseconds:F3}", this);
+        Debug.Log($"[GeodesicSeaLevelDiagnostics] mode={geodesicSeaLevelControlMode}, manualOffset={geodesicSeaLevelOffset:F6}, requestedTargetPercent={targetPercent:F3}, resolvedSeaLevelRadius={resolvedGeodesicSeaLevelRadius:F6}, resolvedSeaLevelOffset={resolvedGeodesicSeaLevelOffset:F6}, selectedCells={bestSubmergedCount}/{count}, targetResolveMs={watch.Elapsed.TotalMilliseconds:F3}", this);
     }
 
     float MinGeodesicRawTerrainRadius()
@@ -1550,7 +1556,15 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         geodesicCoastlineOceanCellCount = coast;
         achievedGeodesicOceanCellCoveragePercent = count > 0 ? ocean * 100f / count : 0f;
         achievedGeodesicOceanAreaCoveragePercent = areaSum > 0f ? oceanArea * 100f / areaSum : 0f;
-        Debug.Log($"[GeodesicBathymetryDiagnostics] mode={geodesicSeaLevelControlMode}, manualOffset={geodesicSeaLevelOffset:F6}, requestedTargetPercent={geodesicTargetOceanCoveragePercent:F3}, resolvedSeaLevelRadius={resolvedGeodesicSeaLevelRadius:F6}, resolvedSeaLevelOffset={resolvedGeodesicSeaLevelRadius - BasePlanetRadius:F6}, oceanCells={ocean}, coastlineOceanCells={coast}, cellCountOceanPercent={achievedGeodesicOceanCellCoveragePercent:F3}, areaWeightedOceanPercent={achievedGeodesicOceanAreaCoveragePercent:F3}, areaWeightedOceanFraction={(areaSum > 0f ? oceanArea / areaSum : 0f):F6}, finalDepthMinMaxMean={minD:F6}/{maxD:F6}/{(oceanArea > 0f ? depthArea / oceanArea : 0f):F6}, percentilesP25P50P75P90={P(.25f):F6}/{P(.5f):F6}/{P(.75f):F6}/{P(.9f):F6}, categoryCounts(shallow/shelf/slope/deep)={shallow}/{shelf}/{slope}/{deep}, categoryAreaFractionApprox={shallow / (float)Mathf.Max(1, ocean):F3}/{shelf / (float)Mathf.Max(1, ocean):F3}/{slope / (float)Mathf.Max(1, ocean):F3}/{deep / (float)Mathf.Max(1, ocean):F3}, seafloorRadiusMinMax={minFloor:F6}/{maxFloor:F6}, maxShoreDistance={maxShore:F6}, bathymetrySeed={DerivedBathymetrySeed}, simulationSubdivision={geodesicSimulationSubdivisionLevel}, renderSubdivision={geodesicRenderSubdivisionLevel}", this);
+        Debug.Log($"[GeodesicBathymetryDiagnostics] mode={geodesicSeaLevelControlMode}, manualOffset={geodesicSeaLevelOffset:F6}, requestedTargetPercent={geodesicTargetOceanCoveragePercent:F3}, resolvedSeaLevelRadius={resolvedGeodesicSeaLevelRadius:F6}, resolvedSeaLevelOffset={resolvedGeodesicSeaLevelOffset:F6}, oceanCells={ocean}, coastlineOceanCells={coast}, cellCountOceanPercent={achievedGeodesicOceanCellCoveragePercent:F3}, areaWeightedOceanPercent={achievedGeodesicOceanAreaCoveragePercent:F3}, areaWeightedOceanFraction={(areaSum > 0f ? oceanArea / areaSum : 0f):F6}, finalDepthMinMaxMean={minD:F6}/{maxD:F6}/{(oceanArea > 0f ? depthArea / oceanArea : 0f):F6}, percentilesP25P50P75P90={P(.25f):F6}/{P(.5f):F6}/{P(.75f):F6}/{P(.9f):F6}, categoryCounts(shallow/shelf/slope/deep)={shallow}/{shelf}/{slope}/{deep}, categoryAreaFractionApprox={shallow / (float)Mathf.Max(1, ocean):F3}/{shelf / (float)Mathf.Max(1, ocean):F3}/{slope / (float)Mathf.Max(1, ocean):F3}/{deep / (float)Mathf.Max(1, ocean):F3}, seafloorRadiusMinMax={minFloor:F6}/{maxFloor:F6}, maxShoreDistance={maxShore:F6}, bathymetrySeed={DerivedBathymetrySeed}, simulationSubdivision={geodesicSimulationSubdivisionLevel}, renderSubdivision={geodesicRenderSubdivisionLevel}", this);
+        if (geodesicSeaLevelControlMode == GeodesicSeaLevelControlMode.ManualOffset && Mathf.Abs(Mathf.Clamp(geodesicTargetOceanCoveragePercent, 0f, 100f) - achievedGeodesicOceanAreaCoveragePercent) > 0.05f)
+        {
+            Debug.LogWarning($"[GeodesicSeaLevelDiagnostics] Geodesic Target Ocean Coverage is inactive because mode=ManualOffset; classification is controlled by manualOffset={geodesicSeaLevelOffset:F6}, resolvedSeaLevelRadius={resolvedGeodesicSeaLevelRadius:F6}, achievedAreaWeightedOceanPercent={achievedGeodesicOceanAreaCoveragePercent:F3}.", this);
+        }
+        else if (geodesicSeaLevelControlMode == GeodesicSeaLevelControlMode.TargetAreaCoverage)
+        {
+            Debug.LogWarning($"[GeodesicSeaLevelDiagnostics] Geodesic Sea Level Offset is inactive because mode=TargetAreaCoverage; the resolved offset is calculated automatically as {resolvedGeodesicSeaLevelOffset:F6}.", this);
+        }
         if (ocean != oceanCountBefore) Debug.LogWarning("[GeodesicBathymetryDiagnostics] Bathymetry changed ocean classification count; this should not happen.", this);
         if (ocean > 0 && shallow == ocean) Debug.LogWarning("[GeodesicBathymetryDiagnostics] All ocean cells are shallow.", this);
         if (ocean > 0 && slope + deep == 0) Debug.LogWarning("[GeodesicBathymetryDiagnostics] No ocean cells reached slope/deep-basin categories.", this);
