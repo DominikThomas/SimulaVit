@@ -886,6 +886,7 @@ GameObject:
   - component: {fileID: 382753102}
   - component: {fileID: 382753104}
   - component: {fileID: 382753105}
+  - component: {fileID: 382753106}
   m_Layer: 0
   m_Name: Planet Generator
   m_TagString: Planet
@@ -1145,6 +1146,40 @@ MonoBehaviour:
   seaIceThresholdKelvin: 269.15
   seaIceFadeKelvin: 3
   seaIceRadiusMultiplier: 1.002
+--- !u!114 &382753106
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 382753101}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7fb57947876b4edb963edbe2a66187cc, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: SimulaVit::GeodesicSurfaceTemperatureField
+  enableGeodesicSurfaceTemperature: 1
+  updateIntervalSeconds: 0.25
+  heatingTimescaleSeconds: 20
+  coolingTimescaleSeconds: 35
+  diffusionStrength: 0.002
+  landHeatCapacityMultiplier: 1
+  oceanSurfaceHeatCapacityMultiplier: 2
+  insolationExponent: 1
+  debugTemperatureVisualization: 0
+  enableProfilingDiagnostics: 0
+  initialized: 0
+  runtimeCellCount: 0
+  minimumTemperatureKelvin: 0
+  areaWeightedMeanTemperatureKelvin: 0
+  maximumTemperatureKelvin: 0
+  lastCompletedTemperatureTick: 0
+  lastTickDurationMilliseconds: 0
+  currentSunDirectionProvider: None
+  latestDiffusionConservationRelativeError: 0
+  lastTargetUpdateDurationMilliseconds: 0
+  lastDiffusionDurationMilliseconds: 0
+  lastDiffusionSubstepCount: 0
 --- !u!1 &581314702
 GameObject:
   m_ObjectHideFlags: 0

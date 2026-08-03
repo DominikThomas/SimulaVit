@@ -755,9 +755,16 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         LogStage("bathymetry sampling/interpolation", stage);
 
         stage = System.Diagnostics.Stopwatch.StartNew();
-        var temperatureField = GetOrAddComponent<GeodesicSurfaceTemperatureField>(gameObject);
-        temperatureField.enabled = true;
-        temperatureField.InitializeForCurrentTopology();
+        var temperatureField = GetComponent<GeodesicSurfaceTemperatureField>();
+        if (temperatureField == null)
+        {
+            Debug.LogError("[GeodesicTemperature] Planet Generator is missing its required GeodesicSurfaceTemperatureField component; temperature initialization was skipped.", this);
+        }
+        else
+        {
+            temperatureField.enabled = true;
+            temperatureField.InitializeForCurrentTopology();
+        }
         LogStage("surface-temperature initialization", stage);
 
         stage = System.Diagnostics.Stopwatch.StartNew();
