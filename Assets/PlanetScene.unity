@@ -1081,6 +1081,11 @@ MonoBehaviour:
   oceanCoverageRange: {x: 25, y: 60}
   photosynthesisUnlockSeconds: 0
   saprotrophyUnlockSeconds: 0
+  geodesicTransportGraphInitialized: 0
+  geodesicTransportGraphCellCount: 0
+  geodesicTransportGraphEdgeCount: 0
+  geodesicTransportGraphApproximateMemoryBytes: 0
+  geodesicTransportGraphBuildMilliseconds: 0
 --- !u!4 &382753103
 Transform:
   m_ObjectHideFlags: 0
@@ -1156,7 +1161,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 7fb57947876b4edb963edbe2a66187cc, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: SimulaVit::GeodesicSurfaceTemperatureField
   enableGeodesicSurfaceTemperature: 1
   updateIntervalSeconds: 0.25
@@ -1164,7 +1169,7 @@ MonoBehaviour:
   coolingTimescaleSeconds: 35
   diffusionStrength: 0.002
   landHeatCapacityMultiplier: 1
-  oceanSurfaceHeatCapacityMultiplier: 2
+  oceanSurfaceHeatCapacityMultiplier: 8
   insolationExponent: 1
   debugTemperatureVisualization: 0
   enableProfilingDiagnostics: 0
