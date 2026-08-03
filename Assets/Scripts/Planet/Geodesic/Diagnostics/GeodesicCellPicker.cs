@@ -59,6 +59,9 @@ public class GeodesicCellPicker : MonoBehaviour
 
     private GeodesicGridTopology topology;
     private PlanetGenerator planetGenerator;
+    private GeodesicOceanLayerDomain oceanLayerDomain;
+    private string selectedLayeredOceanLog = ", layeredOcean=unavailable";
+    private string selectedLayeredOceanPopup = "unavailable";
     private bool warnedMissingCamera;
     private bool warnedNoPickSurface;
     private Vector2 popupScrollPosition;
@@ -78,6 +81,7 @@ public class GeodesicCellPicker : MonoBehaviour
     {
         ResolvePickingCollider();
         planetGenerator = GetComponent<PlanetGenerator>();
+        oceanLayerDomain = GetComponent<GeodesicOceanLayerDomain>();
     }
 
     public void SetTopology(GeodesicGridTopology t)
@@ -94,6 +98,8 @@ public class GeodesicCellPicker : MonoBehaviour
         selectedIsPentagon = false;
         selectedUnitArea = 0f;
         selectedNeighborIndices = System.Array.Empty<int>();
+        selectedLayeredOceanLog = ", layeredOcean=unavailable";
+        selectedLayeredOceanPopup = "unavailable";
         popupScrollPosition = Vector2.zero;
     }
 
@@ -345,7 +351,7 @@ public class GeodesicCellPicker : MonoBehaviour
             {
                 Vector3 centreDirection = topology.CellDirections[selectedCellIndex];
                 PlanetTerrainSample terrainSample = planetGenerator.EvaluateGeodesicTerrainSample(centreDirection);
-                terrainDiagnostics = $", classification={(planetGenerator.IsGeodesicCellOcean(selectedCellIndex) ? "ocean" : "land")}, coastline={planetGenerator.IsGeodesicCellCoastline(selectedCellIndex)}, terrainHeight={terrainSample.HeightOffset:F6}, mountainMask={terrainSample.MountainMask:F4}, ridge={terrainSample.RidgeValue:F4}, continent={terrainSample.ContinentValue:F4}, rawTerrainRadius={planetGenerator.GetGeodesicCellRawTerrainRadius(selectedCellIndex):F6}, finalSeafloorRadius={planetGenerator.GetGeodesicCellSeafloorRadius(selectedCellIndex):F6}, finalSurfaceRadius={planetGenerator.GetSurfaceRadiusAtDirection(centreDirection):F6}, seaLevelRadius={planetGenerator.GeodesicSeaLevelRadius:F6}, baseDepth={planetGenerator.GetGeodesicCellBaseWaterDepth(selectedCellIndex):F6}, finalBathymetryDepth={planetGenerator.GetGeodesicCellWaterDepth(selectedCellIndex):F6}, distanceToShore={(planetGenerator.IsGeodesicOceanWorldActive ? "N/A — OceanWorld" : planetGenerator.GetGeodesicCellDistanceToShore(selectedCellIndex).ToString("F6"))}, depth01={planetGenerator.GetGeodesicCellNormalizedDepth(selectedCellIndex):F3}, bathymetryRegion={planetGenerator.GetGeodesicCellBathymetryRegion(selectedCellIndex)}, basinNoiseContribution={planetGenerator.GetGeodesicCellBasinNoiseContribution(selectedCellIndex):F4}, oceanNeighborCount={planetGenerator.GetGeodesicOceanNeighborCount(selectedCellIndex)}, continentalInfluence01={planetGenerator.GetGeodesicCellContinentalInfluence01(selectedCellIndex):F3}, coastType={planetGenerator.GetGeodesicCellCoastType(selectedCellIndex)}, landComponentId={(planetGenerator.GetGeodesicCellLandComponentId(selectedCellIndex) >= 0 ? planetGenerator.GetGeodesicCellLandComponentId(selectedCellIndex).ToString() : "None")}, shelfProfile={planetGenerator.GetGeodesicCellShelfProfileType(selectedCellIndex)}, continentalShelfInfluence={planetGenerator.GetGeodesicCellContinentalShelfInfluence01(selectedCellIndex):F3}, oceanicIslandInfluence={planetGenerator.GetGeodesicCellOceanicIslandShelfInfluence01(selectedCellIndex):F3}, shelfWidthMul={planetGenerator.GetGeodesicCellLocalShelfWidthMultiplier(selectedCellIndex):F3}, continentalProfileWidthDeg={planetGenerator.GetGeodesicCellContinentalProfileShelfWidthDegrees(selectedCellIndex):F3}, finalShelfWidthDeg={planetGenerator.GetGeodesicCellFinalShelfWidthDegrees(selectedCellIndex):F3}, localShelfDepth={planetGenerator.GetGeodesicCellLocalShelfDepth(selectedCellIndex):F5}, approxCellSpacingDeg={planetGenerator.GetGeodesicCellApproxCellSpacingDegrees(selectedCellIndex):F3}, oceanicRelief(ridge/plateau/seamount/total)={planetGenerator.GetGeodesicCellRidgeContribution(selectedCellIndex):F5}/{planetGenerator.GetGeodesicCellPlateauContribution(selectedCellIndex):F5}/{planetGenerator.GetGeodesicCellSeamountContribution(selectedCellIndex):F5}/{planetGenerator.GetGeodesicCellTotalOceanicReliefContribution(selectedCellIndex):F5}";
+                terrainDiagnostics = $", classification={(planetGenerator.IsGeodesicCellOcean(selectedCellIndex) ? "ocean" : "land")}, coastline={planetGenerator.IsGeodesicCellCoastline(selectedCellIndex)}, terrainHeight={terrainSample.HeightOffset:F6}, mountainMask={terrainSample.MountainMask:F4}, ridge={terrainSample.RidgeValue:F4}, continent={terrainSample.ContinentValue:F4}, rawTerrainRadius={planetGenerator.GetGeodesicCellRawTerrainRadius(selectedCellIndex):F6}, finalSeafloorRadius={planetGenerator.GetGeodesicCellSeafloorRadius(selectedCellIndex):F6}, finalSurfaceRadius={planetGenerator.GetSurfaceRadiusAtDirection(centreDirection):F6}, seaLevelRadius={planetGenerator.GeodesicSeaLevelRadius:F6}, baseDepth={planetGenerator.GetGeodesicCellBaseWaterDepth(selectedCellIndex):F6}, finalBathymetryDepth={planetGenerator.GetGeodesicCellWaterDepth(selectedCellIndex):F6}, distanceToShore={(planetGenerator.IsGeodesicOceanWorldActive ? "N/A — OceanWorld" : planetGenerator.GetGeodesicCellDistanceToShore(selectedCellIndex).ToString("F6"))}, depth01={planetGenerator.GetGeodesicCellNormalizedDepth(selectedCellIndex):F3}, bathymetryRegion={planetGenerator.GetGeodesicCellBathymetryRegion(selectedCellIndex)}, basinNoiseContribution={planetGenerator.GetGeodesicCellBasinNoiseContribution(selectedCellIndex):F4}, oceanNeighborCount={planetGenerator.GetGeodesicOceanNeighborCount(selectedCellIndex)}, continentalInfluence01={planetGenerator.GetGeodesicCellContinentalInfluence01(selectedCellIndex):F3}, coastType={planetGenerator.GetGeodesicCellCoastType(selectedCellIndex)}, landComponentId={(planetGenerator.GetGeodesicCellLandComponentId(selectedCellIndex) >= 0 ? planetGenerator.GetGeodesicCellLandComponentId(selectedCellIndex).ToString() : "None")}, shelfProfile={planetGenerator.GetGeodesicCellShelfProfileType(selectedCellIndex)}, continentalShelfInfluence={planetGenerator.GetGeodesicCellContinentalShelfInfluence01(selectedCellIndex):F3}, oceanicIslandInfluence={planetGenerator.GetGeodesicCellOceanicIslandShelfInfluence01(selectedCellIndex):F3}, shelfWidthMul={planetGenerator.GetGeodesicCellLocalShelfWidthMultiplier(selectedCellIndex):F3}, continentalProfileWidthDeg={planetGenerator.GetGeodesicCellContinentalProfileShelfWidthDegrees(selectedCellIndex):F3}, finalShelfWidthDeg={planetGenerator.GetGeodesicCellFinalShelfWidthDegrees(selectedCellIndex):F3}, localShelfDepth={planetGenerator.GetGeodesicCellLocalShelfDepth(selectedCellIndex):F5}, approxCellSpacingDeg={planetGenerator.GetGeodesicCellApproxCellSpacingDegrees(selectedCellIndex):F3}, oceanicRelief(ridge/plateau/seamount/total)={planetGenerator.GetGeodesicCellRidgeContribution(selectedCellIndex):F5}/{planetGenerator.GetGeodesicCellPlateauContribution(selectedCellIndex):F5}/{planetGenerator.GetGeodesicCellSeamountContribution(selectedCellIndex):F5}/{planetGenerator.GetGeodesicCellTotalOceanicReliefContribution(selectedCellIndex):F5}{selectedLayeredOceanLog}";
             }
 
             Debug.Log(
@@ -378,8 +384,85 @@ public class GeodesicCellPicker : MonoBehaviour
             selectedNeighborIndices[slot] = topology.Neighbors6[index * 6 + slot];
         }
 
+        CacheSelectedLayeredOceanDiagnostics(index);
+
         popupScrollPosition = Vector2.zero;
         EnsurePopupRect(true);
+    }
+
+    private void CacheSelectedLayeredOceanDiagnostics(int cellIndex)
+    {
+        GeodesicOceanLayerGrid grid = oceanLayerDomain != null ? oceanLayerDomain.Grid : null;
+        if (grid == null || cellIndex < 0 || cellIndex >= grid.CellCount)
+        {
+            selectedLayeredOceanLog = ", layeredOcean=unavailable";
+            selectedLayeredOceanPopup = "unavailable";
+            return;
+        }
+
+        int activeCount = grid.ActiveLayerCountByCell[cellIndex];
+        int topLayer = grid.GetTopLayerIndex(cellIndex);
+        int bottomLayer = grid.GetBottomLayerIndex(cellIndex);
+        float localDepth = grid.SourceOceanMask[cellIndex]
+            ? Mathf.Max(0f, grid.OceanSurfaceRadius - grid.SourceSeafloorRadius[cellIndex])
+            : 0f;
+        float normalizedDepth = grid.MaximumOceanDepth > 0f
+            ? Mathf.Clamp01(localDepth / grid.MaximumOceanDepth)
+            : 0f;
+
+        var log = new StringBuilder(320);
+        var popup = new StringBuilder(320);
+        log.Append(", oceanLayerActiveCount=").Append(activeCount)
+            .Append(", topLayerIndex=").Append(topLayer)
+            .Append(", bottomLayerIndex=").Append(bottomLayer)
+            .Append(", oceanLayerLocalDepth=").Append(localDepth.ToString("F6"))
+            .Append(", oceanLayerNormalizedDepth=").Append(normalizedDepth.ToString("F3"));
+        popup.Append("oceanLayerActiveCount=").Append(activeCount)
+            .Append("\ntopLayerIndex=").Append(topLayer)
+            .Append("\nbottomLayerIndex=").Append(bottomLayer)
+            .Append("\nlocalOceanDepth=").Append(localDepth.ToString("F6"))
+            .Append("\nnormalizedDepth=").Append(normalizedDepth.ToString("F3"));
+
+        for (int layer = 0; layer < activeCount; layer++)
+        {
+            int node = grid.GetNodeIndex(cellIndex, layer);
+            int horizontalDegree = GetHorizontalLayerDegree(grid, node);
+            int verticalDegree = GetVerticalLayerDegree(grid, node);
+            float centerDepth = grid.OceanSurfaceRadius - grid.LayerCenterRadius[node];
+            log.Append(", layer[").Append(layer).Append("]={thickness=").Append(grid.LayerThickness[node].ToString("F6"))
+                .Append(", volume=").Append(grid.LayerVolume[node].ToString("G6"))
+                .Append(", centerDepth=").Append(centerDepth.ToString("F6"))
+                .Append(", horizontalDegree=").Append(horizontalDegree)
+                .Append(", verticalDegree=").Append(verticalDegree).Append('}');
+            popup.Append("\nlayer ").Append(layer)
+                .Append(": thickness=").Append(grid.LayerThickness[node].ToString("F6"))
+                .Append(", volume=").Append(grid.LayerVolume[node].ToString("G6"))
+                .Append(", centerDepth=").Append(centerDepth.ToString("F6"))
+                .Append(", H/V degree=").Append(horizontalDegree).Append('/').Append(verticalDegree);
+        }
+
+        selectedLayeredOceanLog = log.ToString();
+        selectedLayeredOceanPopup = popup.ToString();
+    }
+
+    private static int GetHorizontalLayerDegree(GeodesicOceanLayerGrid grid, int nodeIndex)
+    {
+        int degree = 0;
+        for (int link = 0; link < grid.HorizontalLinkCount; link++)
+        {
+            if (grid.HorizontalNodeA[link] == nodeIndex || grid.HorizontalNodeB[link] == nodeIndex) degree++;
+        }
+        return degree;
+    }
+
+    private static int GetVerticalLayerDegree(GeodesicOceanLayerGrid grid, int nodeIndex)
+    {
+        int degree = 0;
+        for (int link = 0; link < grid.VerticalLinkCount; link++)
+        {
+            if (grid.VerticalUpperNode[link] == nodeIndex || grid.VerticalLowerNode[link] == nodeIndex) degree++;
+        }
+        return degree;
     }
 
     private void OnGUI()
@@ -480,6 +563,9 @@ public class GeodesicCellPicker : MonoBehaviour
         DrawLine("Base depth", baseDepth.ToString("F5"));
         DrawLine("Final depth", finalDepth.ToString("F5"));
         DrawLine("Depth 01", planetGenerator.GetGeodesicCellNormalizedDepth(selectedCellIndex).ToString("F3"));
+
+        DrawSection("Layered Ocean");
+        DrawLine("layeredOcean", selectedLayeredOceanPopup);
 
         DrawSection("Bathymetry");
         DrawLine("Enabled", (finalDepth > 0f || baseDepth > 0f || radialDisplacement < 0f).ToString());
