@@ -415,6 +415,12 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     private bool[] geodesicOceanMask;
     private byte[] geodesicOceanNeighborCounts;
     private bool[] geodesicCoastlineMask;
+    [System.NonSerialized] private GeodesicTransportGraph geodesicTransportGraph;
+    [SerializeField] private bool geodesicTransportGraphInitialized;
+    [SerializeField] private int geodesicTransportGraphCellCount;
+    [SerializeField] private int geodesicTransportGraphEdgeCount;
+    [SerializeField] private long geodesicTransportGraphApproximateMemoryBytes;
+    [SerializeField] private double geodesicTransportGraphBuildMilliseconds;
 
     public MeshRenderer OceanRenderer => oceanMeshRenderer;
     public Material LegacyRuntimeOceanMaterial => runtimeOceanMaterial;
@@ -422,6 +428,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     public int VisualResolution => Mathf.Max(1, resolution);
     public bool IsPlanetInitialized { get; private set; }
     public GeodesicGridTopology GeodesicTopology { get; private set; }
+    public GeodesicTransportGraph GeodesicTransportGraph => geodesicTransportGraph;
     public PlanetRuntimeDescriptor RuntimeDescriptor { get; private set; }
     public bool HasRuntimeDescriptor { get; private set; }
     public const int GenerationVersion = 2;
@@ -563,6 +570,24 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         InitializeAuthoritativePlanet("RegeneratePlanet explicit request");
     }
 
+    private void ClearGeodesicTransportGraph()
+    {
+        geodesicTransportGraph = null;
+        geodesicTransportGraphInitialized = false;
+        geodesicTransportGraphCellCount = 0;
+        geodesicTransportGraphEdgeCount = 0;
+        geodesicTransportGraphApproximateMemoryBytes = 0;
+        geodesicTransportGraphBuildMilliseconds = 0d;
+    }
+
+    [ContextMenu("Validate Geodesic Transport Graph")]
+    private void ValidateGeodesicTransportGraph()
+    {
+        bool valid = GeodesicTransportGraphValidation.Validate(geodesicTransportGraph, out string report);
+        if (valid) Debug.Log($"[GeodesicTransportGraphValidation] {report}", this);
+        else Debug.LogError($"[GeodesicTransportGraphValidation] {report}", this);
+    }
+
     private void ClearGeodesicRuntimeVisuals(string reason = null)
     {
         GeodesicGridDebugRenderer debugRenderer = transform.Find("Geodesic Debug Lines")?.GetComponent<GeodesicGridDebugRenderer>();
@@ -580,8 +605,9 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
         GetComponent<PlanetTemperatureIceVisuals>()?.ClearForGeodesicMode();
 
-        GeodesicTopology = null;
         GetComponent<GeodesicSurfaceTemperatureField>()?.ClearField();
+        GeodesicTopology = null;
+        ClearGeodesicTransportGraph();
         geodesicTerrainHeightByCell = null;
         geodesicNormalizedTerrainByCell = null;
         geodesicRawTerrainRadius = null;
@@ -712,6 +738,16 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         }
 
         stage = System.Diagnostics.Stopwatch.StartNew();
+        geodesicTransportGraph = new GeodesicTransportGraph(GeodesicTopology);
+        stage.Stop();
+        geodesicTransportGraphBuildMilliseconds = stage.Elapsed.TotalMilliseconds;
+        geodesicTransportGraphInitialized = true;
+        geodesicTransportGraphCellCount = geodesicTransportGraph.CellCount;
+        geodesicTransportGraphEdgeCount = geodesicTransportGraph.EdgeCount;
+        geodesicTransportGraphApproximateMemoryBytes = geodesicTransportGraph.ApproximateMemoryBytes;
+        Debug.Log($"[GeodesicTransportGraph] subdivision={simulationSubdivision}, cells={geodesicTransportGraphCellCount}, uniqueEdges={geodesicTransportGraphEdgeCount}, buildMs={geodesicTransportGraphBuildMilliseconds:F2}, approximateMemory={geodesicTransportGraphApproximateMemoryBytes} bytes", this);
+
+        stage = System.Diagnostics.Stopwatch.StartNew();
         RebuildGeodesicCellTerrainCache();
         LogStage("simulation-cell terrain cache", stage);
         stage = System.Diagnostics.Stopwatch.StartNew();
@@ -719,9 +755,16 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         LogStage("bathymetry sampling/interpolation", stage);
 
         stage = System.Diagnostics.Stopwatch.StartNew();
-        var temperatureField = GetOrAddComponent<GeodesicSurfaceTemperatureField>(gameObject);
-        temperatureField.enabled = true;
-        temperatureField.InitializeForCurrentTopology();
+        var temperatureField = GetComponent<GeodesicSurfaceTemperatureField>();
+        if (temperatureField == null)
+        {
+            Debug.LogError("[GeodesicTemperature] Planet Generator is missing its required GeodesicSurfaceTemperatureField component; temperature initialization was skipped.", this);
+        }
+        else
+        {
+            temperatureField.enabled = true;
+            temperatureField.InitializeForCurrentTopology();
+        }
         LogStage("surface-temperature initialization", stage);
 
         stage = System.Diagnostics.Stopwatch.StartNew();
@@ -2627,6 +2670,11 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         {
             stale = true;
             GeodesicTopology = null;
+        }
+        if (geodesicTransportGraph != null)
+        {
+            stale = true;
+            ClearGeodesicTransportGraph();
         }
 
         if (meshRenderer != null && runtimePlanetMaterial != null && meshRenderer.sharedMaterial != runtimePlanetMaterial)

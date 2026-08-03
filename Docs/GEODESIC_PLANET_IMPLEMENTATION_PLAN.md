@@ -1531,3 +1531,13 @@ Future serialization must include the temperature array, last simulation tick/ti
 This phase does not model atmospheric greenhouse feedback, ocean vertical heat storage, currents, latent heat, ice-albedo feedback, geothermal heat, or chemistry-driven climate.
 
 After validation the next task remains **Geodesic resource-grid foundation**: authoritative cell/layer indexing, area and neighbor metrics, conservative resource diffusion, and save-schema/versioning groundwork. The broader migration order is unchanged.
+
+## 20.1 Shared immutable geodesic transport graph
+
+`GeodesicTransportGraph` is now the shared immutable horizontal transport topology derived from the authoritative `GeodesicGridTopology`. It stores exactly one canonical entry (`CellA < CellB`) for every undirected cell edge: endpoint indices, center-to-center angular distance, shared dual-edge angular length, their geometry-only conductance ratio, and the sum of that ratio incident on each cell. Transported values and system policy remain consumer-owned; the graph contains no temperatures, capacities, concentrations, masks, velocities, sources, timers, or work buffers.
+
+`PlanetGenerator` owns the sole active runtime graph as a nonserialized reference. It constructs the graph immediately after topology validation, before terrain-classification consumers initialize, and clears it with geodesic runtime cleanup, legacy-mode transitions, destruction, and regeneration. Only constant-size graph diagnostics appear in the Inspector. The geodesic surface-temperature field is the first consumer and requires that exact owner-provided graph; it neither constructs nor caches a duplicate topology.
+
+Temperature diffusion now traverses the compact unique-edge arrays once per substep. Thermal capacities and inverse capacities remain temperature-owned and are rebuilt on initialization or capacity/classification input changes. The explicit stability limit is cached from graph incident-conductance sums and invalidated only by capacity or diffusion-strength changes. Solar targets remain dynamic.
+
+Intended future consumers include chemical-resource mixing, layered-ocean horizontal transport, atmospheric transport, and currents/wind after directional advection data exists. Shared geometry is distinct from every system's evolving state and coefficients. Vertical ocean links are deliberately not part of this horizontal graph; a later layered transport structure will own them. This infrastructure phase implements no chemistry, resources, ocean layers, atmosphere, currents, wind, vents, advection, buoyancy, settling, or reactions, and none of those phases is marked complete.
