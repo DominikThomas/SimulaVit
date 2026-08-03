@@ -487,6 +487,7 @@ public class SimulationStartupController : MonoBehaviour
         }
         else if (config.gridType == PlanetGridType.GeodesicIcosphere)
         {
+            planetGenerator?.GetComponent<GeodesicSurfaceTemperatureField>()?.ConfigureStartupTemperatures(config.baseTempKelvin, config.insolationTempGain);
             Debug.Log("[StartupLifecycle] Geodesic prototype mode: skipping PlanetResourceMap resource initialization and vent/resource overlays once.", this);
             ventVisualizer?.ClearRuntimeVisuals("geodesic prototype mode selected");
             planetGenerator?.GetComponent<PlanetTemperatureIceVisuals>()?.ClearForGeodesicMode();

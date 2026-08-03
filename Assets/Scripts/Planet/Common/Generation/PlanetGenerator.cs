@@ -581,6 +581,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         GetComponent<PlanetTemperatureIceVisuals>()?.ClearForGeodesicMode();
 
         GeodesicTopology = null;
+        GetComponent<GeodesicSurfaceTemperatureField>()?.ClearField();
         geodesicTerrainHeightByCell = null;
         geodesicNormalizedTerrainByCell = null;
         geodesicRawTerrainRadius = null;
@@ -716,6 +717,12 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         stage = System.Diagnostics.Stopwatch.StartNew();
         RebuildGeodesicOceanClassification();
         LogStage("bathymetry sampling/interpolation", stage);
+
+        stage = System.Diagnostics.Stopwatch.StartNew();
+        var temperatureField = GetOrAddComponent<GeodesicSurfaceTemperatureField>(gameObject);
+        temperatureField.enabled = true;
+        temperatureField.InitializeForCurrentTopology();
+        LogStage("surface-temperature initialization", stage);
 
         stage = System.Diagnostics.Stopwatch.StartNew();
         IcosphereRenderGeometry renderGeometry = IcosphereRenderGeometryCache.GetOrBuild(renderSubdivision);
@@ -2355,6 +2362,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
     void GeneratePlanet()
     {
+        GetComponent<GeodesicSurfaceTemperatureField>()?.ClearField();
         ClearGeodesicRuntimeVisuals("before legacy generation");
         RestoreLegacyTerrainMaterial();
         AssertLegacyModeClean("legacy generation start");

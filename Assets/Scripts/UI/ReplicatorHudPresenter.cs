@@ -24,6 +24,7 @@ public class ReplicatorHudPresenter
     private float hudMinTempKelvin;
     private float hudMaxTempKelvin;
     private float nextHudTempSampleTime;
+    private GeodesicSurfaceTemperatureField geodesicTemperatureField;
 
     private bool showMenu;
     private bool portraitShowReplicators;
@@ -273,6 +274,17 @@ public class ReplicatorHudPresenter
 
     private void SampleHudTemperatureStats(PlanetResourceMap planetResourceMap)
     {
+        if (geodesicTemperatureField == null)
+        {
+            geodesicTemperatureField = UnityEngine.Object.FindFirstObjectByType<GeodesicSurfaceTemperatureField>();
+        }
+        if (geodesicTemperatureField != null && geodesicTemperatureField.IsInitialized)
+        {
+            hudMeanTempKelvin = geodesicTemperatureField.AreaWeightedMeanTemperatureKelvin;
+            hudMinTempKelvin = geodesicTemperatureField.MinimumTemperatureKelvin;
+            hudMaxTempKelvin = geodesicTemperatureField.MaximumTemperatureKelvin;
+            return;
+        }
         if (planetResourceMap == null)
         {
             hudMeanTempKelvin = 0f;
