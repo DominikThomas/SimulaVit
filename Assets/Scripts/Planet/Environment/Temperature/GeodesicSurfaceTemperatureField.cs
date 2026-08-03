@@ -15,7 +15,7 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
     [SerializeField, Min(0.01f), Tooltip("Authoritative simulation seconds accumulated between temperature ticks.")] private float updateIntervalSeconds = 0.25f;
     [SerializeField, Min(MinimumTimescale), Tooltip("Surface-only warming relaxation timescale in simulation seconds.")] private float heatingTimescaleSeconds = 20f;
     [SerializeField, Min(MinimumTimescale), Tooltip("Surface-only cooling relaxation timescale in simulation seconds.")] private float coolingTimescaleSeconds = 35f;
-    [SerializeField, Min(0f), Tooltip("Horizontal, area-aware surface diffusion strength. This is not ocean-current transport.")] private float diffusionStrength = 0.002f;
+    [SerializeField, Min(0f), Tooltip("Optional temporary approximation of unresolved horizontal surface heat transport. Uses the shared geodesic transport graph. This is not ocean-current, atmospheric-wind, or vent-plume transport.")] private float diffusionStrength = 0.002f;
     [SerializeField, Min(0.01f), Tooltip("Land surface heat-capacity multiplier used by inertia and diffusion.")] private float landHeatCapacityMultiplier = 1f;
     [SerializeField, Min(0.01f), Tooltip("Ocean surface heat-capacity multiplier. This is not vertical ocean heat storage.")] private float oceanSurfaceHeatCapacityMultiplier = 2f;
     [SerializeField, Range(0.1f, 4f), Tooltip("Exponent applied to direct insolation in the interim surface-energy approximation.")] private float insolationExponent = 1f;
@@ -32,16 +32,25 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
     [SerializeField] private double lastTickDurationMilliseconds;
     [SerializeField] private string currentSunDirectionProvider = "None";
     [SerializeField] private double latestDiffusionConservationRelativeError;
+    [SerializeField] private double lastTargetUpdateDurationMilliseconds;
+    [SerializeField] private double lastDiffusionDurationMilliseconds;
+    [SerializeField] private int lastDiffusionSubstepCount;
 
     private PlanetGenerator planetGenerator;
     private SunSkyRotator sunDirectionProvider;
     private ReplicatorManager simulationClock;
     private GeodesicGridTopology topology;
+    private GeodesicTransportGraph transportGraph;
     private float[] surfaceTemperatureKelvinByCell;
     private float[] targetTemperatureKelvinByCell;
     private float[] workingTemperatureKelvinByCell;
     private float[] energyDeltaByCell;
     private float[] heatCapacityByCell;
+    private float[] inverseHeatCapacityByCell;
+    private float cachedLandHeatCapacityMultiplier;
+    private float cachedOceanHeatCapacityMultiplier;
+    private float cachedDiffusionStrength = float.NaN;
+    private float cachedStableDiffusionStep = float.MaxValue;
     private float accumulatedSimulationSeconds;
     private float baseTemperatureKelvin = 273.15f;
     private float insolationTemperatureGainKelvin = 45f;
@@ -87,8 +96,15 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
     {
         ResolveReferences();
         topology = planetGenerator != null ? planetGenerator.GeodesicTopology : null;
+        transportGraph = planetGenerator != null ? planetGenerator.GeodesicTransportGraph : null;
         if (!enableGeodesicSurfaceTemperature || planetGenerator == null || planetGenerator.CurrentGridType != PlanetGridType.GeodesicIcosphere || topology == null)
         {
+            ClearField();
+            return;
+        }
+        if (transportGraph == null || !ReferenceEquals(transportGraph.SourceTopology, topology))
+        {
+            UnityEngine.Debug.LogError("[GeodesicTemperature] The authoritative transport graph is unavailable or belongs to a different topology; temperature initialization was aborted.", this);
             ClearField();
             return;
         }
@@ -99,9 +115,11 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
         workingTemperatureKelvinByCell = new float[count];
         energyDeltaByCell = new float[count];
         heatCapacityByCell = new float[count];
+        inverseHeatCapacityByCell = new float[count];
         runtimeCellCount = count;
         accumulatedSimulationSeconds = 0f;
-        UpdateTargetsAndCapacities();
+        RebuildThermalCapacities();
+        UpdateTemperatureTargets();
         Array.Copy(targetTemperatureKelvinByCell, surfaceTemperatureKelvinByCell, count);
         UpdateDiagnostics();
         initialized = true;
@@ -112,11 +130,13 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
     {
         initialized = false;
         topology = null;
+        transportGraph = null;
         surfaceTemperatureKelvinByCell = null;
         targetTemperatureKelvinByCell = null;
         workingTemperatureKelvinByCell = null;
         energyDeltaByCell = null;
         heatCapacityByCell = null;
+        inverseHeatCapacityByCell = null;
         runtimeCellCount = 0;
         accumulatedSimulationSeconds = 0f;
     }
@@ -147,8 +167,11 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
 
     private void TickTemperature(float dt)
     {
-        var watch = Stopwatch.StartNew();
-        UpdateTargetsAndCapacities();
+        long tickStart = Stopwatch.GetTimestamp();
+        if (cachedLandHeatCapacityMultiplier != landHeatCapacityMultiplier || cachedOceanHeatCapacityMultiplier != oceanSurfaceHeatCapacityMultiplier) RebuildThermalCapacities();
+        long targetStart = Stopwatch.GetTimestamp();
+        UpdateTemperatureTargets();
+        lastTargetUpdateDurationMilliseconds = ElapsedMilliseconds(targetStart);
         for (int i = 0; i < runtimeCellCount; i++)
         {
             float current = surfaceTemperatureKelvinByCell[i];
@@ -157,64 +180,84 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
             float response = 1f - Mathf.Exp(-dt / Mathf.Max(MinimumTimescale, timescale));
             workingTemperatureKelvinByCell[i] = current + (target - current) * response;
         }
+        long diffusionStart = Stopwatch.GetTimestamp();
         ApplyConservativeDiffusion(dt);
+        lastDiffusionDurationMilliseconds = ElapsedMilliseconds(diffusionStart);
         float[] swap = surfaceTemperatureKelvinByCell; surfaceTemperatureKelvinByCell = workingTemperatureKelvinByCell; workingTemperatureKelvinByCell = swap;
         UpdateDiagnostics();
         lastCompletedTemperatureTick += dt;
-        watch.Stop(); lastTickDurationMilliseconds = watch.Elapsed.TotalMilliseconds;
-        if (enableProfilingDiagnostics) UnityEngine.Debug.Log($"[GeodesicTemperatureProfile] cells={runtimeCellCount}, tickMs={lastTickDurationMilliseconds:F3}, diffusionRelativeError={latestDiffusionConservationRelativeError:E3}", this);
+        lastTickDurationMilliseconds = ElapsedMilliseconds(tickStart);
+        if (enableProfilingDiagnostics) UnityEngine.Debug.Log($"[GeodesicTemperatureProfile] cells={runtimeCellCount}, edges={transportGraph.EdgeCount}, substeps={lastDiffusionSubstepCount}, targetMs={lastTargetUpdateDurationMilliseconds:F3}, diffusionMs={lastDiffusionDurationMilliseconds:F3}, tickMs={lastTickDurationMilliseconds:F3}, diffusionRelativeError={latestDiffusionConservationRelativeError:E3}", this);
     }
 
-    private void UpdateTargetsAndCapacities()
+    private void UpdateTemperatureTargets()
     {
         for (int i = 0; i < runtimeCellCount; i++)
         {
             float insolation = GetCellInsolationCosine(i);
             targetTemperatureKelvinByCell[i] = baseTemperatureKelvin + insolationTemperatureGainKelvin * Mathf.Pow(insolation, insolationExponent);
-            heatCapacityByCell[i] = Mathf.Max(1e-12f, topology.UnitCellAreas[i] * GetSurfaceMultiplier(i));
         }
+    }
+
+    private void RebuildThermalCapacities()
+    {
+        for (int i = 0; i < runtimeCellCount; i++)
+        {
+            float capacity = Mathf.Max(1e-12f, topology.UnitCellAreas[i] * GetSurfaceMultiplier(i));
+            heatCapacityByCell[i] = capacity;
+            inverseHeatCapacityByCell[i] = 1f / capacity;
+        }
+        cachedLandHeatCapacityMultiplier = landHeatCapacityMultiplier;
+        cachedOceanHeatCapacityMultiplier = oceanSurfaceHeatCapacityMultiplier;
+        cachedDiffusionStrength = float.NaN;
     }
 
     private void ApplyConservativeDiffusion(float dt)
     {
-        if (diffusionStrength <= 0f) return;
-        float safeDt = ComputeStableDiffusionStep();
+        lastDiffusionSubstepCount = 0;
+        if (diffusionStrength <= 0f) { latestDiffusionConservationRelativeError = 0d; return; }
+        float safeDt = GetStableDiffusionStep();
         int substeps = Mathf.Max(1, Mathf.CeilToInt(dt / safeDt));
         if (substeps > 64) { if (!warnedDiffusionClamp) { UnityEngine.Debug.LogWarning("[GeodesicTemperature] Diffusion requested more than 64 stable substeps; strength is being stability-clamped.", this); warnedDiffusionClamp = true; } substeps = 64; }
+        lastDiffusionSubstepCount = substeps;
         float stepDt = dt / substeps;
         double before = TotalThermalEnergy(workingTemperatureKelvinByCell);
+        int[] cellA = transportGraph.EdgeCellA;
+        int[] cellB = transportGraph.EdgeCellB;
+        float[] conductanceBase = transportGraph.EdgeConductanceBase;
         for (int step = 0; step < substeps; step++)
         {
             Array.Clear(energyDeltaByCell, 0, runtimeCellCount);
-            for (int a = 0; a < runtimeCellCount; a++)
+            for (int edge = 0; edge < transportGraph.EdgeCount; edge++)
             {
-                int count = topology.NeighborCounts[a];
-                for (int slot = 0; slot < count; slot++)
-                {
-                    int b = topology.Neighbors6[a * 6 + slot]; if (b <= a) continue;
-                    float distance = Mathf.Max(1e-6f, topology.NeighborAngularDistances6[a * 6 + slot]);
-                    float edge = topology.SharedDualEdgeAngularLengths6[a * 6 + slot];
-                    float energy = diffusionStrength * edge / distance * (workingTemperatureKelvinByCell[b] - workingTemperatureKelvinByCell[a]) * stepDt;
-                    energyDeltaByCell[a] += energy; energyDeltaByCell[b] -= energy;
-                }
+                int a = cellA[edge], b = cellB[edge];
+                float energy = diffusionStrength * conductanceBase[edge] * (workingTemperatureKelvinByCell[b] - workingTemperatureKelvinByCell[a]) * stepDt;
+                energyDeltaByCell[a] += energy;
+                energyDeltaByCell[b] -= energy;
             }
-            for (int i = 0; i < runtimeCellCount; i++) workingTemperatureKelvinByCell[i] += energyDeltaByCell[i] / heatCapacityByCell[i];
+            for (int i = 0; i < runtimeCellCount; i++) workingTemperatureKelvinByCell[i] += energyDeltaByCell[i] * inverseHeatCapacityByCell[i];
         }
         double after = TotalThermalEnergy(workingTemperatureKelvinByCell);
         latestDiffusionConservationRelativeError = Math.Abs(after - before) / Math.Max(1e-12, Math.Abs(before));
     }
 
-    private float ComputeStableDiffusionStep()
+    private float GetStableDiffusionStep()
     {
+        if (diffusionStrength <= 0f) return float.MaxValue;
+        if (cachedDiffusionStrength == diffusionStrength) return cachedStableDiffusionStep;
         float result = float.PositiveInfinity;
         for (int i = 0; i < runtimeCellCount; i++)
         {
-            float conductance = 0f;
-            for (int slot = 0; slot < topology.NeighborCounts[i]; slot++) conductance += diffusionStrength * topology.SharedDualEdgeAngularLengths6[i * 6 + slot] / Mathf.Max(1e-6f, topology.NeighborAngularDistances6[i * 6 + slot]);
+            float conductance = diffusionStrength * transportGraph.CellConductanceSumBase[i];
             if (conductance > 0f) result = Mathf.Min(result, 0.45f * heatCapacityByCell[i] / conductance);
         }
-        return float.IsInfinity(result) ? float.MaxValue : Mathf.Max(1e-5f, result);
+        cachedStableDiffusionStep = float.IsInfinity(result) ? float.MaxValue : Mathf.Max(1e-5f, result);
+        cachedDiffusionStrength = diffusionStrength;
+        return cachedStableDiffusionStep;
     }
+
+    private static double ElapsedMilliseconds(long startTimestamp) =>
+        (Stopwatch.GetTimestamp() - startTimestamp) * 1000d / Stopwatch.Frequency;
 
     private double TotalThermalEnergy(float[] temperatures) { double total = 0d; for (int i = 0; i < runtimeCellCount; i++) total += temperatures[i] * heatCapacityByCell[i]; return total; }
 
@@ -261,11 +304,48 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
     private void ValidateDiffusion()
     {
         if (!initialized) { UnityEngine.Debug.LogWarning("[GeodesicTemperatureValidation] Field is not initialized.", this); return; }
-        Array.Copy(surfaceTemperatureKelvinByCell, workingTemperatureKelvinByCell, runtimeCellCount);
-        for (int i = 0; i < runtimeCellCount; i++) workingTemperatureKelvinByCell[i] = 300f;
-        double uniformBefore = TotalThermalEnergy(workingTemperatureKelvinByCell); ApplyConservativeDiffusion(updateIntervalSeconds); double uniformAfter = TotalThermalEnergy(workingTemperatureKelvinByCell);
-        for (int i = 0; i < runtimeCellCount; i++) workingTemperatureKelvinByCell[i] = 300f; workingTemperatureKelvinByCell[0] = 400f;
-        double hotBefore = TotalThermalEnergy(workingTemperatureKelvinByCell); ApplyConservativeDiffusion(updateIntervalSeconds); double hotAfter = TotalThermalEnergy(workingTemperatureKelvinByCell);
-        UnityEngine.Debug.Log($"[GeodesicTemperatureValidation] subdivision={topology.SubdivisionLevel}, cells={runtimeCellCount}, pentagons=12, uniformDeltaEnergy={uniformAfter-uniformBefore:E3}, hotCellDeltaEnergy={hotAfter-hotBefore:E3}, relativeConservationError={latestDiffusionConservationRelativeError:E3}", this);
+        int count = runtimeCellCount;
+        float[] adjacency = new float[count];
+        float[] graphResult = new float[count];
+        float[] adjacencyDelta = new float[count];
+        float[] graphDelta = new float[count];
+        for (int i = 0; i < count; i++) adjacency[i] = graphResult[i] = 250f + (i * 37 % 101) * 0.75f;
+        double before = TotalThermalEnergy(adjacency);
+        const int substeps = 4;
+        float stepDt = Mathf.Max(0.01f, updateIntervalSeconds) / substeps;
+        for (int step = 0; step < substeps; step++)
+        {
+            Array.Clear(adjacencyDelta, 0, count);
+            Array.Clear(graphDelta, 0, count);
+            for (int a = 0; a < count; a++)
+            {
+                for (int slot = 0; slot < topology.NeighborCounts[a]; slot++)
+                {
+                    int b = topology.Neighbors6[a * 6 + slot];
+                    if (b <= a) continue;
+                    float conductance = topology.SharedDualEdgeAngularLengths6[a * 6 + slot] / topology.NeighborAngularDistances6[a * 6 + slot];
+                    float energy = diffusionStrength * conductance * (adjacency[b] - adjacency[a]) * stepDt;
+                    adjacencyDelta[a] += energy; adjacencyDelta[b] -= energy;
+                }
+            }
+            for (int edge = 0; edge < transportGraph.EdgeCount; edge++)
+            {
+                int a = transportGraph.EdgeCellA[edge], b = transportGraph.EdgeCellB[edge];
+                float energy = diffusionStrength * transportGraph.EdgeConductanceBase[edge] * (graphResult[b] - graphResult[a]) * stepDt;
+                graphDelta[a] += energy; graphDelta[b] -= energy;
+            }
+            for (int i = 0; i < count; i++)
+            {
+                adjacency[i] += adjacencyDelta[i] * inverseHeatCapacityByCell[i];
+                graphResult[i] += graphDelta[i] * inverseHeatCapacityByCell[i];
+            }
+        }
+        double absoluteSum = 0d;
+        float maximumAbsoluteDifference = 0f;
+        for (int i = 0; i < count; i++) { float difference = Mathf.Abs(adjacency[i] - graphResult[i]); absoluteSum += difference; maximumAbsoluteDifference = Mathf.Max(maximumAbsoluteDifference, difference); }
+        double after = TotalThermalEnergy(graphResult);
+        double relativeConservationError = Math.Abs(after - before) / Math.Max(1e-12, Math.Abs(before));
+        UnityEngine.Debug.Log($"[GeodesicTemperatureEquivalence] subdivision={topology.SubdivisionLevel}, cells={count}, edges={transportGraph.EdgeCount}, substeps={substeps}, maxAbsoluteDifferenceK={maximumAbsoluteDifference:E3}, meanAbsoluteDifferenceK={absoluteSum / count:E3}, energyBefore={before:E6}, energyAfter={after:E6}, relativeConservationError={relativeConservationError:E3}", this);
     }
+
 }
