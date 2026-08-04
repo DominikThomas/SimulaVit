@@ -607,6 +607,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
         GetComponent<PlanetTemperatureIceVisuals>()?.ClearForGeodesicMode();
 
+        GetComponent<GeodesicOceanTemperatureField>()?.ClearField();
         GetComponent<GeodesicSurfaceTemperatureField>()?.ClearField();
         GetComponent<GeodesicOceanLayerDomain>()?.ClearGrid();
         GeodesicTopology = null;
@@ -782,6 +783,19 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
             temperatureField.InitializeForCurrentTopology();
         }
         LogStage("surface-temperature initialization", stage);
+
+        stage = System.Diagnostics.Stopwatch.StartNew();
+        var oceanTemperatureField = GetComponent<GeodesicOceanTemperatureField>();
+        if (oceanTemperatureField == null)
+        {
+            Debug.LogError("[GeodesicOceanTemperature] Planet Generator is missing its required scene-owned GeodesicOceanTemperatureField component; subsurface temperature initialization was skipped.", this);
+        }
+        else
+        {
+            oceanTemperatureField.enabled = true;
+            oceanTemperatureField.InitializeForCurrentDomain();
+        }
+        LogStage("ocean-temperature initialization", stage);
 
         stage = System.Diagnostics.Stopwatch.StartNew();
         IcosphereRenderGeometry renderGeometry = IcosphereRenderGeometryCache.GetOrBuild(renderSubdivision);

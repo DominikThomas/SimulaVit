@@ -7,6 +7,9 @@ using UnityEngine;
 [DisallowMultipleComponent]
 public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
 {
+    public event Action<float> SurfaceTemperatureTickCommitted;
+    public event Action SurfaceTemperatureFieldReinitialized;
+    public event Action SurfaceTemperatureFieldClearing;
     private const float MinimumTimescale = 0.001f;
     private const float DiagnosticHighTemperatureKelvin = 2000f;
 
@@ -123,11 +126,13 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
         Array.Copy(targetTemperatureKelvinByCell, surfaceTemperatureKelvinByCell, count);
         UpdateDiagnostics();
         initialized = true;
+        SurfaceTemperatureFieldReinitialized?.Invoke();
         UnityEngine.Debug.Log($"[GeodesicTemperature] initialized cells={count}, baseK={baseTemperatureKelvin:F2}, gainK={insolationTemperatureGainKelvin:F2}, min/mean/maxK={minimumTemperatureKelvin:F2}/{areaWeightedMeanTemperatureKelvin:F2}/{maximumTemperatureKelvin:F2}", this);
     }
 
     public void ClearField()
     {
+        if (initialized) SurfaceTemperatureFieldClearing?.Invoke();
         initialized = false;
         topology = null;
         transportGraph = null;
@@ -142,6 +147,16 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
     }
 
     public float GetCellTemperatureKelvin(int cellIndex) => initialized && cellIndex >= 0 && cellIndex < runtimeCellCount ? surfaceTemperatureKelvinByCell[cellIndex] : float.NaN;
+    public float GetCellHeatCapacity(int cellIndex) => initialized && cellIndex >= 0 && cellIndex < runtimeCellCount ? heatCapacityByCell[cellIndex] : float.NaN;
+
+    public bool TryApplyExternalEnergyDelta(int cellIndex, float energyDelta)
+    {
+        if (!initialized || cellIndex < 0 || cellIndex >= runtimeCellCount || float.IsNaN(energyDelta) || float.IsInfinity(energyDelta)) return false;
+        float updated = surfaceTemperatureKelvinByCell[cellIndex] + energyDelta * inverseHeatCapacityByCell[cellIndex];
+        if (float.IsNaN(updated) || float.IsInfinity(updated) || updated < 0f) return false;
+        surfaceTemperatureKelvinByCell[cellIndex] = updated;
+        return true;
+    }
     public float GetTemperatureKelvinAtLocalDirection(Vector3 localDirection) { int cell = FindCellForLocalDirection(localDirection); return GetCellTemperatureKelvin(cell); }
     public float GetTemperatureKelvinAtWorldDirection(Vector3 worldDirection) => GetTemperatureKelvinAtLocalDirection(transform.InverseTransformDirection(worldDirection));
 
@@ -184,6 +199,7 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
         ApplyConservativeDiffusion(dt);
         lastDiffusionDurationMilliseconds = ElapsedMilliseconds(diffusionStart);
         float[] swap = surfaceTemperatureKelvinByCell; surfaceTemperatureKelvinByCell = workingTemperatureKelvinByCell; workingTemperatureKelvinByCell = swap;
+        SurfaceTemperatureTickCommitted?.Invoke(dt);
         UpdateDiagnostics();
         lastCompletedTemperatureTick += dt;
         lastTickDurationMilliseconds = ElapsedMilliseconds(tickStart);

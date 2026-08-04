@@ -49,6 +49,7 @@ public sealed class GeodesicOceanLayerDomain : MonoBehaviour
 
     public void ClearGrid()
     {
+        GetComponent<GeodesicOceanTemperatureField>()?.ClearField();
         grid = null; sourceGenerator = null; initialized = false; runtimeCellCount = oceanCellCount = runtimeMaximumLayers = activeNodeCount = horizontalLinkCount = verticalLinkCount = 0;
         minimumActiveLayers = maximumActiveLayers = 0; meanActiveLayers = 0f; oceanCellsWithOneLayer = oceanCellsWithTwoLayers = oceanCellsWithThreeLayers = oceanCellsWithFourLayers = oceanCellsWithFiveLayers = 0;
         minimumLayerVolume = meanLayerVolume = maximumLayerVolume = maximumOceanDepth = 0f; buildDurationMilliseconds = 0d; approximateMemoryBytes = 0; sampleCellOutput = "Grid not initialized.";
