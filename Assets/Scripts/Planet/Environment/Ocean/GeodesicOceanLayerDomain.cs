@@ -56,7 +56,9 @@ public sealed class GeodesicOceanLayerDomain : MonoBehaviour
     }
 
     private void OnDestroy() => ClearGrid();
-    private void OnValidate() { maximumLayerCount = Mathf.Clamp(maximumLayerCount, 1, 5); if (grid != null) RefreshSampleDiagnostics(); }
+    // Never traverse the runtime grid from Inspector validation; the explicit sample command
+    // and initialization path refresh diagnostics without coupling work to Editor repaints.
+    private void OnValidate() => maximumLayerCount = Mathf.Clamp(maximumLayerCount, 1, 5);
     [ContextMenu("Refresh Geodesic Ocean Layer Sample")] private void RefreshSample() => RefreshSampleDiagnostics();
 
     private bool TryGetBoundaries(out float[] result, out string error)

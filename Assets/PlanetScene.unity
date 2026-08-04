@@ -1246,9 +1246,12 @@ MonoBehaviour:
   startupMode: 1
   initialTemperatureDropPerLayerKelvin: 2
   maximumVerticalSubsteps: 64
+  inspectorSnapshotIntervalSeconds: 1
+  exactConservationAuditIntervalSeconds: 1
   enableProfilingDiagnostics: 0
   initialized: 0
   activeSubsurfaceNodeCount: 0
+  participatingSurfaceCellCount: 0
   totalSubsurfaceThermalCapacity: 0
   sourceGridSummary: None
   lastCompletedOceanTemperatureTick: 0
@@ -1256,10 +1259,19 @@ MonoBehaviour:
   lastVerticalSubstepCount: 0
   lastVerticalExchangeDurationMilliseconds: 0
   latestVerticalConservationRelativeError: 0
+  lastExactConservationAuditSimulationTime: 0
+  ticksSinceLastExactConservationAudit: 0
+  lastTickUsedAlgebraicConservationOnly: 0
   lastAbsoluteEnergyTransferred: 0
   lastStabilityClampingOccurred: 0
   maximumSurfaceToBottomTemperatureDifference: 0
   approximateRuntimeMemoryBytes: 0
+  oceanCallbacksLastRenderedFrame: 0
+  maximumOceanCallbacksPerRenderedFrame: 0
+  verticalSubstepsLastRenderedFrame: 0
+  verticalLinksProcessedLastRenderedFrame: 0
+  oceanTemperatureMillisecondsLastRenderedFrame: 0
+  duplicateOrStaleCallbackCount: 0
   layerActiveCellCount:
   - 0
   - 0

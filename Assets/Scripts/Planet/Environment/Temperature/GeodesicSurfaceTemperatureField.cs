@@ -2,11 +2,17 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using UnityEngine;
+using Unity.Profiling;
 
 /// <summary>Authoritative, surface-only Kelvin field for geodesic simulation cells.</summary>
 [DisallowMultipleComponent]
 public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
 {
+    private static readonly ProfilerMarker TickMarker = new ProfilerMarker("GeodesicTemperature.SurfaceTick");
+    private static readonly ProfilerMarker TargetMarker = new ProfilerMarker("GeodesicTemperature.TargetUpdate");
+    private static readonly ProfilerMarker ResponseMarker = new ProfilerMarker("GeodesicTemperature.SurfaceResponse");
+    private static readonly ProfilerMarker DiffusionMarker = new ProfilerMarker("GeodesicTemperature.HorizontalDiffusion");
+    private static readonly ProfilerMarker CommitMarker = new ProfilerMarker("GeodesicTemperature.CommittedEvent");
     public event Action<float> SurfaceTemperatureTickCommitted;
     public event Action SurfaceTemperatureFieldReinitialized;
     public event Action SurfaceTemperatureFieldClearing;
@@ -59,6 +65,8 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
     private float insolationTemperatureGainKelvin = 45f;
     private bool warnedInvalidTemperature;
     private bool warnedDiffusionClamp;
+    private int thermalCapacityVersion;
+    private long surfaceTemperatureTickSequence;
 
     public bool IsInitialized => initialized;
     public int CellCount => runtimeCellCount;
@@ -70,6 +78,8 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
     public double LastTickDurationMilliseconds => lastTickDurationMilliseconds;
     public double LatestDiffusionConservationRelativeError => latestDiffusionConservationRelativeError;
     public string CurrentSunDirectionProvider => currentSunDirectionProvider;
+    public int ThermalCapacityVersion => thermalCapacityVersion;
+    public long SurfaceTemperatureTickSequence => surfaceTemperatureTickSequence;
 
     private void Awake() => ResolveReferences();
 
@@ -182,11 +192,15 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
 
     private void TickTemperature(float dt)
     {
+        using (TickMarker.Auto())
+        {
         long tickStart = Stopwatch.GetTimestamp();
         if (cachedLandHeatCapacityMultiplier != landHeatCapacityMultiplier || cachedOceanHeatCapacityMultiplier != oceanSurfaceHeatCapacityMultiplier) RebuildThermalCapacities();
         long targetStart = Stopwatch.GetTimestamp();
-        UpdateTemperatureTargets();
+        using (TargetMarker.Auto()) UpdateTemperatureTargets();
         lastTargetUpdateDurationMilliseconds = ElapsedMilliseconds(targetStart);
+        using (ResponseMarker.Auto())
+        {
         for (int i = 0; i < runtimeCellCount; i++)
         {
             float current = surfaceTemperatureKelvinByCell[i];
@@ -195,15 +209,18 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
             float response = 1f - Mathf.Exp(-dt / Mathf.Max(MinimumTimescale, timescale));
             workingTemperatureKelvinByCell[i] = current + (target - current) * response;
         }
+        }
         long diffusionStart = Stopwatch.GetTimestamp();
-        ApplyConservativeDiffusion(dt);
+        using (DiffusionMarker.Auto()) ApplyConservativeDiffusion(dt);
         lastDiffusionDurationMilliseconds = ElapsedMilliseconds(diffusionStart);
         float[] swap = surfaceTemperatureKelvinByCell; surfaceTemperatureKelvinByCell = workingTemperatureKelvinByCell; workingTemperatureKelvinByCell = swap;
-        SurfaceTemperatureTickCommitted?.Invoke(dt);
+        surfaceTemperatureTickSequence++;
+        using (CommitMarker.Auto()) SurfaceTemperatureTickCommitted?.Invoke(dt);
         UpdateDiagnostics();
         lastCompletedTemperatureTick += dt;
         lastTickDurationMilliseconds = ElapsedMilliseconds(tickStart);
         if (enableProfilingDiagnostics) UnityEngine.Debug.Log($"[GeodesicTemperatureProfile] cells={runtimeCellCount}, edges={transportGraph.EdgeCount}, substeps={lastDiffusionSubstepCount}, targetMs={lastTargetUpdateDurationMilliseconds:F3}, diffusionMs={lastDiffusionDurationMilliseconds:F3}, tickMs={lastTickDurationMilliseconds:F3}, diffusionRelativeError={latestDiffusionConservationRelativeError:E3}", this);
+        }
     }
 
     private void UpdateTemperatureTargets()
@@ -226,6 +243,7 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
         cachedLandHeatCapacityMultiplier = landHeatCapacityMultiplier;
         cachedOceanHeatCapacityMultiplier = oceanSurfaceHeatCapacityMultiplier;
         cachedDiffusionStrength = float.NaN;
+        thermalCapacityVersion++;
     }
 
     private void ApplyConservativeDiffusion(float dt)

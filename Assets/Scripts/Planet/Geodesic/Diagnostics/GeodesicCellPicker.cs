@@ -1,5 +1,6 @@
 using System.Text;
 using UnityEngine;
+using Unity.Profiling;
 
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
@@ -7,6 +8,7 @@ using UnityEngine.InputSystem;
 
 public class GeodesicCellPicker : MonoBehaviour
 {
+    private static readonly ProfilerMarker DynamicRefreshMarker = new ProfilerMarker("GeodesicCellPicker.DynamicRefresh");
     [Header("Picking")]
     public Camera pickingCamera;
     [Tooltip("Optional collider for the generated geodesic sphere. If omitted, the picker searches this object and its children.")]
@@ -584,6 +586,8 @@ public class GeodesicCellPicker : MonoBehaviour
 
     private void RefreshDynamicPopupText(bool force = false)
     {
+        using (DynamicRefreshMarker.Auto())
+        {
         if (!showSelectionPopup || selectedCellIndex < 0 || temperatureField == null || !temperatureField.IsInitialized)
         {
             return;
@@ -608,6 +612,7 @@ public class GeodesicCellPicker : MonoBehaviour
         string detailedDynamic = $"\n\nSurface Temperature\nTemperature: {temperatureText}\nInsolation cosine: {insolation:F4}\nIllumination: {illumination}\nTarget equilibrium: {ReplicatorManager.FormatTemperature(temperatureField.GetCellTargetTemperatureKelvin(selectedCellIndex), displayUnit)}\nResponse multiplier: {temperatureField.GetCellEffectiveThermalResponseMultiplier(selectedCellIndex):F3}\nThermal category: {temperatureField.GetCellThermalCategory(selectedCellIndex)}\nNeighbor min/mean/max: {ReplicatorManager.FormatTemperature(neighborMin, displayUnit)} / {ReplicatorManager.FormatTemperature(neighborMean, displayUnit)} / {ReplicatorManager.FormatTemperature(neighborMax, displayUnit)}";
         selectedCompactPopup = selectedCompactStaticHeader + compactDynamic + selectedCompactStaticOcean + compactLayers;
         selectedDetailedPopup = selectedDetailedStaticPopup + detailedDynamic + detailedLayers;
+        }
     }
 
     private string BuildDynamicLayerTemperatureText(bool detailed)
