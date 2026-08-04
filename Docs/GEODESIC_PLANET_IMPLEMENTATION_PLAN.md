@@ -1428,6 +1428,28 @@ Current limitations:
 
 Save/load work has two stages: schema/versioning groundwork during resource-grid migration, then complete round-trip serialization after the major environment, layer, atmosphere, vent, sediment, and population structures stabilize.
 
+## Authoritative immutable layered geodesic ocean domain
+
+The scene-owned `GeodesicOceanLayerDomain` on the Planet Generator now owns the compact configuration, cached O(1) diagnostics, manual sample output, explicit validator, and one nonserialized immutable `GeodesicOceanLayerGrid`. `PlanetGenerator` orchestrates it after simulation topology, the shared `GeodesicTransportGraph`, final ocean classification, resolved water-surface radius, and final bathymetry/seafloor radii exist. Cleanup precedes topology replacement and occurs on regeneration, mode transition, return to startup, and destruction. A missing scene component is an isolated layered-domain error and does not stop terrain or surface-temperature generation. No runtime `AddComponent` is used for this authority.
+
+The default normalized depth boundaries are exactly `0.00, 0.12, 0.32, 0.58, 0.82, 1.00` for five layers. Reduced maximum layer counts use the applicable leading configured boundaries and `1.00` as the final boundary. Boundaries must be finite, strictly increasing, and within zero through one. They are multiplied by the maximum current generated local ocean depth to make globally aligned physical radial bands. Each ocean column intersects those global bands with its unmodified local seafloor; shallow columns consequently end in one partial band while sufficiently deep basins use every configured band. Land has no active nodes.
+
+Node storage is fixed and contiguous (`nodeIndex = cellIndex * maximumLayerCount + layerIndex`), while active geometry and links are represented by parallel primitive arrays rather than objects or repeated graphs. Each active radial wedge uses the topology unit-cell solid angle:
+
+```
+volume = unitCellSolidAngle * (outerRadius^3 - innerRadius^3) / 3
+```
+
+Horizontal connectivity iterates each canonical unique `GeodesicTransportGraph` edge and each common active band exactly once, retains the source edge index and canonical endpoints, and records the shared radial overlap thickness. Vertical connectivity joins adjacent active bands once per column. Its interface area is `unitCellSolidAngle * interfaceRadius^2`, and it records positive layer-center distance. This is immutable physical topology/geometry, not transported state or transport coefficients.
+
+The explicit context-menu validator checks source identity and dimensions, land/ocean activation, contiguous layers, surface/seafloor closure, thickness and independently calculated wedge-volume conservation, finite positive geometry, canonical source-backed horizontal links, duplicate prevention, adjacent same-column vertical links, and expected vertical degree. Sample diagnostics refresh only after construction, a sample-index `OnValidate`, explicit refresh, or explicit validation; there is no update loop or Inspector-time array scan.
+
+### Future temperature ownership contract
+
+`GeodesicSurfaceTemperatureField` remains authoritative for land and ocean surface-layer temperature. A future `GeodesicOceanTemperatureField` will own subsurface layers without duplicating layer 0 as an independent second value. Future vertical heat transfer must exchange equal-and-opposite energy between adjacent layers, with heat capacity derived from `LayerVolume`. Direct solar forcing should be strongest at layer 0, weaker or optional at layer 1, and zero or near-zero deeper; later bottom vent heat belongs on the bottom active layer. Horizontal heat transport will use layered horizontal links and vertical heat transport will use vertical links.
+
+The legacy cube-sphere `PlanetResourceMap` remains a behavioral reference only and is not called by geodesic mode. Its useful fast-surface/slow-depth behavior and reference defaults are recorded, not activated here: top solar factor `1`, second-layer solar factor `0.55`, deep direct solar factor `0`, initial temperature drop `2 K` per layer, bottom vent factor `1`, and above-bottom vent factor `0.45`. Layered temperature, passive tracers, dissolved chemistry, reactions, vents, currents/advection, plume behavior, sedimentation, marine snow, biology, atmosphere coupling, and layered save payloads remain deferred and are not marked complete.
+
 ## 18.4 Explicitly deferred features
 
 Not implemented in the OceanWorld phase:

@@ -887,6 +887,7 @@ GameObject:
   - component: {fileID: 382753104}
   - component: {fileID: 382753105}
   - component: {fileID: 382753106}
+  - component: {fileID: 382753107}
   m_Layer: 0
   m_Name: Planet Generator
   m_TagString: Planet
@@ -1185,6 +1186,47 @@ MonoBehaviour:
   lastTargetUpdateDurationMilliseconds: 0
   lastDiffusionDurationMilliseconds: 0
   lastDiffusionSubstepCount: 0
+--- !u!114 &382753107
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 382753101}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 10580f2e998f41d483f48a29e76bed20, type: 3}
+  m_Name: GeodesicOceanLayerDomain
+  m_EditorClassIdentifier: SimulaVit::GeodesicOceanLayerDomain
+  enableGeodesicLayeredOcean: 1
+  maximumLayerCount: 5
+  secondLayerBeginsAtDepthFraction: 0.12
+  thirdLayerBeginsAtDepthFraction: 0.32
+  fourthLayerBeginsAtDepthFraction: 0.58
+  fifthLayerBeginsAtDepthFraction: 0.82
+  initialized: 0
+  runtimeCellCount: 0
+  oceanCellCount: 0
+  runtimeMaximumLayers: 0
+  activeNodeCount: 0
+  horizontalLinkCount: 0
+  verticalLinkCount: 0
+  minimumActiveLayers: 0
+  maximumActiveLayers: 0
+  meanActiveLayers: 0
+  oceanCellsWithOneLayer: 0
+  oceanCellsWithTwoLayers: 0
+  oceanCellsWithThreeLayers: 0
+  oceanCellsWithFourLayers: 0
+  oceanCellsWithFiveLayers: 0
+  minimumLayerVolume: 0
+  meanLayerVolume: 0
+  maximumLayerVolume: 0
+  maximumOceanDepth: 0
+  buildDurationMilliseconds: 0
+  approximateMemoryBytes: 0
+  sampleCellIndex: 0
+  sampleCellOutput: Grid not initialized.
 --- !u!1 &581314702
 GameObject:
   m_ObjectHideFlags: 0

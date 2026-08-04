@@ -429,6 +429,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     public bool IsPlanetInitialized { get; private set; }
     public GeodesicGridTopology GeodesicTopology { get; private set; }
     public GeodesicTransportGraph GeodesicTransportGraph => geodesicTransportGraph;
+    internal bool[] GeodesicOceanMaskData => geodesicOceanMask;
+    internal float[] GeodesicSeafloorRadiusData => geodesicSeafloorRadius;
     public PlanetRuntimeDescriptor RuntimeDescriptor { get; private set; }
     public bool HasRuntimeDescriptor { get; private set; }
     public const int GenerationVersion = 2;
@@ -606,6 +608,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         GetComponent<PlanetTemperatureIceVisuals>()?.ClearForGeodesicMode();
 
         GetComponent<GeodesicSurfaceTemperatureField>()?.ClearField();
+        GetComponent<GeodesicOceanLayerDomain>()?.ClearGrid();
         GeodesicTopology = null;
         ClearGeodesicTransportGraph();
         geodesicTerrainHeightByCell = null;
@@ -753,6 +756,19 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         stage = System.Diagnostics.Stopwatch.StartNew();
         RebuildGeodesicOceanClassification();
         LogStage("bathymetry sampling/interpolation", stage);
+
+        stage = System.Diagnostics.Stopwatch.StartNew();
+        var oceanLayerDomain = GetComponent<GeodesicOceanLayerDomain>();
+        if (oceanLayerDomain == null)
+        {
+            Debug.LogError("[GeodesicOceanLayers] Planet Generator is missing its required scene-owned GeodesicOceanLayerDomain component; layered-ocean initialization was skipped.", this);
+        }
+        else
+        {
+            oceanLayerDomain.enabled = true;
+            oceanLayerDomain.Initialize(this, GeodesicTopology, geodesicTransportGraph, geodesicOceanMask, geodesicSeafloorRadius, GeodesicSeaLevelRadius);
+        }
+        LogStage("layered-ocean domain initialization", stage);
 
         stage = System.Diagnostics.Stopwatch.StartNew();
         var temperatureField = GetComponent<GeodesicSurfaceTemperatureField>();
