@@ -167,11 +167,18 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
         maximumSolarAngularAdvancePerThermalTickDegrees = sunDirectionProvider != null ? Mathf.Abs(sunDirectionProvider.orbitDegreesPerSecond * (float)interval) : 0f;
     }
 
-    public void ConfigureStartupTemperatures(float baseKelvin, float insolationGainKelvin)
+    /// <summary>Assigns startup parameters without allocating or rebuilding runtime field state.</summary>
+    public void SetStartupTemperatureParameters(float baseKelvin, float insolationGainKelvin)
     {
         baseTemperatureKelvin = Mathf.Max(0f, baseKelvin);
         insolationTemperatureGainKelvin = Mathf.Max(0f, insolationGainKelvin);
-        if (planetGenerator != null && planetGenerator.CurrentGridType == PlanetGridType.GeodesicIcosphere) InitializeForCurrentTopology();
+    }
+
+    /// <summary>Explicit replacement path for runtime configuration changes; normal startup uses the non-rebuilding setter before generation.</summary>
+    public void ReinitializeWithTemperatureParameters(float baseKelvin, float insolationGainKelvin)
+    {
+        SetStartupTemperatureParameters(baseKelvin, insolationGainKelvin);
+        InitializeForCurrentTopology();
     }
 
     public void InitializeForCurrentTopology()
@@ -433,7 +440,7 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
         if (valid) UnityEngine.Debug.Log($"[GeodesicTemperaturePartitionValidation] valid; {report}", this); else UnityEngine.Debug.LogError($"[GeodesicTemperaturePartitionValidation] invalid; {report}", this);
     }
 
-    [ContextMenu("Compare Geodesic Thermal Intervals")]
+    [ContextMenu("Compare Representative Geodesic Thermal Intervals")]
     private void CompareThermalIntervals()
     {
         if (!initialized || sunDirectionProvider == null) { UnityEngine.Debug.LogWarning("[GeodesicThermalIntervalValidation] Surface field and sun ephemeris must be initialized.", this); return; }
@@ -445,7 +452,7 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
         float halfError = MaximumRepresentativeDifference(reference, halfSecond);
         float oneError = MaximumRepresentativeDifference(reference, oneSecond);
         bool halfPass = halfError <= 0.1f, onePass = oneError <= 0.1f;
-        UnityEngine.Debug.Log($"[GeodesicThermalIntervalValidation] referenceTicks={reference.Ticks}, 0.5sTicks={halfSecond.Ticks}, 1.0sTicks={oneSecond.Ticks}, maxRepresentativeDifferenceK(0.5/1.0)={halfError:F4}/{oneError:F4}, accepted(<=0.1K)={halfPass}/{onePass}, productionInterval={updateIntervalSeconds:F2}s", this);
+        UnityEngine.Debug.Log($"[GeodesicRepresentativeThermalIntervalValidation] lightweight representative-state comparison only; referenceTicks={reference.Ticks}, 0.5sTicks={halfSecond.Ticks}, 1.0sTicks={oneSecond.Ticks}, maxRepresentativeDifferenceK(0.5/1.0)={halfError:F4}/{oneError:F4}, accepted(<=0.1K)={halfPass}/{onePass}, productionInterval={updateIntervalSeconds:F2}s. Full-field Unity comparison remains authoritative.", this);
     }
 
     private static float MaximumRepresentativeDifference(PartitionValidationResult a, PartitionValidationResult b)

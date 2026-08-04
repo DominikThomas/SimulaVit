@@ -119,6 +119,13 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
         simulationSpeedMultiplier = simulationStepsPerFrame;
     }
 
+    public void ResetClockForNewSimulation()
+    {
+        simulationTimeSeconds = 0d;
+        discardNextFrameDelta = true;
+        ResetFrameTiming();
+    }
+
 
     public void ApplyClockSnapshot(SimulationClockSnapshot snapshot)
     {
