@@ -1166,7 +1166,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: SimulaVit::GeodesicSurfaceTemperatureField
   enableGeodesicSurfaceTemperature: 1
-  updateIntervalSeconds: 1
+  updateIntervalSeconds: 0.25
   maximumThermalTicksPerFrame: 64
   diagnosticSnapshotIntervalSeconds: 0.25
   diffusionConservationAuditIntervalSeconds: 5
@@ -1190,6 +1190,26 @@ MonoBehaviour:
   lastTargetUpdateDurationMilliseconds: 0
   lastDiffusionDurationMilliseconds: 0
   lastDiffusionSubstepCount: 0
+  totalAuthoritativeSimulationSecondsReceived: 0
+  totalSimulationSecondsConsumedByThermalTicks: 0
+  unconsumedThermalRemainderSeconds: 0
+  discardedSimulationSeconds: 0
+  thermalTicksCurrentRenderedFrame: 0
+  maximumThermalTicksPerRenderedFrame: 0
+  currentAuthoritativeSimulationTime: 0
+  thermalIntegrationCursorTime: 0
+  currentSunOrbitTime: 0
+  currentSunPhase01: 0
+  maximumSolarAngularAdvancePerThermalTickDegrees: 0
+  lastCompletedSolarDayIndex: -1
+  lastCompletedDayMinimumTemperatureKelvin: 0
+  lastCompletedDayMeanTemperatureKelvin: 0
+  lastCompletedDayMaximumTemperatureKelvin: 0
+  lastThermalTickRepresentativeSimulationTime: 0
+  lastThermalTickSolarPhase01: 0
+  lastExactDiffusionAuditSimulationTime: 0
+  ticksSinceLastExactDiffusionAudit: 0
+  lastTickUsedAlgebraicDiffusionConservationOnly: 0
 --- !u!114 &382753107
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1275,12 +1295,7 @@ MonoBehaviour:
   verticalLinksProcessedLastRenderedFrame: 0
   oceanTemperatureMillisecondsLastRenderedFrame: 0
   duplicateOrStaleCallbackCount: 0
-  layerActiveCellCount:
-  - 0
-  - 0
-  - 0
-  - 0
-  - 0
+  layerActiveCellCount: 0000000000000000000000000000000000000000
   layerMinimumTemperatureKelvin:
   - 0
   - 0
@@ -2034,6 +2049,10 @@ MonoBehaviour:
   movementUsesAuthoritativeSimulationDelta: 1
   shouldAdvanceSimulation: 1
   pauseDetected: 0
+  rawRenderedFrameDelta: 0
+  simulationStepDeltaClamped: 0
+  simulationStepsExecutedThisFrame: 0
+  effectiveSimulationTimeAdvanceThisFrame: 0
 --- !u!1 &1222684992
 GameObject:
   m_ObjectHideFlags: 0
