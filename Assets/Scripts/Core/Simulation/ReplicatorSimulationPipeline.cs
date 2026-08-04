@@ -18,6 +18,7 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
 
     [Header("Stepping")]
     [SerializeField, Min(0)] private int simulationStepsPerFrame = 1;
+    [SerializeField, Min(0.001f), Tooltip("Maximum authoritative delta accepted by each configured simulation step. Under overload simulation throughput slows coherently instead of creating catch-up work.")] private float maximumSimulationStepDeltaSeconds = 1f / 30f;
     [Header("Diagnostics")]
     [SerializeField] private float simulationSpeedMultiplier = 1f;
     [SerializeField] private float frameDeltaTime;
@@ -27,8 +28,14 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
     [SerializeField] private bool movementUsesAuthoritativeSimulationDelta = true;
     [SerializeField] private bool shouldAdvanceSimulation = true;
     [SerializeField] private bool pauseDetected;
+    [SerializeField] private float rawRenderedFrameDelta;
+    [SerializeField] private bool simulationStepDeltaClamped;
+    [SerializeField] private int simulationStepsExecutedThisFrame;
+    [SerializeField] private float effectiveSimulationTimeAdvanceThisFrame;
 
     private bool discardNextFrameDelta;
+    private int consecutiveClampedFrames;
+    private bool warnedSustainedDeltaClamping;
 
     public int SimulationStepsPerFrame => simulationStepsPerFrame;
     public float SimulationSpeedMultiplier => simulationSpeedMultiplier;
@@ -39,6 +46,11 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
     public bool MovementUsesAuthoritativeSimulationDelta => movementUsesAuthoritativeSimulationDelta;
     public bool ShouldAdvanceSimulation => shouldAdvanceSimulation;
     public bool PauseDetected => pauseDetected;
+    public float RawRenderedFrameDelta => rawRenderedFrameDelta;
+    public float MaximumSimulationStepDeltaSeconds => maximumSimulationStepDeltaSeconds;
+    public bool SimulationStepDeltaClamped => simulationStepDeltaClamped;
+    public int SimulationStepsExecutedThisFrame => simulationStepsExecutedThisFrame;
+    public float EffectiveSimulationTimeAdvanceThisFrame => effectiveSimulationTimeAdvanceThisFrame;
 
     private void Awake()
     {
@@ -170,10 +182,24 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
             return;
         }
 
-        frameDeltaTime = Time.unscaledDeltaTime;
+        rawRenderedFrameDelta = Time.unscaledDeltaTime;
+        frameDeltaTime = rawRenderedFrameDelta;
         simulationSpeedMultiplier = simulationStepsPerFrame;
-        simulationDeltaTime = simulationStepsPerFrame > 0 ? frameDeltaTime : 0f;
+        simulationDeltaTime = simulationStepsPerFrame > 0 ? Mathf.Min(rawRenderedFrameDelta, Mathf.Max(0.001f, maximumSimulationStepDeltaSeconds)) : 0f;
+        simulationStepDeltaClamped = simulationDeltaTime + 1e-7f < rawRenderedFrameDelta;
         frameSimulationDeltaTime = simulationDeltaTime * simulationStepsPerFrame;
+        simulationStepsExecutedThisFrame = simulationStepsPerFrame;
+        effectiveSimulationTimeAdvanceThisFrame = frameSimulationDeltaTime;
+        if (simulationStepDeltaClamped)
+        {
+            consecutiveClampedFrames++;
+            if (consecutiveClampedFrames >= 30 && !warnedSustainedDeltaClamping)
+            {
+                warnedSustainedDeltaClamping = true;
+                Debug.LogWarning($"[SimulationTiming] Rendered-frame delta has remained above the {maximumSimulationStepDeltaSeconds:F4}s simulation-step limit. Requested speed is target throughput; authoritative simulation is slowing coherently under load.", this);
+            }
+        }
+        else consecutiveClampedFrames = 0;
 
         for (int i = 0; i < simulationStepsPerFrame; i++)
         {
@@ -195,6 +221,10 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
         frameDeltaTime = 0f;
         simulationDeltaTime = 0f;
         frameSimulationDeltaTime = 0f;
+        rawRenderedFrameDelta = 0f;
+        simulationStepDeltaClamped = false;
+        simulationStepsExecutedThisFrame = 0;
+        effectiveSimulationTimeAdvanceThisFrame = 0f;
     }
 
     private bool _runtimePaused;

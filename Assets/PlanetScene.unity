@@ -1166,7 +1166,10 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: SimulaVit::GeodesicSurfaceTemperatureField
   enableGeodesicSurfaceTemperature: 1
-  updateIntervalSeconds: 0.25
+  updateIntervalSeconds: 1
+  maximumThermalTicksPerFrame: 64
+  diagnosticSnapshotIntervalSeconds: 0.25
+  diffusionConservationAuditIntervalSeconds: 5
   heatingTimescaleSeconds: 20
   coolingTimescaleSeconds: 35
   diffusionStrength: 0.002
@@ -1247,7 +1250,7 @@ MonoBehaviour:
   initialTemperatureDropPerLayerKelvin: 2
   maximumVerticalSubsteps: 64
   inspectorSnapshotIntervalSeconds: 1
-  exactConservationAuditIntervalSeconds: 1
+  exactConservationAuditIntervalSeconds: 5
   enableProfilingDiagnostics: 0
   initialized: 0
   activeSubsurfaceNodeCount: 0
@@ -2022,6 +2025,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: SimulaVit::ReplicatorSimulationPipeline
   replicatorManager: {fileID: 1064713443}
   simulationStepsPerFrame: 1
+  maximumSimulationStepDeltaSeconds: 0.033333335
   simulationSpeedMultiplier: 1
   frameDeltaTime: 0
   simulationDeltaTime: 0

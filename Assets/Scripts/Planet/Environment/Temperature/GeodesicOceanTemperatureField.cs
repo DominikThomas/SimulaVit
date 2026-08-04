@@ -28,7 +28,7 @@ public sealed class GeodesicOceanTemperatureField : MonoBehaviour
     [SerializeField, Min(0f), Tooltip("Initial Kelvin decrease per layer index when Depth Gradient is selected.")] private float initialTemperatureDropPerLayerKelvin = 2f;
     [SerializeField, Range(1, 256), Tooltip("Maximum stable explicit vertical-exchange substeps per surface tick.")] private int maximumVerticalSubsteps = 64;
     [SerializeField, Min(0.1f), Tooltip("Unscaled real-time interval between serialized Inspector diagnostic snapshots.")] private float inspectorSnapshotIntervalSeconds = 1f;
-    [SerializeField, Min(0.1f), Tooltip("Simulation-time interval between exact coupled-energy conservation audits. Profiling diagnostics audits every tick.")] private float exactConservationAuditIntervalSeconds = 1f;
+    [SerializeField, Min(0.1f), Tooltip("Simulation-time interval between exact coupled-energy conservation audits. Profiling diagnostics audits every tick.")] private float exactConservationAuditIntervalSeconds = 5f;
     [SerializeField, Tooltip("Enables per-tick exact conservation auditing and periodic profiling logs.")] private bool enableProfilingDiagnostics;
 
     [Header("Runtime Diagnostics (Throttled Inspector Snapshot)")]
