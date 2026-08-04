@@ -49,6 +49,9 @@ public class GeodesicCellPicker : MonoBehaviour
     [SerializeField] private float popupFontScale = 1f;
     [Tooltip("Preserve dragged popup position between selected cells when possible.")]
     [SerializeField] private bool rememberPopupPosition = true;
+    [Tooltip("Unscaled-time interval between dynamic simulation-value refreshes while the popup is visible.")]
+    [Min(0.05f)]
+    [SerializeField] private float popupDynamicRefreshInterval = 0.25f;
 
     [Header("Selected Cell (Runtime Debug)")]
     public int selectedCellIndex = -1;
@@ -60,8 +63,17 @@ public class GeodesicCellPicker : MonoBehaviour
     private GeodesicGridTopology topology;
     private PlanetGenerator planetGenerator;
     private GeodesicOceanLayerDomain oceanLayerDomain;
+    private GeodesicSurfaceTemperatureField temperatureField;
     private string selectedLayeredOceanLog = ", layeredOcean=unavailable";
     private string selectedLayeredOceanPopup = "unavailable";
+    private string selectedCompactLayeredOceanPopup = "unavailable";
+    private string selectedCompactPopup = string.Empty;
+    private string selectedDetailedPopup = string.Empty;
+    private string selectedCompactStaticHeader = string.Empty;
+    private string selectedCompactStaticOcean = string.Empty;
+    private string selectedDetailedStaticPopup = string.Empty;
+    private float popupDynamicRefreshElapsed;
+    private bool showDetailedDebug;
     private bool warnedMissingCamera;
     private bool warnedNoPickSurface;
     private Vector2 popupScrollPosition;
@@ -82,6 +94,7 @@ public class GeodesicCellPicker : MonoBehaviour
         ResolvePickingCollider();
         planetGenerator = GetComponent<PlanetGenerator>();
         oceanLayerDomain = GetComponent<GeodesicOceanLayerDomain>();
+        temperatureField = GetComponent<GeodesicSurfaceTemperatureField>();
     }
 
     public void SetTopology(GeodesicGridTopology t)
@@ -100,11 +113,21 @@ public class GeodesicCellPicker : MonoBehaviour
         selectedNeighborIndices = System.Array.Empty<int>();
         selectedLayeredOceanLog = ", layeredOcean=unavailable";
         selectedLayeredOceanPopup = "unavailable";
+        selectedCompactLayeredOceanPopup = "unavailable";
+        selectedCompactPopup = string.Empty;
+        selectedDetailedPopup = string.Empty;
+        selectedCompactStaticHeader = string.Empty;
+        selectedCompactStaticOcean = string.Empty;
+        selectedDetailedStaticPopup = string.Empty;
+        popupDynamicRefreshElapsed = 0f;
+        showDetailedDebug = false;
         popupScrollPosition = Vector2.zero;
     }
 
     private void Update()
     {
+        RefreshDynamicPopupText();
+
 #if ENABLE_INPUT_SYSTEM
         Pointer pointer = Pointer.current;
         if (pointer == null || !pointer.press.wasPressedThisFrame)
@@ -385,6 +408,10 @@ public class GeodesicCellPicker : MonoBehaviour
         }
 
         CacheSelectedLayeredOceanDiagnostics(index);
+        showDetailedDebug = false;
+        popupDynamicRefreshElapsed = 0f;
+        CacheSelectedStaticPopupText(index);
+        RefreshDynamicPopupText(true);
 
         popupScrollPosition = Vector2.zero;
         EnsurePopupRect(true);
@@ -397,6 +424,7 @@ public class GeodesicCellPicker : MonoBehaviour
         {
             selectedLayeredOceanLog = ", layeredOcean=unavailable";
             selectedLayeredOceanPopup = "unavailable";
+            selectedCompactLayeredOceanPopup = "unavailable";
             return;
         }
 
@@ -412,6 +440,7 @@ public class GeodesicCellPicker : MonoBehaviour
 
         var log = new StringBuilder(320);
         var popup = new StringBuilder(320);
+        var compactPopup = new StringBuilder(192);
         log.Append(", oceanLayerActiveCount=").Append(activeCount)
             .Append(", topLayerIndex=").Append(topLayer)
             .Append(", bottomLayerIndex=").Append(bottomLayer)
@@ -422,6 +451,7 @@ public class GeodesicCellPicker : MonoBehaviour
             .Append("\nbottomLayerIndex=").Append(bottomLayer)
             .Append("\nlocalOceanDepth=").Append(localDepth.ToString("F6"))
             .Append("\nnormalizedDepth=").Append(normalizedDepth.ToString("F3"));
+        compactPopup.Append("Active layers: ").Append(activeCount);
 
         for (int layer = 0; layer < activeCount; layer++)
         {
@@ -439,10 +469,103 @@ public class GeodesicCellPicker : MonoBehaviour
                 .Append(", volume=").Append(grid.LayerVolume[node].ToString("G6"))
                 .Append(", centerDepth=").Append(centerDepth.ToString("F6"))
                 .Append(", H/V degree=").Append(horizontalDegree).Append('/').Append(verticalDegree);
+            compactPopup.Append("\nLayer ").Append(layer)
+                .Append(": center depth ").Append(centerDepth.ToString("F6"))
+                .Append(", thickness ").Append(grid.LayerThickness[node].ToString("F6"));
         }
 
         selectedLayeredOceanLog = log.ToString();
         selectedLayeredOceanPopup = popup.ToString();
+        selectedCompactLayeredOceanPopup = compactPopup.ToString();
+    }
+
+    private void CacheSelectedStaticPopupText(int cellIndex)
+    {
+        if (planetGenerator == null)
+        {
+            selectedCompactStaticHeader = $"Cell index: {cellIndex}\nType: {(selectedIsPentagon ? "Pentagon" : "Hexagon")}";
+            selectedCompactStaticOcean = string.Empty;
+            selectedDetailedStaticPopup = selectedCompactStaticHeader;
+            selectedCompactPopup = selectedCompactStaticHeader;
+            selectedDetailedPopup = selectedDetailedStaticPopup;
+            return;
+        }
+
+        bool ocean = planetGenerator.IsGeodesicCellOcean(cellIndex);
+        float height = planetGenerator.GetCellTerrainHeight(cellIndex);
+        float surfaceRadius = planetGenerator.GetCellSurfaceRadius(cellIndex);
+        float rawRadius = planetGenerator.GetGeodesicCellRawTerrainRadius(cellIndex);
+        float baseDepth = planetGenerator.GetGeodesicCellBaseWaterDepth(cellIndex);
+        float finalDepth = planetGenerator.GetGeodesicCellWaterDepth(cellIndex);
+        float radialDisplacement = surfaceRadius - rawRadius;
+        PlanetTerrainSample sample = planetGenerator.EvaluateGeodesicTerrainSample(topology.CellDirections[cellIndex]);
+        var compactHeader = new StringBuilder(128);
+        compactHeader.Append("Cell index: ").Append(cellIndex)
+            .Append("\nClassification: ").Append(ocean ? "Ocean" : "Land")
+            .Append("\nType: ").Append(selectedIsPentagon ? "Pentagon" : "Hexagon");
+        selectedCompactStaticHeader = compactHeader.ToString();
+        selectedCompactStaticOcean = string.Empty;
+        if (ocean)
+        {
+            var compactOcean = new StringBuilder(256);
+            compactOcean.Append("\n\nOcean\nLocal ocean depth: ").Append(finalDepth.ToString("F5"))
+                .Append("\nNormalized depth: ").Append(planetGenerator.GetGeodesicCellNormalizedDepth(cellIndex).ToString("F3"))
+                .Append("\nBathymetry region: ").Append(planetGenerator.GetGeodesicCellBathymetryRegion(cellIndex))
+                .Append("\nDistance to shore: ").Append(planetGenerator.IsGeodesicOceanWorldActive ? "N/A — OceanWorld" : planetGenerator.GetGeodesicCellDistanceToShore(cellIndex).ToString("F5"))
+                .Append("\n").Append(selectedCompactLayeredOceanPopup);
+            selectedCompactStaticOcean = compactOcean.ToString();
+        }
+
+        float addedDepth = Mathf.Max(0f, finalDepth - baseDepth);
+        var detailed = new StringBuilder(1800);
+        detailed.Append("Cell\nIndex: ").Append(cellIndex).Append("\nType: ").Append(selectedIsPentagon ? "Pentagon" : "Hexagon")
+            .Append("\nNeighbors: ").Append(selectedNeighborCount).Append("\nUnit area: ").Append(selectedUnitArea.ToString("F8"))
+            .Append("\nPhysical area: ").Append((selectedUnitArea * planetGenerator.BasePlanetRadius * planetGenerator.BasePlanetRadius).ToString("F8"))
+            .Append("\nNeighbor IDs: ").Append(BuildNeighborText())
+            .Append("\n\nTerrain\nHeight: ").Append(height.ToString("F5")).Append("\nNormalized: ").Append(planetGenerator.GetCellNormalizedTerrainHeight(cellIndex).ToString("F3"))
+            .Append("\nRaw radius: ").Append(rawRadius.ToString("F5")).Append("\nFinal radius: ").Append(surfaceRadius.ToString("F5"))
+            .Append("\nContinent: ").Append(sample.ContinentValue.ToString("F3")).Append("\nMountain mask: ").Append(sample.MountainMask.ToString("F3")).Append("\nRidge: ").Append(sample.RidgeValue.ToString("F3"))
+            .Append("\n\nOcean\nClass: ").Append(ocean ? "Ocean" : "Land").Append("\nCoastline: ").Append(planetGenerator.IsGeodesicCellCoastline(cellIndex))
+            .Append("\nSea level: ").Append(planetGenerator.GeodesicSeaLevelRadius.ToString("F5")).Append("\nOcean neighbors: ").Append(planetGenerator.GetGeodesicOceanNeighborCount(cellIndex))
+            .Append("\nBase depth: ").Append(baseDepth.ToString("F5")).Append("\nFinal depth: ").Append(finalDepth.ToString("F5")).Append("\nDepth 01: ").Append(planetGenerator.GetGeodesicCellNormalizedDepth(cellIndex).ToString("F3"))
+            .Append("\n\nLayered Ocean\nlayeredOcean: ").Append(selectedLayeredOceanPopup)
+            .Append("\n\nBathymetry\nEnabled: ").Append(finalDepth > 0f || baseDepth > 0f || radialDisplacement < 0f).Append("\nRegion: ").Append(planetGenerator.GetGeodesicCellBathymetryRegion(cellIndex))
+            .Append("\nDistance shore: ").Append(planetGenerator.IsGeodesicOceanWorldActive ? "N/A — OceanWorld" : planetGenerator.GetGeodesicCellDistanceToShore(cellIndex).ToString("F5"))
+            .Append("\nAdded depth: ").Append(addedDepth.ToString("F5")).Append("\nRadial disp.: ").Append(radialDisplacement.ToString("F5")).Append("\nBasin noise: ").Append(planetGenerator.GetGeodesicCellBasinNoiseContribution(cellIndex).ToString("F4"))
+            .Append("\nCoast type: ").Append(planetGenerator.GetGeodesicCellCoastType(cellIndex)).Append("\nShelf profile: ").Append(planetGenerator.GetGeodesicCellShelfProfileType(cellIndex)).Append("\nLand comp.: ").Append(planetGenerator.GetGeodesicCellLandComponentId(cellIndex))
+            .Append("\nContinent 01: ").Append(planetGenerator.GetGeodesicCellContinentalInfluence01(cellIndex).ToString("F3")).Append("\nShelf infl.: ").Append(planetGenerator.GetGeodesicCellContinentalShelfInfluence01(cellIndex).ToString("F3")).Append("\nIsland infl.: ").Append(planetGenerator.GetGeodesicCellOceanicIslandShelfInfluence01(cellIndex).ToString("F3"))
+            .Append("\nShelf width x: ").Append(planetGenerator.GetGeodesicCellLocalShelfWidthMultiplier(cellIndex).ToString("F3")).Append("\nCont. width°: ").Append(planetGenerator.GetGeodesicCellContinentalProfileShelfWidthDegrees(cellIndex).ToString("F3")).Append("\nFinal width°: ").Append(planetGenerator.GetGeodesicCellFinalShelfWidthDegrees(cellIndex).ToString("F3"))
+            .Append("\nCell spacing°: ").Append(planetGenerator.GetGeodesicCellApproxCellSpacingDegrees(cellIndex).ToString("F3")).Append("\nShelf depth: ").Append(planetGenerator.GetGeodesicCellLocalShelfDepth(cellIndex).ToString("F5"))
+            .Append("\nRidge relief: ").Append(planetGenerator.GetGeodesicCellRidgeContribution(cellIndex).ToString("F5")).Append("\nPlateau relief: ").Append(planetGenerator.GetGeodesicCellPlateauContribution(cellIndex).ToString("F5")).Append("\nSeamount relief: ").Append(planetGenerator.GetGeodesicCellSeamountContribution(cellIndex).ToString("F5")).Append("\nOcean relief: ").Append(planetGenerator.GetGeodesicCellTotalOceanicReliefContribution(cellIndex).ToString("F5"))
+            .Append("\nModified: ").Append(!Mathf.Approximately(finalDepth, baseDepth) || !Mathf.Approximately(radialDisplacement, 0f));
+        selectedDetailedStaticPopup = detailed.ToString();
+        selectedCompactPopup = selectedCompactStaticHeader + "\nSurface temperature: unavailable\nIllumination / insolation: unavailable" + selectedCompactStaticOcean;
+        selectedDetailedPopup = selectedDetailedStaticPopup + "\n\nSurface Temperature\nunavailable";
+    }
+
+    private void RefreshDynamicPopupText(bool force = false)
+    {
+        if (!showSelectionPopup || selectedCellIndex < 0 || temperatureField == null || !temperatureField.IsInitialized)
+        {
+            return;
+        }
+
+        popupDynamicRefreshElapsed += Time.unscaledDeltaTime;
+        if (!force && popupDynamicRefreshElapsed < Mathf.Max(0.05f, popupDynamicRefreshInterval))
+        {
+            return;
+        }
+
+        popupDynamicRefreshElapsed = 0f;
+        float kelvin = temperatureField.GetCellTemperatureKelvin(selectedCellIndex);
+        float insolation = temperatureField.GetCellInsolationCosine(selectedCellIndex);
+        temperatureField.GetNeighborTemperatureStats(selectedCellIndex, out float neighborMin, out float neighborMean, out float neighborMax);
+        string temperatureText = $"{kelvin:F2} K / {kelvin - 273.15f:F2} °C";
+        string illumination = insolation > 0f ? "Day" : "Night";
+        string compactDynamic = $"\nSurface temperature: {temperatureText}\nIllumination / insolation: {illumination} / {insolation:F4}";
+        string detailedDynamic = $"\n\nSurface Temperature\nTemperature: {temperatureText}\nInsolation cosine: {insolation:F4}\nIllumination: {illumination}\nTarget equilibrium: {temperatureField.GetCellTargetTemperatureKelvin(selectedCellIndex):F2} K\nResponse multiplier: {temperatureField.GetCellEffectiveThermalResponseMultiplier(selectedCellIndex):F3}\nThermal category: {temperatureField.GetCellThermalCategory(selectedCellIndex)}\nNeighbor min/mean/max: {neighborMin:F2} / {neighborMean:F2} / {neighborMax:F2} K";
+        selectedCompactPopup = selectedCompactStaticHeader + compactDynamic + selectedCompactStaticOcean;
+        selectedDetailedPopup = selectedDetailedStaticPopup + detailedDynamic;
     }
 
     private static int GetHorizontalLayerDegree(GeodesicOceanLayerGrid grid, int nodeIndex)
@@ -513,99 +636,23 @@ public class GeodesicCellPicker : MonoBehaviour
         string classification = planetGenerator != null && planetGenerator.IsGeodesicCellOcean(selectedCellIndex) ? "Ocean" : "Land";
         GUILayout.Label("Geodesic Cell Selection", popupHeaderStyle);
         GUILayout.Label($"Cell {selectedCellIndex} — {classification} — {type}", popupSummaryStyle);
+        GUILayout.BeginHorizontal();
+        if (GUILayout.Toggle(!showDetailedDebug, "Compact", popupButtonStyle) && showDetailedDebug)
+        {
+            showDetailedDebug = false;
+            popupScrollPosition = Vector2.zero;
+        }
+        if (GUILayout.Toggle(showDetailedDebug, "Detailed Debug", popupButtonStyle) && !showDetailedDebug)
+        {
+            showDetailedDebug = true;
+            popupScrollPosition = Vector2.zero;
+        }
+        GUILayout.EndHorizontal();
     }
 
     private void DrawDiagnostics()
     {
-        DrawSection("Cell");
-        DrawLine("Index", selectedCellIndex.ToString());
-        DrawLine("Type", selectedIsPentagon ? "Pentagon" : "Hexagon");
-        DrawLine("Neighbors", selectedNeighborCount.ToString());
-        DrawLine("Unit area", selectedUnitArea.ToString("F8"));
-        if (planetGenerator != null)
-        {
-            DrawLine("Physical area", (selectedUnitArea * planetGenerator.BasePlanetRadius * planetGenerator.BasePlanetRadius).ToString("F8"));
-        }
-        DrawLine("Neighbor IDs", BuildNeighborText());
-
-        if (planetGenerator == null)
-        {
-            return;
-        }
-
-        float height = planetGenerator.GetCellTerrainHeight(selectedCellIndex);
-        float surfaceRadius = planetGenerator.GetCellSurfaceRadius(selectedCellIndex);
-        float rawRadius = planetGenerator.GetGeodesicCellRawTerrainRadius(selectedCellIndex);
-        float normalizedHeight = planetGenerator.GetCellNormalizedTerrainHeight(selectedCellIndex);
-        bool ocean = planetGenerator.IsGeodesicCellOcean(selectedCellIndex);
-        bool coastline = planetGenerator.IsGeodesicCellCoastline(selectedCellIndex);
-        PlanetTerrainSample sample = planetGenerator.EvaluateGeodesicTerrainSample(topology.CellDirections[selectedCellIndex]);
-        float baseDepth = planetGenerator.GetGeodesicCellBaseWaterDepth(selectedCellIndex);
-        float finalDepth = planetGenerator.GetGeodesicCellWaterDepth(selectedCellIndex);
-        float bathymetryAddedDepth = Mathf.Max(0f, finalDepth - baseDepth);
-        float radialDisplacement = surfaceRadius - rawRadius;
-        bool bathymetryModified = !Mathf.Approximately(finalDepth, baseDepth) || !Mathf.Approximately(radialDisplacement, 0f);
-
-        DrawSection("Terrain");
-        DrawLine("Height", height.ToString("F5"));
-        DrawLine("Normalized", normalizedHeight.ToString("F3"));
-        DrawLine("Raw radius", rawRadius.ToString("F5"));
-        DrawLine("Final radius", surfaceRadius.ToString("F5"));
-        DrawLine("Continent", sample.ContinentValue.ToString("F3"));
-        DrawLine("Mountain mask", sample.MountainMask.ToString("F3"));
-        DrawLine("Ridge", sample.RidgeValue.ToString("F3"));
-
-        DrawSection("Ocean");
-        DrawLine("Class", ocean ? "Ocean" : "Land");
-        DrawLine("Coastline", coastline.ToString());
-        DrawLine("Sea level", planetGenerator.GeodesicSeaLevelRadius.ToString("F5"));
-        DrawLine("Ocean neighbors", planetGenerator.GetGeodesicOceanNeighborCount(selectedCellIndex).ToString());
-        DrawLine("Base depth", baseDepth.ToString("F5"));
-        DrawLine("Final depth", finalDepth.ToString("F5"));
-        DrawLine("Depth 01", planetGenerator.GetGeodesicCellNormalizedDepth(selectedCellIndex).ToString("F3"));
-
-        DrawSection("Layered Ocean");
-        DrawLine("layeredOcean", selectedLayeredOceanPopup);
-
-        DrawSection("Bathymetry");
-        DrawLine("Enabled", (finalDepth > 0f || baseDepth > 0f || radialDisplacement < 0f).ToString());
-        DrawLine("Region", planetGenerator.GetGeodesicCellBathymetryRegion(selectedCellIndex).ToString());
-        DrawLine("Distance shore", planetGenerator.IsGeodesicOceanWorldActive ? "N/A — OceanWorld" : planetGenerator.GetGeodesicCellDistanceToShore(selectedCellIndex).ToString("F5"));
-        DrawLine("Added depth", bathymetryAddedDepth.ToString("F5"));
-        DrawLine("Radial disp.", radialDisplacement.ToString("F5"));
-        DrawLine("Basin noise", planetGenerator.GetGeodesicCellBasinNoiseContribution(selectedCellIndex).ToString("F4"));
-        DrawLine("Coast type", planetGenerator.GetGeodesicCellCoastType(selectedCellIndex));
-        DrawLine("Shelf profile", planetGenerator.GetGeodesicCellShelfProfileType(selectedCellIndex));
-        DrawLine("Land comp.", planetGenerator.GetGeodesicCellLandComponentId(selectedCellIndex).ToString());
-        DrawLine("Continent 01", planetGenerator.GetGeodesicCellContinentalInfluence01(selectedCellIndex).ToString("F3"));
-        DrawLine("Shelf infl.", planetGenerator.GetGeodesicCellContinentalShelfInfluence01(selectedCellIndex).ToString("F3"));
-        DrawLine("Island infl.", planetGenerator.GetGeodesicCellOceanicIslandShelfInfluence01(selectedCellIndex).ToString("F3"));
-        DrawLine("Shelf width x", planetGenerator.GetGeodesicCellLocalShelfWidthMultiplier(selectedCellIndex).ToString("F3"));
-        DrawLine("Cont. width°", planetGenerator.GetGeodesicCellContinentalProfileShelfWidthDegrees(selectedCellIndex).ToString("F3"));
-        DrawLine("Final width°", planetGenerator.GetGeodesicCellFinalShelfWidthDegrees(selectedCellIndex).ToString("F3"));
-        DrawLine("Cell spacing°", planetGenerator.GetGeodesicCellApproxCellSpacingDegrees(selectedCellIndex).ToString("F3"));
-        DrawLine("Shelf depth", planetGenerator.GetGeodesicCellLocalShelfDepth(selectedCellIndex).ToString("F5"));
-        DrawLine("Ridge relief", planetGenerator.GetGeodesicCellRidgeContribution(selectedCellIndex).ToString("F5"));
-        DrawLine("Plateau relief", planetGenerator.GetGeodesicCellPlateauContribution(selectedCellIndex).ToString("F5"));
-        DrawLine("Seamount relief", planetGenerator.GetGeodesicCellSeamountContribution(selectedCellIndex).ToString("F5"));
-        DrawLine("Ocean relief", planetGenerator.GetGeodesicCellTotalOceanicReliefContribution(selectedCellIndex).ToString("F5"));
-        DrawLine("Modified", bathymetryModified.ToString());
-
-        GeodesicSurfaceTemperatureField temperature = planetGenerator.GetComponent<GeodesicSurfaceTemperatureField>();
-        if (temperature != null && temperature.IsInitialized)
-        {
-            float kelvin = temperature.GetCellTemperatureKelvin(selectedCellIndex);
-            float insolation = temperature.GetCellInsolationCosine(selectedCellIndex);
-            temperature.GetNeighborTemperatureStats(selectedCellIndex, out float neighborMin, out float neighborMean, out float neighborMax);
-            DrawSection("Surface Temperature");
-            DrawLine("Temperature", $"{kelvin:F2} K / {kelvin - 273.15f:F2} °C");
-            DrawLine("Insolation cosine", insolation.ToString("F4"));
-            DrawLine("Illumination", insolation > 0f ? "Day" : "Night");
-            DrawLine("Target equilibrium", $"{temperature.GetCellTargetTemperatureKelvin(selectedCellIndex):F2} K");
-            DrawLine("Response multiplier", temperature.GetCellEffectiveThermalResponseMultiplier(selectedCellIndex).ToString("F3"));
-            DrawLine("Thermal category", temperature.GetCellThermalCategory(selectedCellIndex));
-            DrawLine("Neighbor min/mean/max", $"{neighborMin:F2} / {neighborMean:F2} / {neighborMax:F2} K");
-        }
+        GUILayout.Label(showDetailedDebug ? selectedDetailedPopup : selectedCompactPopup, popupLabelStyle);
     }
 
     private void DrawPopupFooter()
