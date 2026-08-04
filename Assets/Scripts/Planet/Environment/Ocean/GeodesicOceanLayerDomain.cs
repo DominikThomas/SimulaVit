@@ -49,13 +49,16 @@ public sealed class GeodesicOceanLayerDomain : MonoBehaviour
 
     public void ClearGrid()
     {
+        GetComponent<GeodesicOceanTemperatureField>()?.ClearField();
         grid = null; sourceGenerator = null; initialized = false; runtimeCellCount = oceanCellCount = runtimeMaximumLayers = activeNodeCount = horizontalLinkCount = verticalLinkCount = 0;
         minimumActiveLayers = maximumActiveLayers = 0; meanActiveLayers = 0f; oceanCellsWithOneLayer = oceanCellsWithTwoLayers = oceanCellsWithThreeLayers = oceanCellsWithFourLayers = oceanCellsWithFiveLayers = 0;
         minimumLayerVolume = meanLayerVolume = maximumLayerVolume = maximumOceanDepth = 0f; buildDurationMilliseconds = 0d; approximateMemoryBytes = 0; sampleCellOutput = "Grid not initialized.";
     }
 
     private void OnDestroy() => ClearGrid();
-    private void OnValidate() { maximumLayerCount = Mathf.Clamp(maximumLayerCount, 1, 5); if (grid != null) RefreshSampleDiagnostics(); }
+    // Never traverse the runtime grid from Inspector validation; the explicit sample command
+    // and initialization path refresh diagnostics without coupling work to Editor repaints.
+    private void OnValidate() => maximumLayerCount = Mathf.Clamp(maximumLayerCount, 1, 5);
     [ContextMenu("Refresh Geodesic Ocean Layer Sample")] private void RefreshSample() => RefreshSampleDiagnostics();
 
     private bool TryGetBoundaries(out float[] result, out string error)

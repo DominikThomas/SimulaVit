@@ -58,6 +58,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     }
 
     [SerializeField] private ReplicatorManager replicatorManager;
+    public ReplicatorManager ReplicatorManager => replicatorManager;
     [Header("Generation Mode")]
     public PlanetGenerationMode generationMode = PlanetGenerationMode.LegacyCubeSphere;
     [Range(0, GeodesicGridTopology.MaxSupportedSubdivision)]
@@ -607,6 +608,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
         GetComponent<PlanetTemperatureIceVisuals>()?.ClearForGeodesicMode();
 
+        GetComponent<GeodesicOceanTemperatureField>()?.ClearField();
         GetComponent<GeodesicSurfaceTemperatureField>()?.ClearField();
         GetComponent<GeodesicOceanLayerDomain>()?.ClearGrid();
         GeodesicTopology = null;
@@ -784,6 +786,19 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         LogStage("surface-temperature initialization", stage);
 
         stage = System.Diagnostics.Stopwatch.StartNew();
+        var oceanTemperatureField = GetComponent<GeodesicOceanTemperatureField>();
+        if (oceanTemperatureField == null)
+        {
+            Debug.LogError("[GeodesicOceanTemperature] Planet Generator is missing its required scene-owned GeodesicOceanTemperatureField component; subsurface temperature initialization was skipped.", this);
+        }
+        else
+        {
+            oceanTemperatureField.enabled = true;
+            oceanTemperatureField.InitializeForCurrentDomain();
+        }
+        LogStage("ocean-temperature initialization", stage);
+
+        stage = System.Diagnostics.Stopwatch.StartNew();
         IcosphereRenderGeometry renderGeometry = IcosphereRenderGeometryCache.GetOrBuild(renderSubdivision);
         IcosphereDirectionMapping renderMapping = GetOrBuildDirectionMapping(renderGeometry);
         mesh = IcosphereRenderMeshBuilder.BuildSurfaceMesh(renderGeometry, BasePlanetRadius, $"Geodesic Terrain Render L{renderSubdivision}");
@@ -830,6 +845,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         BuildGeodesicOceanVisual();
         LogStage("ocean mesh generation", stage);
         var picker = GetOrAddComponent<GeodesicCellPicker>(gameObject);
+        picker.SetTemperatureDisplayAuthority(replicatorManager);
         picker.enabled = true;
         picker.SetTopology(GeodesicTopology);
         Transform debugTransform = transform.Find("Geodesic Debug Lines");

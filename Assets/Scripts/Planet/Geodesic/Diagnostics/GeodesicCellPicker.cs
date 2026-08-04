@@ -1,5 +1,6 @@
 using System.Text;
 using UnityEngine;
+using Unity.Profiling;
 
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
@@ -7,6 +8,7 @@ using UnityEngine.InputSystem;
 
 public class GeodesicCellPicker : MonoBehaviour
 {
+    private static readonly ProfilerMarker DynamicRefreshMarker = new ProfilerMarker("GeodesicCellPicker.DynamicRefresh");
     [Header("Picking")]
     public Camera pickingCamera;
     [Tooltip("Optional collider for the generated geodesic sphere. If omitted, the picker searches this object and its children.")]
@@ -64,6 +66,8 @@ public class GeodesicCellPicker : MonoBehaviour
     private PlanetGenerator planetGenerator;
     private GeodesicOceanLayerDomain oceanLayerDomain;
     private GeodesicSurfaceTemperatureField temperatureField;
+    private GeodesicOceanTemperatureField oceanTemperatureField;
+    private ReplicatorManager temperatureDisplayAuthority;
     private string selectedLayeredOceanLog = ", layeredOcean=unavailable";
     private string selectedLayeredOceanPopup = "unavailable";
     private string selectedCompactLayeredOceanPopup = "unavailable";
@@ -73,6 +77,7 @@ public class GeodesicCellPicker : MonoBehaviour
     private string selectedCompactStaticOcean = string.Empty;
     private string selectedDetailedStaticPopup = string.Empty;
     private float popupDynamicRefreshElapsed;
+    private bool temperatureDisplayRefreshRequested;
     private bool showDetailedDebug;
     private bool warnedMissingCamera;
     private bool warnedNoPickSurface;
@@ -95,7 +100,35 @@ public class GeodesicCellPicker : MonoBehaviour
         planetGenerator = GetComponent<PlanetGenerator>();
         oceanLayerDomain = GetComponent<GeodesicOceanLayerDomain>();
         temperatureField = GetComponent<GeodesicSurfaceTemperatureField>();
+        oceanTemperatureField = GetComponent<GeodesicOceanTemperatureField>();
+        SetTemperatureDisplayAuthority(planetGenerator != null ? planetGenerator.ReplicatorManager : null);
     }
+
+    private void OnEnable() => SubscribeToTemperatureDisplayAuthority();
+    private void OnDisable() => UnsubscribeFromTemperatureDisplayAuthority();
+    private void OnDestroy() => UnsubscribeFromTemperatureDisplayAuthority();
+
+    public void SetTemperatureDisplayAuthority(ReplicatorManager authority)
+    {
+        if (ReferenceEquals(temperatureDisplayAuthority, authority)) { SubscribeToTemperatureDisplayAuthority(); return; }
+        UnsubscribeFromTemperatureDisplayAuthority();
+        temperatureDisplayAuthority = authority;
+        SubscribeToTemperatureDisplayAuthority();
+    }
+
+    private void SubscribeToTemperatureDisplayAuthority()
+    {
+        if (!isActiveAndEnabled || temperatureDisplayAuthority == null) return;
+        temperatureDisplayAuthority.TemperatureDisplayUnitChanged -= OnTemperatureDisplayUnitChanged;
+        temperatureDisplayAuthority.TemperatureDisplayUnitChanged += OnTemperatureDisplayUnitChanged;
+    }
+
+    private void UnsubscribeFromTemperatureDisplayAuthority()
+    {
+        if (temperatureDisplayAuthority != null) temperatureDisplayAuthority.TemperatureDisplayUnitChanged -= OnTemperatureDisplayUnitChanged;
+    }
+
+    private void OnTemperatureDisplayUnitChanged(TemperatureDisplayUnit unit) => temperatureDisplayRefreshRequested = true;
 
     public void SetTopology(GeodesicGridTopology t)
     {
@@ -126,7 +159,15 @@ public class GeodesicCellPicker : MonoBehaviour
 
     private void Update()
     {
-        RefreshDynamicPopupText();
+        if (temperatureDisplayRefreshRequested)
+        {
+            temperatureDisplayRefreshRequested = false;
+            RefreshDynamicPopupText(true);
+        }
+        else
+        {
+            RefreshDynamicPopupText();
+        }
 
 #if ENABLE_INPUT_SYSTEM
         Pointer pointer = Pointer.current;
@@ -545,6 +586,8 @@ public class GeodesicCellPicker : MonoBehaviour
 
     private void RefreshDynamicPopupText(bool force = false)
     {
+        using (DynamicRefreshMarker.Auto())
+        {
         if (!showSelectionPopup || selectedCellIndex < 0 || temperatureField == null || !temperatureField.IsInitialized)
         {
             return;
@@ -560,12 +603,35 @@ public class GeodesicCellPicker : MonoBehaviour
         float kelvin = temperatureField.GetCellTemperatureKelvin(selectedCellIndex);
         float insolation = temperatureField.GetCellInsolationCosine(selectedCellIndex);
         temperatureField.GetNeighborTemperatureStats(selectedCellIndex, out float neighborMin, out float neighborMean, out float neighborMax);
-        string temperatureText = $"{kelvin:F2} K / {kelvin - 273.15f:F2} °C";
+        TemperatureDisplayUnit displayUnit = temperatureDisplayAuthority != null ? temperatureDisplayAuthority.CurrentTemperatureDisplayUnit : TemperatureDisplayUnit.Kelvin;
+        string temperatureText = ReplicatorManager.FormatTemperature(kelvin, displayUnit);
         string illumination = insolation > 0f ? "Day" : "Night";
+        string compactLayers = BuildDynamicLayerTemperatureText(false);
+        string detailedLayers = BuildDynamicLayerTemperatureText(true);
         string compactDynamic = $"\nSurface temperature: {temperatureText}\nIllumination / insolation: {illumination} / {insolation:F4}";
-        string detailedDynamic = $"\n\nSurface Temperature\nTemperature: {temperatureText}\nInsolation cosine: {insolation:F4}\nIllumination: {illumination}\nTarget equilibrium: {temperatureField.GetCellTargetTemperatureKelvin(selectedCellIndex):F2} K\nResponse multiplier: {temperatureField.GetCellEffectiveThermalResponseMultiplier(selectedCellIndex):F3}\nThermal category: {temperatureField.GetCellThermalCategory(selectedCellIndex)}\nNeighbor min/mean/max: {neighborMin:F2} / {neighborMean:F2} / {neighborMax:F2} K";
-        selectedCompactPopup = selectedCompactStaticHeader + compactDynamic + selectedCompactStaticOcean;
-        selectedDetailedPopup = selectedDetailedStaticPopup + detailedDynamic;
+        string detailedDynamic = $"\n\nSurface Temperature\nTemperature: {temperatureText}\nInsolation cosine: {insolation:F4}\nIllumination: {illumination}\nTarget equilibrium: {ReplicatorManager.FormatTemperature(temperatureField.GetCellTargetTemperatureKelvin(selectedCellIndex), displayUnit)}\nResponse multiplier: {temperatureField.GetCellEffectiveThermalResponseMultiplier(selectedCellIndex):F3}\nThermal category: {temperatureField.GetCellThermalCategory(selectedCellIndex)}\nNeighbor min/mean/max: {ReplicatorManager.FormatTemperature(neighborMin, displayUnit)} / {ReplicatorManager.FormatTemperature(neighborMean, displayUnit)} / {ReplicatorManager.FormatTemperature(neighborMax, displayUnit)}";
+        selectedCompactPopup = selectedCompactStaticHeader + compactDynamic + selectedCompactStaticOcean + compactLayers;
+        selectedDetailedPopup = selectedDetailedStaticPopup + detailedDynamic + detailedLayers;
+        }
+    }
+
+    private string BuildDynamicLayerTemperatureText(bool detailed)
+    {
+        GeodesicOceanLayerGrid grid = oceanLayerDomain != null ? oceanLayerDomain.Grid : null;
+        if (grid == null || oceanTemperatureField == null || !oceanTemperatureField.IsInitialized || selectedCellIndex < 0 || selectedCellIndex >= grid.CellCount || grid.ActiveLayerCountByCell[selectedCellIndex] == 0) return string.Empty;
+        var text = new StringBuilder(detailed ? 384 : 256);
+        text.Append(detailed ? "\n\nOcean Layer Temperatures" : "\n\nLayer temperatures");
+        int count = grid.ActiveLayerCountByCell[selectedCellIndex];
+        for (int layer = 0; layer < count; layer++)
+        {
+            int node = grid.GetNodeIndex(selectedCellIndex, layer);
+            float kelvin = oceanTemperatureField.GetLayerTemperatureKelvin(selectedCellIndex, layer);
+            float depth = grid.OceanSurfaceRadius - grid.LayerCenterRadius[node];
+            TemperatureDisplayUnit displayUnit = temperatureDisplayAuthority != null ? temperatureDisplayAuthority.CurrentTemperatureDisplayUnit : TemperatureDisplayUnit.Kelvin;
+            if (detailed) text.Append("\nL").Append(layer).Append(": ").Append(ReplicatorManager.FormatTemperature(kelvin, displayUnit)).Append(" | capacity ").Append(oceanTemperatureField.GetLayerHeatCapacity(selectedCellIndex, layer).ToString("G6")).Append(" | authority ").Append(layer == 0 ? "SurfaceField" : "SubsurfaceField");
+            else text.Append("\nL").Append(layer).Append(": ").Append(ReplicatorManager.FormatTemperature(kelvin, displayUnit)).Append(" | depth ").Append(depth.ToString("F3")).Append(" | thickness ").Append(grid.LayerThickness[node].ToString("F3"));
+        }
+        return text.ToString();
     }
 
     private static int GetHorizontalLayerDegree(GeodesicOceanLayerGrid grid, int nodeIndex)

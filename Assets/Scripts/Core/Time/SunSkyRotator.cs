@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -96,6 +97,7 @@ public class SunSkyRotator : MonoBehaviour
 
     private Quaternion initialRotation;
     private float accumulatedOrbitAngle;
+    private double orbitAngleOffsetDegrees;
     private Vector3 initialOrbitForward;
 
     private Material originalSkybox;
@@ -154,6 +156,8 @@ public class SunSkyRotator : MonoBehaviour
     public void ResetOrbitPhase()
     {
         accumulatedOrbitAngle = 0f;
+        double simulationTime = replicatorManager != null ? replicatorManager.SimulationTimeSeconds : 0d;
+        orbitAngleOffsetDegrees = -simulationTime * orbitDegreesPerSecond;
         transform.rotation = initialRotation;
         currentSkyboxRotation = initialSkyboxRotation;
         ApplySkyboxRotation(currentSkyboxRotation);
@@ -177,6 +181,9 @@ public class SunSkyRotator : MonoBehaviour
             seasonalPhaseOffset = snapshot.seasonalPhaseOffset;
             northernSummerAtPhaseZero = snapshot.northernSummerAtPhaseZero;
             accumulatedOrbitAngle = snapshot.accumulatedOrbitAngle;
+            orbitAngleOffsetDegrees = clockSnapshot != null
+                ? accumulatedOrbitAngle - clockSnapshot.simulationTimeSeconds * orbitDegreesPerSecond
+                : accumulatedOrbitAngle;
             sunColor = snapshot.sunColor.ToColor();
             sunEmissionIntensity = snapshot.sunEmissionIntensity;
             currentSkyboxRotation = snapshot.skyboxSnapshotAvailable
@@ -192,6 +199,7 @@ public class SunSkyRotator : MonoBehaviour
         if (clockSnapshot != null && orbitDegreesPerSecond > 0f)
         {
             accumulatedOrbitAngle = (float)(clockSnapshot.simulationTimeSeconds * orbitDegreesPerSecond);
+            orbitAngleOffsetDegrees = 0d;
             transform.rotation = Quaternion.AngleAxis(accumulatedOrbitAngle, GetOrbitAxis()) * initialRotation;
             currentSkyboxRotation = CalculateSkyboxRotationForOrbitAngle(accumulatedOrbitAngle);
             ApplySkyboxRotation(currentSkyboxRotation);
@@ -233,7 +241,14 @@ public class SunSkyRotator : MonoBehaviour
         Vector3 axis = GetOrbitAxis();
 
         // Daily angle drives day/night progression and remains tied to simulation delta time.
-        accumulatedOrbitAngle += orbitDegreesPerSecond * dt;
+        if (scaleRotationWithSimulationSpeed && replicatorManager != null)
+        {
+            accumulatedOrbitAngle = (float)GetOrbitAngleDegreesAtSimulationTime(replicatorManager.SimulationTimeSeconds);
+        }
+        else
+        {
+            accumulatedOrbitAngle += orbitDegreesPerSecond * dt;
+        }
         Quaternion orbitRotation = Quaternion.AngleAxis(accumulatedOrbitAngle, axis);
 
         if (keepOrbitOnEquator)
@@ -486,6 +501,31 @@ public class SunSkyRotator : MonoBehaviour
         return -(rotation * Vector3.forward).normalized;
     }
 
+    /// <summary>Pure ephemeris query; does not mutate the visible sun transform or orbit state.</summary>
+    public Vector3 GetPlanetToSunDirectionWorldAtSimulationTime(double simulationTimeSeconds)
+    {
+        EnsureEphemerisBasis();
+        Vector3 axis = GetOrbitAxis();
+        float orbitAngle = (float)GetOrbitAngleDegreesAtSimulationTime(simulationTimeSeconds);
+        Quaternion orbitRotation = Quaternion.AngleAxis(orbitAngle, axis);
+        if (!keepOrbitOnEquator) return -(orbitRotation * initialRotation * Vector3.forward).normalized;
+        Vector3 orbitForward = orbitRotation * initialOrbitForward;
+        Vector3 east = Vector3.Cross(axis, orbitForward);
+        if (east.sqrMagnitude < 0.0001f) { east = Vector3.Cross(axis, Vector3.right); if (east.sqrMagnitude < 0.0001f) east = Vector3.Cross(axis, Vector3.forward); }
+        Quaternion declinationRotation = Quaternion.AngleAxis(-GetSeasonalDeclinationDegrees(orbitAngle), east.normalized);
+        return -(declinationRotation * orbitForward).normalized;
+    }
+
+    public double GetOrbitAngleDegreesAtSimulationTime(double simulationTimeSeconds) => orbitAngleOffsetDegrees + Math.Max(0d, simulationTimeSeconds) * orbitDegreesPerSecond;
+    public float GetDayPhase01AtSimulationTime(double simulationTimeSeconds) => Mathf.Repeat((float)(GetOrbitAngleDegreesAtSimulationTime(simulationTimeSeconds) / 360d), 1f);
+    public double CurrentOrbitTimeSeconds => replicatorManager != null ? replicatorManager.SimulationTimeSeconds : (orbitDegreesPerSecond > 0f ? accumulatedOrbitAngle / orbitDegreesPerSecond : 0d);
+
+    private void EnsureEphemerisBasis()
+    {
+        if (initialRotation == default) initialRotation = transform.rotation;
+        if (initialOrbitForward.sqrMagnitude < 0.0001f) CacheInitialOrbitForward();
+    }
+
     float GetYearLengthSeconds()
     {
         // Year duration is explicitly derived from the current day length.
@@ -494,6 +534,11 @@ public class SunSkyRotator : MonoBehaviour
     }
 
     float GetSeasonalDeclinationDegrees()
+    {
+        return GetSeasonalDeclinationDegrees(accumulatedOrbitAngle);
+    }
+
+    float GetSeasonalDeclinationDegrees(float orbitAngleDegrees)
     {
         if (!enableSeasons)
         {
@@ -507,7 +552,7 @@ public class SunSkyRotator : MonoBehaviour
         }
 
         // Seasonal phase is based on simulation time only (deterministic, pause-aware).
-        float yearPhase01 = Mathf.Repeat(accumulatedOrbitAngle / 360f, yearLengthInDays) / Mathf.Max(1f, yearLengthInDays);
+        float yearPhase01 = Mathf.Repeat(orbitAngleDegrees / 360f, yearLengthInDays) / Mathf.Max(1f, yearLengthInDays);
         float phaseRadians = (yearPhase01 * Mathf.PI * 2f) + seasonalPhaseOffset;
         float sine = Mathf.Sin(phaseRadians);
 
@@ -828,7 +873,7 @@ public class SunSkyRotator : MonoBehaviour
         Debug.Log($"[SunAppearance] gridMode={mode}, cameraPlanetDistance={cameraToPlanetDistance:F4}, visiblePlanetRadius={resolvedVisiblePlanetRadius:F4}, planetAngularRadiusDeg={apparentPlanetAngularRadiusDegrees:F4}, sunAngularRadiusDeg={apparentSunAngularRadiusDegrees:F4}, sunCentreHeightAboveLimbDeg={sunCentreHeightAboveLimbDegrees:F4}, sunsetColourFactor={sunsetColourFactor:F3}, visibleDiscFactor={visibleDiscFactor:F3}, glowFactor={glowFactor:F3}", this);
     }
 
-    void DestroyRuntimeObject(Object obj)
+    void DestroyRuntimeObject(UnityEngine.Object obj)
     {
         if (obj == null) return;
 

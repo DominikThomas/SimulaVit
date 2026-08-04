@@ -888,6 +888,7 @@ GameObject:
   - component: {fileID: 382753105}
   - component: {fileID: 382753106}
   - component: {fileID: 382753107}
+  - component: {fileID: 382753108}
   m_Layer: 0
   m_Name: Planet Generator
   m_TagString: Planet
@@ -907,7 +908,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: eee7f655e5979404cabff8cefd535095, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  replicatorManager: {fileID: 0}
+  replicatorManager: {fileID: 1064713443}
   generationMode: 1
   geodesicSubdivisionLevel: 6
   geodesicSimulationSubdivisionLevel: 6
@@ -1166,6 +1167,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: SimulaVit::GeodesicSurfaceTemperatureField
   enableGeodesicSurfaceTemperature: 1
   updateIntervalSeconds: 0.25
+  maximumThermalTicksPerFrame: 64
+  diagnosticSnapshotIntervalSeconds: 0.25
+  diffusionConservationAuditIntervalSeconds: 5
   heatingTimescaleSeconds: 20
   coolingTimescaleSeconds: 35
   diffusionStrength: 0.002
@@ -1186,6 +1190,26 @@ MonoBehaviour:
   lastTargetUpdateDurationMilliseconds: 0
   lastDiffusionDurationMilliseconds: 0
   lastDiffusionSubstepCount: 0
+  totalAuthoritativeSimulationSecondsReceived: 0
+  totalSimulationSecondsConsumedByThermalTicks: 0
+  unconsumedThermalRemainderSeconds: 0
+  discardedSimulationSeconds: 0
+  thermalTicksCurrentRenderedFrame: 0
+  maximumThermalTicksPerRenderedFrame: 0
+  currentAuthoritativeSimulationTime: 0
+  thermalIntegrationCursorTime: 0
+  currentSunOrbitTime: 0
+  currentSunPhase01: 0
+  maximumSolarAngularAdvancePerThermalTickDegrees: 0
+  lastCompletedSolarDayIndex: -1
+  lastCompletedDayMinimumTemperatureKelvin: 0
+  lastCompletedDayMeanTemperatureKelvin: 0
+  lastCompletedDayMaximumTemperatureKelvin: 0
+  lastThermalTickRepresentativeSimulationTime: 0
+  lastThermalTickSolarPhase01: 0
+  lastExactDiffusionAuditSimulationTime: 0
+  ticksSinceLastExactDiffusionAudit: 0
+  lastTickUsedAlgebraicDiffusionConservationOnly: 0
 --- !u!114 &382753107
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1227,6 +1251,69 @@ MonoBehaviour:
   approximateMemoryBytes: 0
   sampleCellIndex: 0
   sampleCellOutput: Grid not initialized.
+--- !u!114 &382753108
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 382753101}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7c4f916d78b9443a890b8e6a1631aeee, type: 3}
+  m_Name: GeodesicOceanTemperatureField
+  m_EditorClassIdentifier: SimulaVit::GeodesicOceanTemperatureField
+  enableGeodesicOceanTemperature: 1
+  subsurfaceHeatCapacityPerVolume: 1
+  verticalThermalDiffusivity: 0.00002
+  startupMode: 1
+  initialTemperatureDropPerLayerKelvin: 2
+  maximumVerticalSubsteps: 64
+  inspectorSnapshotIntervalSeconds: 1
+  exactConservationAuditIntervalSeconds: 5
+  enableProfilingDiagnostics: 0
+  initialized: 0
+  activeSubsurfaceNodeCount: 0
+  participatingSurfaceCellCount: 0
+  totalSubsurfaceThermalCapacity: 0
+  sourceGridSummary: None
+  lastCompletedOceanTemperatureTick: 0
+  lastVerticalExchangeSimulationDelta: 0
+  lastVerticalSubstepCount: 0
+  lastVerticalExchangeDurationMilliseconds: 0
+  latestVerticalConservationRelativeError: 0
+  lastExactConservationAuditSimulationTime: 0
+  ticksSinceLastExactConservationAudit: 0
+  lastTickUsedAlgebraicConservationOnly: 0
+  lastAbsoluteEnergyTransferred: 0
+  lastStabilityClampingOccurred: 0
+  maximumSurfaceToBottomTemperatureDifference: 0
+  approximateRuntimeMemoryBytes: 0
+  oceanCallbacksLastRenderedFrame: 0
+  maximumOceanCallbacksPerRenderedFrame: 0
+  verticalSubstepsLastRenderedFrame: 0
+  verticalLinksProcessedLastRenderedFrame: 0
+  oceanTemperatureMillisecondsLastRenderedFrame: 0
+  duplicateOrStaleCallbackCount: 0
+  layerActiveCellCount: 0000000000000000000000000000000000000000
+  layerMinimumTemperatureKelvin:
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  layerMeanTemperatureKelvin:
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  layerMaximumTemperatureKelvin:
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
 --- !u!1 &581314702
 GameObject:
   m_ObjectHideFlags: 0
@@ -1953,6 +2040,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: SimulaVit::ReplicatorSimulationPipeline
   replicatorManager: {fileID: 1064713443}
   simulationStepsPerFrame: 1
+  maximumSimulationStepDeltaSeconds: 0.033333335
   simulationSpeedMultiplier: 1
   frameDeltaTime: 0
   simulationDeltaTime: 0
@@ -1961,6 +2049,10 @@ MonoBehaviour:
   movementUsesAuthoritativeSimulationDelta: 1
   shouldAdvanceSimulation: 1
   pauseDetected: 0
+  rawRenderedFrameDelta: 0
+  simulationStepDeltaClamped: 0
+  simulationStepsExecutedThisFrame: 0
+  effectiveSimulationTimeAdvanceThisFrame: 0
 --- !u!1 &1222684992
 GameObject:
   m_ObjectHideFlags: 0

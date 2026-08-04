@@ -454,21 +454,28 @@ public class SimulationStartupController : MonoBehaviour
         int seed = requestedRandomSeed ? GenerateConcreteSeed() : config.planetSeed;
         config.planetSeed = seed;
 
+        simulationPipeline?.ResetClockForNewSimulation();
+        replicatorManager?.ClearPopulation();
+
+        if (sunSkyRotator != null)
+        {
+            sunSkyRotator.ApplyStartupTiming(config.axisTiltDegrees, config.dayLengthSeconds, config.yearLengthInDays);
+        }
+
         if (planetGenerator != null)
         {
             planetGenerator.ApplyStartupSeed(seed, requestedRandomSeed);
             planetGenerator.ApplyStartupGrid(config.gridType, config.cubeSphereResolution, config.geodesicSubdivisionLevel);
+            if (config.gridType == PlanetGridType.GeodesicIcosphere)
+            {
+                planetGenerator.GetComponent<GeodesicSurfaceTemperatureField>()?.SetStartupTemperatureParameters(config.baseTempKelvin, config.insolationTempGain);
+            }
             planetGenerator.InitializeAuthoritativePlanet("New Game startup selection");
         }
 
         if (requestedRandomSeed)
         {
             config.useRandomSeed = false;
-        }
-
-        if (sunSkyRotator != null)
-        {
-            sunSkyRotator.ApplyStartupTiming(config.axisTiltDegrees, config.dayLengthSeconds, config.yearLengthInDays);
         }
 
         if (config.gridType == PlanetGridType.LegacyCubeSphere && planetResourceMap != null)
@@ -487,7 +494,6 @@ public class SimulationStartupController : MonoBehaviour
         }
         else if (config.gridType == PlanetGridType.GeodesicIcosphere)
         {
-            planetGenerator?.GetComponent<GeodesicSurfaceTemperatureField>()?.ConfigureStartupTemperatures(config.baseTempKelvin, config.insolationTempGain);
             Debug.Log("[StartupLifecycle] Geodesic prototype mode: skipping PlanetResourceMap resource initialization and vent/resource overlays once.", this);
             ventVisualizer?.ClearRuntimeVisuals("geodesic prototype mode selected");
             planetGenerator?.GetComponent<PlanetTemperatureIceVisuals>()?.ClearForGeodesicMode();
@@ -496,7 +502,6 @@ public class SimulationStartupController : MonoBehaviour
         if (replicatorManager != null)
         {
             replicatorManager.initialSpawnCount = Mathf.Max(0, config.initialSpawnCount);
-            replicatorManager.ClearPopulation();
         }
     }
 
