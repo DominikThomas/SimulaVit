@@ -44,6 +44,23 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
     [SerializeField] private double lastTargetUpdateDurationMilliseconds;
     [SerializeField] private double lastDiffusionDurationMilliseconds;
     [SerializeField] private int lastDiffusionSubstepCount;
+    [SerializeField] private double totalAuthoritativeSimulationSecondsReceived;
+    [SerializeField] private double totalSimulationSecondsConsumedByThermalTicks;
+    [SerializeField] private double unconsumedThermalRemainderSeconds;
+    [SerializeField] private double discardedSimulationSeconds;
+    [SerializeField] private int thermalTicksCurrentRenderedFrame;
+    [SerializeField] private int maximumThermalTicksPerRenderedFrame;
+    [SerializeField] private double currentAuthoritativeSimulationTime;
+    [SerializeField] private double thermalIntegrationCursorTime;
+    [SerializeField] private double currentSunOrbitTime;
+    [SerializeField] private float currentSunPhase01;
+    [SerializeField] private float maximumSolarAngularAdvancePerThermalTickDegrees;
+    [SerializeField] private int lastCompletedSolarDayIndex = -1;
+    [SerializeField] private float lastCompletedDayMinimumTemperatureKelvin;
+    [SerializeField] private float lastCompletedDayMeanTemperatureKelvin;
+    [SerializeField] private float lastCompletedDayMaximumTemperatureKelvin;
+    [SerializeField] private double lastThermalTickRepresentativeSimulationTime;
+    [SerializeField] private float lastThermalTickSolarPhase01;
 
     private PlanetGenerator planetGenerator;
     private SunSkyRotator sunDirectionProvider;
@@ -60,13 +77,18 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
     private float cachedOceanHeatCapacityMultiplier;
     private float cachedDiffusionStrength = float.NaN;
     private float cachedStableDiffusionStep = float.MaxValue;
-    private float accumulatedSimulationSeconds;
+    private double lastObservedAuthoritativeSimulationTime;
     private float baseTemperatureKelvin = 273.15f;
     private float insolationTemperatureGainKelvin = 45f;
     private bool warnedInvalidTemperature;
     private bool warnedDiffusionClamp;
     private int thermalCapacityVersion;
     private long surfaceTemperatureTickSequence;
+    private int accumulatingSolarDayIndex = -1;
+    private float accumulatingDayMinimumTemperatureKelvin;
+    private float accumulatingDayMaximumTemperatureKelvin;
+    private double accumulatingDayMeanSum;
+    private int accumulatingDaySampleCount;
 
     public bool IsInitialized => initialized;
     public int CellCount => runtimeCellCount;
@@ -80,6 +102,11 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
     public string CurrentSunDirectionProvider => currentSunDirectionProvider;
     public int ThermalCapacityVersion => thermalCapacityVersion;
     public long SurfaceTemperatureTickSequence => surfaceTemperatureTickSequence;
+    public double TotalAuthoritativeSimulationSecondsReceived => totalAuthoritativeSimulationSecondsReceived;
+    public double TotalSimulationSecondsConsumedByThermalTicks => totalSimulationSecondsConsumedByThermalTicks;
+    public double UnconsumedThermalRemainderSeconds => unconsumedThermalRemainderSeconds;
+    public double DiscardedSimulationSeconds => discardedSimulationSeconds;
+    public double ThermalIntegrationCursorTime => thermalIntegrationCursorTime;
 
     private void Awake() => ResolveReferences();
 
@@ -87,15 +114,34 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
     {
         if (!initialized || !enableGeodesicSurfaceTemperature || planetGenerator.CurrentGridType != PlanetGridType.GeodesicIcosphere) return;
         ResolveClockOnly();
-        float elapsed = simulationClock != null ? Mathf.Max(0f, simulationClock.FrameSimulationDeltaTime) : 0f;
-        if (elapsed <= 0f) return;
-        accumulatedSimulationSeconds = Mathf.Min(accumulatedSimulationSeconds + elapsed, Mathf.Max(updateIntervalSeconds, 0.01f) * 4f);
-        float interval = Mathf.Max(0.01f, updateIntervalSeconds);
-        while (accumulatedSimulationSeconds >= interval)
+        if (simulationClock == null) return;
+        double target = Math.Max(0d, simulationClock.SimulationTimeSeconds);
+        currentAuthoritativeSimulationTime = target;
+        thermalTicksCurrentRenderedFrame = 0;
+        if (target < lastObservedAuthoritativeSimulationTime)
         {
-            TickTemperature(interval);
-            accumulatedSimulationSeconds -= interval;
+            // Clock restoration/regression establishes a new integration epoch; old-world backlog never survives.
+            thermalIntegrationCursorTime = target;
+            lastObservedAuthoritativeSimulationTime = target;
+            unconsumedThermalRemainderSeconds = 0d;
+            return;
         }
+        totalAuthoritativeSimulationSecondsReceived += target - lastObservedAuthoritativeSimulationTime;
+        lastObservedAuthoritativeSimulationTime = target;
+        double interval = Math.Max(0.01d, updateIntervalSeconds);
+        while (thermalIntegrationCursorTime + interval <= target + 1e-9d)
+        {
+            double midpoint = thermalIntegrationCursorTime + interval * 0.5d;
+            TickTemperature((float)interval, midpoint);
+            thermalIntegrationCursorTime += interval;
+            totalSimulationSecondsConsumedByThermalTicks += interval;
+            thermalTicksCurrentRenderedFrame++;
+        }
+        maximumThermalTicksPerRenderedFrame = Mathf.Max(maximumThermalTicksPerRenderedFrame, thermalTicksCurrentRenderedFrame);
+        unconsumedThermalRemainderSeconds = Math.Max(0d, target - thermalIntegrationCursorTime);
+        currentSunOrbitTime = sunDirectionProvider != null ? sunDirectionProvider.CurrentOrbitTimeSeconds : target;
+        currentSunPhase01 = sunDirectionProvider != null ? sunDirectionProvider.GetDayPhase01AtSimulationTime(target) : 0f;
+        maximumSolarAngularAdvancePerThermalTickDegrees = sunDirectionProvider != null ? Mathf.Abs(sunDirectionProvider.orbitDegreesPerSecond * (float)interval) : 0f;
     }
 
     public void ConfigureStartupTemperatures(float baseKelvin, float insolationGainKelvin)
@@ -130,11 +176,17 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
         heatCapacityByCell = new float[count];
         inverseHeatCapacityByCell = new float[count];
         runtimeCellCount = count;
-        accumulatedSimulationSeconds = 0f;
+        double simulationTime = simulationClock != null ? Math.Max(0d, simulationClock.SimulationTimeSeconds) : 0d;
+        thermalIntegrationCursorTime = lastObservedAuthoritativeSimulationTime = currentAuthoritativeSimulationTime = simulationTime;
+        totalAuthoritativeSimulationSecondsReceived = totalSimulationSecondsConsumedByThermalTicks = unconsumedThermalRemainderSeconds = discardedSimulationSeconds = 0d;
+        surfaceTemperatureTickSequence = 0;
+        accumulatingSolarDayIndex = lastCompletedSolarDayIndex = -1; accumulatingDaySampleCount = 0;
         RebuildThermalCapacities();
-        UpdateTemperatureTargets();
+        Vector3 startupSun = sunDirectionProvider != null ? sunDirectionProvider.GetPlanetToSunDirectionWorldAtSimulationTime(simulationTime) : Vector3.zero;
+        UpdateTemperatureTargets(startupSun);
         Array.Copy(targetTemperatureKelvinByCell, surfaceTemperatureKelvinByCell, count);
         UpdateDiagnostics();
+        UpdateTickLevelCycleDiagnostics(simulationTime);
         initialized = true;
         SurfaceTemperatureFieldReinitialized?.Invoke();
         UnityEngine.Debug.Log($"[GeodesicTemperature] initialized cells={count}, baseK={baseTemperatureKelvin:F2}, gainK={insolationTemperatureGainKelvin:F2}, min/mean/maxK={minimumTemperatureKelvin:F2}/{areaWeightedMeanTemperatureKelvin:F2}/{maximumTemperatureKelvin:F2}", this);
@@ -153,7 +205,10 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
         heatCapacityByCell = null;
         inverseHeatCapacityByCell = null;
         runtimeCellCount = 0;
-        accumulatedSimulationSeconds = 0f;
+        thermalIntegrationCursorTime = lastObservedAuthoritativeSimulationTime = currentAuthoritativeSimulationTime = 0d;
+        totalAuthoritativeSimulationSecondsReceived = totalSimulationSecondsConsumedByThermalTicks = unconsumedThermalRemainderSeconds = discardedSimulationSeconds = 0d;
+        surfaceTemperatureTickSequence = 0;
+        accumulatingSolarDayIndex = lastCompletedSolarDayIndex = -1; accumulatingDaySampleCount = 0;
     }
 
     public float GetCellTemperatureKelvin(int cellIndex) => initialized && cellIndex >= 0 && cellIndex < runtimeCellCount ? surfaceTemperatureKelvinByCell[cellIndex] : float.NaN;
@@ -190,14 +245,15 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
         mean = count > 0 ? mean / count : surfaceTemperatureKelvinByCell[cellIndex];
     }
 
-    private void TickTemperature(float dt)
+    private void TickTemperature(float dt, double representativeSimulationTime)
     {
         using (TickMarker.Auto())
         {
         long tickStart = Stopwatch.GetTimestamp();
         if (cachedLandHeatCapacityMultiplier != landHeatCapacityMultiplier || cachedOceanHeatCapacityMultiplier != oceanSurfaceHeatCapacityMultiplier) RebuildThermalCapacities();
         long targetStart = Stopwatch.GetTimestamp();
-        using (TargetMarker.Auto()) UpdateTemperatureTargets();
+        Vector3 tickSunDirection = sunDirectionProvider != null ? sunDirectionProvider.GetPlanetToSunDirectionWorldAtSimulationTime(representativeSimulationTime) : Vector3.zero;
+        using (TargetMarker.Auto()) UpdateTemperatureTargets(tickSunDirection);
         lastTargetUpdateDurationMilliseconds = ElapsedMilliseconds(targetStart);
         using (ResponseMarker.Auto())
         {
@@ -217,19 +273,43 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
         surfaceTemperatureTickSequence++;
         using (CommitMarker.Auto()) SurfaceTemperatureTickCommitted?.Invoke(dt);
         UpdateDiagnostics();
+        UpdateTickLevelCycleDiagnostics(representativeSimulationTime);
         lastCompletedTemperatureTick += dt;
         lastTickDurationMilliseconds = ElapsedMilliseconds(tickStart);
         if (enableProfilingDiagnostics) UnityEngine.Debug.Log($"[GeodesicTemperatureProfile] cells={runtimeCellCount}, edges={transportGraph.EdgeCount}, substeps={lastDiffusionSubstepCount}, targetMs={lastTargetUpdateDurationMilliseconds:F3}, diffusionMs={lastDiffusionDurationMilliseconds:F3}, tickMs={lastTickDurationMilliseconds:F3}, diffusionRelativeError={latestDiffusionConservationRelativeError:E3}", this);
         }
     }
 
-    private void UpdateTemperatureTargets()
+    private void UpdateTemperatureTargets(Vector3 sunDirectionWorld)
     {
         for (int i = 0; i < runtimeCellCount; i++)
         {
-            float insolation = GetCellInsolationCosine(i);
+            Vector3 normalWorld = transform.TransformDirection(topology.CellDirections[i]).normalized;
+            float insolation = sunDirectionWorld.sqrMagnitude > 0.5f ? Mathf.Max(0f, Vector3.Dot(normalWorld, sunDirectionWorld)) : 0f;
             targetTemperatureKelvinByCell[i] = baseTemperatureKelvin + insolationTemperatureGainKelvin * Mathf.Pow(insolation, insolationExponent);
         }
+    }
+
+    private void UpdateTickLevelCycleDiagnostics(double representativeSimulationTime)
+    {
+        lastThermalTickRepresentativeSimulationTime = representativeSimulationTime;
+        float dayLength = sunDirectionProvider != null ? sunDirectionProvider.GetDayLengthSeconds() : float.PositiveInfinity;
+        lastThermalTickSolarPhase01 = sunDirectionProvider != null ? sunDirectionProvider.GetDayPhase01AtSimulationTime(representativeSimulationTime) : 0f;
+        int day = float.IsFinite(dayLength) && dayLength > 0f ? (int)Math.Floor(representativeSimulationTime / dayLength) : 0;
+        if (accumulatingSolarDayIndex != day)
+        {
+            if (accumulatingSolarDayIndex >= 0 && accumulatingDaySampleCount > 0)
+            {
+                lastCompletedSolarDayIndex = accumulatingSolarDayIndex;
+                lastCompletedDayMinimumTemperatureKelvin = accumulatingDayMinimumTemperatureKelvin;
+                lastCompletedDayMeanTemperatureKelvin = (float)(accumulatingDayMeanSum / accumulatingDaySampleCount);
+                lastCompletedDayMaximumTemperatureKelvin = accumulatingDayMaximumTemperatureKelvin;
+            }
+            accumulatingSolarDayIndex = day; accumulatingDayMinimumTemperatureKelvin = float.PositiveInfinity; accumulatingDayMaximumTemperatureKelvin = float.NegativeInfinity; accumulatingDayMeanSum = 0d; accumulatingDaySampleCount = 0;
+        }
+        accumulatingDayMinimumTemperatureKelvin = Mathf.Min(accumulatingDayMinimumTemperatureKelvin, minimumTemperatureKelvin);
+        accumulatingDayMaximumTemperatureKelvin = Mathf.Max(accumulatingDayMaximumTemperatureKelvin, maximumTemperatureKelvin);
+        accumulatingDayMeanSum += areaWeightedMeanTemperatureKelvin; accumulatingDaySampleCount++;
     }
 
     private void RebuildThermalCapacities()
@@ -292,6 +372,54 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
 
     private static double ElapsedMilliseconds(long startTimestamp) =>
         (Stopwatch.GetTimestamp() - startTimestamp) * 1000d / Stopwatch.Frequency;
+
+    private struct PartitionValidationResult
+    {
+        public double Received, Integrated, Discarded;
+        public int Ticks;
+        public float Surface, Layer1, Layer2;
+    }
+
+    [ContextMenu("Validate Geodesic Temperature Frame-Partition Invariance")]
+    private void ValidateFramePartitionInvariance()
+    {
+        if (!initialized || sunDirectionProvider == null) { UnityEngine.Debug.LogWarning("[GeodesicTemperaturePartitionValidation] Surface field and sun ephemeris must be initialized.", this); return; }
+        double interval = Math.Max(0.01d, updateIntervalSeconds), duration = interval * 480d;
+        PartitionValidationResult small = IntegrateTemporaryPartition(duration, interval * 0.2d, interval);
+        PartitionValidationResult large = IntegrateTemporaryPartition(duration, interval * 20d, interval);
+        float surfaceDifference = Mathf.Abs(small.Surface - large.Surface);
+        float layerDifference = Mathf.Max(Mathf.Abs(small.Layer1 - large.Layer1), Mathf.Abs(small.Layer2 - large.Layer2));
+        float maximumDifference = Mathf.Max(surfaceDifference, layerDifference);
+        bool valid = small.Discarded == 0d && large.Discarded == 0d && small.Ticks == large.Ticks && maximumDifference <= 0.01f;
+        string report = $"received={small.Received:F6}/{large.Received:F6}, integrated={small.Integrated:F6}/{large.Integrated:F6}, discarded={small.Discarded:F6}/{large.Discarded:F6}, ticks={small.Ticks}/{large.Ticks}, surfaceMaxAbsK={surfaceDifference:E3}, layeredMaxAbsK={layerDifference:E3}";
+        if (valid) UnityEngine.Debug.Log($"[GeodesicTemperaturePartitionValidation] valid; {report}", this); else UnityEngine.Debug.LogError($"[GeodesicTemperaturePartitionValidation] invalid; {report}", this);
+    }
+
+    private PartitionValidationResult IntegrateTemporaryPartition(double duration, double frameDelta, double interval)
+    {
+        PartitionValidationResult result = new PartitionValidationResult { Surface = baseTemperatureKelvin, Layer1 = Mathf.Max(0f, baseTemperatureKelvin - 2f), Layer2 = Mathf.Max(0f, baseTemperatureKelvin - 4f) };
+        double target = 0d, cursor = 0d;
+        Vector3 normalWorld = transform.TransformDirection(topology.CellDirections[0]).normalized;
+        while (target < duration - 1e-9d)
+        {
+            double next = Math.Min(duration, target + frameDelta); result.Received += next - target; target = next;
+            while (cursor + interval <= target + 1e-9d)
+            {
+                double midpoint = cursor + interval * 0.5d;
+                Vector3 sun = sunDirectionProvider.GetPlanetToSunDirectionWorldAtSimulationTime(midpoint);
+                float targetTemperature = baseTemperatureKelvin + insolationTemperatureGainKelvin * Mathf.Pow(Mathf.Max(0f, Vector3.Dot(normalWorld, sun)), insolationExponent);
+                float timescale = targetTemperature >= result.Surface ? heatingTimescaleSeconds : coolingTimescaleSeconds;
+                result.Surface += (targetTemperature - result.Surface) * (1f - Mathf.Exp(-(float)interval / Mathf.Max(MinimumTimescale, timescale)));
+                float energy01 = verticalThermalDiffusivityForValidation * (result.Layer1 - result.Surface) * (float)interval;
+                float energy12 = verticalThermalDiffusivityForValidation * (result.Layer2 - result.Layer1) * (float)interval;
+                result.Surface += energy01; result.Layer1 += -energy01 + energy12; result.Layer2 -= energy12;
+                cursor += interval; result.Integrated += interval; result.Ticks++;
+            }
+        }
+        return result;
+    }
+
+    private const float verticalThermalDiffusivityForValidation = 0.00002f;
 
     private double TotalThermalEnergy(float[] temperatures) { double total = 0d; for (int i = 0; i < runtimeCellCount; i++) total += temperatures[i] * heatCapacityByCell[i]; return total; }
 
