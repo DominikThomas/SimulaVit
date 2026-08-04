@@ -290,6 +290,8 @@ public class ReplicatorManager : MonoBehaviour
 
     [Header("Temperature Display")]
     public TemperatureDisplayUnit temperatureDisplayUnit = TemperatureDisplayUnit.Celsius;
+    public TemperatureDisplayUnit CurrentTemperatureDisplayUnit => temperatureDisplayUnit;
+    public event Action<TemperatureDisplayUnit> TemperatureDisplayUnitChanged;
 
     [Header("Steering Habitat Score")]
     [Tooltip("Dominant weight for temperature fitness when computing per-cell habitat score.")]
@@ -884,6 +886,7 @@ public class ReplicatorManager : MonoBehaviour
             return;
         }
 
+        TemperatureDisplayUnit previousTemperatureDisplayUnit = temperatureDisplayUnit;
         hudPresenter.Draw(
             agents,
             planetResourceMap,
@@ -896,6 +899,18 @@ public class ReplicatorManager : MonoBehaviour
             methanogenAgentCount,
             methanotrophAgentCount,
             ref temperatureDisplayUnit);
+        if (temperatureDisplayUnit != previousTemperatureDisplayUnit)
+        {
+            TemperatureDisplayUnitChanged?.Invoke(temperatureDisplayUnit);
+        }
+    }
+
+    public void CycleTemperatureDisplayUnit()
+    {
+        TemperatureDisplayUnit next = (TemperatureDisplayUnit)(((int)temperatureDisplayUnit + 1) % Enum.GetValues(typeof(TemperatureDisplayUnit)).Length);
+        if (next == temperatureDisplayUnit) return;
+        temperatureDisplayUnit = next;
+        TemperatureDisplayUnitChanged?.Invoke(temperatureDisplayUnit);
     }
 
 

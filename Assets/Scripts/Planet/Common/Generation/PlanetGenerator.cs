@@ -58,6 +58,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     }
 
     [SerializeField] private ReplicatorManager replicatorManager;
+    public ReplicatorManager ReplicatorManager => replicatorManager;
     [Header("Generation Mode")]
     public PlanetGenerationMode generationMode = PlanetGenerationMode.LegacyCubeSphere;
     [Range(0, GeodesicGridTopology.MaxSupportedSubdivision)]
@@ -844,6 +845,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         BuildGeodesicOceanVisual();
         LogStage("ocean mesh generation", stage);
         var picker = GetOrAddComponent<GeodesicCellPicker>(gameObject);
+        picker.SetTemperatureDisplayAuthority(replicatorManager);
         picker.enabled = true;
         picker.SetTopology(GeodesicTopology);
         Transform debugTransform = transform.Find("Geodesic Debug Lines");

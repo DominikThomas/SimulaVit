@@ -908,7 +908,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: eee7f655e5979404cabff8cefd535095, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  replicatorManager: {fileID: 0}
+  replicatorManager: {fileID: 1064713443}
   generationMode: 1
   geodesicSubdivisionLevel: 6
   geodesicSimulationSubdivisionLevel: 6
