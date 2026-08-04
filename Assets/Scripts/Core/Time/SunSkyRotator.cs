@@ -873,7 +873,7 @@ public class SunSkyRotator : MonoBehaviour
         Debug.Log($"[SunAppearance] gridMode={mode}, cameraPlanetDistance={cameraToPlanetDistance:F4}, visiblePlanetRadius={resolvedVisiblePlanetRadius:F4}, planetAngularRadiusDeg={apparentPlanetAngularRadiusDegrees:F4}, sunAngularRadiusDeg={apparentSunAngularRadiusDegrees:F4}, sunCentreHeightAboveLimbDeg={sunCentreHeightAboveLimbDegrees:F4}, sunsetColourFactor={sunsetColourFactor:F3}, visibleDiscFactor={visibleDiscFactor:F3}, glowFactor={glowFactor:F3}", this);
     }
 
-    void DestroyRuntimeObject(Object obj)
+    void DestroyRuntimeObject(UnityEngine.Object obj)
     {
         if (obj == null) return;
 
