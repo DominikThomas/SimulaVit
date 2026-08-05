@@ -254,6 +254,20 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
         surfaceTemperatureKelvinByCell[cellIndex] = updated;
         return true;
     }
+
+    /// <summary>Internal simulation-authority path for geodesic ocean coupling. Validates the whole compact batch before mutating layer 0.</summary>
+    internal bool TryApplyAuthoritativeTemperatureBatch(int[] cellIndices, float[] temperatureKelvin, int count)
+    {
+        if (!initialized || cellIndices == null || temperatureKelvin == null || count < 0 || count > cellIndices.Length || count > temperatureKelvin.Length) return false;
+        for (int i = 0; i < count; i++)
+        {
+            int cell = cellIndices[i];
+            float updated = temperatureKelvin[i];
+            if (cell < 0 || cell >= runtimeCellCount || float.IsNaN(updated) || float.IsInfinity(updated) || updated < 0f) return false;
+        }
+        for (int i = 0; i < count; i++) surfaceTemperatureKelvinByCell[cellIndices[i]] = temperatureKelvin[i];
+        return true;
+    }
     public float GetTemperatureKelvinAtLocalDirection(Vector3 localDirection) { int cell = FindCellForLocalDirection(localDirection); return GetCellTemperatureKelvin(cell); }
     public float GetTemperatureKelvinAtWorldDirection(Vector3 worldDirection) => GetTemperatureKelvinAtLocalDirection(transform.InverseTransformDirection(worldDirection));
 

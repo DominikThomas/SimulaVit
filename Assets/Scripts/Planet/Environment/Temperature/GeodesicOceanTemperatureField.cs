@@ -8,15 +8,13 @@ public enum GeodesicOceanTemperatureStartupMode { IsothermalFromSurface, DepthGr
 [DisallowMultipleComponent]
 public sealed class GeodesicOceanTemperatureField : MonoBehaviour
 {
-    private const float StabilitySafetyFactor = 0.45f;
     private const double ConservationTolerance = 2e-5;
-    private const int SurfaceEndpointSentinel = -1;
     private static readonly ProfilerMarker CallbackMarker = new ProfilerMarker("GeodesicOceanTemperature.Callback");
-    private static readonly ProfilerMarker StabilityMarker = new ProfilerMarker("GeodesicOceanTemperature.ResolveStability");
-    private static readonly ProfilerMarker ClearMarker = new ProfilerMarker("GeodesicOceanTemperature.ClearActiveDeltas");
-    private static readonly ProfilerMarker FluxMarker = new ProfilerMarker("GeodesicOceanTemperature.AccumulateVerticalFlux");
-    private static readonly ProfilerMarker SurfaceApplyMarker = new ProfilerMarker("GeodesicOceanTemperature.ApplySurfaceDeltas");
-    private static readonly ProfilerMarker SubsurfaceApplyMarker = new ProfilerMarker("GeodesicOceanTemperature.ApplySubsurfaceDeltas");
+    private static readonly ProfilerMarker PrepareColumnsMarker = new ProfilerMarker("GeodesicOceanTemperature.PrepareColumns");
+    private static readonly ProfilerMarker SolveImplicitColumnsMarker = new ProfilerMarker("GeodesicOceanTemperature.SolveImplicitColumns");
+    private static readonly ProfilerMarker ValidateSolutionMarker = new ProfilerMarker("GeodesicOceanTemperature.ValidateSolution");
+    private static readonly ProfilerMarker SurfaceApplyMarker = new ProfilerMarker("GeodesicOceanTemperature.ApplySurfaceBatch");
+    private static readonly ProfilerMarker SubsurfaceApplyMarker = new ProfilerMarker("GeodesicOceanTemperature.CommitSubsurface");
     private static readonly ProfilerMarker ConservationMarker = new ProfilerMarker("GeodesicOceanTemperature.ExactConservationAudit");
     private static readonly ProfilerMarker DiagnosticsMarker = new ProfilerMarker("GeodesicOceanTemperature.DiagnosticSnapshot");
 
@@ -26,7 +24,7 @@ public sealed class GeodesicOceanTemperatureField : MonoBehaviour
     [SerializeField, Min(0f), Tooltip("Simulation-unit vertical diffusivity; this is not SI calibrated and will be tuned later.")] private float verticalThermalDiffusivity = 0.00002f;
     [SerializeField, Tooltip("Initializes subsurface layers from the surface or with a per-layer depth gradient.")] private GeodesicOceanTemperatureStartupMode startupMode = GeodesicOceanTemperatureStartupMode.DepthGradient;
     [SerializeField, Min(0f), Tooltip("Initial Kelvin decrease per layer index when Depth Gradient is selected.")] private float initialTemperatureDropPerLayerKelvin = 2f;
-    [SerializeField, Range(1, 256), Tooltip("Maximum stable explicit vertical-exchange substeps per surface tick.")] private int maximumVerticalSubsteps = 64;
+    [SerializeField, HideInInspector, Tooltip("Deprecated explicit solver cap retained only for serialized scene compatibility; production uses an implicit column solve.")] private int maximumVerticalSubsteps = 64;
     [SerializeField, Min(0.1f), Tooltip("Unscaled real-time interval between serialized Inspector diagnostic snapshots.")] private float inspectorSnapshotIntervalSeconds = 1f;
     [SerializeField, Min(0.1f), Tooltip("Simulation-time interval between exact coupled-energy conservation audits. Profiling diagnostics audits every tick.")] private float exactConservationAuditIntervalSeconds = 5f;
     [SerializeField, Tooltip("Enables per-tick exact conservation auditing and periodic profiling logs.")] private bool enableProfilingDiagnostics;
@@ -39,20 +37,26 @@ public sealed class GeodesicOceanTemperatureField : MonoBehaviour
     [SerializeField] private string sourceGridSummary = "None";
     [SerializeField] private double lastCompletedOceanTemperatureTick;
     [SerializeField] private float lastVerticalExchangeSimulationDelta;
-    [SerializeField] private int lastVerticalSubstepCount;
+    [SerializeField] private string solverMode = "ImplicitBackwardEuler";
+    [SerializeField] private int columnsSolvedLastTick;
+    [SerializeField] private int layersSolvedLastTick;
     [SerializeField] private double lastVerticalExchangeDurationMilliseconds;
+    [SerializeField] private double lastSurfaceBatchDurationMilliseconds;
+    [SerializeField] private double lastSubsurfaceCommitDurationMilliseconds;
+    [SerializeField] private double maximumEquationResidual;
+    [SerializeField] private int failedColumnCount;
     [SerializeField] private double latestVerticalConservationRelativeError;
     [SerializeField] private double lastExactConservationAuditSimulationTime;
     [SerializeField] private int ticksSinceLastExactConservationAudit;
     [SerializeField] private bool lastTickUsedAlgebraicConservationOnly;
     [SerializeField] private double lastAbsoluteEnergyTransferred;
-    [SerializeField] private bool lastStabilityClampingOccurred;
+    [SerializeField, HideInInspector] private bool lastStabilityClampingOccurred;
     [SerializeField] private float maximumSurfaceToBottomTemperatureDifference;
     [SerializeField] private long approximateRuntimeMemoryBytes;
     [SerializeField] private int oceanCallbacksLastRenderedFrame;
     [SerializeField] private int maximumOceanCallbacksPerRenderedFrame;
-    [SerializeField] private int verticalSubstepsLastRenderedFrame;
-    [SerializeField] private long verticalLinksProcessedLastRenderedFrame;
+    [SerializeField, HideInInspector] private int verticalSubstepsLastRenderedFrame;
+    [SerializeField, HideInInspector] private long verticalLinksProcessedLastRenderedFrame;
     [SerializeField] private double oceanTemperatureMillisecondsLastRenderedFrame;
     [SerializeField] private int duplicateOrStaleCallbackCount;
     [SerializeField] private int[] layerActiveCellCount = new int[5];
@@ -67,26 +71,26 @@ public sealed class GeodesicOceanTemperatureField : MonoBehaviour
     private float[] subsurfaceTemperatureKelvinByNode;
     private float[] heatCapacityByNode;
     private float[] inverseHeatCapacityByNode;
-    private float[] energyDeltaByNode;
-    private float[] surfaceEnergyDeltaByCell;
+    private float[] solvedSurfaceTemperatureByColumn;
+    private float[] solvedSubsurfaceTemperatureByCompactNode;
     private int[] activeSubsurfaceNodeIndices;
     private int[] participatingSurfaceCells;
-    private int[] linkLowerNode;
-    private int[] linkUpperSubsurfaceNode;
-    private int[] linkSurfaceCell;
-    private float[] linkConductanceBase;
-    private float[] compactSubsurfaceConductanceSumBase;
-    private float[] compactSurfaceConductanceSumBase;
+    private float[] columnInterfaceConductanceBase;
+    private readonly double[] solveLower = new double[5];
+    private readonly double[] solveDiagonal = new double[5];
+    private readonly double[] solveUpper = new double[5];
+    private readonly double[] solveRhs = new double[5];
+    private readonly double[] solveCPrime = new double[5];
+    private readonly double[] solveDPrime = new double[5];
+    private readonly double[] solveResult = new double[5];
+    private readonly double[] oldTemperature = new double[5];
+    private readonly double[] layerCapacity = new double[5];
+    private readonly double[] conductance = new double[4];
     private readonly double[] diagnosticWeightedTemperature = new double[5];
     private readonly double[] diagnosticWeight = new double[5];
     private float cachedCapacityPerVolume = float.NaN;
-    private float cachedVerticalDiffusivity = float.NaN;
-    private int cachedMaximumVerticalSubsteps = -1;
-    private int cachedSurfaceCapacityVersion = -1;
-    private float cachedStableVerticalStep = float.MaxValue;
-    private bool stabilityCacheValid;
     private bool subscribed;
-    private bool warnedStabilityClamp;
+    private string firstColumnFailure;
     private long lastProcessedSurfaceTickSequence = -1;
     private double nextInspectorSnapshotUnscaledTime;
     private double nextExactAuditSimulationTime;
@@ -115,11 +119,11 @@ public sealed class GeodesicOceanTemperatureField : MonoBehaviour
     public bool IsInitialized => initialized;
     public GeodesicOceanLayerGrid SourceGrid => sourceGrid;
     public float LastVerticalExchangeSimulationDelta => liveLastVerticalExchangeSimulationDelta;
-    public int LastVerticalSubstepCount => liveLastVerticalSubstepCount;
+    public int LastVerticalSubstepCount => 1;
     public double LastVerticalExchangeDurationMilliseconds => liveLastVerticalExchangeDurationMilliseconds;
     public double LatestVerticalConservationRelativeError => liveLatestVerticalConservationRelativeError;
     public double LastAbsoluteEnergyTransferred => liveLastAbsoluteEnergyTransferred;
-    public bool LastStabilityClampingOccurred => liveLastStabilityClampingOccurred;
+    public bool LastStabilityClampingOccurred => false;
     public float MaximumSurfaceToBottomTemperatureDifference => liveMaximumSurfaceToBottomTemperatureDifference;
     public int ActiveSubsurfaceNodeCount => activeSubsurfaceNodeCount;
     public int ParticipatingSurfaceCellCount => participatingSurfaceCellCount;
@@ -157,7 +161,7 @@ public sealed class GeodesicOceanTemperatureField : MonoBehaviour
     private void AllocateState()
     {
         int nodes = sourceGrid.NodeCapacity, cells = sourceGrid.CellCount;
-        subsurfaceTemperatureKelvinByNode = new float[nodes]; heatCapacityByNode = new float[nodes]; inverseHeatCapacityByNode = new float[nodes]; energyDeltaByNode = new float[nodes]; surfaceEnergyDeltaByCell = new float[cells];
+        subsurfaceTemperatureKelvinByNode = new float[nodes]; heatCapacityByNode = new float[nodes]; inverseHeatCapacityByNode = new float[nodes];
     }
 
     private void BuildCompactParticipationTables()
@@ -175,31 +179,24 @@ public sealed class GeodesicOceanTemperatureField : MonoBehaviour
         participatingSurfaceCells = new int[surfaceCount];
         int surfaceIndex = 0;
         for (int cell = 0; cell < sourceGrid.CellCount; cell++) if (sourceGrid.ActiveLayerCountByCell[cell] > 1) participatingSurfaceCells[surfaceIndex++] = cell;
-        int links = sourceGrid.VerticalLinkCount;
-        linkLowerNode = new int[links]; linkUpperSubsurfaceNode = new int[links]; linkSurfaceCell = new int[links]; linkConductanceBase = new float[links];
-        compactSubsurfaceConductanceSumBase = new float[subsurfaceCount]; compactSurfaceConductanceSumBase = new float[surfaceCount];
-        int compactUpper = 0, compactLower = 0, compactSurface = 0;
-        for (int link = 0; link < links; link++)
+        columnInterfaceConductanceBase = new float[surfaceCount * (sourceGrid.MaximumLayerCount - 1)];
+        for (int link = 0; link < sourceGrid.VerticalLinkCount; link++)
         {
-            int upper = sourceGrid.VerticalUpperNode[link], lower = sourceGrid.VerticalLowerNode[link];
-            int cell = lower / sourceGrid.MaximumLayerCount;
-            bool upperIsSurface = upper == sourceGrid.GetNodeIndex(cell, 0);
-            float conductanceBase = sourceGrid.VerticalInterfaceArea[link] / sourceGrid.VerticalCenterDistance[link];
-            linkLowerNode[link] = lower; linkUpperSubsurfaceNode[link] = upperIsSurface ? SurfaceEndpointSentinel : upper; linkSurfaceCell[link] = upperIsSurface ? cell : -1; linkConductanceBase[link] = conductanceBase;
-            while (activeSubsurfaceNodeIndices[compactLower] != lower) compactLower++;
-            compactSubsurfaceConductanceSumBase[compactLower] += conductanceBase;
-            if (upperIsSurface)
-            {
-                while (participatingSurfaceCells[compactSurface] != cell) compactSurface++;
-                compactSurfaceConductanceSumBase[compactSurface] += conductanceBase;
-            }
-            else
-            {
-                while (activeSubsurfaceNodeIndices[compactUpper] != upper) compactUpper++;
-                compactSubsurfaceConductanceSumBase[compactUpper] += conductanceBase;
-            }
+            int upper = sourceGrid.VerticalUpperNode[link];
+            int cell = upper / sourceGrid.MaximumLayerCount;
+            int layer = upper - cell * sourceGrid.MaximumLayerCount;
+            if (sourceGrid.VerticalCenterDistance[link] > 0f) columnInterfaceConductanceBase[cellColumnIndex(cell) * (sourceGrid.MaximumLayerCount - 1) + layer] = sourceGrid.VerticalInterfaceArea[link] / sourceGrid.VerticalCenterDistance[link];
         }
+        solvedSurfaceTemperatureByColumn = new float[surfaceCount];
+        solvedSubsurfaceTemperatureByCompactNode = new float[subsurfaceCount];
         activeSubsurfaceNodeCount = subsurfaceCount; participatingSurfaceCellCount = surfaceCount;
+
+        int cellColumnIndex(int cell)
+        {
+            int lo = 0, hi = participatingSurfaceCells.Length - 1;
+            while (lo <= hi) { int mid = (lo + hi) >> 1; int value = participatingSurfaceCells[mid]; if (value == cell) return mid; if (value < cell) lo = mid + 1; else hi = mid - 1; }
+            return -1;
+        }
     }
 
     private void RebuildCapacities()
@@ -207,17 +204,17 @@ public sealed class GeodesicOceanTemperatureField : MonoBehaviour
         totalSubsurfaceThermalCapacity = 0d;
         float density = Mathf.Max(1e-8f, subsurfaceHeatCapacityPerVolume);
         for (int i = 0; i < activeSubsurfaceNodeIndices.Length; i++) { int node = activeSubsurfaceNodeIndices[i]; float capacity = sourceGrid.LayerVolume[node] * density; heatCapacityByNode[node] = capacity; inverseHeatCapacityByNode[node] = 1f / capacity; totalSubsurfaceThermalCapacity += capacity; }
-        cachedCapacityPerVolume = subsurfaceHeatCapacityPerVolume; stabilityCacheValid = false;
+        cachedCapacityPerVolume = subsurfaceHeatCapacityPerVolume;
         sourceGridSummary = $"cells={sourceGrid.CellCount}, nodes={sourceGrid.NodeCapacity}, active={sourceGrid.ActiveNodeCount}, verticalLinks={sourceGrid.VerticalLinkCount}";
-        approximateRuntimeMemoryBytes = (long)sourceGrid.NodeCapacity * sizeof(float) * 4L + (long)sourceGrid.CellCount * sizeof(float) + (long)activeSubsurfaceNodeIndices.Length * (sizeof(int) + sizeof(float)) + (long)participatingSurfaceCells.Length * (sizeof(int) + sizeof(float)) + (long)sourceGrid.VerticalLinkCount * (sizeof(int) * 3L + sizeof(float));
+        approximateRuntimeMemoryBytes = (long)sourceGrid.NodeCapacity * sizeof(float) * 3L + (long)activeSubsurfaceNodeIndices.Length * (sizeof(int) + sizeof(float)) + (long)participatingSurfaceCells.Length * (sizeof(int) + sizeof(float)) + (long)columnInterfaceConductanceBase.Length * sizeof(float);
     }
 
     public void ClearField() { Unsubscribe(); ClearState(); }
     private void ClearState()
     {
-        initialized = false; sourceGrid = null; subsurfaceTemperatureKelvinByNode = heatCapacityByNode = inverseHeatCapacityByNode = energyDeltaByNode = surfaceEnergyDeltaByCell = null;
-        activeSubsurfaceNodeIndices = participatingSurfaceCells = linkLowerNode = linkUpperSubsurfaceNode = linkSurfaceCell = null; linkConductanceBase = compactSubsurfaceConductanceSumBase = compactSurfaceConductanceSumBase = null;
-        activeSubsurfaceNodeCount = participatingSurfaceCellCount = 0; totalSubsurfaceThermalCapacity = 0d; sourceGridSummary = "None"; approximateRuntimeMemoryBytes = 0; stabilityCacheValid = false; lastProcessedSurfaceTickSequence = -1; liveCompletedOceanTemperatureTick = 0d;
+        initialized = false; sourceGrid = null; subsurfaceTemperatureKelvinByNode = heatCapacityByNode = inverseHeatCapacityByNode = solvedSurfaceTemperatureByColumn = solvedSubsurfaceTemperatureByCompactNode = columnInterfaceConductanceBase = null;
+        activeSubsurfaceNodeIndices = participatingSurfaceCells = null;
+        activeSubsurfaceNodeCount = participatingSurfaceCellCount = 0; totalSubsurfaceThermalCapacity = 0d; sourceGridSummary = "None"; approximateRuntimeMemoryBytes = 0; lastProcessedSurfaceTickSequence = -1; liveCompletedOceanTemperatureTick = 0d;
     }
     private void Subscribe() { if (subscribed || surfaceField == null) return; surfaceField.SurfaceTemperatureTickCommitted += OnSurfaceTickCommitted; surfaceField.SurfaceTemperatureFieldReinitialized += OnSurfaceReinitialized; surfaceField.SurfaceTemperatureFieldClearing += OnSurfaceClearing; subscribed = true; }
     private void Unsubscribe() { if (!subscribed || surfaceField == null) { subscribed = false; return; } surfaceField.SurfaceTemperatureTickCommitted -= OnSurfaceTickCommitted; surfaceField.SurfaceTemperatureFieldReinitialized -= OnSurfaceReinitialized; surfaceField.SurfaceTemperatureFieldClearing -= OnSurfaceClearing; subscribed = false; }
@@ -245,54 +242,78 @@ public sealed class GeodesicOceanTemperatureField : MonoBehaviour
             double start = Time.realtimeSinceStartupAsDouble;
             RollFrameCounters(); callbacksThisFrame++;
             bool collectTickDiagnostics = enableProfilingDiagnostics || Time.unscaledTimeAsDouble >= nextInspectorSnapshotUnscaledTime;
-            liveLastVerticalExchangeSimulationDelta = dt; liveLastStabilityClampingOccurred = false; if (collectTickDiagnostics) liveLastAbsoluteEnergyTransferred = 0d;
+            liveLastVerticalExchangeSimulationDelta = dt; liveLastVerticalSubstepCount = 1; liveLastStabilityClampingOccurred = false;
+            columnsSolvedLastTick = layersSolvedLastTick = failedColumnCount = 0; maximumEquationResidual = 0d; firstColumnFailure = null;
+            if (collectTickDiagnostics) liveLastAbsoluteEnergyTransferred = 0d;
             if (cachedCapacityPerVolume != subsurfaceHeatCapacityPerVolume) RebuildCapacities();
             bool exactAudit = enableProfilingDiagnostics || liveCompletedOceanTemperatureTick + dt >= nextExactAuditSimulationTime;
             double before = 0d;
             if (exactAudit) using (ConservationMarker.Auto()) before = TotalParticipatingEnergy();
-            if (verticalThermalDiffusivity <= 0f || dt <= 0f)
+            if (verticalThermalDiffusivity < 0f || dt <= 0f) { CompleteAudit(exactAudit, before, dt); FinishTick(start); return; }
+
+            using (PrepareColumnsMarker.Auto()) { }
+            double solveStart = Time.realtimeSinceStartupAsDouble;
+            using (SolveImplicitColumnsMarker.Auto())
             {
-                liveLastVerticalSubstepCount = 0; CompleteAudit(exactAudit, before, dt); FinishTick(start); return;
-            }
-            int needed; float effectiveDiffusivity;
-            using (StabilityMarker.Auto()) ResolveStableSubsteps(dt, out needed, out effectiveDiffusivity);
-            int substeps = Mathf.Min(needed, Mathf.Max(1, maximumVerticalSubsteps));
-            if (needed > substeps) { effectiveDiffusivity *= (float)substeps / needed; liveLastStabilityClampingOccurred = true; if (!warnedStabilityClamp) { UnityEngine.Debug.LogWarning("[GeodesicOceanTemperature] Vertical diffusivity stability-clamped for a capped tick.", this); warnedStabilityClamp = true; } }
-            liveLastVerticalSubstepCount = substeps; substepsThisFrame += substeps; float stepDt = dt / substeps;
-            for (int step = 0; step < substeps; step++)
-            {
-                using (ClearMarker.Auto()) { for (int i = 0; i < activeSubsurfaceNodeIndices.Length; i++) energyDeltaByNode[activeSubsurfaceNodeIndices[i]] = 0f; for (int i = 0; i < participatingSurfaceCells.Length; i++) surfaceEnergyDeltaByCell[participatingSurfaceCells[i]] = 0f; }
-                using (FluxMarker.Auto()) for (int link = 0; link < linkLowerNode.Length; link++)
+                int compactSubsurface = 0;
+                for (int column = 0; column < participatingSurfaceCells.Length; column++)
                 {
-                    int lower = linkLowerNode[link], upper = linkUpperSubsurfaceNode[link], surfaceCell = linkSurfaceCell[link];
-                    float upperTemperature = upper == SurfaceEndpointSentinel ? surfaceField.GetCellTemperatureKelvin(surfaceCell) : subsurfaceTemperatureKelvinByNode[upper];
-                    float energy = effectiveDiffusivity * linkConductanceBase[link] * (subsurfaceTemperatureKelvinByNode[lower] - upperTemperature) * stepDt;
-                    if (upper == SurfaceEndpointSentinel) surfaceEnergyDeltaByCell[surfaceCell] += energy; else energyDeltaByNode[upper] += energy;
-                    energyDeltaByNode[lower] -= energy; if (collectTickDiagnostics) liveLastAbsoluteEnergyTransferred += Math.Abs(energy);
+                    int cell = participatingSurfaceCells[column];
+                    int layers = sourceGrid.ActiveLayerCountByCell[cell];
+                    if (layers <= 1) continue;
+                    if (TrySolveColumn(cell, column, compactSubsurface, layers, dt)) { columnsSolvedLastTick++; layersSolvedLastTick += layers; } else failedColumnCount++;
+                    compactSubsurface += layers - 1;
                 }
-                linksThisFrame += linkLowerNode.Length;
-                using (SurfaceApplyMarker.Auto()) for (int i = 0; i < participatingSurfaceCells.Length; i++) { int cell = participatingSurfaceCells[i]; float delta = surfaceEnergyDeltaByCell[cell]; if (delta != 0f) surfaceField.TryApplyExternalEnergyDelta(cell, delta); }
-                using (SubsurfaceApplyMarker.Auto()) for (int i = 0; i < activeSubsurfaceNodeIndices.Length; i++) { int node = activeSubsurfaceNodeIndices[i]; subsurfaceTemperatureKelvinByNode[node] += energyDeltaByNode[node] * inverseHeatCapacityByNode[node]; }
             }
+            liveLastVerticalExchangeDurationMilliseconds = (Time.realtimeSinceStartupAsDouble - solveStart) * 1000d;
+            using (ValidateSolutionMarker.Auto()) if (failedColumnCount > 0 && firstColumnFailure != null) UnityEngine.Debug.LogError($"[GeodesicOceanTemperature] Implicit vertical solve failed; failedColumns={failedColumnCount}; first={firstColumnFailure}", this);
+            double surfaceStart = Time.realtimeSinceStartupAsDouble;
+            using (SurfaceApplyMarker.Auto()) if (failedColumnCount == 0 && !surfaceField.TryApplyAuthoritativeTemperatureBatch(participatingSurfaceCells, solvedSurfaceTemperatureByColumn, participatingSurfaceCells.Length)) { failedColumnCount++; UnityEngine.Debug.LogError("[GeodesicOceanTemperature] Surface temperature batch rejected; retaining previous column state.", this); }
+            lastSurfaceBatchDurationMilliseconds = (Time.realtimeSinceStartupAsDouble - surfaceStart) * 1000d;
+            double commitStart = Time.realtimeSinceStartupAsDouble;
+            if (failedColumnCount == 0) using (SubsurfaceApplyMarker.Auto()) for (int i = 0; i < activeSubsurfaceNodeIndices.Length; i++) subsurfaceTemperatureKelvinByNode[activeSubsurfaceNodeIndices[i]] = solvedSubsurfaceTemperatureByCompactNode[i];
+            lastSubsurfaceCommitDurationMilliseconds = (Time.realtimeSinceStartupAsDouble - commitStart) * 1000d;
             CompleteAudit(exactAudit, before, dt); FinishTick(start);
         }
     }
 
-    private void ResolveStableSubsteps(float dt, out int needed, out float effectiveDiffusivity)
+    private bool TrySolveColumn(int cell, int column, int compactSubsurfaceStart, int layers, float dt)
     {
-        int surfaceVersion = surfaceField.ThermalCapacityVersion;
-        if (!stabilityCacheValid || cachedVerticalDiffusivity != verticalThermalDiffusivity || cachedMaximumVerticalSubsteps != maximumVerticalSubsteps || cachedSurfaceCapacityVersion != surfaceVersion)
+        oldTemperature[0] = surfaceField.GetCellTemperatureKelvin(cell); layerCapacity[0] = surfaceField.GetCellHeatCapacity(cell);
+        for (int layer = 1; layer < layers; layer++) { int node = sourceGrid.GetNodeIndex(cell, layer); oldTemperature[layer] = subsurfaceTemperatureKelvinByNode[node]; layerCapacity[layer] = heatCapacityByNode[node]; }
+        for (int layer = 0; layer + 1 < layers; layer++) conductance[layer] = verticalThermalDiffusivity * columnInterfaceConductanceBase[column * (sourceGrid.MaximumLayerCount - 1) + layer];
+        double oldEnergy = 0d;
+        for (int layer = 0; layer < layers; layer++)
         {
-            float stable = float.PositiveInfinity;
-            if (verticalThermalDiffusivity > 0f)
-            {
-                for (int i = 0; i < participatingSurfaceCells.Length; i++) if (compactSurfaceConductanceSumBase[i] > 0f) stable = Mathf.Min(stable, StabilitySafetyFactor * surfaceField.GetCellHeatCapacity(participatingSurfaceCells[i]) / (verticalThermalDiffusivity * compactSurfaceConductanceSumBase[i]));
-                for (int i = 0; i < activeSubsurfaceNodeIndices.Length; i++) if (compactSubsurfaceConductanceSumBase[i] > 0f) stable = Mathf.Min(stable, StabilitySafetyFactor * heatCapacityByNode[activeSubsurfaceNodeIndices[i]] / (verticalThermalDiffusivity * compactSubsurfaceConductanceSumBase[i]));
-            }
-            cachedStableVerticalStep = float.IsInfinity(stable) ? float.MaxValue : Mathf.Max(1e-8f, stable); cachedVerticalDiffusivity = verticalThermalDiffusivity; cachedMaximumVerticalSubsteps = maximumVerticalSubsteps; cachedSurfaceCapacityVersion = surfaceVersion; stabilityCacheValid = true;
+            if (!Finite(oldTemperature[layer]) || oldTemperature[layer] < 0d || !Finite(layerCapacity[layer]) || layerCapacity[layer] <= 0d) return ColumnFailure(cell, "invalid temperature/capacity");
+            oldEnergy += oldTemperature[layer] * layerCapacity[layer];
+            double above = layer > 0 ? conductance[layer - 1] : 0d, below = layer + 1 < layers ? conductance[layer] : 0d;
+            if (!Finite(above) || above < 0d || !Finite(below) || below < 0d) return ColumnFailure(cell, "invalid conductance");
+            solveLower[layer] = layer > 0 ? -dt * above : 0d; solveUpper[layer] = layer + 1 < layers ? -dt * below : 0d; solveDiagonal[layer] = layerCapacity[layer] + dt * (above + below); solveRhs[layer] = layerCapacity[layer] * oldTemperature[layer];
         }
-        needed = Mathf.Max(1, Mathf.CeilToInt(dt / cachedStableVerticalStep)); effectiveDiffusivity = verticalThermalDiffusivity;
+        double pivot = solveDiagonal[0]; if (Math.Abs(pivot) < 1e-20 || !Finite(pivot)) return ColumnFailure(cell, "singular diagonal");
+        solveCPrime[0] = solveUpper[0] / pivot; solveDPrime[0] = solveRhs[0] / pivot;
+        for (int i = 1; i < layers; i++) { pivot = solveDiagonal[i] - solveLower[i] * solveCPrime[i - 1]; if (Math.Abs(pivot) < 1e-20 || !Finite(pivot)) return ColumnFailure(cell, "singular diagonal"); solveCPrime[i] = i + 1 < layers ? solveUpper[i] / pivot : 0d; solveDPrime[i] = (solveRhs[i] - solveLower[i] * solveDPrime[i - 1]) / pivot; }
+        solveResult[layers - 1] = solveDPrime[layers - 1];
+        for (int i = layers - 2; i >= 0; i--) solveResult[i] = solveDPrime[i] - solveCPrime[i] * solveResult[i + 1];
+        double newEnergy = 0d, residualMax = 0d;
+        for (int i = 0; i < layers; i++)
+        {
+            double v = solveResult[i]; if (!Finite(v) || v < 0d) return ColumnFailure(cell, "invalid solved temperature");
+            newEnergy += v * layerCapacity[i];
+            double residual = solveDiagonal[i] * v + solveLower[i] * (i > 0 ? solveResult[i - 1] : 0d) + solveUpper[i] * (i + 1 < layers ? solveResult[i + 1] : 0d) - solveRhs[i];
+            residualMax = Math.Max(residualMax, Math.Abs(residual));
+        }
+        maximumEquationResidual = Math.Max(maximumEquationResidual, residualMax);
+        double rel = Math.Abs(newEnergy - oldEnergy) / Math.Max(1e-12, Math.Abs(oldEnergy));
+        if (rel > ConservationTolerance) return ColumnFailure(cell, "energy conservation exceeded");
+        solvedSurfaceTemperatureByColumn[column] = (float)solveResult[0];
+        for (int layer = 1; layer < layers; layer++) solvedSubsurfaceTemperatureByCompactNode[compactSubsurfaceStart + layer - 1] = (float)solveResult[layer];
+        if (Math.Abs(solveResult[0] - oldTemperature[0]) > 0d) liveLastAbsoluteEnergyTransferred += Math.Abs((solveResult[0] - oldTemperature[0]) * layerCapacity[0]);
+        return true;
     }
+
+    private bool ColumnFailure(int cell, string reason) { if (firstColumnFailure == null) firstColumnFailure = $"cell={cell}, reason={reason}"; return false; }
 
     private void CompleteAudit(bool exactAudit, double before, float dt)
     {
@@ -308,7 +329,7 @@ public sealed class GeodesicOceanTemperatureField : MonoBehaviour
     {
         liveLastVerticalExchangeDurationMilliseconds = (Time.realtimeSinceStartupAsDouble - start) * 1000d; millisecondsThisFrame += liveLastVerticalExchangeDurationMilliseconds;
         RefreshInspectorSnapshot(false);
-        if (enableProfilingDiagnostics && Time.frameCount % 120 == 0) UnityEngine.Debug.Log($"[GeodesicOceanTemperatureProfile] callbacks={callbacksThisFrame}, substeps={substepsThisFrame}, links={linksThisFrame}, frameMs={millisecondsThisFrame:F3}, conservation={liveLatestVerticalConservationRelativeError:E3}", this);
+        if (enableProfilingDiagnostics && Time.frameCount % 120 == 0) UnityEngine.Debug.Log($"[GeodesicOceanTemperatureProfile] mode={solverMode}, callbacks={callbacksThisFrame}, columns={columnsSolvedLastTick}, layers={layersSolvedLastTick}, frameMs={millisecondsThisFrame:F3}, residual={maximumEquationResidual:E3}, conservation={liveLatestVerticalConservationRelativeError:E3}", this);
     }
     private void RollFrameCounters()
     {
@@ -338,7 +359,7 @@ public sealed class GeodesicOceanTemperatureField : MonoBehaviour
                 liveMaximumSurfaceToBottomTemperatureDifference = Mathf.Max(liveMaximumSurfaceToBottomTemperatureDifference, Mathf.Abs(surface - GetBottomLayerTemperatureKelvin(cell)));
             }
             for (int layer = 0; layer < 5; layer++) { if (diagnosticWeight[layer] > 0d) layerMeanTemperatureKelvin[layer] = (float)(diagnosticWeightedTemperature[layer] / diagnosticWeight[layer]); else layerMinimumTemperatureKelvin[layer] = layerMaximumTemperatureKelvin[layer] = float.NaN; }
-            lastCompletedOceanTemperatureTick = liveCompletedOceanTemperatureTick; lastVerticalExchangeSimulationDelta = liveLastVerticalExchangeSimulationDelta; lastVerticalSubstepCount = liveLastVerticalSubstepCount; lastVerticalExchangeDurationMilliseconds = liveLastVerticalExchangeDurationMilliseconds; latestVerticalConservationRelativeError = liveLatestVerticalConservationRelativeError; lastExactConservationAuditSimulationTime = liveLastExactConservationAuditSimulationTime; ticksSinceLastExactConservationAudit = liveTicksSinceLastExactConservationAudit; lastTickUsedAlgebraicConservationOnly = liveLastTickUsedAlgebraicConservationOnly; lastAbsoluteEnergyTransferred = liveLastAbsoluteEnergyTransferred; lastStabilityClampingOccurred = liveLastStabilityClampingOccurred; maximumSurfaceToBottomTemperatureDifference = liveMaximumSurfaceToBottomTemperatureDifference; oceanCallbacksLastRenderedFrame = liveCallbacksLastFrame; maximumOceanCallbacksPerRenderedFrame = liveMaximumCallbacksPerFrame; verticalSubstepsLastRenderedFrame = liveSubstepsLastFrame; verticalLinksProcessedLastRenderedFrame = liveLinksLastFrame; oceanTemperatureMillisecondsLastRenderedFrame = liveMillisecondsLastFrame;
+            lastCompletedOceanTemperatureTick = liveCompletedOceanTemperatureTick; lastVerticalExchangeSimulationDelta = liveLastVerticalExchangeSimulationDelta; lastVerticalExchangeDurationMilliseconds = liveLastVerticalExchangeDurationMilliseconds; latestVerticalConservationRelativeError = liveLatestVerticalConservationRelativeError; lastExactConservationAuditSimulationTime = liveLastExactConservationAuditSimulationTime; ticksSinceLastExactConservationAudit = liveTicksSinceLastExactConservationAudit; lastTickUsedAlgebraicConservationOnly = liveLastTickUsedAlgebraicConservationOnly; lastAbsoluteEnergyTransferred = liveLastAbsoluteEnergyTransferred; lastStabilityClampingOccurred = false; maximumSurfaceToBottomTemperatureDifference = liveMaximumSurfaceToBottomTemperatureDifference; oceanCallbacksLastRenderedFrame = liveCallbacksLastFrame; maximumOceanCallbacksPerRenderedFrame = liveMaximumCallbacksPerFrame; verticalSubstepsLastRenderedFrame = 1; verticalLinksProcessedLastRenderedFrame = 0; oceanTemperatureMillisecondsLastRenderedFrame = liveMillisecondsLastFrame;
         }
     }
 
@@ -351,13 +372,11 @@ public sealed class GeodesicOceanTemperatureField : MonoBehaviour
         {
             if (!ReferenceEquals(sourceGrid.SourceTopology, generator.GeodesicTopology) || subsurfaceTemperatureKelvinByNode.Length != sourceGrid.NodeCapacity || heatCapacityByNode.Length != sourceGrid.NodeCapacity || activeSubsurfaceNodeIndices.Length != activeSubsurfaceNodeCount) fail("stale topology or array length");
             for (int cell = 0; cell < sourceGrid.CellCount; cell++) for (int layer = 0; layer < sourceGrid.MaximumLayerCount; layer++) { bool active = sourceGrid.IsNodeActive(cell, layer); if (!active && TryGetLayerTemperatureKelvin(cell, layer, out _)) fail("inactive/land node exposes temperature"); if (active && layer == 0 && GetLayerTemperatureKelvin(cell, 0) != surfaceField.GetCellTemperatureKelvin(cell)) fail("layer 0 is not exact read-through"); if (active && layer > 0) { int node = sourceGrid.GetNodeIndex(cell, layer); if (!Finite(subsurfaceTemperatureKelvinByNode[node]) || subsurfaceTemperatureKelvinByNode[node] < 0f || !Finite(heatCapacityByNode[node]) || heatCapacityByNode[node] <= 0f) fail("invalid active subsurface state"); } }
-            for (int link = 0; link < linkLowerNode.Length; link++) if (!Finite(linkConductanceBase[link]) || linkConductanceBase[link] <= 0f || !sourceGrid.IsNodeActive(linkLowerNode[link] / sourceGrid.MaximumLayerCount, linkLowerNode[link] % sourceGrid.MaximumLayerCount)) fail("invalid compact vertical link/conductance");
-            float[] t = { 300f, 300f }, c = { 2f, 3f }, d = new float[2]; TestExchange(t, c, d, 1f); if (t[0] != 300f || t[1] != 300f) fail("uniform-column test changed"); t[0] = 310f; t[1] = 290f; double before = t[0] * c[0] + t[1] * c[1]; TestExchange(t, c, d, 0.01f); double after = t[0] * c[0] + t[1] * c[1]; if (t[1] <= 290f) fail("warm-surface test did not transfer downward"); if (Math.Abs(after - before) > 1e-5 * Math.Abs(before)) fail("temporary column did not conserve energy");
+            for (int i = 0; i < columnInterfaceConductanceBase.Length; i++) if (!Finite(columnInterfaceConductanceBase[i]) || columnInterfaceConductanceBase[i] < 0f) fail("invalid compact column conductance");
             double liveEnergy = TotalParticipatingEnergy(); if (!Finite(liveEnergy) || !Finite(liveLatestVerticalConservationRelativeError) || liveLatestVerticalConservationRelativeError > ConservationTolerance) fail("runtime energy/conservation tolerance invalid");
         }
         if (errors == 0) UnityEngine.Debug.Log($"[GeodesicOceanTemperatureValidation] valid; {sourceGridSummary}; subsurface={activeSubsurfaceNodeCount}; surfaces={participatingSurfaceCellCount}; conservation={liveLatestVerticalConservationRelativeError:E3}", this); else UnityEngine.Debug.LogError($"[GeodesicOceanTemperatureValidation] invalid; errors={errors}; first={first}", this);
     }
-    private static void TestExchange(float[] t, float[] c, float[] d, float dt) { d[0] = d[1] = 0f; float e = (t[1] - t[0]) * dt; d[0] += e; d[1] -= e; t[0] += d[0] / c[0]; t[1] += d[1] / c[1]; }
     private static bool Finite(float value) => !float.IsNaN(value) && !float.IsInfinity(value);
     private static bool Finite(double value) => !double.IsNaN(value) && !double.IsInfinity(value);
 }
