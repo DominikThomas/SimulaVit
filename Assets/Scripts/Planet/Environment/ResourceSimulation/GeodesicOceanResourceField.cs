@@ -3,6 +3,7 @@ using Unity.Profiling;
 using UnityEngine;
 
 public enum GeodesicOceanResource { CO2 = 0, O2 = 1, CH4 = 2, H2 = 3, H2S = 4, Fe2 = 5, OrganicC = 6 }
+public enum GeodesicOceanResourceInitializationFailure { None, PlanetGeneratorMissing, NotGeodesicMode, DomainMissing, DomainNotInitialized, DomainGridNull, ZeroActiveNodes, InvalidNodeCapacity, AllocationOrInitializationFailure }
 
 [Serializable]
 public struct GeodesicOceanResourceDiagnostics
@@ -45,6 +46,10 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     [SerializeField] private int rejectedNonfiniteWriteCount;
     [SerializeField] private int rejectedNegativeWriteCount;
     [SerializeField] private GeodesicOceanResourceDiagnostics[] resourceDiagnostics = CreateDiagnosticsArray();
+    [SerializeField] private GeodesicOceanResourceInitializationFailure lastInitializationFailure;
+    [SerializeField] private string lastInitializationFailureMessage = string.Empty;
+    [SerializeField] private string lastStartupConcentrationDiagnostic = string.Empty;
+    [SerializeField] private string lastSentinelVerificationDiagnostic = string.Empty;
 
     private GeodesicOceanLayerDomain domain;
     private GeodesicOceanLayerGrid sourceGrid;
@@ -59,6 +64,10 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     public int ActiveNodeCount => activeNodeCount;
     public double ActiveOceanVolume => activeOceanVolume;
     public long ApproximateRuntimeMemoryBytes => approximateRuntimeMemoryBytes;
+    public GeodesicOceanLayerGrid SourceGrid => sourceGrid;
+    public GeodesicOceanResourceInitializationFailure LastInitializationFailure => lastInitializationFailure;
+    public string LastInitializationFailureMessage => lastInitializationFailureMessage;
+    public string LastStartupConcentrationDiagnostic => lastStartupConcentrationDiagnostic;
 
     private void Awake() => domain = GetComponent<GeodesicOceanLayerDomain>();
     private void OnDestroy() => ClearField();
@@ -69,18 +78,30 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
         initialO2Concentration = Mathf.Max(0f, o2);
         initialCH4Concentration = Mathf.Max(0f, ch4);
         initialFe2Concentration = Mathf.Max(0f, fe2);
+        lastStartupConcentrationDiagnostic = $"CO2={initialCO2Concentration:G6}, O2={initialO2Concentration:G6}, CH4={initialCH4Concentration:G6}, Fe2={initialFe2Concentration:G6}";
     }
 
-    public void InitializeForCurrentDomain()
+    public bool InitializeForCurrentDomain()
     {
         using (InitializeMarker.Auto())
         {
             ClearField(false);
-            domain ??= GetComponent<GeodesicOceanLayerDomain>();
-            GeodesicOceanLayerGrid grid = domain != null ? domain.Grid : null;
+            lastInitializationFailure = GeodesicOceanResourceInitializationFailure.None;
+            lastInitializationFailureMessage = string.Empty;
+            lastSentinelVerificationDiagnostic = string.Empty;
+            domain = GetComponent<GeodesicOceanLayerDomain>();
             PlanetGenerator generator = GetComponent<PlanetGenerator>();
-            if (generator == null || generator.CurrentGridType != PlanetGridType.GeodesicIcosphere || domain == null || !domain.Initialized || grid == null) { ClearField(); return; }
+            if (generator == null) return FailInitialization(GeodesicOceanResourceInitializationFailure.PlanetGeneratorMissing, "PlanetGenerator missing");
+            if (generator.CurrentGridType != PlanetGridType.GeodesicIcosphere) return FailInitialization(GeodesicOceanResourceInitializationFailure.NotGeodesicMode, $"current mode is {generator.CurrentGridType}, not GeodesicIcosphere");
+            if (domain == null) return FailInitialization(GeodesicOceanResourceInitializationFailure.DomainMissing, "GeodesicOceanLayerDomain missing");
+            if (!domain.Initialized) return FailInitialization(GeodesicOceanResourceInitializationFailure.DomainNotInitialized, "GeodesicOceanLayerDomain not initialized");
+            GeodesicOceanLayerGrid grid = domain.Grid;
+            if (grid == null) return FailInitialization(GeodesicOceanResourceInitializationFailure.DomainGridNull, "GeodesicOceanLayerDomain Grid is null");
+            if (grid.ActiveNodeCount <= 0) return FailInitialization(GeodesicOceanResourceInitializationFailure.ZeroActiveNodes, "grid has zero active nodes");
+            if (grid.NodeCapacity <= 0 || grid.CellCount <= 0 || grid.MaximumLayerCount <= 0 || grid.NodeCapacity != grid.CellCount * grid.MaximumLayerCount) return FailInitialization(GeodesicOceanResourceInitializationFailure.InvalidNodeCapacity, $"invalid node capacity: cells={grid.CellCount}, layers={grid.MaximumLayerCount}, nodeCapacity={grid.NodeCapacity}");
 
+            try
+            {
             sourceGrid = grid; cellCount = grid.CellCount; nodeCapacity = grid.NodeCapacity; activeNodeCount = grid.ActiveNodeCount;
             concentrationsByResourceThenNode = new float[ResourceCount * nodeCapacity];
             activeNodeIndices = new int[activeNodeCount]; activeNodeVolumes = new float[activeNodeCount];
@@ -100,8 +121,49 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
             }
             activeOceanVolume = volume; approximateRuntimeMemoryBytes = (long)concentrationsByResourceThenNode.Length * sizeof(float) + (long)activeNodeIndices.Length * sizeof(int) + (long)activeNodeVolumes.Length * sizeof(float) + ResourceCount * 32L;
             initialized = true; initializationCount++; RecomputeDiagnostics();
-            Debug.Log($"[GeodesicOceanResource] initialized dissolved-ocean concentrations (not atmosphere; not legacy normalized totals): cells={cellCount}, nodeCapacity={nodeCapacity}, activeNodes={activeNodeCount}, volume={activeOceanVolume:G6}, memory={approximateRuntimeMemoryBytes} bytes, CO2={initialCO2Concentration:G6}, O2={initialO2Concentration:G6}, CH4={initialCH4Concentration:G6}, H2=0, H2S=0, Fe2={initialFe2Concentration:G6}, OrganicC=0", this);
+            if (!VerifyStartupSentinel(out string sentinel)) return FailInitialization(GeodesicOceanResourceInitializationFailure.AllocationOrInitializationFailure, sentinel);
+            lastSentinelVerificationDiagnostic = sentinel;
+            Debug.Log($"[GeodesicOceanResource] initialized dissolved-ocean concentrations (not atmosphere; not legacy normalized totals): cells={cellCount}, nodeCapacity={nodeCapacity}, activeNodes={activeNodeCount}, volume={activeOceanVolume:G6}, memory={approximateRuntimeMemoryBytes} bytes, CO2={initialCO2Concentration:G6}, O2={initialO2Concentration:G6}, CH4={initialCH4Concentration:G6}, H2=0, H2S=0, Fe2={initialFe2Concentration:G6}, OrganicC=0, sentinel={sentinel}", this);
+            return true;
+            }
+            catch (Exception exception)
+            {
+                return FailInitialization(GeodesicOceanResourceInitializationFailure.AllocationOrInitializationFailure, exception.Message);
+            }
         }
+    }
+
+    private bool FailInitialization(GeodesicOceanResourceInitializationFailure failure, string detail)
+    {
+        lastInitializationFailure = failure;
+        lastInitializationFailureMessage = detail ?? failure.ToString();
+        ClearField(false);
+        Debug.LogError($"[GeodesicOceanResource] initialization failed: {failure}; {lastInitializationFailureMessage}", this);
+        return false;
+    }
+
+    private bool VerifyStartupSentinel(out string diagnostic)
+    {
+        diagnostic = "no active sentinel";
+        if (sourceGrid == null || activeNodeCount <= 0) return false;
+        int node = activeNodeIndices[0];
+        int cell = node / sourceGrid.MaximumLayerCount;
+        int layer = node % sourceGrid.MaximumLayerCount;
+        bool ok = TryGetConcentration(cell, layer, GeodesicOceanResource.CO2, out float co2)
+            && TryGetConcentration(cell, layer, GeodesicOceanResource.O2, out float o2)
+            && TryGetConcentration(cell, layer, GeodesicOceanResource.CH4, out float ch4)
+            && TryGetConcentration(cell, layer, GeodesicOceanResource.H2, out float h2)
+            && TryGetConcentration(cell, layer, GeodesicOceanResource.H2S, out float h2s)
+            && TryGetConcentration(cell, layer, GeodesicOceanResource.Fe2, out float fe2)
+            && TryGetConcentration(cell, layer, GeodesicOceanResource.OrganicC, out float organicC);
+        diagnostic = $"cell={cell}, layer={layer}, CO2={co2:G6}, O2={o2:G6}, CH4={ch4:G6}, H2={h2:G6}, H2S={h2s:G6}, Fe2={fe2:G6}, OrganicC={organicC:G6}";
+        if (!ok) return false;
+        const float tolerance = 1e-5f;
+        return Mathf.Abs(co2 - initialCO2Concentration) <= tolerance
+            && Mathf.Abs(o2 - initialO2Concentration) <= tolerance
+            && Mathf.Abs(ch4 - initialCH4Concentration) <= tolerance
+            && Mathf.Abs(fe2 - initialFe2Concentration) <= tolerance
+            && h2 == 0f && h2s == 0f && organicC == 0f;
     }
 
     public void ClearField() => ClearField(true);
@@ -120,15 +182,15 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     }
     public bool TryAddConcentration(int cellIndex, int layerIndex, GeodesicOceanResource resource, float deltaConcentration)
     {
-        if (!Finite(deltaConcentration)) { rejectedNonfiniteWriteCount++; return false; } if (!TryResolveNode(cellIndex, layerIndex, resource, out int offset)) return false; float next = concentrationsByResourceThenNode[offset] + deltaConcentration; if (next < 0f) { rejectedNegativeWriteCount++; return false; } concentrationsByResourceThenNode[offset] = next; RecomputeDiagnosticsFor(resource); return true;
+        if (!Finite(deltaConcentration)) { rejectedNonfiniteWriteCount++; return false; } if (!TryResolveNode(cellIndex, layerIndex, resource, out int offset)) return false; float next = concentrationsByResourceThenNode[offset] + deltaConcentration; if (!Finite(next)) { rejectedNonfiniteWriteCount++; return false; } if (next < 0f) { rejectedNegativeWriteCount++; return false; } concentrationsByResourceThenNode[offset] = next; RecomputeDiagnosticsFor(resource); return true;
     }
     public bool TryAddInventory(int cellIndex, int layerIndex, GeodesicOceanResource resource, double inventoryDelta)
     {
-        if (!Finite(inventoryDelta)) { rejectedNonfiniteWriteCount++; return false; } if (inventoryDelta < 0d) { rejectedNegativeWriteCount++; return false; } if (!TryResolveNode(cellIndex, layerIndex, resource, out int offset)) return false; int node = sourceGrid.GetNodeIndex(cellIndex, layerIndex); float next = concentrationsByResourceThenNode[offset] + (float)(inventoryDelta / sourceGrid.LayerVolume[node]); if (next < 0f) { rejectedNegativeWriteCount++; return false; } concentrationsByResourceThenNode[offset] = next; RecomputeDiagnosticsFor(resource); return true;
+        if (!Finite(inventoryDelta)) { rejectedNonfiniteWriteCount++; return false; } if (inventoryDelta < 0d) { rejectedNegativeWriteCount++; return false; } if (!TryResolveNode(cellIndex, layerIndex, resource, out int offset)) return false; int node = sourceGrid.GetNodeIndex(cellIndex, layerIndex); double delta = inventoryDelta / sourceGrid.LayerVolume[node]; if (!Finite(delta) || delta > float.MaxValue) { rejectedNonfiniteWriteCount++; return false; } float next = concentrationsByResourceThenNode[offset] + (float)delta; if (!Finite(next)) { rejectedNonfiniteWriteCount++; return false; } if (next < 0f) { rejectedNegativeWriteCount++; return false; } concentrationsByResourceThenNode[offset] = next; RecomputeDiagnosticsFor(resource); return true;
     }
     public bool TryWithdrawInventoryBounded(int cellIndex, int layerIndex, GeodesicOceanResource resource, double requestedInventory, out double withdrawnInventory)
     {
-        withdrawnInventory = 0d; if (!Finite(requestedInventory) || requestedInventory < 0d) { if (!Finite(requestedInventory)) rejectedNonfiniteWriteCount++; else rejectedNegativeWriteCount++; return false; } if (!TryResolveNode(cellIndex, layerIndex, resource, out int offset)) return false; int node = sourceGrid.GetNodeIndex(cellIndex, layerIndex); double available = concentrationsByResourceThenNode[offset] * (double)sourceGrid.LayerVolume[node]; withdrawnInventory = Math.Min(requestedInventory, available); concentrationsByResourceThenNode[offset] = (float)((available - withdrawnInventory) / sourceGrid.LayerVolume[node]); RecomputeDiagnosticsFor(resource); return true;
+        withdrawnInventory = 0d; if (!Finite(requestedInventory) || requestedInventory < 0d) { if (!Finite(requestedInventory)) rejectedNonfiniteWriteCount++; else rejectedNegativeWriteCount++; return false; } if (!TryResolveNode(cellIndex, layerIndex, resource, out int offset)) return false; int node = sourceGrid.GetNodeIndex(cellIndex, layerIndex); double available = concentrationsByResourceThenNode[offset] * (double)sourceGrid.LayerVolume[node]; withdrawnInventory = Math.Min(requestedInventory, available); double next = (available - withdrawnInventory) / sourceGrid.LayerVolume[node]; if (!Finite(next) || next > float.MaxValue) { rejectedNonfiniteWriteCount++; return false; } concentrationsByResourceThenNode[offset] = (float)next; RecomputeDiagnosticsFor(resource); return true;
     }
     public float GetNodeInventory(int cellIndex, int layerIndex, GeodesicOceanResource resource) => TryGetConcentration(cellIndex, layerIndex, resource, out float c) ? c * sourceGrid.LayerVolume[sourceGrid.GetNodeIndex(cellIndex, layerIndex)] : 0f;
     public double GetGlobalInventory(GeodesicOceanResource resource) => IsResourceValid(resource) && resourceDiagnostics != null ? resourceDiagnostics[(int)resource].globalInventory : 0d;

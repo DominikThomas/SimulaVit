@@ -25,6 +25,8 @@ public class ReplicatorHudPresenter
     private float hudMaxTempKelvin;
     private float nextHudTempSampleTime;
     private GeodesicSurfaceTemperatureField geodesicTemperatureField;
+    private GeodesicOceanResourceField geodesicOceanResourceField;
+    private PlanetGenerator geodesicResourcePlanetGenerator;
 
     private bool showMenu;
     private bool portraitShowReplicators;
@@ -129,18 +131,15 @@ public class ReplicatorHudPresenter
         float o2Pct = (globalO2 / atmosphereTotal) * 100f;
         float ch4Pct = (globalCH4 / atmosphereTotal) * 100f;
 
-        float dissolvedFe2Total = planetResourceMap != null ? planetResourceMap.debugDissolvedFe2PlusTotal : 0f;
-        float dissolvedFe2OceanMean = planetResourceMap != null ? planetResourceMap.debugDissolvedFe2PlusOceanMean : 0f;
-        float dissolvedFe2RemainingPct = planetResourceMap != null ? planetResourceMap.debugDissolvedFe2PlusRemainingFraction * 100f : 0f;
-
         SampleHudTemperatureStats(planetResourceMap);
+        string dissolvedOceanText = BuildDissolvedOceanHudText(planetResourceMap);
 
         string atmosphereText =
-            "Atmosphere (global average)\n" +
+            GetAtmosphereHudHeader(planetResourceMap) + "\n" +
             $"CO2: {globalCo2:0.000} ({co2Pct:0.0}%)\n" +
             $"O2: {globalO2:0.000} ({o2Pct:0.0}%)\n" +
             $"CH4: {globalCH4:0.000} ({ch4Pct:0.0}%)\n" +
-            $"Dissolved Fe2+: {dissolvedFe2OceanMean:0.000} avg / {dissolvedFe2Total:0.0} total ({dissolvedFe2RemainingPct:0.0}% rem)\n" +
+            dissolvedOceanText +
             $"Temp Mean: {ReplicatorManager.FormatTemperature(hudMeanTempKelvin, temperatureDisplayUnit)}\n" +
             $"Temp Min: {ReplicatorManager.FormatTemperature(hudMinTempKelvin, temperatureDisplayUnit)}\n" +
             $"Temp Max: {ReplicatorManager.FormatTemperature(hudMaxTempKelvin, temperatureDisplayUnit)}";
@@ -270,6 +269,54 @@ public class ReplicatorHudPresenter
         initialized = true;
         masterVolume = PlayerPrefs.GetFloat("MasterVolume", 1f);
         AudioListener.volume = masterVolume;
+    }
+
+    private PlanetGenerator ResolveHudPlanetGenerator(PlanetResourceMap planetResourceMap)
+    {
+        if (planetResourceMap != null) return planetResourceMap.GetComponent<PlanetGenerator>();
+        if (geodesicResourcePlanetGenerator == null)
+        {
+            geodesicResourcePlanetGenerator = UnityEngine.Object.FindFirstObjectByType<PlanetGenerator>();
+        }
+        return geodesicResourcePlanetGenerator;
+    }
+
+    private string GetAtmosphereHudHeader(PlanetResourceMap planetResourceMap)
+    {
+        PlanetGenerator generator = ResolveHudPlanetGenerator(planetResourceMap);
+        return generator != null && generator.CurrentGridType == PlanetGridType.GeodesicIcosphere
+            ? "Atmosphere (global; geodesic coupling not migrated)"
+            : "Atmosphere (global average)";
+    }
+
+    private string BuildDissolvedOceanHudText(PlanetResourceMap planetResourceMap)
+    {
+        PlanetGenerator generator = ResolveHudPlanetGenerator(planetResourceMap);
+        if (generator == null || generator.CurrentGridType != PlanetGridType.GeodesicIcosphere)
+        {
+            float dissolvedFe2Total = planetResourceMap != null ? planetResourceMap.debugDissolvedFe2PlusTotal : 0f;
+            float dissolvedFe2OceanMean = planetResourceMap != null ? planetResourceMap.debugDissolvedFe2PlusOceanMean : 0f;
+            float dissolvedFe2RemainingPct = planetResourceMap != null ? planetResourceMap.debugDissolvedFe2PlusRemainingFraction * 100f : 0f;
+            return $"Dissolved Fe2+: {dissolvedFe2OceanMean:0.000} avg / {dissolvedFe2Total:0.0} total ({dissolvedFe2RemainingPct:0.0}% rem)\n";
+        }
+
+        if (geodesicOceanResourceField == null || !ReferenceEquals(geodesicResourcePlanetGenerator, generator))
+        {
+            geodesicResourcePlanetGenerator = generator;
+            geodesicOceanResourceField = generator.GetComponent<GeodesicOceanResourceField>();
+        }
+
+        if (geodesicOceanResourceField == null || !geodesicOceanResourceField.IsInitialized)
+        {
+            return "Dissolved ocean: unavailable\n";
+        }
+
+        return
+            "Dissolved ocean (geodesic volume-weighted mean)\n" +
+            $"CO2: {geodesicOceanResourceField.GetVolumeWeightedMeanConcentration(GeodesicOceanResource.CO2):0.###}\n" +
+            $"O2: {geodesicOceanResourceField.GetVolumeWeightedMeanConcentration(GeodesicOceanResource.O2):0.###}\n" +
+            $"CH4: {geodesicOceanResourceField.GetVolumeWeightedMeanConcentration(GeodesicOceanResource.CH4):0.###}\n" +
+            $"Fe2+: {geodesicOceanResourceField.GetVolumeWeightedMeanConcentration(GeodesicOceanResource.Fe2):0.###} avg / {geodesicOceanResourceField.GetGlobalInventory(GeodesicOceanResource.Fe2):0.###} total\n";
     }
 
     private void SampleHudTemperatureStats(PlanetResourceMap planetResourceMap)

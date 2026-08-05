@@ -808,7 +808,11 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         else
         {
             oceanResourceField.enabled = true;
-            oceanResourceField.InitializeForCurrentDomain();
+            bool resourcesInitialized = oceanResourceField.InitializeForCurrentDomain();
+            if (!resourcesInitialized || !oceanResourceField.IsInitialized)
+            {
+                Debug.LogError($"[GeodesicOceanResource] PlanetGenerator observed resource initialization failure: {oceanResourceField.LastInitializationFailure}; {oceanResourceField.LastInitializationFailureMessage}", this);
+            }
         }
         LogStage("ocean-resource initialization", stage);
 

@@ -1702,3 +1702,15 @@ Deferred: passive/horizontal/vertical transport, mixing, advection, chemistry/re
 ### Next recommended phase
 
 Proceed to passive conservative layered transport for the geodesic dissolved-ocean resource field. Do not proceed directly to chemistry or biology until transport conservation and sparse active-node traversal have been validated.
+
+### PR #238 correction notes — resource availability diagnostics
+
+Runtime testing found picker resource rows could show channel-level `--` values for every layer, which made it impossible to distinguish a missing/stale picker reference from an uninitialized resource field or inactive node. The correction keeps the same ownership/storage contract but adds explicit initialization failure reporting, `LastInitializationFailure` diagnostics, a bool-returning initialization path, PlanetGenerator post-call verification, and a startup sentinel read that confirms configured CO2/O2/CH4/Fe2 values plus zero H2/H2S/OrganicC reached one deterministic active node.
+
+Picker resource resolution is now refreshed from the authoritative Planet Generator object during `Awake`, topology binding, and selected-cell resource diagnostic caching. If the field itself is unavailable, the picker reports one actionable status (`component missing`, `field not initialized`, `source grid mismatch`, or `node inactive`) instead of showing rows of ambiguous channel `--` values. A real initialized zero concentration remains formatted as `0`.
+
+The runtime HUD remains legacy-exact in cube-sphere mode. In geodesic mode it labels atmosphere values as global placeholders because geodesic atmosphere coupling is not migrated, and it displays geodesic dissolved-ocean volume-weighted means for CO2/O2/CH4/Fe2 plus Fe2 global inventory when `GeodesicOceanResourceField` is initialized. It deliberately omits legacy Fe2 remaining percentage in geodesic mode because no geodesic depletion baseline exists yet.
+
+Public per-node writes still recompute diagnostics immediately for this foundation phase. Future passive conservative transport should use a dedicated batch mutation path so transport loops do not recalculate full diagnostics per node.
+
+Unity Profiler spikes in `GeodesicOceanTemperature.AccumulateVerticalFlux`, `GeodesicOceanTemperature.ApplySurfaceDeltas`, `GeodesicOceanTemperature.ApplySubsurfaceDeltas`, and `GeodesicTemperature.HorizontalDiffusion` are recorded as a separate follow-up performance task after PR #238. This resource-state correction does not add periodic stepping.
