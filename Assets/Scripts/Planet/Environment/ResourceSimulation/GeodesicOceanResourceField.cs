@@ -145,25 +145,66 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     private bool VerifyStartupSentinel(out string diagnostic)
     {
         diagnostic = "no active sentinel";
-        if (sourceGrid == null || activeNodeCount <= 0) return false;
+
+        if (sourceGrid == null || activeNodeCount <= 0)
+        {
+            return false;
+        }
+
         int node = activeNodeIndices[0];
         int cell = node / sourceGrid.MaximumLayerCount;
         int layer = node % sourceGrid.MaximumLayerCount;
-        bool ok = TryGetConcentration(cell, layer, GeodesicOceanResource.CO2, out float co2)
-            && TryGetConcentration(cell, layer, GeodesicOceanResource.O2, out float o2)
-            && TryGetConcentration(cell, layer, GeodesicOceanResource.CH4, out float ch4)
-            && TryGetConcentration(cell, layer, GeodesicOceanResource.H2, out float h2)
-            && TryGetConcentration(cell, layer, GeodesicOceanResource.H2S, out float h2s)
-            && TryGetConcentration(cell, layer, GeodesicOceanResource.Fe2, out float fe2)
-            && TryGetConcentration(cell, layer, GeodesicOceanResource.OrganicC, out float organicC);
-        diagnostic = $"cell={cell}, layer={layer}, CO2={co2:G6}, O2={o2:G6}, CH4={ch4:G6}, H2={h2:G6}, H2S={h2s:G6}, Fe2={fe2:G6}, OrganicC={organicC:G6}";
-        if (!ok) return false;
+
+        bool co2Ok = TryGetConcentration(
+            cell, layer, GeodesicOceanResource.CO2, out float co2);
+
+        bool o2Ok = TryGetConcentration(
+            cell, layer, GeodesicOceanResource.O2, out float o2);
+
+        bool ch4Ok = TryGetConcentration(
+            cell, layer, GeodesicOceanResource.CH4, out float ch4);
+
+        bool h2Ok = TryGetConcentration(
+            cell, layer, GeodesicOceanResource.H2, out float h2);
+
+        bool h2sOk = TryGetConcentration(
+            cell, layer, GeodesicOceanResource.H2S, out float h2s);
+
+        bool fe2Ok = TryGetConcentration(
+            cell, layer, GeodesicOceanResource.Fe2, out float fe2);
+
+        bool organicCOk = TryGetConcentration(
+            cell, layer, GeodesicOceanResource.OrganicC, out float organicC);
+
+        bool ok =
+            co2Ok &&
+            o2Ok &&
+            ch4Ok &&
+            h2Ok &&
+            h2sOk &&
+            fe2Ok &&
+            organicCOk;
+
+        diagnostic =
+            $"cell={cell}, layer={layer}, " +
+            $"CO2={co2:G6}, O2={o2:G6}, CH4={ch4:G6}, " +
+            $"H2={h2:G6}, H2S={h2s:G6}, Fe2={fe2:G6}, " +
+            $"OrganicC={organicC:G6}";
+
+        if (!ok)
+        {
+            return false;
+        }
+
         const float tolerance = 1e-5f;
+
         return Mathf.Abs(co2 - initialCO2Concentration) <= tolerance
             && Mathf.Abs(o2 - initialO2Concentration) <= tolerance
             && Mathf.Abs(ch4 - initialCH4Concentration) <= tolerance
             && Mathf.Abs(fe2 - initialFe2Concentration) <= tolerance
-            && h2 == 0f && h2s == 0f && organicC == 0f;
+            && h2 == 0f
+            && h2s == 0f
+            && organicC == 0f;
     }
 
     public void ClearField() => ClearField(true);
