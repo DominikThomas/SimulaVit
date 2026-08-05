@@ -469,6 +469,7 @@ public class SimulationStartupController : MonoBehaviour
             if (config.gridType == PlanetGridType.GeodesicIcosphere)
             {
                 planetGenerator.GetComponent<GeodesicSurfaceTemperatureField>()?.SetStartupTemperatureParameters(config.baseTempKelvin, config.insolationTempGain);
+                planetGenerator.GetComponent<GeodesicOceanResourceField>()?.SetStartupConcentrations(config.initialCO2, config.initialO2, config.initialCH4, config.initialDissolvedFe2Plus);
             }
             planetGenerator.InitializeAuthoritativePlanet("New Game startup selection");
         }
@@ -494,7 +495,7 @@ public class SimulationStartupController : MonoBehaviour
         }
         else if (config.gridType == PlanetGridType.GeodesicIcosphere)
         {
-            Debug.Log("[StartupLifecycle] Geodesic prototype mode: skipping PlanetResourceMap resource initialization and vent/resource overlays once.", this);
+            Debug.Log("[StartupLifecycle] Geodesic mode: skipping legacy PlanetResourceMap resource initialization and vent/resource overlays; GeodesicOceanResourceField owns dissolved-ocean concentrations.", this);
             ventVisualizer?.ClearRuntimeVisuals("geodesic prototype mode selected");
             planetGenerator?.GetComponent<PlanetTemperatureIceVisuals>()?.ClearForGeodesicMode();
         }

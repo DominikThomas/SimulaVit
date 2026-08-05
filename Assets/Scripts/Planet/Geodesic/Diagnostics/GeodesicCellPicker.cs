@@ -67,6 +67,7 @@ public class GeodesicCellPicker : MonoBehaviour
     private GeodesicOceanLayerDomain oceanLayerDomain;
     private GeodesicSurfaceTemperatureField temperatureField;
     private GeodesicOceanTemperatureField oceanTemperatureField;
+    private GeodesicOceanResourceField oceanResourceField;
     private ReplicatorManager temperatureDisplayAuthority;
     private string selectedLayeredOceanLog = ", layeredOcean=unavailable";
     private string selectedLayeredOceanPopup = "unavailable";
@@ -97,11 +98,28 @@ public class GeodesicCellPicker : MonoBehaviour
     private void Awake()
     {
         ResolvePickingCollider();
+        ResolveAuthoritativePlanetComponents();
+        SetTemperatureDisplayAuthority(planetGenerator != null ? planetGenerator.ReplicatorManager : null);
+    }
+
+    private void ResolveAuthoritativePlanetComponents()
+    {
         planetGenerator = GetComponent<PlanetGenerator>();
         oceanLayerDomain = GetComponent<GeodesicOceanLayerDomain>();
         temperatureField = GetComponent<GeodesicSurfaceTemperatureField>();
         oceanTemperatureField = GetComponent<GeodesicOceanTemperatureField>();
-        SetTemperatureDisplayAuthority(planetGenerator != null ? planetGenerator.ReplicatorManager : null);
+        oceanResourceField = GetComponent<GeodesicOceanResourceField>();
+    }
+
+    private bool TryGetResourceFieldStatus(int cellIndex, out string status)
+    {
+        if (planetGenerator == null || oceanLayerDomain == null || oceanResourceField == null || !ReferenceEquals(oceanResourceField.gameObject, gameObject)) ResolveAuthoritativePlanetComponents();
+        if (oceanResourceField == null) { status = "Resources unavailable: component missing"; return false; }
+        if (!oceanResourceField.IsInitialized) { status = "Resources unavailable: field not initialized"; return false; }
+        GeodesicOceanLayerGrid grid = oceanLayerDomain != null ? oceanLayerDomain.Grid : null;
+        if (grid == null || !ReferenceEquals(oceanResourceField.SourceGrid, grid)) { status = "Resources unavailable: source grid mismatch"; return false; }
+        if (cellIndex < 0 || cellIndex >= grid.CellCount || grid.ActiveLayerCountByCell[cellIndex] == 0) { status = "Resources unavailable: node inactive"; return false; }
+        status = string.Empty; return true;
     }
 
     private void OnEnable() => SubscribeToTemperatureDisplayAuthority();
@@ -134,6 +152,7 @@ public class GeodesicCellPicker : MonoBehaviour
     {
         topology = t;
         ResolvePickingCollider();
+        ResolveAuthoritativePlanetComponents();
         ClearSelection();
     }
 
@@ -493,6 +512,8 @@ public class GeodesicCellPicker : MonoBehaviour
             .Append("\nlocalOceanDepth=").Append(localDepth.ToString("F6"))
             .Append("\nnormalizedDepth=").Append(normalizedDepth.ToString("F3"));
         compactPopup.Append("Active layers: ").Append(activeCount);
+        bool resourceFieldAvailable = TryGetResourceFieldStatus(cellIndex, out string resourceStatus);
+        if (!resourceFieldAvailable) { compactPopup.Append("\n").Append(resourceStatus); popup.Append("\n").Append(resourceStatus); }
 
         for (int layer = 0; layer < activeCount; layer++)
         {
@@ -510,9 +531,22 @@ public class GeodesicCellPicker : MonoBehaviour
                 .Append(", volume=").Append(grid.LayerVolume[node].ToString("G6"))
                 .Append(", centerDepth=").Append(centerDepth.ToString("F6"))
                 .Append(", H/V degree=").Append(horizontalDegree).Append('/').Append(verticalDegree);
-            compactPopup.Append("\nLayer ").Append(layer)
-                .Append(": center depth ").Append(centerDepth.ToString("F6"))
-                .Append(", thickness ").Append(grid.LayerThickness[node].ToString("F6"));
+            if (resourceFieldAvailable)
+            {
+                popup.Append(", CO2=").Append(GetResourceText(cellIndex, layer, GeodesicOceanResource.CO2))
+                    .Append(", O2=").Append(GetResourceText(cellIndex, layer, GeodesicOceanResource.O2))
+                    .Append(", CH4=").Append(GetResourceText(cellIndex, layer, GeodesicOceanResource.CH4))
+                    .Append(", H2=").Append(GetResourceText(cellIndex, layer, GeodesicOceanResource.H2))
+                    .Append(", H2S=").Append(GetResourceText(cellIndex, layer, GeodesicOceanResource.H2S))
+                    .Append(", Fe2=").Append(GetResourceText(cellIndex, layer, GeodesicOceanResource.Fe2))
+                    .Append(", OrganicC=").Append(GetResourceText(cellIndex, layer, GeodesicOceanResource.OrganicC));
+                compactPopup.Append("\nL").Append(layer)
+                    .Append(": O2 ").Append(GetResourceText(cellIndex, layer, GeodesicOceanResource.O2))
+                    .Append(" | CO2 ").Append(GetResourceText(cellIndex, layer, GeodesicOceanResource.CO2))
+                    .Append(" | H2 ").Append(GetResourceText(cellIndex, layer, GeodesicOceanResource.H2))
+                    .Append(" | H2S ").Append(GetResourceText(cellIndex, layer, GeodesicOceanResource.H2S))
+                    .Append(" | Fe2 ").Append(GetResourceText(cellIndex, layer, GeodesicOceanResource.Fe2));
+            }
         }
 
         selectedLayeredOceanLog = log.ToString();
@@ -632,6 +666,13 @@ public class GeodesicCellPicker : MonoBehaviour
             else text.Append("\nL").Append(layer).Append(": ").Append(ReplicatorManager.FormatTemperature(kelvin, displayUnit)).Append(" | depth ").Append(depth.ToString("F3")).Append(" | thickness ").Append(grid.LayerThickness[node].ToString("F3"));
         }
         return text.ToString();
+    }
+
+    private string GetResourceText(int cellIndex, int layerIndex, GeodesicOceanResource resource)
+    {
+        return oceanResourceField != null && oceanResourceField.IsInitialized && oceanResourceField.TryGetConcentration(cellIndex, layerIndex, resource, out float concentration)
+            ? concentration.ToString("G4")
+            : "--";
     }
 
     private static int GetHorizontalLayerDegree(GeodesicOceanLayerGrid grid, int nodeIndex)

@@ -1605,3 +1605,112 @@ Per tick, the world sun direction is transformed to planet-local space once, nor
 New Game applies sun day/year timing and assigns geodesic base/gain parameters before authoritative planet generation. Parameter assignment is allocation-free and does not rebuild a field. Generation then creates topology, transport graph, ocean domain, surface temperature, and ocean temperature exactly once in dependency order. Because cleanup unsubscribes the old ocean field before surface initialization, the surface reinitialization event has no ocean subscriber during generation; the generator's explicit ocean initialization is therefore the sole startup ocean build. Genuine runtime parameter replacement uses the explicit rebuilding API and its reinitialization event.
 
 The thermal-interval context command is intentionally labelled a lightweight representative-state comparison. It is useful for deterministic screening but is not evidence that the full 10,242-cell surface and layered ocean remain within 0.1 K; the production one-second interval requires the documented full-field Unity comparison before merge.
+
+---
+
+## Phase 6 — Geodesic layered-ocean resource-state foundation
+
+### Status
+
+Implemented on the current geodesic resource-state child branch as an ownership, storage, initialization, query, lifecycle, diagnostics, and validation foundation only. This phase deliberately does not add resource transport, chemistry, vents, atmosphere exchange, biology, sedimentation, visuals, or geodesic save/load payloads.
+
+### Resource ownership
+
+`GeodesicOceanResourceField` is the scene-owned authority for dissolved geodesic ocean resources. It is serialized on the same Planet Generator object as `GeodesicOceanLayerDomain`, `GeodesicSurfaceTemperatureField`, and `GeodesicOceanTemperatureField`. Legacy `PlanetResourceMap` remains unchanged and authoritative only for legacy cube-sphere mode.
+
+### Channel contract
+
+The stable geodesic dissolved-ocean channels are:
+
+- `CO2`;
+- `O2`;
+- `CH4`;
+- `H2`;
+- `H2S`;
+- `Fe2`;
+- `OrganicC`.
+
+Reaction products, sediments, and biological stores remain deferred.
+
+### Concentration and inventory semantics
+
+Geodesic resources are stored as concentration per active ocean-layer volume. For any active node:
+
+```text
+inventory = concentration * GeodesicOceanLayerGrid.LayerVolume[node]
+```
+
+APIs keep concentration and inventory explicit: direct concentration reads/writes/adds, inventory adds, bounded inventory withdrawal, node inventory, global inventory, and volume-weighted mean concentration. Invalid cells, invalid layers, inactive nodes, non-finite writes, and negative writes are rejected safely. Global reductions and validator checks use double precision.
+
+This differs from legacy `PlanetResourceMap` startup/runtime labels, which may mix atmosphere-style startup values, legacy normalized totals, and legacy per-cell resource arrays. Geodesic initialization logs now identify values as dissolved-ocean concentrations, not atmospheric values or legacy normalized totals.
+
+### Storage layout and memory
+
+`GeodesicOceanResourceField` uses one channel-major contiguous `float[]` indexed by:
+
+```text
+resourceOffset = (int)resource * nodeCapacity
+nodeIndex = GeodesicOceanLayerGrid.GetNodeIndex(cellIndex, layerIndex)
+storageIndex = resourceOffset + nodeIndex
+```
+
+Fixed node indexing, active-layer counts, and layer volumes come only from `GeodesicOceanLayerGrid`. Inactive slots remain zero and are not active ocean state. Full scans that are required for diagnostics traverse a compact active-node index list and cached active-node volume list; ordinary direct queries perform no allocation and use no dictionaries.
+
+At subdivision 5 (10,242 cells, five possible layers, seven channels), the channel-major concentration buffer is approximately 1.37 MiB, plus compact active-node indices/volumes and diagnostics. For the known subdivision-5 configuration with `activeNodes=26452`, the total reported resource-field runtime memory is expected to be about 1.57 MiB.
+
+### Initialization order and lifecycle
+
+Geodesic startup order is now:
+
+1. topology;
+2. transport graph;
+3. final bathymetry/classification;
+4. `GeodesicOceanLayerDomain`;
+5. `GeodesicSurfaceTemperatureField`;
+6. `GeodesicOceanTemperatureField`;
+7. `GeodesicOceanResourceField`.
+
+Cleanup reverses ownership by clearing resources before ocean temperature, surface temperature, the ocean-layer domain, and then transport/topology. Legacy startup leaves the geodesic resource field cleared. Regeneration and mode changes replace old arrays and do not subscribe the resource field to temperature ticks because resources do not evolve in this phase.
+
+### Initialization values and diagnostics
+
+Existing startup values with direct dissolved-ocean equivalents are applied uniformly across active ocean volume:
+
+- initial CO2 -> `CO2` concentration;
+- initial O2 -> `O2` concentration;
+- initial CH4 -> `CH4` concentration;
+- initial dissolved Fe2 -> `Fe2` concentration.
+
+`H2`, `H2S`, and `OrganicC` initialize to zero. Land and inactive slots are not initialized. A single initialization log reports all applied geodesic dissolved-ocean concentrations with active-node, volume, and memory diagnostics.
+
+Inspector-visible diagnostics include initialization state, cell count, node capacity, active-node count, active ocean volume, approximate memory, initialization count, clear count, invalid query count, rejected non-finite write count, rejected negative write count, and per-channel cached min/mean/max/global inventory.
+
+### Picker integration
+
+`GeodesicCellPicker` keeps its existing static/dynamic temperature split. Ocean cells show compact per-layer resource concentrations for `O2`, `CO2`, `H2`, `H2S`, and `Fe2`; detailed mode also includes `CH4` and `OrganicC` next to existing layer geometry. Land cells and cells with no active ocean layers report that no active ocean resource layers exist. The picker reads selected nodes directly and does not perform global field scans.
+
+### Validation performed
+
+`GeodesicOceanResourceField` exposes a context-menu command named **Validate Geodesic Ocean Resource Field**. It verifies source-grid identity, storage dimensions, finite/non-negative active values, zero inactive slots, land-cell inactivity, active-node count, independent double-precision global inventories, volume-weighted means, invalid-query non-mutation/counter behavior, and deterministic sentinel coverage for one-layer shallow ocean, partial-layer ocean, five-layer deep ocean, and land cells.
+
+Static checks run in this environment are recorded in the PR/final report. Unity Play Mode and the context-menu validator still require local Unity execution when an editor is available.
+
+### Explicitly deferred features
+
+Deferred: passive/horizontal/vertical transport, mixing, advection, chemistry/reactions, H2/O2 reactions, H2S/O2 reactions, Fe2 oxidation, reaction products, hydrothermal vents, heat sources, atmosphere exchange, photosynthesis, methanogenesis, biology, replicator sampling, sedimentation, marine snow, resource-based ocean colour, save/load payloads, temperature cadence/solver changes, and legacy resource-physics changes.
+
+### Next recommended phase
+
+Proceed to passive conservative layered transport for the geodesic dissolved-ocean resource field. Do not proceed directly to chemistry or biology until transport conservation and sparse active-node traversal have been validated.
+
+### PR #238 correction notes — resource availability diagnostics
+
+Runtime testing found picker resource rows could show channel-level `--` values for every layer, which made it impossible to distinguish a missing/stale picker reference from an uninitialized resource field or inactive node. The correction keeps the same ownership/storage contract but adds explicit initialization failure reporting, `LastInitializationFailure` diagnostics, a bool-returning initialization path, PlanetGenerator post-call verification, and a startup sentinel read that confirms configured CO2/O2/CH4/Fe2 values plus zero H2/H2S/OrganicC reached one deterministic active node.
+
+Picker resource resolution is now refreshed from the authoritative Planet Generator object during `Awake`, topology binding, and selected-cell resource diagnostic caching. If the field itself is unavailable, the picker reports one actionable status (`component missing`, `field not initialized`, `source grid mismatch`, or `node inactive`) instead of showing rows of ambiguous channel `--` values. A real initialized zero concentration remains formatted as `0`.
+
+The runtime HUD remains legacy-exact in cube-sphere mode. In geodesic mode it labels atmosphere values as global placeholders because geodesic atmosphere coupling is not migrated, and it displays geodesic dissolved-ocean volume-weighted means for CO2/O2/CH4/Fe2 plus Fe2 global inventory when `GeodesicOceanResourceField` is initialized. It deliberately omits legacy Fe2 remaining percentage in geodesic mode because no geodesic depletion baseline exists yet.
+
+Public per-node writes still recompute diagnostics immediately for this foundation phase. Future passive conservative transport should use a dedicated batch mutation path so transport loops do not recalculate full diagnostics per node.
+
+Unity Profiler spikes in `GeodesicOceanTemperature.AccumulateVerticalFlux`, `GeodesicOceanTemperature.ApplySurfaceDeltas`, `GeodesicOceanTemperature.ApplySubsurfaceDeltas`, and `GeodesicTemperature.HorizontalDiffusion` are recorded as a separate follow-up performance task after PR #238. This resource-state correction does not add periodic stepping.

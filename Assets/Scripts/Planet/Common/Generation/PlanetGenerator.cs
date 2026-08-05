@@ -608,6 +608,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
         GetComponent<PlanetTemperatureIceVisuals>()?.ClearForGeodesicMode();
 
+        GetComponent<GeodesicOceanResourceField>()?.ClearField();
         GetComponent<GeodesicOceanTemperatureField>()?.ClearField();
         GetComponent<GeodesicSurfaceTemperatureField>()?.ClearField();
         GetComponent<GeodesicOceanLayerDomain>()?.ClearGrid();
@@ -797,6 +798,23 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
             oceanTemperatureField.InitializeForCurrentDomain();
         }
         LogStage("ocean-temperature initialization", stage);
+
+        stage = System.Diagnostics.Stopwatch.StartNew();
+        var oceanResourceField = GetComponent<GeodesicOceanResourceField>();
+        if (oceanResourceField == null)
+        {
+            Debug.LogError("[GeodesicOceanResource] Planet Generator is missing its required scene-owned GeodesicOceanResourceField component; dissolved resource initialization was skipped.", this);
+        }
+        else
+        {
+            oceanResourceField.enabled = true;
+            bool resourcesInitialized = oceanResourceField.InitializeForCurrentDomain();
+            if (!resourcesInitialized || !oceanResourceField.IsInitialized)
+            {
+                Debug.LogError($"[GeodesicOceanResource] PlanetGenerator observed resource initialization failure: {oceanResourceField.LastInitializationFailure}; {oceanResourceField.LastInitializationFailureMessage}", this);
+            }
+        }
+        LogStage("ocean-resource initialization", stage);
 
         stage = System.Diagnostics.Stopwatch.StartNew();
         IcosphereRenderGeometry renderGeometry = IcosphereRenderGeometryCache.GetOrBuild(renderSubdivision);
