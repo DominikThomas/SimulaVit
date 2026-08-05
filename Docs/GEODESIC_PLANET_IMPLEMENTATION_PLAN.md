@@ -1714,3 +1714,24 @@ The runtime HUD remains legacy-exact in cube-sphere mode. In geodesic mode it la
 Public per-node writes still recompute diagnostics immediately for this foundation phase. Future passive conservative transport should use a dedicated batch mutation path so transport loops do not recalculate full diagnostics per node.
 
 Unity Profiler spikes in `GeodesicOceanTemperature.AccumulateVerticalFlux`, `GeodesicOceanTemperature.ApplySurfaceDeltas`, `GeodesicOceanTemperature.ApplySubsurfaceDeltas`, and `GeodesicTemperature.HorizontalDiffusion` are recorded as a separate follow-up performance task after PR #238. This resource-state correction does not add periodic stepping.
+
+### Implicit geodesic ocean vertical-temperature solver
+
+The production geodesic ocean-temperature coupling now uses one backward-Euler implicit tridiagonal solve per participating multi-layer ocean column for each authoritative surface thermal tick. The fixed thermal cadence remains owned by `GeodesicSurfaceTemperatureField`; the ocean field still advances synchronously from `SurfaceTemperatureTickCommitted`, but `ExchangeVerticalHeat` no longer computes a stability-limited explicit substep count, no longer repeatedly clears delta buffers, no longer traverses the global vertical-link table per substep, and no longer clamps effective diffusivity in production.
+
+For every active column, layer 0 remains the authoritative surface-temperature unknown and layers 1-4 remain persistent subsurface unknowns owned by `GeodesicOceanTemperatureField`. Adjacent interfaces use the cached geometry-only base conductance from `GeodesicOceanLayerGrid.VerticalInterfaceArea / VerticalCenterDistance`, scaled by `verticalThermalDiffusivity`, and the solver applies:
+
+```text
+(C_i + dt * (k_above + k_below)) * T_i_new
+- dt * k_above * T_above_new
+- dt * k_below * T_below_new
+= C_i * T_i_old
+```
+
+The tridiagonal matrix has at most five unknowns and is solved with fixed preallocated scratch arrays using double-precision coefficients and elimination. Column mutation is two-phase: solved layer-0 temperatures are staged into a compact surface batch, solved subsurface temperatures are staged into compact active-node order, the surface field validates the whole authoritative batch, and subsurface storage commits only after the surface batch succeeds. A failed column or rejected batch logs the first failure and retains previous valid column state rather than partially mutating the coupled column.
+
+Reusable compact metadata is built during ocean-temperature initialization from the existing `GeodesicOceanLayerGrid`: participating surface cells, active subsurface node indices, and per-column interface conductance bases. One-layer ocean cells are skipped because there is no vertical interface to solve. The old explicit delta arrays and per-substep sparse clear/apply production path are removed; the explicit approach should be retained only as a validation/reference concept, not as ordinary Play Mode stepping.
+
+Vertical exchange conserves coupled column energy algebraically as `sum(C_i * T_i)` for surface plus subsurface layers. Production ticks rely on the conservative solve and throttled exact participating-ocean audits instead of whole-field exact audits every tick. The existing tolerance remains `2e-5` relative error; no tolerance was loosened for this migration. Residual and conservation diagnostics are exposed alongside solver mode, solved column/layer counts, failed-column count, callback/frame counts, solver duration, surface-batch duration, subsurface-commit duration, and exact-audit state. Deprecated explicit-substep/clamp serialized fields are hidden for scene compatibility.
+
+Profiler-marker semantics now distinguish `GeodesicOceanTemperature.Callback`, `PrepareColumns`, `SolveImplicitColumns`, `ValidateSolution`, `ApplySurfaceBatch`, `CommitSubsurface`, `ExactConservationAudit`, and `DiagnosticSnapshot`. The expected next performance phase, after Unity profiling this vertical fix, is to isolate `GeodesicTemperature.HorizontalDiffusion` if it becomes the dominant remaining thermal spike. Baseline profiler values supplied for this task were approximately 80-117 ms vertical flux, 62 ms repeated surface apply, 21 ms repeated subsurface apply, 11-12 ms repeated clear, and 20 ms horizontal diffusion on subdivision-6 affected frames. Optimized Unity profiler captures were not produced in this non-Unity environment and must be recorded before claiming a measured speedup.
