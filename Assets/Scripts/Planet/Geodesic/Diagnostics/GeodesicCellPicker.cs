@@ -67,6 +67,7 @@ public class GeodesicCellPicker : MonoBehaviour
     private GeodesicOceanLayerDomain oceanLayerDomain;
     private GeodesicSurfaceTemperatureField temperatureField;
     private GeodesicOceanTemperatureField oceanTemperatureField;
+    private GeodesicOceanResourceField oceanResourceField;
     private ReplicatorManager temperatureDisplayAuthority;
     private string selectedLayeredOceanLog = ", layeredOcean=unavailable";
     private string selectedLayeredOceanPopup = "unavailable";
@@ -101,6 +102,7 @@ public class GeodesicCellPicker : MonoBehaviour
         oceanLayerDomain = GetComponent<GeodesicOceanLayerDomain>();
         temperatureField = GetComponent<GeodesicSurfaceTemperatureField>();
         oceanTemperatureField = GetComponent<GeodesicOceanTemperatureField>();
+        oceanResourceField = GetComponent<GeodesicOceanResourceField>();
         SetTemperatureDisplayAuthority(planetGenerator != null ? planetGenerator.ReplicatorManager : null);
     }
 
@@ -493,6 +495,7 @@ public class GeodesicCellPicker : MonoBehaviour
             .Append("\nlocalOceanDepth=").Append(localDepth.ToString("F6"))
             .Append("\nnormalizedDepth=").Append(normalizedDepth.ToString("F3"));
         compactPopup.Append("Active layers: ").Append(activeCount);
+        if (activeCount == 0) compactPopup.Append("\nNo active ocean resource layers.");
 
         for (int layer = 0; layer < activeCount; layer++)
         {
@@ -509,10 +512,20 @@ public class GeodesicCellPicker : MonoBehaviour
                 .Append(": thickness=").Append(grid.LayerThickness[node].ToString("F6"))
                 .Append(", volume=").Append(grid.LayerVolume[node].ToString("G6"))
                 .Append(", centerDepth=").Append(centerDepth.ToString("F6"))
-                .Append(", H/V degree=").Append(horizontalDegree).Append('/').Append(verticalDegree);
-            compactPopup.Append("\nLayer ").Append(layer)
-                .Append(": center depth ").Append(centerDepth.ToString("F6"))
-                .Append(", thickness ").Append(grid.LayerThickness[node].ToString("F6"));
+                .Append(", H/V degree=").Append(horizontalDegree).Append('/').Append(verticalDegree)
+                .Append(", CO2=").Append(GetResourceText(cellIndex, layer, GeodesicOceanResource.CO2))
+                .Append(", O2=").Append(GetResourceText(cellIndex, layer, GeodesicOceanResource.O2))
+                .Append(", CH4=").Append(GetResourceText(cellIndex, layer, GeodesicOceanResource.CH4))
+                .Append(", H2=").Append(GetResourceText(cellIndex, layer, GeodesicOceanResource.H2))
+                .Append(", H2S=").Append(GetResourceText(cellIndex, layer, GeodesicOceanResource.H2S))
+                .Append(", Fe2=").Append(GetResourceText(cellIndex, layer, GeodesicOceanResource.Fe2))
+                .Append(", OrganicC=").Append(GetResourceText(cellIndex, layer, GeodesicOceanResource.OrganicC));
+            compactPopup.Append("\nL").Append(layer)
+                .Append(": O2 ").Append(GetResourceText(cellIndex, layer, GeodesicOceanResource.O2))
+                .Append(" | CO2 ").Append(GetResourceText(cellIndex, layer, GeodesicOceanResource.CO2))
+                .Append(" | H2 ").Append(GetResourceText(cellIndex, layer, GeodesicOceanResource.H2))
+                .Append(" | H2S ").Append(GetResourceText(cellIndex, layer, GeodesicOceanResource.H2S))
+                .Append(" | Fe2 ").Append(GetResourceText(cellIndex, layer, GeodesicOceanResource.Fe2));
         }
 
         selectedLayeredOceanLog = log.ToString();
@@ -632,6 +645,13 @@ public class GeodesicCellPicker : MonoBehaviour
             else text.Append("\nL").Append(layer).Append(": ").Append(ReplicatorManager.FormatTemperature(kelvin, displayUnit)).Append(" | depth ").Append(depth.ToString("F3")).Append(" | thickness ").Append(grid.LayerThickness[node].ToString("F3"));
         }
         return text.ToString();
+    }
+
+    private string GetResourceText(int cellIndex, int layerIndex, GeodesicOceanResource resource)
+    {
+        return oceanResourceField != null && oceanResourceField.TryGetConcentration(cellIndex, layerIndex, resource, out float concentration)
+            ? concentration.ToString("G4")
+            : "--";
     }
 
     private static int GetHorizontalLayerDegree(GeodesicOceanLayerGrid grid, int nodeIndex)

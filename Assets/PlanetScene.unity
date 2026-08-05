@@ -889,6 +889,7 @@ GameObject:
   - component: {fileID: 382753106}
   - component: {fileID: 382753107}
   - component: {fileID: 382753108}
+  - component: {fileID: 382753109}
   m_Layer: 0
   m_Name: Planet Generator
   m_TagString: Planet
@@ -1251,6 +1252,34 @@ MonoBehaviour:
   approximateMemoryBytes: 0
   sampleCellIndex: 0
   sampleCellOutput: Grid not initialized.
+--- !u!114 &382753109
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 382753101}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2019979015eb4f069151bac084de2ab2, type: 3}
+  m_Name: GeodesicOceanResourceField
+  m_EditorClassIdentifier: SimulaVit::GeodesicOceanResourceField
+  initialCO2Concentration: 1
+  initialO2Concentration: 0.21
+  initialCH4Concentration: 0
+  initialFe2Concentration: 0
+  initialized: 0
+  cellCount: 0
+  nodeCapacity: 0
+  activeNodeCount: 0
+  activeOceanVolume: 0
+  approximateRuntimeMemoryBytes: 0
+  initializationCount: 0
+  clearCount: 0
+  invalidQueryCount: 0
+  rejectedNonfiniteWriteCount: 0
+  rejectedNegativeWriteCount: 0
+  resourceDiagnostics: []
 --- !u!114 &382753108
 MonoBehaviour:
   m_ObjectHideFlags: 0
