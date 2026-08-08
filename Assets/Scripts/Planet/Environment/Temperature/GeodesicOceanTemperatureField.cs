@@ -67,7 +67,7 @@ public sealed class GeodesicOceanTemperatureField : MonoBehaviour
     [SerializeField, HideInInspector] private long verticalLinksProcessedLastRenderedFrame;
     [SerializeField] private double oceanTemperatureMillisecondsLastRenderedFrame;
     [SerializeField] private int duplicateOrStaleCallbackCount;
-    [SerializeField] private GeodesicThermalModel selectedThermalModel;
+    [SerializeField, InspectorName("Active Thermal Model")] private string activeThermalModelDiagnostic = "Not initialized";
     [SerializeField] private int subsurfaceNodesUpdatedLastTick;
     [SerializeField] private int verticalInterfacesProcessedLastTick;
     [SerializeField] private int implicitColumnsSolvedLastTick;
@@ -85,6 +85,7 @@ public sealed class GeodesicOceanTemperatureField : MonoBehaviour
     private GeodesicSurfaceTemperatureField surfaceField;
     private GeodesicOceanLayerGrid sourceGrid;
     private PlanetResourceMap resourceMap;
+    [NonSerialized] private GeodesicThermalModel activeThermalModel;
     private float[] subsurfaceTemperatureKelvinByNode;
     private float[] heatCapacityByNode;
     private float[] inverseHeatCapacityByNode;
@@ -158,18 +159,20 @@ public sealed class GeodesicOceanTemperatureField : MonoBehaviour
         GeodesicOceanLayerGrid grid = domain != null ? domain.Grid : null;
         if (!enableGeodesicOceanTemperature || generator == null || generator.CurrentGridType != PlanetGridType.GeodesicIcosphere || grid == null || surfaceField == null || !surfaceField.IsInitialized || !ReferenceEquals(grid.SourceTopology, generator.GeodesicTopology)) { ClearState(); return; }
         sourceGrid = grid;
-        selectedThermalModel = surfaceField.ThermalModel;
-        solverMode = selectedThermalModel.ToString();
+        if (!surfaceField.HasActiveThermalModel) { ClearState(); return; }
+        activeThermalModel = surfaceField.ActiveThermalModel;
+        activeThermalModelDiagnostic = activeThermalModel.ToString();
+        solverMode = activeThermalModel.ToString();
         AllocateState();
         BuildThermalVentStrengths();
         BuildActiveSubsurfaceNodes();
-        if (selectedThermalModel == GeodesicThermalModel.ConservativeImplicit) BuildCompactParticipationTables();
+        if (activeThermalModel == GeodesicThermalModel.ConservativeImplicit) BuildCompactParticipationTables();
         RebuildCapacities();
         for (int i = 0; i < activeSubsurfaceNodeIndices.Length; i++)
         {
             int node = activeSubsurfaceNodeIndices[i], cell = node / sourceGrid.MaximumLayerCount, layer = node - cell * sourceGrid.MaximumLayerCount;
             float surface = surfaceField.GetCellTemperatureKelvin(cell);
-            subsurfaceTemperatureKelvinByNode[node] = selectedThermalModel == GeodesicThermalModel.ApproximateEcologicalProfiles
+            subsurfaceTemperatureKelvinByNode[node] = activeThermalModel == GeodesicThermalModel.ApproximateEcologicalProfiles
                 ? CalculateApproximateTarget(cell, layer, surface)
                 : Mathf.Max(0f, surface - (startupMode == GeodesicOceanTemperatureStartupMode.DepthGradient ? initialTemperatureDropPerLayerKelvin * layer : 0f));
         }
@@ -179,7 +182,7 @@ public sealed class GeodesicOceanTemperatureField : MonoBehaviour
         lastProcessedSurfaceTickSequence = -1;
         Subscribe();
         RefreshInspectorSnapshot(true);
-        UnityEngine.Debug.Log($"[GeodesicOceanTemperature] initialized {sourceGridSummary}, subsurfaceNodes={activeSubsurfaceNodeCount}, participatingSurfaces={participatingSurfaceCellCount}, capacity={totalSubsurfaceThermalCapacity:E4}, memory={approximateRuntimeMemoryBytes} bytes", this);
+        UnityEngine.Debug.Log($"[GeodesicOceanTemperature] initialized configuredModel={surfaceField.ConfiguredThermalModel}, activeModel={activeThermalModel}, {sourceGridSummary}, subsurfaceNodes={activeSubsurfaceNodeCount}, participatingSurfaces={participatingSurfaceCellCount}, capacity={totalSubsurfaceThermalCapacity:E4}, memory={approximateRuntimeMemoryBytes} bytes", this);
     }
 
     private void AllocateState()
@@ -260,6 +263,8 @@ public sealed class GeodesicOceanTemperatureField : MonoBehaviour
     private void ClearState()
     {
         initialized = false; sourceGrid = null; subsurfaceTemperatureKelvinByNode = heatCapacityByNode = inverseHeatCapacityByNode = solvedSurfaceTemperatureByColumn = solvedSubsurfaceTemperatureByCompactNode = columnInterfaceConductanceBase = null; thermalVentStrengthByCell = null;
+        activeThermalModel = default;
+        activeThermalModelDiagnostic = "Not initialized";
         activeSubsurfaceNodeIndices = participatingSurfaceCells = null;
         activeSubsurfaceNodeCount = participatingSurfaceCellCount = 0; totalSubsurfaceThermalCapacity = 0d; sourceGridSummary = "None"; approximateRuntimeMemoryBytes = 0; lastProcessedSurfaceTickSequence = -1; liveCompletedOceanTemperatureTick = 0d;
         columnsSolvedLastTick = layersSolvedLastTick = subsurfaceNodesUpdatedLastTick = verticalInterfacesProcessedLastTick = implicitColumnsSolvedLastTick = approximateNodesRelaxedLastTick = thermalSubstepsLastTick = 0;
@@ -275,7 +280,7 @@ public sealed class GeodesicOceanTemperatureField : MonoBehaviour
         long sequence = surfaceField.SurfaceTemperatureTickSequence;
         if (sequence == lastProcessedSurfaceTickSequence) { duplicateOrStaleCallbackCount++; return; }
         lastProcessedSurfaceTickSequence = sequence;
-        if (selectedThermalModel == GeodesicThermalModel.ApproximateEcologicalProfiles) RelaxApproximateProfiles(dt); else ExchangeVerticalHeat(dt);
+        if (activeThermalModel == GeodesicThermalModel.ApproximateEcologicalProfiles) RelaxApproximateProfiles(dt); else ExchangeVerticalHeat(dt);
     }
 
     private void RelaxApproximateProfiles(float dt)
@@ -470,7 +475,7 @@ public sealed class GeodesicOceanTemperatureField : MonoBehaviour
         {
             if (!ReferenceEquals(sourceGrid.SourceTopology, generator.GeodesicTopology) || subsurfaceTemperatureKelvinByNode.Length != sourceGrid.NodeCapacity || heatCapacityByNode.Length != sourceGrid.NodeCapacity || activeSubsurfaceNodeIndices.Length != activeSubsurfaceNodeCount) fail("stale topology or array length");
             for (int cell = 0; cell < sourceGrid.CellCount; cell++) for (int layer = 0; layer < sourceGrid.MaximumLayerCount; layer++) { bool active = sourceGrid.IsNodeActive(cell, layer); if (!active && TryGetLayerTemperatureKelvin(cell, layer, out _)) fail("inactive/land node exposes temperature"); if (active && layer == 0 && GetLayerTemperatureKelvin(cell, 0) != surfaceField.GetCellTemperatureKelvin(cell)) fail("layer 0 is not exact read-through"); if (active && layer > 0) { int node = sourceGrid.GetNodeIndex(cell, layer); if (!Finite(subsurfaceTemperatureKelvinByNode[node]) || subsurfaceTemperatureKelvinByNode[node] < 0f || !Finite(heatCapacityByNode[node]) || heatCapacityByNode[node] <= 0f) fail("invalid active subsurface state"); } }
-            if (selectedThermalModel == GeodesicThermalModel.ConservativeImplicit)
+            if (activeThermalModel == GeodesicThermalModel.ConservativeImplicit)
             {
                 for (int i = 0; i < columnInterfaceConductanceBase.Length; i++) if (!Finite(columnInterfaceConductanceBase[i]) || columnInterfaceConductanceBase[i] < 0f) fail("invalid compact column conductance");
                 double liveEnergy = TotalParticipatingEnergy(); if (!Finite(liveEnergy) || !Finite(liveLatestVerticalConservationRelativeError) || liveLatestVerticalConservationRelativeError > ConservationTolerance) fail("runtime energy/conservation tolerance invalid");
