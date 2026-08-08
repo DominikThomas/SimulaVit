@@ -4,6 +4,12 @@ using System.Diagnostics;
 using UnityEngine;
 using Unity.Profiling;
 
+public enum GeodesicThermalModel
+{
+    ApproximateEcologicalProfiles = 0,
+    ConservativeImplicit = 1
+}
+
 /// <summary>Authoritative, surface-only Kelvin field for geodesic simulation cells.</summary>
 [DisallowMultipleComponent]
 public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
@@ -20,6 +26,7 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
     private const float DiagnosticHighTemperatureKelvin = 2000f;
 
     [Header("Geodesic Surface Temperature")]
+    [SerializeField, InspectorName("Configured Thermal Model"), Tooltip("Authoritative model configuration for the next generated geodesic planet. Runtime switching is unsupported.")] private GeodesicThermalModel thermalModel = GeodesicThermalModel.ApproximateEcologicalProfiles;
     [SerializeField, Tooltip("Enables one physical surface-temperature value per geodesic simulation cell. This does not enable ocean layers or ice.")] private bool enableGeodesicSurfaceTemperature = true;
     [SerializeField, Min(0.01f), Tooltip("Fixed authoritative simulation seconds per temperature tick. Independent of simulation speed and rendered FPS.")] private float updateIntervalSeconds = 1f;
     [SerializeField, Range(1, 512), Tooltip("Emergency per-rendered-frame catch-up guard. Remaining authoritative time stays as explicit backlog and is never discarded.")] private int maximumThermalTicksPerFrame = 64;
@@ -67,6 +74,10 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
     [SerializeField] private double lastExactDiffusionAuditSimulationTime;
     [SerializeField] private int ticksSinceLastExactDiffusionAudit;
     [SerializeField] private bool lastTickUsedAlgebraicDiffusionConservationOnly;
+    [SerializeField, InspectorName("Active Thermal Model"), Tooltip("Read-only diagnostic snapshot; runtime model switching is unsupported.")] private string activeThermalModelDiagnostic = "Not initialized";
+    [SerializeField, Tooltip("True only while Active Thermal Model is latched for an initialized geodesic planet.")] private bool hasActiveThermalModel;
+    [SerializeField] private int surfaceCellsUpdatedLastTick;
+    [SerializeField] private int horizontalEdgesProcessedLastTick;
 
     private PlanetGenerator planetGenerator;
     private SunSkyRotator sunDirectionProvider;
@@ -100,6 +111,7 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
     private double nextDiagnosticSnapshotUnscaledTime;
     private double nextDiffusionConservationAuditSimulationTime;
     private bool warnedThermalBacklogGuard;
+    [NonSerialized] private GeodesicThermalModel activeThermalModel;
 
     public bool IsInitialized => initialized;
     public int CellCount => runtimeCellCount;
@@ -118,6 +130,13 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
     public double UnconsumedThermalRemainderSeconds => unconsumedThermalRemainderSeconds;
     public double DiscardedSimulationSeconds => discardedSimulationSeconds;
     public double ThermalIntegrationCursorTime => thermalIntegrationCursorTime;
+    public GeodesicThermalModel ConfiguredThermalModel => thermalModel;
+    public GeodesicThermalModel ActiveThermalModel => activeThermalModel;
+    public bool HasActiveThermalModel => hasActiveThermalModel;
+    public float BaseTemperatureKelvin => baseTemperatureKelvin;
+    public int SurfaceCellsUpdatedLastTick => surfaceCellsUpdatedLastTick;
+    public int HorizontalEdgesProcessedLastTick => horizontalEdgesProcessedLastTick;
+    public int ThermalTicksCurrentRenderedFrame => thermalTicksCurrentRenderedFrame;
 
     private void Awake() => ResolveReferences();
 
@@ -199,10 +218,13 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
         }
 
         int count = topology.CellCount;
+        activeThermalModel = thermalModel;
+        hasActiveThermalModel = true;
+        activeThermalModelDiagnostic = activeThermalModel.ToString();
         surfaceTemperatureKelvinByCell = new float[count];
         targetTemperatureKelvinByCell = new float[count];
         workingTemperatureKelvinByCell = new float[count];
-        energyDeltaByCell = new float[count];
+        energyDeltaByCell = activeThermalModel == GeodesicThermalModel.ConservativeImplicit ? new float[count] : null;
         heatCapacityByCell = new float[count];
         inverseHeatCapacityByCell = new float[count];
         runtimeCellCount = count;
@@ -221,13 +243,16 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
         UpdateSampledCycleDiagnostics(simulationTime);
         initialized = true;
         SurfaceTemperatureFieldReinitialized?.Invoke();
-        UnityEngine.Debug.Log($"[GeodesicTemperature] initialized cells={count}, baseK={baseTemperatureKelvin:F2}, gainK={insolationTemperatureGainKelvin:F2}, min/mean/maxK={minimumTemperatureKelvin:F2}/{areaWeightedMeanTemperatureKelvin:F2}/{maximumTemperatureKelvin:F2}", this);
+        UnityEngine.Debug.Log($"[GeodesicTemperature] initialized configuredModel={thermalModel}, activeModel={activeThermalModel}, cells={count}, baseK={baseTemperatureKelvin:F2}, gainK={insolationTemperatureGainKelvin:F2}, min/mean/maxK={minimumTemperatureKelvin:F2}/{areaWeightedMeanTemperatureKelvin:F2}/{maximumTemperatureKelvin:F2}", this);
     }
 
     public void ClearField()
     {
         if (initialized) SurfaceTemperatureFieldClearing?.Invoke();
         initialized = false;
+        hasActiveThermalModel = false;
+        activeThermalModel = default;
+        activeThermalModelDiagnostic = "Not initialized";
         topology = null;
         transportGraph = null;
         surfaceTemperatureKelvinByCell = null;
@@ -312,8 +337,20 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
             workingTemperatureKelvinByCell[i] = current + (target - current) * response;
         }
         }
+        surfaceCellsUpdatedLastTick = runtimeCellCount;
         long diffusionStart = Stopwatch.GetTimestamp();
-        using (DiffusionMarker.Auto()) ApplyConservativeDiffusion(dt);
+        if (activeThermalModel == GeodesicThermalModel.ConservativeImplicit)
+        {
+            using (DiffusionMarker.Auto()) ApplyConservativeDiffusion(dt);
+            horizontalEdgesProcessedLastTick = transportGraph.EdgeCount * lastDiffusionSubstepCount;
+        }
+        else
+        {
+            lastDiffusionSubstepCount = 0;
+            horizontalEdgesProcessedLastTick = 0;
+            latestDiffusionConservationRelativeError = 0d;
+            lastTickUsedAlgebraicDiffusionConservationOnly = true;
+        }
         lastDiffusionDurationMilliseconds = ElapsedMilliseconds(diffusionStart);
         float[] swap = surfaceTemperatureKelvinByCell; surfaceTemperatureKelvinByCell = workingTemperatureKelvinByCell; workingTemperatureKelvinByCell = swap;
         surfaceTemperatureTickSequence++;

@@ -1166,6 +1166,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7fb57947876b4edb963edbe2a66187cc, type: 3}
   m_Name: 
   m_EditorClassIdentifier: SimulaVit::GeodesicSurfaceTemperatureField
+  thermalModel: 0
   enableGeodesicSurfaceTemperature: 1
   updateIntervalSeconds: 0.25
   maximumThermalTicksPerFrame: 64
@@ -1293,6 +1294,13 @@ MonoBehaviour:
   m_Name: GeodesicOceanTemperatureField
   m_EditorClassIdentifier: SimulaVit::GeodesicOceanTemperatureField
   enableGeodesicOceanTemperature: 1
+  deepOceanTemperatureOffsetKelvin: -8
+  shallowResponseTimescaleSeconds: 80
+  deepResponseTimescaleSeconds: 1200
+  depthProfileExponent: 1.4
+  bottomVentTemperatureGainKelvin: 25
+  aboveBottomVentHeatingFactor: 0.35
+  thermalVentColumnFraction: 0.02
   subsurfaceHeatCapacityPerVolume: 1
   verticalThermalDiffusivity: 0.00002
   startupMode: 1
