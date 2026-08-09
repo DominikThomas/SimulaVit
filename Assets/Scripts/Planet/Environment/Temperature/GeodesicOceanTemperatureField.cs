@@ -182,7 +182,7 @@ public sealed class GeodesicOceanTemperatureField : MonoBehaviour
         lastProcessedSurfaceTickSequence = -1;
         Subscribe();
         RefreshInspectorSnapshot(true);
-        UnityEngine.Debug.Log($"[GeodesicOceanTemperature] initialized configuredModel={surfaceField.ConfiguredThermalModel}, activeModel={activeThermalModel}, {sourceGridSummary}, subsurfaceNodes={activeSubsurfaceNodeCount}, participatingSurfaces={participatingSurfaceCellCount}, capacity={totalSubsurfaceThermalCapacity:E4}, memory={approximateRuntimeMemoryBytes} bytes", this);
+        UnityEngine.Debug.Log($"[GeodesicOceanTemperature] initialized configuredModel={surfaceField.ConfiguredThermalModel}, activeModel={activeThermalModel}, thermalIntervalSeconds={surfaceField.ActiveUpdateIntervalSeconds:F3}, {sourceGridSummary}, subsurfaceNodes={activeSubsurfaceNodeCount}, participatingSurfaces={participatingSurfaceCellCount}, capacity={totalSubsurfaceThermalCapacity:E4}, memory={approximateRuntimeMemoryBytes} bytes", this);
     }
 
     private void AllocateState()

@@ -1596,7 +1596,18 @@ The sun ephemeris evaluates orbit angle, equatorial path, axial tilt, seasons, p
 
 `ReplicatorSimulationPipeline` accepts at most 1/30 simulation second per configured step. At healthy 60 FPS the raw frame delta is accepted unchanged; under overload the authoritative clock advances by only the bounded work accepted, with no wall-clock accumulator or later catch-up. Requested 10×–100× speeds are target throughput: an overloaded simulation slows coherently instead of letting a slow frame create a larger next-frame thermal workload.
 
-The production geodesic thermal interval is one simulation second and remains fixed across speeds. The absolute cursor, interval-midpoint ephemeris, zero-discard contract, and one ocean callback per completed surface interval remain unchanged. A 64-tick emergency guard retains explicit backlog rather than discarding it. The lightweight representative interval comparison context command evaluates 0.25, 0.5, and 1.0 second midpoint integrations over multiple simulated days and reports representative surface/layer error against the 0.25-second reference.
+The approximate production thermal interval is one simulation second; `ConservativeImplicit` retains its serialized 0.25-s interval. Initialization latches the active interval from the already-latched active model, and the interval remains fixed in authoritative simulation time across playback speeds. The absolute cursor, interval-midpoint ephemeris, deterministic fractional remainder, zero-discard contract, and one ocean callback per completed surface interval remain unchanged. A 64-tick emergency guard retains explicit backlog rather than discarding it.
+
+The isolated **Validate Approximate Thermal Cadence Sensitivity** comparison uses the previous 0.25-s cadence as its reference, runs 12 warm/cold, dawn/dusk, latitude/season, shallow/partial/deep-ocean, and vent/non-vent cases for 960 simulated seconds, and samples every candidate at identical simulation-time boundaries. The comparison produced:
+
+| Cadence (s) | Max surface K | Mean surface K | RMS surface K | Max subsurface K | Mean subsurface K | RMS subsurface K |
+|---:|---:|---:|---:|---:|---:|---:|
+| 0.50 | 0.000796 | 0.000081 | 0.000130 | 0.021211 | 0.002867 | 0.005013 |
+| 1.00 | 0.003216 | 0.000374 | 0.000605 | 0.063364 | 0.008575 | 0.014988 |
+| 2.00 | 0.009039 | 0.001532 | 0.002454 | 0.146588 | 0.019906 | 0.034767 |
+| 5.00 | 0.051642 | 0.009744 | 0.015245 | 0.387830 | 0.053098 | 0.092525 |
+
+One second is selected because it reduces approximate thermal ticks from 1,920 to 480 per 480-s day while keeping the worst sampled difference below the strict 0.1-K screening target. The 2-s candidate reduced ticks further to 240 per day but crossed that target in transient subsurface sampling; 5 s produced a still larger transient. These are deterministic validator measurements, not Unity Profiler or full subdivision-6 performance measurements. Cadence never branches on rendered FPS, wall-clock time, or requested playback-speed multiplier.
 
 Per tick, the world sun direction is transformed to planet-local space once, normalized topology directions are dotted directly, and exponent 1/2 avoid `Pow`. Full surface min/mean/max diagnostics are sampled at most every 0.25 unscaled second after the frame's thermal ticks; completed-day values are therefore sampled extrema. Exact surface and vertical diffusion-energy scans run once per five simulation seconds or every tick only when profiling is enabled, while ordinary ticks rely on the algebraic equal-and-opposite edge invariant and retain the latest exact result. The stable diffusion limit is cached by strength, thermal-capacity version, and graph identity.
 
@@ -1604,7 +1615,7 @@ Per tick, the world sun direction is transformed to planet-local space once, nor
 
 New Game applies sun day/year timing and assigns geodesic base/gain parameters before authoritative planet generation. Parameter assignment is allocation-free and does not rebuild a field. Generation then creates topology, transport graph, ocean domain, surface temperature, and ocean temperature exactly once in dependency order. Because cleanup unsubscribes the old ocean field before surface initialization, the surface reinitialization event has no ocean subscriber during generation; the generator's explicit ocean initialization is therefore the sole startup ocean build. Genuine runtime parameter replacement uses the explicit rebuilding API and its reinitialization event.
 
-The thermal-interval context command is intentionally labelled a lightweight representative-state comparison. It is useful for deterministic screening but is not evidence that the full 10,242-cell surface and layered ocean remain within 0.1 K; the production one-second interval requires the documented full-field Unity comparison before merge.
+The cadence-sensitivity context command is intentionally an isolated representative-state comparison. It is useful for deterministic screening but is not evidence that a full subdivision-6 surface and layered ocean remain within 0.1 K; that full-field Unity comparison and performance profiling remain required when the Editor is available.
 
 ---
 
@@ -1742,7 +1753,7 @@ Geodesic generation now has one authoritative serialized developer selector on `
 
 `thermalModel` is configuration for the next generated planet and is never reset by startup-menu entry, cleanup, mode transitions, or temperature deinitialization. Successful surface-temperature initialization latches it once into `activeThermalModel`; all production surface and ocean paths use that active value for the generated planet's lifetime. Cleanup clears only the active latch. Editing the configured value after generation therefore affects only the next generation, while an Inspector selection made before Play Mode or at the startup menu survives generation and is latched exactly as configured. Initialization logs both configured and active values so lifecycle regressions are visible without per-tick logging.
 
-Approximate mode retains the fixed 0.25-s simulation-time cadence, existing sunlight/albedo/latitude/season surface target, and exponential surface inertia. It visits every surface cell once, publishes one completed surface tick, and deliberately skips the conservative horizontal edge pass. The synchronous ocean callback visits only persistent active subsurface nodes (layers 1-4) once; layer 0 remains exact read-through owned solely by `GeodesicSurfaceTemperatureField`. One-layer columns therefore have no ocean-temperature work.
+Approximate mode uses the evidence-selected fixed 1.0-s simulation-time cadence, while 0.25 s remains the comparison reference and the unchanged `ConservativeImplicit` cadence. Existing sunlight/albedo/latitude/season surface targets and exponential surface inertia are unchanged. Each tick visits every surface cell once, publishes one completed surface tick, and deliberately skips the conservative horizontal edge pass. The synchronous ocean callback visits only persistent active subsurface nodes (layers 1-4) once; layer 0 remains exact read-through owned solely by `GeodesicSurfaceTemperatureField`. One-layer columns therefore have no ocean-temperature work.
 
 For subsurface node center depth `z = clamp01((oceanSurfaceRadius - layerCenterRadius) / maximumOceanDepth)`, the exact ecological target is:
 

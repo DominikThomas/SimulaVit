@@ -28,7 +28,8 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
     [Header("Geodesic Surface Temperature")]
     [SerializeField, InspectorName("Configured Thermal Model"), Tooltip("Authoritative model configuration for the next generated geodesic planet. Runtime switching is unsupported.")] private GeodesicThermalModel thermalModel = GeodesicThermalModel.ApproximateEcologicalProfiles;
     [SerializeField, Tooltip("Enables one physical surface-temperature value per geodesic simulation cell. This does not enable ocean layers or ice.")] private bool enableGeodesicSurfaceTemperature = true;
-    [SerializeField, Min(0.01f), Tooltip("Fixed authoritative simulation seconds per temperature tick. Independent of simulation speed and rendered FPS.")] private float updateIntervalSeconds = 1f;
+    [SerializeField, Min(0.01f), InspectorName("Approximate Thermal Update Interval"), Tooltip("Fixed authoritative simulation seconds per ApproximateEcologicalProfiles tick. Independent of simulation speed and rendered FPS.")] private float approximateUpdateIntervalSeconds = 1f;
+    [SerializeField, Min(0.01f), InspectorName("Conservative Thermal Update Interval"), Tooltip("Fixed authoritative simulation seconds per ConservativeImplicit tick. This retains the original serialized cadence.")] private float updateIntervalSeconds = 0.25f;
     [SerializeField, Range(1, 512), Tooltip("Emergency per-rendered-frame catch-up guard. Remaining authoritative time stays as explicit backlog and is never discarded.")] private int maximumThermalTicksPerFrame = 64;
     [SerializeField, Min(0.05f), Tooltip("Unscaled real-time interval for cached global surface diagnostics used by the HUD and Inspector.")] private float diagnosticSnapshotIntervalSeconds = 0.25f;
     [SerializeField, Min(0.1f), Tooltip("Simulation-time interval between exact surface-diffusion conservation audits.")] private float diffusionConservationAuditIntervalSeconds = 5f;
@@ -112,6 +113,7 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
     private double nextDiffusionConservationAuditSimulationTime;
     private bool warnedThermalBacklogGuard;
     [NonSerialized] private GeodesicThermalModel activeThermalModel;
+    [NonSerialized] private float activeUpdateIntervalSeconds;
 
     public bool IsInitialized => initialized;
     public int CellCount => runtimeCellCount;
@@ -133,6 +135,7 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
     public GeodesicThermalModel ConfiguredThermalModel => thermalModel;
     public GeodesicThermalModel ActiveThermalModel => activeThermalModel;
     public bool HasActiveThermalModel => hasActiveThermalModel;
+    public float ActiveUpdateIntervalSeconds => activeUpdateIntervalSeconds;
     public float BaseTemperatureKelvin => baseTemperatureKelvin;
     public int SurfaceCellsUpdatedLastTick => surfaceCellsUpdatedLastTick;
     public int HorizontalEdgesProcessedLastTick => horizontalEdgesProcessedLastTick;
@@ -158,7 +161,7 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
         }
         totalAuthoritativeSimulationSecondsReceived += target - lastObservedAuthoritativeSimulationTime;
         lastObservedAuthoritativeSimulationTime = target;
-        double interval = Math.Max(0.01d, updateIntervalSeconds);
+        double interval = Math.Max(0.01d, activeUpdateIntervalSeconds);
         int guard = Mathf.Max(1, maximumThermalTicksPerFrame);
         while (thermalIntegrationCursorTime + interval <= target + 1e-9d && thermalTicksCurrentRenderedFrame < guard)
         {
@@ -219,6 +222,7 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
 
         int count = topology.CellCount;
         activeThermalModel = thermalModel;
+        activeUpdateIntervalSeconds = Mathf.Max(0.01f, activeThermalModel == GeodesicThermalModel.ApproximateEcologicalProfiles ? approximateUpdateIntervalSeconds : updateIntervalSeconds);
         hasActiveThermalModel = true;
         activeThermalModelDiagnostic = activeThermalModel.ToString();
         surfaceTemperatureKelvinByCell = new float[count];
@@ -243,7 +247,7 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
         UpdateSampledCycleDiagnostics(simulationTime);
         initialized = true;
         SurfaceTemperatureFieldReinitialized?.Invoke();
-        UnityEngine.Debug.Log($"[GeodesicTemperature] initialized configuredModel={thermalModel}, activeModel={activeThermalModel}, cells={count}, baseK={baseTemperatureKelvin:F2}, gainK={insolationTemperatureGainKelvin:F2}, min/mean/maxK={minimumTemperatureKelvin:F2}/{areaWeightedMeanTemperatureKelvin:F2}/{maximumTemperatureKelvin:F2}", this);
+        UnityEngine.Debug.Log($"[GeodesicTemperature] initialized configuredModel={thermalModel}, activeModel={activeThermalModel}, thermalIntervalSeconds={activeUpdateIntervalSeconds:F3}, cells={count}, baseK={baseTemperatureKelvin:F2}, gainK={insolationTemperatureGainKelvin:F2}, min/mean/maxK={minimumTemperatureKelvin:F2}/{areaWeightedMeanTemperatureKelvin:F2}/{maximumTemperatureKelvin:F2}", this);
     }
 
     public void ClearField()
@@ -252,6 +256,7 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
         initialized = false;
         hasActiveThermalModel = false;
         activeThermalModel = default;
+        activeUpdateIntervalSeconds = 0f;
         activeThermalModelDiagnostic = "Not initialized";
         topology = null;
         transportGraph = null;
@@ -471,7 +476,7 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
 
     private struct PartitionValidationResult
     {
-        public double Received, Integrated, Discarded;
+        public double Received, Integrated, Remainder, Discarded;
         public int Ticks;
         public float Surface, Layer1, Layer2;
     }
@@ -480,35 +485,147 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
     private void ValidateFramePartitionInvariance()
     {
         if (!initialized || sunDirectionProvider == null) { UnityEngine.Debug.LogWarning("[GeodesicTemperaturePartitionValidation] Surface field and sun ephemeris must be initialized.", this); return; }
-        double interval = Math.Max(0.01d, updateIntervalSeconds), duration = interval * 480d;
+        double interval = Math.Max(0.01d, activeUpdateIntervalSeconds), duration = 120d + interval * 0.37d;
         PartitionValidationResult small = IntegrateTemporaryPartition(duration, interval * 0.2d, interval);
+        PartitionValidationResult uneven = IntegrateTemporaryPartition(duration, interval * 1.7d, interval);
         PartitionValidationResult large = IntegrateTemporaryPartition(duration, interval * 20d, interval);
-        float surfaceDifference = Mathf.Abs(small.Surface - large.Surface);
-        float layerDifference = Mathf.Max(Mathf.Abs(small.Layer1 - large.Layer1), Mathf.Abs(small.Layer2 - large.Layer2));
-        float maximumDifference = Mathf.Max(surfaceDifference, layerDifference);
-        bool valid = small.Discarded == 0d && large.Discarded == 0d && small.Ticks == large.Ticks && maximumDifference <= 0.01f;
-        string report = $"received={small.Received:F6}/{large.Received:F6}, integrated={small.Integrated:F6}/{large.Integrated:F6}, discarded={small.Discarded:F6}/{large.Discarded:F6}, ticks={small.Ticks}/{large.Ticks}, surfaceMaxAbsK={surfaceDifference:E3}, layeredMaxAbsK={layerDifference:E3}";
+        float surfaceDifference = Mathf.Max(Mathf.Abs(small.Surface - uneven.Surface), Mathf.Abs(small.Surface - large.Surface));
+        float layerDifference = Mathf.Max(Mathf.Abs(small.Layer1 - uneven.Layer1), Mathf.Abs(small.Layer1 - large.Layer1), Mathf.Abs(small.Layer2 - uneven.Layer2), Mathf.Abs(small.Layer2 - large.Layer2));
+        int expectedTicks = (int)Math.Floor((duration + 1e-9d) / interval);
+        bool valid = small.Discarded == 0d && uneven.Discarded == 0d && large.Discarded == 0d && small.Ticks == expectedTicks && uneven.Ticks == expectedTicks && large.Ticks == expectedTicks && Math.Abs(small.Remainder - uneven.Remainder) <= 1e-8d && Math.Abs(small.Remainder - large.Remainder) <= 1e-8d && surfaceDifference <= 1e-5f && layerDifference <= 1e-5f;
+        string report = $"activeModel={activeThermalModel}, activeIntervalSeconds={interval:F3}, receivedSimulationSeconds={small.Received:F6}/{uneven.Received:F6}/{large.Received:F6}, integratedThermalSeconds={small.Integrated:F6}/{uneven.Integrated:F6}/{large.Integrated:F6}, remainderSeconds={small.Remainder:F6}/{uneven.Remainder:F6}/{large.Remainder:F6}, ticks={small.Ticks}/{uneven.Ticks}/{large.Ticks}, expectedTicks={expectedTicks}, surfaceMaxAbsDifferenceK={surfaceDifference:E3}, layeredMaxAbsDifferenceK={layerDifference:E3}, pauseAdvanceSeconds=0";
         if (valid) UnityEngine.Debug.Log($"[GeodesicTemperaturePartitionValidation] valid; {report}", this); else UnityEngine.Debug.LogError($"[GeodesicTemperaturePartitionValidation] invalid; {report}", this);
     }
 
-    [ContextMenu("Compare Representative Geodesic Thermal Intervals")]
-    private void CompareThermalIntervals()
+    private struct CadenceDifferenceMetrics
     {
-        if (!initialized || sunDirectionProvider == null) { UnityEngine.Debug.LogWarning("[GeodesicThermalIntervalValidation] Surface field and sun ephemeris must be initialized.", this); return; }
-        double dayLength = sunDirectionProvider.GetDayLengthSeconds();
-        double duration = double.IsInfinity(dayLength) ? 480d : Math.Max(120d, dayLength * 3d);
-        PartitionValidationResult reference = IntegrateTemporaryPartition(duration, 0.25d, 0.25d);
-        PartitionValidationResult halfSecond = IntegrateTemporaryPartition(duration, 0.5d, 0.5d);
-        PartitionValidationResult oneSecond = IntegrateTemporaryPartition(duration, 1d, 1d);
-        float halfError = MaximumRepresentativeDifference(reference, halfSecond);
-        float oneError = MaximumRepresentativeDifference(reference, oneSecond);
-        bool halfPass = halfError <= 0.1f, onePass = oneError <= 0.1f;
-        UnityEngine.Debug.Log($"[GeodesicRepresentativeThermalIntervalValidation] lightweight representative-state comparison only; referenceTicks={reference.Ticks}, 0.5sTicks={halfSecond.Ticks}, 1.0sTicks={oneSecond.Ticks}, maxRepresentativeDifferenceK(0.5/1.0)={halfError:F4}/{oneError:F4}, accepted(<=0.1K)={halfPass}/{onePass}, productionInterval={updateIntervalSeconds:F2}s. Full-field Unity comparison remains authoritative.", this);
+        public double SurfaceMaximum, SurfaceSum, SurfaceSquareSum;
+        public double SubsurfaceMaximum, SubsurfaceSum, SubsurfaceSquareSum;
+        public int SurfaceSamples, SubsurfaceSamples;
     }
 
-    private static float MaximumRepresentativeDifference(PartitionValidationResult a, PartitionValidationResult b)
+    [ContextMenu("Validate Approximate Thermal Cadence Sensitivity")]
+    private void ValidateApproximateThermalCadenceSensitivity()
     {
-        return Mathf.Max(Mathf.Abs(a.Surface - b.Surface), Mathf.Abs(a.Layer1 - b.Layer1), Mathf.Abs(a.Layer2 - b.Layer2));
+        if (!initialized || activeThermalModel != GeodesicThermalModel.ApproximateEcologicalProfiles) { UnityEngine.Debug.LogWarning("[GeodesicApproximateCadenceValidation] ApproximateEcologicalProfiles must be initialized; validation uses isolated temporary state.", this); return; }
+        long sequenceBefore = surfaceTemperatureTickSequence;
+        double cursorBefore = thermalIntegrationCursorTime;
+        double checksumBefore = ProductionTemperatureChecksum();
+        float[] candidates = { 0.5f, 1f, 2f, 5f };
+        string table = "cadenceSeconds|maxSurfaceDifferenceK|meanSurfaceDifferenceK|rmsSurfaceDifferenceK|maxSubsurfaceDifferenceK|meanSubsurfaceDifferenceK|rmsSubsurfaceDifferenceK";
+        bool valid = true;
+        for (int i = 0; i < candidates.Length; i++)
+        {
+            CadenceDifferenceMetrics metrics = CompareApproximateCadence(candidates[i]);
+            double surfaceMean = metrics.SurfaceSum / metrics.SurfaceSamples;
+            double surfaceRms = Math.Sqrt(metrics.SurfaceSquareSum / metrics.SurfaceSamples);
+            double subsurfaceMean = metrics.SubsurfaceSum / metrics.SubsurfaceSamples;
+            double subsurfaceRms = Math.Sqrt(metrics.SubsurfaceSquareSum / metrics.SubsurfaceSamples);
+            table += $"\n{candidates[i]:F2}|{metrics.SurfaceMaximum:F6}|{surfaceMean:F6}|{surfaceRms:F6}|{metrics.SubsurfaceMaximum:F6}|{subsurfaceMean:F6}|{subsurfaceRms:F6}";
+            if (candidates[i] <= activeUpdateIntervalSeconds + 1e-5f) valid &= metrics.SurfaceMaximum < 0.1d && metrics.SubsurfaceMaximum < 0.1d;
+        }
+        bool stateRestored = sequenceBefore == surfaceTemperatureTickSequence && cursorBefore == thermalIntegrationCursorTime && checksumBefore == ProductionTemperatureChecksum();
+        valid &= stateRestored;
+        string report = $"[GeodesicApproximateCadenceValidation] {(valid ? "valid" : "invalid")}; referenceCadenceSeconds=0.25; durationSeconds=960; cases=12; productionCadenceSeconds={activeUpdateIntervalSeconds:F2}; stateRestore={(stateRestored ? "pass" : "fail")}\n{table}";
+        if (valid) UnityEngine.Debug.Log(report, this); else UnityEngine.Debug.LogError(report, this);
+    }
+
+    private CadenceDifferenceMetrics CompareApproximateCadence(float candidateInterval)
+    {
+        const int cases = 12, layers = 4;
+        float[] referenceSurface = new float[cases], candidateSurface = new float[cases];
+        float[] referenceSubsurface = new float[cases * layers], candidateSubsurface = new float[cases * layers];
+        for (int c = 0; c < cases; c++)
+        {
+            float initialTarget = CadenceSurfaceTarget(c, 0d);
+            referenceSurface[c] = candidateSurface[c] = initialTarget;
+            for (int layer = 0; layer < layers; layer++)
+            {
+                float initial = CadenceSubsurfaceTarget(c, layer, initialTarget);
+                referenceSubsurface[c * layers + layer] = candidateSubsurface[c * layers + layer] = initial;
+            }
+        }
+        CadenceDifferenceMetrics metrics = default;
+        double referenceCursor = 0d, candidateCursor = 0d;
+        while (candidateCursor < 960d - 1e-9d)
+        {
+            double candidateStep = Math.Min(candidateInterval, 960d - candidateCursor);
+            while (referenceCursor < candidateCursor + candidateStep - 1e-9d)
+            {
+                double referenceStep = Math.Min(0.25d, candidateCursor + candidateStep - referenceCursor);
+                IntegrateCadenceState(referenceSurface, referenceSubsurface, referenceCursor + referenceStep * 0.5d, (float)referenceStep);
+                referenceCursor += referenceStep;
+            }
+            IntegrateCadenceState(candidateSurface, candidateSubsurface, candidateCursor + candidateStep * 0.5d, (float)candidateStep);
+            candidateCursor += candidateStep;
+            for (int c = 0; c < cases; c++) AccumulateDifference(ref metrics, Math.Abs(referenceSurface[c] - candidateSurface[c]), true);
+            for (int c = 0; c < cases; c++)
+                for (int layer = 0; layer < CadenceActiveSubsurfaceLayers(c); layer++)
+                {
+                    int node = c * layers + layer;
+                    AccumulateDifference(ref metrics, Math.Abs(referenceSubsurface[node] - candidateSubsurface[node]), false);
+                }
+        }
+        return metrics;
+    }
+
+    private void IntegrateCadenceState(float[] surface, float[] subsurface, double representativeTime, float dt)
+    {
+        const int layers = 4;
+        for (int c = 0; c < surface.Length; c++)
+        {
+            float target = CadenceSurfaceTarget(c, representativeTime);
+            float surfaceTimescale = (target >= surface[c] ? heatingTimescaleSeconds : coolingTimescaleSeconds) * (c >= 4 && c <= 9 ? 2f : 1f);
+            surface[c] = RelaxCadenceScalar(surface[c], target, dt, surfaceTimescale);
+            for (int layer = 0; layer < CadenceActiveSubsurfaceLayers(c); layer++)
+            {
+                int node = c * layers + layer;
+                float depth = CadenceDepth(c, layer);
+                float timescale = Mathf.Lerp(80f, 1200f, depth);
+                subsurface[node] = RelaxCadenceScalar(subsurface[node], CadenceSubsurfaceTarget(c, layer, surface[c]), dt, timescale);
+            }
+        }
+    }
+
+    private float CadenceSurfaceTarget(int cadenceCase, double time)
+    {
+        float[] phases = { -0.2f, 2.9f, 1.45f, -1.7f, 0.4f, 2.4f, -1.2f, 1.8f, -2.7f, 0.9f, 0.1f, 3.0f };
+        float latitudeFactor = cadenceCase == 10 ? 0.28f : cadenceCase == 11 ? 0.42f : 1f;
+        float dayAngle = (float)(2d * Math.PI * time / 480d) + phases[cadenceCase];
+        float seasonal = cadenceCase >= 10 ? 12f * Mathf.Sin((float)(2d * Math.PI * time / 1440d) + cadenceCase) : 0f;
+        return Mathf.Max(0f, baseTemperatureKelvin + seasonal + insolationTemperatureGainKelvin * latitudeFactor * Mathf.Max(0f, Mathf.Cos(dayAngle)));
+    }
+
+    private float CadenceSubsurfaceTarget(int cadenceCase, int layer, float surface)
+    {
+        float depth = CadenceDepth(cadenceCase, layer);
+        float deep = Mathf.Max(0f, baseTemperatureKelvin - 8f);
+        float vent = cadenceCase == 9 && layer == 3 ? 25f : cadenceCase == 9 && layer == 2 ? 8.75f : 0f;
+        return Mathf.Lerp(surface, deep, Mathf.Pow(depth, 1.4f)) + vent;
+    }
+
+    private static float CadenceDepth(int cadenceCase, int layer)
+    {
+        if (cadenceCase == 4) return 0.04f;
+        if (cadenceCase == 5) return Mathf.Min(0.55f, 0.12f + layer * 0.2f);
+        return 0.08f + layer * 0.29f;
+    }
+
+    private static int CadenceActiveSubsurfaceLayers(int cadenceCase) => cadenceCase == 4 ? 0 : cadenceCase == 5 ? 2 : 4;
+
+    private static float RelaxCadenceScalar(float current, float target, float dt, float timescale) => current + (target - current) * (1f - Mathf.Exp(-dt / Mathf.Max(MinimumTimescale, timescale)));
+
+    private static void AccumulateDifference(ref CadenceDifferenceMetrics metrics, double difference, bool surface)
+    {
+        if (surface) { metrics.SurfaceMaximum = Math.Max(metrics.SurfaceMaximum, difference); metrics.SurfaceSum += difference; metrics.SurfaceSquareSum += difference * difference; metrics.SurfaceSamples++; }
+        else { metrics.SubsurfaceMaximum = Math.Max(metrics.SubsurfaceMaximum, difference); metrics.SubsurfaceSum += difference; metrics.SubsurfaceSquareSum += difference * difference; metrics.SubsurfaceSamples++; }
+    }
+
+    private double ProductionTemperatureChecksum()
+    {
+        double checksum = 0d;
+        for (int i = 0; i < surfaceTemperatureKelvinByCell.Length; i++) checksum += surfaceTemperatureKelvinByCell[i] * (i + 1d);
+        return checksum;
     }
 
     private PartitionValidationResult IntegrateTemporaryPartition(double duration, double frameDelta, double interval)
@@ -532,6 +649,7 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
                 cursor += interval; result.Integrated += interval; result.Ticks++;
             }
         }
+        result.Remainder = Math.Max(0d, result.Received - result.Integrated);
         return result;
     }
 
@@ -590,7 +708,7 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
         for (int i = 0; i < count; i++) adjacency[i] = graphResult[i] = 250f + (i * 37 % 101) * 0.75f;
         double before = TotalThermalEnergy(adjacency);
         const int substeps = 4;
-        float stepDt = Mathf.Max(0.01f, updateIntervalSeconds) / substeps;
+        float stepDt = Mathf.Max(0.01f, activeUpdateIntervalSeconds) / substeps;
         for (int step = 0; step < substeps; step++)
         {
             Array.Clear(adjacencyDelta, 0, count);
