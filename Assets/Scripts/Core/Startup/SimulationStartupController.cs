@@ -429,7 +429,9 @@ public class SimulationStartupController : MonoBehaviour
             Debug.Log("[StartupLifecycle] Geodesic prototype mode: skipping replicator initialization/spawn once.", this);
         }
 
-        int targetSteps = currentConfig.gridType == PlanetGridType.GeodesicIcosphere ? 0 : (keepPaused ? 0 : Mathf.Max(1, resumeStepsPerFrame));
+        // Simulation timing is the shared world clock. Geodesic prototype mode skips
+        // biology initialization, not world-time advancement.
+        int targetSteps = keepPaused ? 0 : Mathf.Max(1, resumeStepsPerFrame);
         replicatorManager?.SetSimulationTiming(targetSteps);
         simulationPipeline?.SetSimulationStepsPerFrame(targetSteps);
         FindFirstObjectByType<SimulationSpeedController>()?.RefreshFromSimulationTiming();

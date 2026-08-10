@@ -45,4 +45,30 @@ public class ReplicatorManagerLifecycleTests
         Assert.That(manager.TotalPopulation, Is.Zero);
         Assert.That(manager.IsInitializedForSimulation, Is.False);
     }
+
+    [Test]
+    public void WorldClock_RemainsRunnableAcrossRepeatedBiologyDeinitialization()
+    {
+        ReplicatorSimulationPipeline pipeline = root.GetComponent<ReplicatorSimulationPipeline>();
+        Assert.That(pipeline, Is.Not.Null);
+
+        for (int generation = 0; generation < 3; generation++)
+        {
+            initializedField.SetValue(manager, true);
+            manager.DeinitializeForStartupMenu();
+            pipeline.ResetClockForNewSimulation();
+            pipeline.SetSimulationStepsPerFrame(1);
+
+            // ResetClock deliberately discards one rendered delta, just as startup does.
+            pipeline.RunFrame();
+            pipeline.RunFrame();
+
+            Assert.That(manager.IsInitializedForSimulation, Is.False);
+            Assert.That(pipeline.ShouldAdvanceSimulation, Is.True,
+                $"World timing stopped after biology cleanup on generation {generation}.");
+            Assert.That(pipeline.SimulationStepsExecutedThisFrame, Is.EqualTo(1));
+            Assert.That(manager.SimulationStepCount, Is.Zero,
+                "An uninitialized biology runtime must not execute biological steps.");
+        }
+    }
 }

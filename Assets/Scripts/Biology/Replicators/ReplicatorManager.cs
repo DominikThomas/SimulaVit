@@ -852,8 +852,6 @@ public class ReplicatorManager : MonoBehaviour
 
     void Update()
     {
-        if (!IsInitializedForSimulation) return;
-
         if (simulationPipeline != null)
         {
             simulationPipeline.RunFrame();
@@ -895,7 +893,8 @@ public class ReplicatorManager : MonoBehaviour
 
     void OnGUI()
     {
-        if (!showSimulationHud || !isInitialized || SimulationStartupController.IsStartupBlockingHud)
+        // The runtime menu and Escape handling are world UI, not biology lifecycle work.
+        if (!showSimulationHud || SimulationStartupController.IsStartupBlockingHud)
         {
             return;
         }

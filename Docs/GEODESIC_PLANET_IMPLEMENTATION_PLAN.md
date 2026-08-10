@@ -180,7 +180,7 @@ This section is based on reported branch summaries and local runtime fixes. Unit
 - visible runtime cell-selection popup;
 - runtime geodesic cell picker popup is resolution-aware, vertically scrollable, keeps its header/footer fixed, and blocks popup-local input from world picking; this diagnostics/UI-only refactor did not complete a new implementation phase;
 - new Input System support;
-- geodesic startup path that skips legacy resources, vents, replicators, and stepping;
+- geodesic startup path that skips legacy resources, vents, replicators, and biological stepping while retaining the shared authoritative world clock;
 - explicit replicator-runtime lifecycle: current geodesic prototype startup leaves biology uninitialized, so `ReplicatorManager.Update` performs no biological simulation, rendering, resource scans, or telemetry work; cleanup clears this state, while an initialized legacy runtime remains initialized even at zero population;
 - geodesic vertex-colour shader and runtime-owned material;
 - deterministic procedural surface colours;
@@ -192,7 +192,7 @@ This section is based on reported branch summaries and local runtime fixes. Unit
 - refreshed MeshCollider after displacement;
 - outlines sampled against authoritative terrain radius.
 
-The replicator lifecycle optimization changes no biological rule or cadence. In initialized legacy simulations, metabolism counts still update each rendered simulation frame, while the allocation-heavy telemetry snapshot and its full legacy vent-chemistry scan are built only when the existing three-second log is actually due. Enum-sized mutation telemetry buffers are initialized/reused rather than rediscovered through allocating reflection on each snapshot.
+The replicator lifecycle optimization changes no biological rule or cadence. `ReplicatorSimulationPipeline` remains the shared authoritative world clock even while the biology runtime is uninitialized; only its biological simulation, render synchronization, and telemetry phases are gated by biology initialization. This separation is required for repeated startup-menu generations because world temperature, sun/orbit motion, and speed control consume that clock. In initialized legacy simulations, metabolism counts still update each rendered simulation frame, while the allocation-heavy telemetry snapshot and its full legacy vent-chemistry scan are built only when the existing three-second log is actually due. Enum-sized mutation telemetry buffers are initialized/reused rather than rediscovered through allocating reflection on each snapshot.
 
 ## 2.2 Runtime fixes already identified
 

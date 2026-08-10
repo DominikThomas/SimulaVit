@@ -165,7 +165,7 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
 
     public void RunFrame()
     {
-        if (replicatorManager == null || !replicatorManager.IsInitializedForSimulation)
+        if (replicatorManager == null)
         {
             shouldAdvanceSimulation = false;
             ResetFrameTiming();
@@ -178,7 +178,10 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
         if (!shouldAdvanceSimulation)
         {
             ResetFrameTiming();
-            if (!pauseDetected && replicatorManager.enableRendering && replicatorManager.ShouldRenderThisFrame(simulationStepsPerFrame))
+            if (replicatorManager.IsInitializedForSimulation
+                && !pauseDetected
+                && replicatorManager.enableRendering
+                && replicatorManager.ShouldRenderThisFrame(simulationStepsPerFrame))
             {
                 using (VisualSyncMarker.Auto())
                 {
@@ -215,15 +218,29 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
         }
         else consecutiveClampedFrames = 0;
 
-        using (SimulationMarker.Auto())
+        if (replicatorManager.IsInitializedForSimulation)
         {
+            using (SimulationMarker.Auto())
+            {
+                for (int i = 0; i < simulationStepsPerFrame; i++)
+                {
+                    RunSimulationStep(simulationDeltaTime);
+                }
+            }
+        }
+        else
+        {
+            // World time remains authoritative when the current world has no biology runtime.
+            // Keep the same per-step accumulation order without entering any biological phase.
             for (int i = 0; i < simulationStepsPerFrame; i++)
             {
-                RunSimulationStep(simulationDeltaTime);
+                simulationTimeSeconds += simulationDeltaTime;
             }
         }
 
-        if (replicatorManager.enableRendering && replicatorManager.ShouldRenderThisFrame(simulationStepsPerFrame))
+        if (replicatorManager.IsInitializedForSimulation
+            && replicatorManager.enableRendering
+            && replicatorManager.ShouldRenderThisFrame(simulationStepsPerFrame))
         {
             using (VisualSyncMarker.Auto())
             {
@@ -231,10 +248,13 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
             }
         }
 
-        using (TelemetryMarker.Auto())
+        if (replicatorManager.IsInitializedForSimulation)
         {
-            replicatorManager.UpdateMetabolismCounts();
-            replicatorManager.LogMetabolismDebugThrottled();
+            using (TelemetryMarker.Auto())
+            {
+                replicatorManager.UpdateMetabolismCounts();
+                replicatorManager.LogMetabolismDebugThrottled();
+            }
         }
     }
 
