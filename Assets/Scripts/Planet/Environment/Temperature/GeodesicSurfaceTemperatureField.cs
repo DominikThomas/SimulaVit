@@ -137,6 +137,9 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
     public bool HasActiveThermalModel => hasActiveThermalModel;
     public float ActiveUpdateIntervalSeconds => activeUpdateIntervalSeconds;
     public float BaseTemperatureKelvin => baseTemperatureKelvin;
+    // Synchronous ocean ticks use this generation-owned storage directly. The array remains
+    // authoritative here; callers must treat it as read-only.
+    internal float[] AuthoritativeTemperatureStorage => initialized ? surfaceTemperatureKelvinByCell : null;
     public int SurfaceCellsUpdatedLastTick => surfaceCellsUpdatedLastTick;
     public int HorizontalEdgesProcessedLastTick => horizontalEdgesProcessedLastTick;
     public int ThermalTicksCurrentRenderedFrame => thermalTicksCurrentRenderedFrame;
