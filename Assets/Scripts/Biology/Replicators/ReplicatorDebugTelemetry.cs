@@ -98,7 +98,16 @@ public class ReplicatorDebugTelemetry
     private readonly HashSet<Replicator> sessileDebugSeen = new HashSet<Replicator>();
     private readonly List<Replicator> staleSessileAgents = new List<Replicator>(128);
 
-    public bool LogMetabolismDebugThrottled(ReplicatorTelemetrySnapshot snapshot)
+    public void ResetRuntimeState()
+    {
+        metabolismDebugLogTimer = 0f;
+        sessileDebugPositions.Clear();
+        sessileDebugTimers.Clear();
+        sessileDebugSeen.Clear();
+        staleSessileAgents.Clear();
+    }
+
+    public bool IsMetabolismDebugLogDue()
     {
         metabolismDebugLogTimer += Time.deltaTime;
         if (metabolismDebugLogTimer < 3f)
@@ -107,6 +116,11 @@ public class ReplicatorDebugTelemetry
         }
 
         metabolismDebugLogTimer = 0f;
+        return true;
+    }
+
+    public void LogMetabolismDebug(ReplicatorTelemetrySnapshot snapshot)
+    {
         string prefix = $"[SIM {snapshot.SimulationTimestamp}]";
 
         Debug.Log($"{prefix} Population: {FormatPopulation(snapshot)}");
@@ -117,7 +131,6 @@ public class ReplicatorDebugTelemetry
         Debug.Log($"{prefix} Resources: {FormatChemistrySummary(snapshot)}");
         Debug.Log($"{prefix} Mutation gates: {FormatMutationGateSummary(snapshot)}");
         Debug.Log($"{prefix} Replication habitat: {FormatReplicationHabitatSummary(snapshot)}");
-        return true;
     }
 
     public void ValidateSessileMovement(

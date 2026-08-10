@@ -1,5 +1,6 @@
 using System;
 using UnityEngine;
+using Unity.Profiling;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
@@ -7,6 +8,9 @@ using UnityEditor;
 [DefaultExecutionOrder(-1000)]
 public class ReplicatorSimulationPipeline : MonoBehaviour
 {
+    private static readonly ProfilerMarker SimulationMarker = new ProfilerMarker("ReplicatorManager.Simulation");
+    private static readonly ProfilerMarker TelemetryMarker = new ProfilerMarker("ReplicatorManager.Telemetry");
+    private static readonly ProfilerMarker VisualSyncMarker = new ProfilerMarker("ReplicatorManager.VisualSync");
     [Serializable]
     public struct SpeedProfile
     {
@@ -161,7 +165,7 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
 
     public void RunFrame()
     {
-        if (replicatorManager == null || !replicatorManager.IsInitializedForSimulation)
+        if (replicatorManager == null)
         {
             shouldAdvanceSimulation = false;
             ResetFrameTiming();
@@ -174,9 +178,15 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
         if (!shouldAdvanceSimulation)
         {
             ResetFrameTiming();
-            if (!pauseDetected && replicatorManager.enableRendering && replicatorManager.ShouldRenderThisFrame(simulationStepsPerFrame))
+            if (replicatorManager.IsInitializedForSimulation
+                && !pauseDetected
+                && replicatorManager.enableRendering
+                && replicatorManager.ShouldRenderThisFrame(simulationStepsPerFrame))
             {
-                replicatorManager.RenderAgents();
+                using (VisualSyncMarker.Auto())
+                {
+                    replicatorManager.RenderAgents();
+                }
             }
 
             return;
@@ -208,18 +218,44 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
         }
         else consecutiveClampedFrames = 0;
 
-        for (int i = 0; i < simulationStepsPerFrame; i++)
+        if (replicatorManager.IsInitializedForSimulation)
         {
-            RunSimulationStep(simulationDeltaTime);
+            using (SimulationMarker.Auto())
+            {
+                for (int i = 0; i < simulationStepsPerFrame; i++)
+                {
+                    RunSimulationStep(simulationDeltaTime);
+                }
+            }
+        }
+        else
+        {
+            // World time remains authoritative when the current world has no biology runtime.
+            // Keep the same per-step accumulation order without entering any biological phase.
+            for (int i = 0; i < simulationStepsPerFrame; i++)
+            {
+                simulationTimeSeconds += simulationDeltaTime;
+            }
         }
 
-        if (replicatorManager.enableRendering && replicatorManager.ShouldRenderThisFrame(simulationStepsPerFrame))
+        if (replicatorManager.IsInitializedForSimulation
+            && replicatorManager.enableRendering
+            && replicatorManager.ShouldRenderThisFrame(simulationStepsPerFrame))
         {
-            replicatorManager.RenderAgents();
+            using (VisualSyncMarker.Auto())
+            {
+                replicatorManager.RenderAgents();
+            }
         }
 
-        replicatorManager.UpdateMetabolismCounts();
-        replicatorManager.LogMetabolismDebugThrottled();
+        if (replicatorManager.IsInitializedForSimulation)
+        {
+            using (TelemetryMarker.Auto())
+            {
+                replicatorManager.UpdateMetabolismCounts();
+                replicatorManager.LogMetabolismDebugThrottled();
+            }
+        }
     }
 
     private void ResetFrameTiming()
