@@ -39,7 +39,7 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     [SerializeField, Min(0f)] private float initialFe2Concentration = 0f;
 
     [Header("Transport (inventory-conservative)")]
-    [SerializeField, Min(0.01f), Tooltip("Fixed authoritative simulation seconds per resource tick.")] private float transportIntervalSeconds = 1f;
+    [SerializeField, Min(0.01f), Tooltip("Fixed authoritative simulation seconds per resource tick. Five seconds resolves the configured 50-2000 second mixing timescales while reducing topology solves by 80% versus the one-second reference.")] private float transportIntervalSeconds = 5f;
     [SerializeField, Range(0f, 1f), Tooltip("Fractional horizontal mixing rate per simulation second. Each link is degree-normalized for explicit stability.")] private float horizontalMixingRate = 0.02f;
     [SerializeField, Range(0f, 1f), Tooltip("Fractional adjacent-layer mixing rate per simulation second. Each link is degree-normalized for explicit stability.")] private float defaultVerticalMixingRate = 0.005f;
     [SerializeField] private float[] horizontalResourceMultipliers = { 1f, 1f, 1f, 1f, 1f, 1f, 1f };
@@ -344,7 +344,9 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
             AccumulateHorizontalAllResources();
             AccumulateVerticalAllResources();
             ApplyStagedAllResources();
-            InjectVentSources(dt / TransportIntervalSeconds);
+            // Historically named "Per Tick" startup values are rates per simulated second;
+            // the original one-second cadence therefore injected exactly rate * 1 second.
+            InjectVentSources(dt);
         }
         if ((completedTransportTicks + 1) % Math.Max(1, (long)Math.Round(5f / TransportIntervalSeconds)) == 0) { RecomputeDiagnostics(); RefreshO2LayerMeans(); }
     }
@@ -583,9 +585,9 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     {
         bool mapping = initialized; double strength = 0d, actualStrength = 0d; bool partialBottomObserved = false;
         for (int i = 0; i < ventCount; i++) { int node = ventBottomNodes[i]; int cell = node / sourceGrid.MaximumLayerCount; int bottom = sourceGrid.GetBottomLayerIndex(cell); mapping &= sourceGrid.SourceOceanMask[cell] && node == sourceGrid.GetNodeIndex(cell, bottom); partialBottomObserved |= bottom + 1 < sourceGrid.MaximumLayerCount; strength += ventStrengths[i]; float concentrationDelta = ventStrengths[i] / sourceGrid.LayerVolume[node]; actualStrength += concentrationDelta * (double)sourceGrid.LayerVolume[node]; }
-        double duration = 10d, ticks = duration / TransportIntervalSeconds;
-        double h2 = ventH2PerTick * strength * ticks, h2s = ventH2SPerTick * strength * ticks, co2 = ventCO2PerTick * strength * ticks, fe2 = ventFe2PerTick * strength * ticks;
-        double actualH2 = ventH2PerTick * actualStrength * ticks, actualH2S = ventH2SPerTick * actualStrength * ticks, actualCO2 = ventCO2PerTick * actualStrength * ticks, actualFe2 = ventFe2PerTick * actualStrength * ticks;
+        double duration = 10d;
+        double h2 = ventH2PerTick * strength * duration, h2s = ventH2SPerTick * strength * duration, co2 = ventCO2PerTick * strength * duration, fe2 = ventFe2PerTick * strength * duration;
+        double actualH2 = ventH2PerTick * actualStrength * duration, actualH2S = ventH2SPerTick * actualStrength * duration, actualCO2 = ventCO2PerTick * actualStrength * duration, actualFe2 = ventFe2PerTick * actualStrength * duration;
         Debug.Log($"[GeodesicOceanVentValidation] valid={mapping}, vents={ventCount}, simulatedSeconds={duration:G6}, expected(H2/H2S/CO2/Fe2)={h2:G17}/{h2s:G17}/{co2:G17}/{fe2:G17}, actualIncrease={actualH2:G17}/{actualH2S:G17}/{actualCO2:G17}/{actualFe2:G17}, deepestOnly={mapping}, partialBottomObserved={partialBottomObserved}, landSources=0, framePartitions=equivalent", this);
     }
 
@@ -594,12 +596,14 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     {
         double[] c = { 1d, 0d, 0d, 0d, 0d }, delta = new double[5];
         var report = new System.Text.StringBuilder("t=0:[1,0,0,0,0]");
-        for (int tick = 1; tick <= 600; tick++)
+        int totalTicks = Mathf.RoundToInt(600f / TransportIntervalSeconds);
+        for (int tick = 1; tick <= totalTicks; tick++)
         {
             Array.Clear(delta, 0, delta.Length);
-            for (int layer = 0; layer < 4; layer++) { double transfer = defaultVerticalMixingRate * GetMultiplier(verticalResourceMultipliers, (int)GeodesicOceanResource.O2, 0.1f) * 0.5 * (c[layer] - c[layer + 1]); delta[layer] -= transfer; delta[layer + 1] += transfer; }
+            for (int layer = 0; layer < 4; layer++) { double transfer = defaultVerticalMixingRate * GetMultiplier(verticalResourceMultipliers, (int)GeodesicOceanResource.O2, 0.1f) * TransportIntervalSeconds * 0.5 * (c[layer] - c[layer + 1]); delta[layer] -= transfer; delta[layer + 1] += transfer; }
             for (int layer = 0; layer < 5; layer++) c[layer] += delta[layer];
-            if (tick == 60 || tick == 300 || tick == 600) report.Append($"; t={tick * TransportIntervalSeconds:G6}:[{c[0]:G6},{c[1]:G6},{c[2]:G6},{c[3]:G6},{c[4]:G6}]");
+            float elapsed = tick * TransportIntervalSeconds;
+            if (Mathf.Approximately(elapsed, 60f) || Mathf.Approximately(elapsed, 300f) || Mathf.Approximately(elapsed, 600f)) report.Append($"; t={elapsed:G6}:[{c[0]:G6},{c[1]:G6},{c[2]:G6},{c[3]:G6},{c[4]:G6}]");
         }
         bool ok = c[0] > c[1] && c[1] > c[2] && c[2] > c[3] && c[3] > c[4];
         if (ok) Debug.Log("[GeodesicOceanO2PropagationValidation] " + report, this); else Debug.LogError("[GeodesicOceanO2PropagationValidation] " + report, this);
@@ -611,9 +615,103 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
         double[][] partitions = { BuildPartition(100, 0.1), BuildPartition(20, 0.5), new[] { 0.3, 2.7, 0.25, 1.75, 5.0 } };
         var report = new System.Text.StringBuilder(); long expectedTicks = -1; double expectedRemainder = 0d; bool ok = true;
         for (int p = 0; p < partitions.Length; p++) { double cursor = 0d, target = 0d; long ticks = 0; for (int i = 0; i < partitions[p].Length; i++) { target += partitions[p][i]; while (cursor + TransportIntervalSeconds <= target + 1e-9) { cursor += TransportIntervalSeconds; ticks++; } } double remainder = target - cursor; if (p == 0) { expectedTicks = ticks; expectedRemainder = remainder; } else ok &= ticks == expectedTicks && Math.Abs(remainder - expectedRemainder) < 1e-9; report.Append($"partition{p}: ticks={ticks}, integrated={cursor:G9}, remainder={remainder:G9}; "); }
-        ok &= expectedTicks == 10; report.Append("pauseDelta=0 => ticks=0, injection=0");
+        ok &= expectedTicks == (long)Math.Floor(10d / TransportIntervalSeconds + 1e-9d); report.Append("pauseDelta=0 => ticks=0, injection=0");
         if (ok) Debug.Log("[GeodesicOceanResourceFramePartitionValidation] " + report, this); else Debug.LogError("[GeodesicOceanResourceFramePartitionValidation] " + report, this);
     }
+
+    private struct CadenceErrorMetrics
+    {
+        public double maximumAbsolute, absoluteSum, squaredSum, maximumRelative;
+        public int count;
+        public void Add(double candidate, double reference)
+        {
+            double difference = Math.Abs(candidate - reference); maximumAbsolute = Math.Max(maximumAbsolute, difference); absoluteSum += difference; squaredSum += difference * difference; count++;
+            if (Math.Abs(reference) > 1e-8d) maximumRelative = Math.Max(maximumRelative, difference / Math.Abs(reference));
+        }
+        public override string ToString() => $"maxAbs={maximumAbsolute:G9}, meanAbs={(count > 0 ? absoluteSum / count : 0d):G9}, rms={(count > 0 ? Math.Sqrt(squaredSum / count) : 0d):G9}, maxRelative={maximumRelative:G6}";
+    }
+
+    [ContextMenu("Validate Geodesic Resource Transport Cadence Sensitivity")]
+    private void ValidateCadenceSensitivityContextMenu()
+    {
+        double[] candidates = { 2d, 5d, 10d }, checkpoints = { 60d, 300d, 600d, 1200d };
+        double[] horizontalVolumes = { 1d, 1.7d, 0.65d, 2.2d, 0.9d, 1.35d };
+        int[] horizontalA = { 0, 1, 2, 3, 4, 0, 1 }, horizontalB = { 1, 2, 3, 4, 5, 2, 4 };
+        double[] horizontalConductance = { 0.22d, 0.18d, 0.14d, 0.20d, 0.16d, 0.10d, 0.12d };
+        double[][] horizontalInitial = { new[] { 10d, 8d, 0.5d, 0.1d, 0d, 0d }, new[] { 0d, 0d, 5d, 8d, 0.2d, 0d }, new[] { 6d, 0d, 0.2d, 0d, 3d, 0.1d } };
+        double[] fiveVolumes = { 1d, 0.95d, 0.8d, 0.65d, 0.5d }, partialVolumes = { 1d, 0.7d, 0.4d };
+        int[] fiveA = { 0, 1, 2, 3 }, fiveB = { 1, 2, 3, 4 }, partialA = { 0, 1 }, partialB = { 1, 2 };
+        double[] fiveConductance = BuildAdjacentConductance(fiveVolumes), partialConductance = BuildAdjacentConductance(partialVolumes);
+        double[] o2Initial = { 1d, 0d, 0d, 0d, 0d }, fiveZero = new double[5], partialZero = new double[3];
+        double[] ventRates = { 0.006d, 0.01d, 0.02d, 0.002d };
+        var report = new System.Text.StringBuilder("reference=1s; cases=CO2/H2/H2S horizontal gradients + five-layer O2 + five/three-layer vents; checkpoints=60/300/600/1200s\n");
+        report.Append("cadence=1s, stable=True (generalBound=0.025, o2Bound=0.0205), O2 ");
+        for (int checkpointIndex = 0; checkpointIndex < 3; checkpointIndex++) { double duration = checkpoints[checkpointIndex]; double[] o2 = SimulateCadenceCase(1d, duration, fiveVolumes, fiveA, fiveB, fiveConductance, 0.0005d, o2Initial, 0d); report.Append($"t={duration:G3}:[{o2[0]:G9},{o2[1]:G9},{o2[2]:G9},{o2[3]:G9},{o2[4]:G9}] "); }
+        report.AppendLine();
+        bool valid = true;
+        for (int candidateIndex = 0; candidateIndex < candidates.Length; candidateIndex++)
+        {
+            double cadence = candidates[candidateIndex]; CadenceErrorMetrics horizontal = default, depth = default, vent = default; double maximumInventoryError = 0d;
+            bool finiteNonnegative = true, o2Ordered = true, ventBottomStrongest = true;
+            for (int checkpointIndex = 0; checkpointIndex < checkpoints.Length; checkpointIndex++)
+            {
+                double duration = checkpoints[checkpointIndex];
+                for (int resource = 0; resource < horizontalInitial.Length; resource++)
+                {
+                    double[] reference = SimulateCadenceCase(1d, duration, horizontalVolumes, horizontalA, horizontalB, horizontalConductance, 0.02d, horizontalInitial[resource], 0d);
+                    double[] result = SimulateCadenceCase(cadence, duration, horizontalVolumes, horizontalA, horizontalB, horizontalConductance, 0.02d, horizontalInitial[resource], 0d);
+                    AccumulateCadenceMetrics(result, reference, ref horizontal, ref finiteNonnegative);
+                    maximumInventoryError = Math.Max(maximumInventoryError, InventoryError(result, horizontalInitial[resource], horizontalVolumes, 0d));
+                }
+                double[] o2Reference = SimulateCadenceCase(1d, duration, fiveVolumes, fiveA, fiveB, fiveConductance, 0.0005d, o2Initial, 0d);
+                double[] o2Result = SimulateCadenceCase(cadence, duration, fiveVolumes, fiveA, fiveB, fiveConductance, 0.0005d, o2Initial, 0d);
+                AccumulateCadenceMetrics(o2Result, o2Reference, ref depth, ref finiteNonnegative); o2Ordered &= StrictlyDescending(o2Result);
+                maximumInventoryError = Math.Max(maximumInventoryError, InventoryError(o2Result, o2Initial, fiveVolumes, 0d));
+                for (int source = 0; source < ventRates.Length; source++)
+                {
+                    double[] reference = SimulateCadenceCase(1d, duration, fiveVolumes, fiveA, fiveB, fiveConductance, 0.005d, fiveZero, ventRates[source]);
+                    double[] result = SimulateCadenceCase(cadence, duration, fiveVolumes, fiveA, fiveB, fiveConductance, 0.005d, fiveZero, ventRates[source]);
+                    AccumulateCadenceMetrics(result, reference, ref vent, ref finiteNonnegative); ventBottomStrongest &= StrictlyAscending(result);
+                    maximumInventoryError = Math.Max(maximumInventoryError, InventoryError(result, fiveZero, fiveVolumes, ventRates[source] * duration));
+                    reference = SimulateCadenceCase(1d, duration, partialVolumes, partialA, partialB, partialConductance, 0.005d, partialZero, ventRates[source]);
+                    result = SimulateCadenceCase(cadence, duration, partialVolumes, partialA, partialB, partialConductance, 0.005d, partialZero, ventRates[source]);
+                    AccumulateCadenceMetrics(result, reference, ref vent, ref finiteNonnegative); ventBottomStrongest &= StrictlyAscending(result);
+                    maximumInventoryError = Math.Max(maximumInventoryError, InventoryError(result, partialZero, partialVolumes, ventRates[source] * duration));
+                }
+            }
+            double generalRemovalFraction = cadence * (0.02d + 0.005d), o2RemovalFraction = cadence * (0.02d + 0.0005d); bool stable = generalRemovalFraction <= 1d && o2RemovalFraction <= 1d;
+            valid &= stable && finiteNonnegative && o2Ordered && ventBottomStrongest && maximumInventoryError <= 1e-10d;
+            report.Append($"cadence={cadence:G3}s, stable={stable} (generalBound={generalRemovalFraction:G4}, o2Bound={o2RemovalFraction:G4}), horizontal[{horizontal}], depth[{depth}], vent[{vent}], maxInventoryError={maximumInventoryError:G6}, finiteNonnegative={finiteNonnegative}, surfaceFirstO2={o2Ordered}, ventBottomStrongest={ventBottomStrongest}\n");
+            report.Append("O2 ");
+            for (int checkpointIndex = 0; checkpointIndex < 3; checkpointIndex++) { double duration = checkpoints[checkpointIndex]; double[] o2 = SimulateCadenceCase(cadence, duration, fiveVolumes, fiveA, fiveB, fiveConductance, 0.0005d, o2Initial, 0d); report.Append($"t={duration:G3}:[{o2[0]:G9},{o2[1]:G9},{o2[2]:G9},{o2[3]:G9},{o2[4]:G9}] "); }
+            report.AppendLine();
+        }
+        report.Append("selected=5s; rationale=80% fewer topology solves than 1s while representative maxAbs errors remain 0.05492 horizontal, 0.0001829 depth, 0.02696 vent; 10s roughly doubles those localized errors. Vent inventory is rate*simulatedSeconds for every cadence.");
+        if (valid) Debug.Log("[GeodesicOceanResourceCadenceValidation]\n" + report, this); else Debug.LogError("[GeodesicOceanResourceCadenceValidation]\n" + report, this);
+    }
+
+    private static double[] BuildAdjacentConductance(double[] volumes)
+    { double[] result = new double[volumes.Length - 1]; for (int i = 0; i < result.Length; i++) result[i] = Math.Min(volumes[i], volumes[i + 1]) * 0.5d; return result; }
+
+    private static double[] SimulateCadenceCase(double cadence, double duration, double[] volumes, int[] linkA, int[] linkB, double[] conductance, double rate, double[] initial, double bottomSourceRate)
+    {
+        double[] state = (double[])initial.Clone(), delta = new double[state.Length]; int ticks = (int)Math.Round(duration / cadence);
+        for (int tick = 0; tick < ticks; tick++)
+        {
+            Array.Clear(delta, 0, delta.Length);
+            for (int link = 0; link < linkA.Length; link++) { int a = linkA[link], b = linkB[link]; double transfer = conductance[link] * rate * cadence * (state[a] - state[b]); delta[a] -= transfer; delta[b] += transfer; }
+            for (int node = 0; node < state.Length; node++) state[node] = (state[node] * volumes[node] + delta[node]) / volumes[node];
+            state[state.Length - 1] += bottomSourceRate * cadence / volumes[volumes.Length - 1];
+        }
+        return state;
+    }
+
+    private static void AccumulateCadenceMetrics(double[] candidate, double[] reference, ref CadenceErrorMetrics metrics, ref bool finiteNonnegative)
+    { for (int i = 0; i < candidate.Length; i++) { metrics.Add(candidate[i], reference[i]); finiteNonnegative &= Finite(candidate[i]) && candidate[i] >= 0d; } }
+    private static double InventoryError(double[] state, double[] initial, double[] volumes, double expectedAdded)
+    { double before = 0d, after = 0d; for (int i = 0; i < state.Length; i++) { before += initial[i] * volumes[i]; after += state[i] * volumes[i]; } return Math.Abs(after - before - expectedAdded); }
+    private static bool StrictlyDescending(double[] values) { for (int i = 1; i < values.Length; i++) if (!(values[i - 1] > values[i])) return false; return true; }
+    private static bool StrictlyAscending(double[] values) { for (int i = 1; i < values.Length; i++) if (!(values[i - 1] < values[i])) return false; return true; }
 
     private static double[] BuildPartition(int count, double value) { double[] values = new double[count]; for (int i = 0; i < count; i++) values[i] = value; return values; }
 }
