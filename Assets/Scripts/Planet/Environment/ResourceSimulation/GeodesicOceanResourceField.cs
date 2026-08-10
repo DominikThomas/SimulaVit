@@ -115,6 +115,11 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     public long TransportCacheMemoryBytes => transportCacheMemoryBytes;
     public long StagingBufferMemoryBytes => stagingBufferMemoryBytes;
 
+    public void SetStartupTransportInterval(float intervalSeconds)
+    {
+        transportIntervalSeconds = Mathf.Max(0.01f, intervalSeconds);
+    }
+
     private void Awake() { domain = GetComponent<GeodesicOceanLayerDomain>(); planetGenerator = GetComponent<PlanetGenerator>(); simulationClock = FindFirstObjectByType<ReplicatorManager>(); }
     private void OnDestroy() => ClearField();
 

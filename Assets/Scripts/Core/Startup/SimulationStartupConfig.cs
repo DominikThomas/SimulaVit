@@ -39,6 +39,12 @@ public class SimulationStartupConfig
     [Min(0)] public int initialSpawnCount = 100;
     public bool startPaused;
 
+    [Header("Advanced Environment Timing")]
+    [Tooltip("Fixed simulated-time interval used only by ApproximateEcologicalProfiles temperature updates.")]
+    public float approximateThermalIntervalSeconds = 2f;
+    [Tooltip("Fixed simulated-time interval used by Geodesic dissolved-ocean resource transport.")]
+    public float geodesicResourceTransportIntervalSeconds = 5f;
+
     public SimulationStartupConfig Clone()
     {
         return (SimulationStartupConfig)MemberwiseClone();

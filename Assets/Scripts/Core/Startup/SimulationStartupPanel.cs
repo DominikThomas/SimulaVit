@@ -28,6 +28,11 @@ public class SimulationStartupPanel : MonoBehaviour
     [SerializeField] private TMP_InputField ventCO2Input;
     [SerializeField] private TMP_InputField initialSpawnCountInput;
 
+    [Header("Advanced")]
+    [SerializeField] private GameObject advancedSettingsRoot;
+    [SerializeField] private TMP_Dropdown approximateThermalIntervalDropdown;
+    [SerializeField] private TMP_Dropdown resourceTransportIntervalDropdown;
+
     [Header("Labels")]
     [SerializeField] private TMP_Text axisTiltValueLabel;
 
@@ -37,6 +42,8 @@ public class SimulationStartupPanel : MonoBehaviour
     [SerializeField] private Button randomizeSeedButton;
     [SerializeField] private Button resetDefaultsButton;
     [SerializeField] private Button backButton;
+    [SerializeField] private Button advancedButton;
+    [SerializeField] private Button resetAdvancedDefaultsButton;
 
     private void Awake()
     {
@@ -46,6 +53,7 @@ public class SimulationStartupPanel : MonoBehaviour
 
     private void OnEnable()
     {
+        if (advancedSettingsRoot != null) advancedSettingsRoot.SetActive(false);
         RefreshFromConfig();
     }
 
@@ -56,6 +64,8 @@ public class SimulationStartupPanel : MonoBehaviour
         if (randomizeSeedButton != null) randomizeSeedButton.onClick.RemoveListener(RandomizeSeed);
         if (resetDefaultsButton != null) resetDefaultsButton.onClick.RemoveListener(ResetDefaults);
         if (backButton != null) backButton.onClick.RemoveListener(BackToMainMenu);
+        if (advancedButton != null) advancedButton.onClick.RemoveListener(ToggleAdvanced);
+        if (resetAdvancedDefaultsButton != null) resetAdvancedDefaultsButton.onClick.RemoveListener(ResetAdvancedDefaults);
         if (axisTiltSlider != null) axisTiltSlider.onValueChanged.RemoveListener(OnAxisTiltChanged);
         if (planetGridDropdown != null) planetGridDropdown.onValueChanged.RemoveListener(OnPlanetGridChanged);
     }
@@ -67,6 +77,8 @@ public class SimulationStartupPanel : MonoBehaviour
         if (randomizeSeedButton != null) randomizeSeedButton.onClick.AddListener(RandomizeSeed);
         if (resetDefaultsButton != null) resetDefaultsButton.onClick.AddListener(ResetDefaults);
         if (backButton != null) backButton.onClick.AddListener(BackToMainMenu);
+        if (advancedButton != null) advancedButton.onClick.AddListener(ToggleAdvanced);
+        if (resetAdvancedDefaultsButton != null) resetAdvancedDefaultsButton.onClick.AddListener(ResetAdvancedDefaults);
         if (axisTiltSlider != null) axisTiltSlider.onValueChanged.AddListener(OnAxisTiltChanged);
         if (planetGridDropdown != null) planetGridDropdown.onValueChanged.AddListener(OnPlanetGridChanged);
     }
@@ -98,6 +110,8 @@ public class SimulationStartupPanel : MonoBehaviour
         SetText(ventH2SInput, config.ventH2SPerTick.ToString("0.####"));
         SetText(ventCO2Input, config.ventCO2PerTick.ToString("0.####"));
         SetText(initialSpawnCountInput, config.initialSpawnCount.ToString());
+        SetPresetDropdown(approximateThermalIntervalDropdown, config.approximateThermalIntervalSeconds, SimulationStartupController.ApproximateThermalIntervalPresets);
+        SetPresetDropdown(resourceTransportIntervalDropdown, config.geodesicResourceTransportIntervalSeconds, SimulationStartupController.ResourceTransportIntervalPresets);
         OnAxisTiltChanged(config.axisTiltDegrees);
     }
 
@@ -127,6 +141,8 @@ public class SimulationStartupPanel : MonoBehaviour
         config.ventH2SPerTick = Mathf.Max(0f, ReadFloat(ventH2SInput, config.ventH2SPerTick));
         config.ventCO2PerTick = Mathf.Max(0f, ReadFloat(ventCO2Input, config.ventCO2PerTick));
         config.initialSpawnCount = Mathf.Max(0, ReadInt(initialSpawnCountInput, config.initialSpawnCount));
+        config.approximateThermalIntervalSeconds = ReadPresetDropdown(approximateThermalIntervalDropdown, config.approximateThermalIntervalSeconds, SimulationStartupController.ApproximateThermalIntervalPresets);
+        config.geodesicResourceTransportIntervalSeconds = ReadPresetDropdown(resourceTransportIntervalDropdown, config.geodesicResourceTransportIntervalSeconds, SimulationStartupController.ResourceTransportIntervalPresets);
     }
 
     private void StartSimulation()
@@ -156,6 +172,17 @@ public class SimulationStartupPanel : MonoBehaviour
     private void BackToMainMenu()
     {
         controller?.BackToStartMenu();
+    }
+
+    private void ToggleAdvanced()
+    {
+        if (advancedSettingsRoot != null) advancedSettingsRoot.SetActive(!advancedSettingsRoot.activeSelf);
+    }
+
+    private void ResetAdvancedDefaults()
+    {
+        controller?.ResetAdvancedToDefaults();
+        RefreshFromConfig();
     }
 
     private void OnAxisTiltChanged(float value)
@@ -203,6 +230,26 @@ public class SimulationStartupPanel : MonoBehaviour
     private static void SetSlider(Slider slider, float value)
     {
         if (slider != null) slider.SetValueWithoutNotify(value);
+    }
+
+    private static void SetPresetDropdown(TMP_Dropdown dropdown, float value, float[] presets)
+    {
+        if (dropdown == null) return;
+        dropdown.ClearOptions();
+        var labels = new System.Collections.Generic.List<string>(presets.Length);
+        int selected = 0;
+        for (int i = 0; i < presets.Length; i++)
+        {
+            labels.Add($"{presets[i]:0.#} s simulated time");
+            if (Mathf.Approximately(value, presets[i])) selected = i;
+        }
+        dropdown.AddOptions(labels);
+        dropdown.SetValueWithoutNotify(selected);
+    }
+
+    private static float ReadPresetDropdown(TMP_Dropdown dropdown, float fallback, float[] presets)
+    {
+        return dropdown != null && dropdown.value >= 0 && dropdown.value < presets.Length ? presets[dropdown.value] : fallback;
     }
 
     private static float ReadFloat(TMP_InputField input, float fallback)

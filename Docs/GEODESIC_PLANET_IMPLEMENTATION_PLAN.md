@@ -1823,6 +1823,19 @@ frameSimulationDelta = stepDelta * requestedSimulationSpeedMultiplier
 SimulationTimeSeconds += frameSimulationDelta
 ```
 
-The maximum-step clamp intentionally means achieved throughput can fall below the requested multiplier on slow rendered frames; accumulated environmental scheduler time is not discarded to improve displayed FPS. Current Geodesic mode has no initialized biology, so it advances authoritative time once per rendered frame and does not perform empty biological substep iterations. The fixed simulation-time environmental schedulers consume the resulting clock normally (approximate temperature at 1 simulated second and dissolved-ocean resources at 5 simulated seconds).
+The maximum-step clamp intentionally means achieved throughput can fall below the requested multiplier on slow rendered frames; accumulated environmental scheduler time is not discarded to improve displayed FPS. Current Geodesic mode has no initialized biology, so it advances authoritative time once per rendered frame and does not perform empty biological substep iterations. The fixed simulation-time environmental schedulers consume the resulting clock normally (approximate temperature at 2 simulated seconds and dissolved-ocean resources at 5 simulated seconds by default).
 
 Initialized Legacy biology preserves its stability-sensitive integration semantics: the requested integer multiplier remains the biological substep count and each substep uses `stepDelta`. Consequently, requesting 50x or 100x in Legacy can execute 50 or 100 full biological iterations per rendered frame and may achieve less than requested on hardware that cannot keep up. This focused correction does not combine those iterations into a large biological timestep.
+
+### Advanced startup environment timing
+
+The startup menu now keeps expert timing controls in a collapsed-by-default **Advanced** section. The authoritative `SimulationStartupConfig` and its existing `startup_config.json` persistence own both values; startup applies them to the environment components before planet initialization, and the components latch them for the new run. The UI is not runtime configuration authority and opening or closing Advanced performs no initialization.
+
+The exposed model parameters are deliberately limited to:
+
+- `approximateThermalIntervalSeconds`: fixed authoritative simulated-time cadence for `ApproximateEcologicalProfiles` only; presets are 0.5, 1, 2, and 5 seconds, with the validated production default of 2 seconds. `ConservativeImplicit` retains its independent cadence and behavior.
+- `geodesicResourceTransportIntervalSeconds`: fixed authoritative simulated-time cadence for existing conservative Geodesic dissolved-resource transport; presets are 1, 2, 5, and 10 seconds, with the validated production default of 5 seconds.
+
+Saved startup schema version 3 persists these fields. Loading older JSON begins from validated defaults before overlaying fields that exist, so missing cadence fields migrate to 2 and 5 seconds without deleting the file. Non-finite, non-positive, and off-preset values normalize safely (invalid values use the production default; finite positive values use the nearest preset). **Reset Advanced to Defaults** resets only these two fields and leaves seed, resources, population, and other basic startup choices unchanged.
+
+Geodesic simulation subdivision remains in the existing basic grid setup because it was already user-facing. Render subdivision and thermal-model selection are meaningful future Advanced candidates, but remain hidden in this focused change because they do not yet have complete startup persistence/UI paths. Horizontal/vertical mixing rates and the O2 vertical multiplier also remain hidden pending a dedicated safe-range and stability audit. Engine internals—including catch-up guards, staging buffers, profiler/diagnostic cadence, solver tolerances, layer count, cache layout, and frame-clock clamps—remain Inspector/implementation details rather than startup settings.

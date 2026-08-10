@@ -33,7 +33,11 @@ public class SimulationStartupController : MonoBehaviour
     private const float VentCO2MaxPerTick = 1f;
     private const int InitialSpawnMin = 0;
     private const int InitialSpawnMax = 10000;
-    private const int SavedStartupConfigVersion = 2;
+    private const int SavedStartupConfigVersion = 3;
+    public const float DefaultApproximateThermalIntervalSeconds = 2f;
+    public const float DefaultResourceTransportIntervalSeconds = 5f;
+    public static readonly float[] ApproximateThermalIntervalPresets = { 0.5f, 1f, 2f, 5f };
+    public static readonly float[] ResourceTransportIntervalPresets = { 1f, 2f, 5f, 10f };
 
     [Header("Startup Config")]
     [SerializeField] private SimulationStartupConfig defaults = new SimulationStartupConfig();
@@ -97,6 +101,7 @@ public class SimulationStartupController : MonoBehaviour
     private bool warnedAboutMissingOverlay;
     private bool returningToMainMenu;
     private bool deferredStartupPrepared;
+    private bool advancedSettingsExpanded;
 
     public static bool IsSetupActive { get; private set; }
     public static bool IsStartupBlockingHud => IsSetupActive;
@@ -239,6 +244,7 @@ public class SimulationStartupController : MonoBehaviour
 
     public void ShowConfigScreenFromMainMenu()
     {
+        advancedSettingsExpanded = false;
         startupUiState = StartupUiState.ConfigScreen;
         startScreenStatusMessage = null;
         ShowSetupScreen(true);
@@ -382,6 +388,14 @@ public class SimulationStartupController : MonoBehaviour
         currentConfig = defaults.Clone();
     }
 
+    public void ResetAdvancedToDefaults()
+    {
+        if (currentConfig == null) return;
+        currentConfig.approximateThermalIntervalSeconds = DefaultApproximateThermalIntervalSeconds;
+        currentConfig.geodesicResourceTransportIntervalSeconds = DefaultResourceTransportIntervalSeconds;
+        RefreshStartupPanels();
+    }
+
     public void StartSimulation()
     {
         currentConfig.startPaused = false;
@@ -405,6 +419,7 @@ public class SimulationStartupController : MonoBehaviour
         ShowSetupScreen(false);
         loadingOverlay?.ShowLoading("Generating planet...");
 
+        ClampLoadedConfig(currentConfig);
         ApplyConfig(currentConfig);
 
         if (saveStartupConfigOnStart)
@@ -472,8 +487,10 @@ public class SimulationStartupController : MonoBehaviour
             if (config.gridType == PlanetGridType.GeodesicIcosphere)
             {
                 planetGenerator.GetComponent<GeodesicSurfaceTemperatureField>()?.SetStartupTemperatureParameters(config.baseTempKelvin, config.insolationTempGain);
+                planetGenerator.GetComponent<GeodesicSurfaceTemperatureField>()?.SetStartupApproximateUpdateInterval(config.approximateThermalIntervalSeconds);
                 planetGenerator.GetComponent<GeodesicOceanResourceField>()?.SetStartupConcentrations(config.initialCO2, config.initialO2, config.initialCH4, config.initialDissolvedFe2Plus);
                 planetGenerator.GetComponent<GeodesicOceanResourceField>()?.SetStartupVentRates(config.ventH2PerTick, config.ventH2SPerTick, config.ventCO2PerTick, config.ventFe2PerTick);
+                planetGenerator.GetComponent<GeodesicOceanResourceField>()?.SetStartupTransportInterval(config.geodesicResourceTransportIntervalSeconds);
             }
             planetGenerator.InitializeAuthoritativePlanet("New Game startup selection");
         }
@@ -654,6 +671,21 @@ public class SimulationStartupController : MonoBehaviour
         config.initialSpawnCount = Mathf.Clamp(config.initialSpawnCount, InitialSpawnMin, InitialSpawnMax);
         config.cubeSphereResolution = Mathf.Clamp(config.cubeSphereResolution, 3, 240);
         config.geodesicSubdivisionLevel = Mathf.Clamp(config.geodesicSubdivisionLevel, 0, GeodesicGridTopology.MaxSupportedSubdivision);
+        config.approximateThermalIntervalSeconds = NormalizeToPreset(config.approximateThermalIntervalSeconds, ApproximateThermalIntervalPresets, DefaultApproximateThermalIntervalSeconds);
+        config.geodesicResourceTransportIntervalSeconds = NormalizeToPreset(config.geodesicResourceTransportIntervalSeconds, ResourceTransportIntervalPresets, DefaultResourceTransportIntervalSeconds);
+    }
+
+    public static float NormalizeToPreset(float value, float[] presets, float fallback)
+    {
+        if (presets == null || presets.Length == 0 || float.IsNaN(value) || float.IsInfinity(value) || value <= 0f) return fallback;
+        float nearest = presets[0];
+        float nearestDistance = Mathf.Abs(value - nearest);
+        for (int i = 1; i < presets.Length; i++)
+        {
+            float distance = Mathf.Abs(value - presets[i]);
+            if (distance < nearestDistance) { nearest = presets[i]; nearestDistance = distance; }
+        }
+        return nearest;
     }
 
     private void RefreshStartupPanels()
@@ -678,6 +710,8 @@ public class SimulationStartupController : MonoBehaviour
         builder.AppendLine($"Planet Grid: {config.gridType}");
         builder.AppendLine($"Cube Sphere Resolution: {config.cubeSphereResolution}");
         builder.AppendLine($"Geodesic Subdivision Level: {config.geodesicSubdivisionLevel}");
+        builder.AppendLine($"Approx Thermal Interval: {config.approximateThermalIntervalSeconds:0.###} s simulated time");
+        builder.AppendLine($"Resource Transport Interval: {config.geodesicResourceTransportIntervalSeconds:0.###} s simulated time");
         builder.AppendLine($"Axis Tilt Degrees: {config.axisTiltDegrees:0.###}");
         builder.AppendLine($"Day Length Seconds: {config.dayLengthSeconds:0.###}");
         builder.AppendLine($"Year Length In Days: {config.yearLengthInDays:0.###}");
@@ -721,6 +755,8 @@ public class SimulationStartupController : MonoBehaviour
         public float ventFe2PerTick;
         public int initialSpawnCount;
         public bool startPaused;
+        public float approximateThermalIntervalSeconds;
+        public float geodesicResourceTransportIntervalSeconds;
 
         public static SavedStartupConfig FromDefaults(SimulationStartupConfig defaults)
         {
@@ -752,7 +788,9 @@ public class SimulationStartupController : MonoBehaviour
                 ventCO2PerTick = config.ventCO2PerTick,
                 ventFe2PerTick = config.ventFe2PerTick,
                 initialSpawnCount = config.initialSpawnCount,
-                startPaused = config.startPaused
+                startPaused = config.startPaused,
+                approximateThermalIntervalSeconds = config.approximateThermalIntervalSeconds,
+                geodesicResourceTransportIntervalSeconds = config.geodesicResourceTransportIntervalSeconds
             };
         }
 
@@ -779,6 +817,8 @@ public class SimulationStartupController : MonoBehaviour
             config.ventFe2PerTick = ventFe2PerTick > 0f ? ventFe2PerTick : config.ventFe2PerTick;
             config.initialSpawnCount = initialSpawnCount;
             config.startPaused = startPaused;
+            config.approximateThermalIntervalSeconds = approximateThermalIntervalSeconds;
+            config.geodesicResourceTransportIntervalSeconds = geodesicResourceTransportIntervalSeconds;
             return config;
         }
     }
@@ -1022,7 +1062,8 @@ public class SimulationStartupController : MonoBehaviour
         setupGuiScrollPosition = GUILayout.BeginScrollView(setupGuiScrollPosition, GUILayout.Width(width), GUILayout.Height(scrollHeight));
 
         float contentWidth = Mathf.Max(1f, width - 20f);
-        float contentHeight = 44f + ((line + gap) * 18f) + (gap * 2f) + 42f + 30f + 44f;
+        float advancedHeight = advancedSettingsExpanded ? 190f : 0f;
+        float contentHeight = 44f + ((line + gap) * 18f) + advancedHeight + (gap * 2f) + 42f + 30f + 82f;
         Rect contentRect = GUILayoutUtility.GetRect(contentWidth, contentHeight, GUILayout.Width(contentWidth), GUILayout.Height(contentHeight));
         float controlX = contentRect.x;
         float y = contentRect.y;
@@ -1073,6 +1114,27 @@ public class SimulationStartupController : MonoBehaviour
         y += line + gap;
         DrawInt(new Rect(controlX, y, contentWidth, line), "Initial Spawn Count", ref currentConfig.initialSpawnCount, true, InitialSpawnMin, InitialSpawnMax);
         y += line + (gap * 2f);
+
+        if (GUI.Button(new Rect(controlX, y, contentWidth, 32f), advancedSettingsExpanded ? "Advanced ▲" : "Advanced ▼", buttonStyle))
+        {
+            advancedSettingsExpanded = !advancedSettingsExpanded;
+        }
+        y += 40f;
+        if (advancedSettingsExpanded)
+        {
+            GUI.Label(new Rect(controlX, y, contentWidth, 24f), "Environment Timing", labelStyle);
+            y += 26f;
+            DrawPreset(new Rect(controlX, y, contentWidth, line), "Temperature update interval", ref currentConfig.approximateThermalIntervalSeconds, ApproximateThermalIntervalPresets);
+            y += line;
+            GUI.Label(new Rect(controlX, y, contentWidth, 22f), "Simulated time. Lower updates more often but costs more CPU. Recommended: 2 s.", labelStyle);
+            y += 28f;
+            DrawPreset(new Rect(controlX, y, contentWidth, line), "Resource transport interval", ref currentConfig.geodesicResourceTransportIntervalSeconds, ResourceTransportIntervalPresets);
+            y += line;
+            GUI.Label(new Rect(controlX, y, contentWidth, 22f), "Simulated time. Lower gives finer transport but costs more CPU. Recommended: 5 s.", labelStyle);
+            y += 30f;
+            if (GUI.Button(new Rect(controlX, y, contentWidth, 30f), "Reset Advanced to Defaults", buttonStyle)) ResetAdvancedToDefaults();
+            y += 38f;
+        }
 
         float buttonWidth = (contentWidth - gap) * 0.5f;
         if (GUI.Button(new Rect(controlX, y, buttonWidth, 34f), "Start Simulation", buttonStyle))
@@ -1172,6 +1234,21 @@ public class SimulationStartupController : MonoBehaviour
         {
             value = Mathf.Clamp(parsed, min, max);
         }
+    }
+
+    private void DrawPreset(Rect rect, string label, ref float value, float[] presets)
+    {
+        value = NormalizeToPreset(value, presets, presets[0]);
+        GUI.Label(new Rect(rect.x, rect.y, rect.width * 0.42f, rect.height), $"{label}: {value:0.#} s simulated", labelStyle);
+        string[] choices = new string[presets.Length];
+        int selected = 0;
+        for (int i = 0; i < presets.Length; i++)
+        {
+            choices[i] = $"{presets[i]:0.#} s";
+            if (Mathf.Approximately(value, presets[i])) selected = i;
+        }
+        selected = GUI.SelectionGrid(new Rect(rect.x + rect.width * 0.44f, rect.y, rect.width * 0.56f, rect.height), selected, choices, presets.Length);
+        value = presets[selected];
     }
 
     private void DrawInt(Rect rect, string label, ref int value, bool enabled, int min = int.MinValue, int max = int.MaxValue)
