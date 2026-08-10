@@ -21,6 +21,7 @@ public class PlanetCellInspectorController : MonoBehaviour
     private int selectedCellIndex = -1;
     private Vector3 selectedDirection;
     private float refreshTimer;
+    private bool legacyInteractionSuppressed;
 
     private void Awake()
     {
@@ -44,6 +45,15 @@ public class PlanetCellInspectorController : MonoBehaviour
 
     private void Update()
     {
+        bool legacyAuthoritative = planetResourceMap != null && planetResourceMap.IsLegacyWorldAuthoritative;
+        if (!legacyAuthoritative)
+        {
+            if (!legacyInteractionSuppressed) ClearSelection();
+            legacyInteractionSuppressed = true;
+            return;
+        }
+        legacyInteractionSuppressed = false;
+
         if (SimulationStartupController.IsStartupBlockingHud)
         {
             return;

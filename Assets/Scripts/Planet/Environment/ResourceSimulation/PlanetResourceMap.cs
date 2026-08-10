@@ -514,6 +514,7 @@ public class PlanetResourceMap : MonoBehaviour
     private float initialDissolvedFe2PlusTotal;
 
     private bool isInitialized;
+    private bool warnedRejectedNonLegacyInitialization;
     public float[] ventStrength;
     public float[] toxicProteolyticWaste;
     public float[] dissolvedOrganicLeak;
@@ -568,6 +569,10 @@ public class PlanetResourceMap : MonoBehaviour
 
 
     public int VentCount => ventCells != null ? ventCells.Length : 0;
+    public bool IsInitialized => isInitialized;
+    public bool IsLegacyWorldAuthoritative => planetGenerator != null
+        && planetGenerator.IsPlanetInitialized
+        && planetGenerator.CurrentGridType == PlanetGridType.LegacyCubeSphere;
     public int[] VentCells => ventCells;
     public Vector3[] CellDirs => cellDirections;
     public int SimulationResolution => Mathf.Max(1, simulationResolution > 0
@@ -656,6 +661,7 @@ public class PlanetResourceMap : MonoBehaviour
     public bool ApplyMutableResourceSnapshot(PlanetResourceMapSnapshot snapshot)
     {
         InitializeIfNeeded();
+        if (!isInitialized) return false;
 
         if (snapshot == null || !snapshot.available)
         {
@@ -761,6 +767,7 @@ public class PlanetResourceMap : MonoBehaviour
     public bool ApplyDissolvedFe2Snapshot(PlanetResourceMapSnapshot snapshot)
     {
         InitializeIfNeeded();
+        if (!isInitialized) return false;
 
         if (snapshot == null || !snapshot.available)
         {
@@ -1001,6 +1008,13 @@ public class PlanetResourceMap : MonoBehaviour
 
     private void Update()
     {
+        // Defense in depth: stale Legacy state must never simulate beside a Geodesic world.
+        if (!IsLegacyWorldAuthoritative)
+        {
+            if (isInitialized) DeinitializeForStartupMenu("authoritative world is not Legacy");
+            return;
+        }
+
         if (!isInitialized)
         {
             return;
@@ -1863,10 +1877,20 @@ public class PlanetResourceMap : MonoBehaviour
 
     public void InitializeIfNeeded()
     {
-        if (planetGenerator == null || !planetGenerator.IsPlanetInitialized)
+        if (!IsLegacyWorldAuthoritative)
         {
+            if (planetGenerator != null
+                && planetGenerator.IsPlanetInitialized
+                && planetGenerator.CurrentGridType == PlanetGridType.GeodesicIcosphere
+                && !warnedRejectedNonLegacyInitialization)
+            {
+                warnedRejectedNonLegacyInitialization = true;
+                Debug.LogWarning("[PlanetResourceMap] Rejected Legacy resource initialization because GeodesicIcosphere is authoritative.", this);
+            }
             return;
         }
+
+        warnedRejectedNonLegacyInitialization = false;
 
         // Resource/simulation arrays are sized from simulationResolution (or visual resolution when in compatibility mode).
         int targetResolution = SimulationResolution;
@@ -2142,6 +2166,7 @@ public class PlanetResourceMap : MonoBehaviour
     public void InitializeForFinalPlanet(string reason, bool notifyVisualizers = true)
     {
         InitializeIfNeeded();
+        if (!isInitialized) return;
         InitializeOceanVisuals();
         Debug.Log($"[StartupLifecycle] Resource initialization complete. Reason: {reason}, cells={SimulationCellCount}, vents={VentCount}", this);
         if (notifyVisualizers)
@@ -3705,6 +3730,7 @@ public class PlanetResourceMap : MonoBehaviour
         debugVentTimer = 0f;
         debugLastVentDeltaTime = 0f;
         debugSimulationDeltaTimeUsedByPlanetResourceMap = 0f;
+        warnedRejectedNonLegacyInitialization = false;
     }
 
     public void DestroyPrecipitateOverlay(string reason)
@@ -5396,12 +5422,12 @@ public class PlanetResourceMap : MonoBehaviour
 
     private void OnDrawGizmosSelected()
     {
-        if (!drawDebugPoints)
+        // Scene-view diagnostics are read-only. Selecting this object must never initialize
+        // the Legacy simulation (the former call here was the Geodesic activation trigger).
+        if (!drawDebugPoints || !IsLegacyWorldAuthoritative)
         {
             return;
         }
-
-        InitializeIfNeeded();
 
         if (!isInitialized || co2 == null || co2.Length == 0 || cellDirections == null)
         {

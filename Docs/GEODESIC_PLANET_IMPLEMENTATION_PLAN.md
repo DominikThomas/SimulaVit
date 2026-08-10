@@ -1731,6 +1731,10 @@ Production state remains concentration-authoritative and exposes direct local co
 
 Persistent memory added by transport is one double staging value per node-capacity slot (8 bytes/node), one float per horizontal and vertical link, and one `(int node, float strength)` pair per vent. Initialization-only geometry normalization scratch arrays are released before production stepping. Unity Play Mode validation and profiler measurements remain required before claiming runtime timings or managed-allocation measurements.
 
+### Legacy/Geodesic runtime isolation
+
+`PlanetResourceMap` is authoritative only while the initialized `PlanetGenerator` reports `LegacyCubeSphere`; `GeodesicOceanResourceField` remains authoritative for dissolved resources in `GeodesicIcosphere`. Legacy initialization and update boundaries reject/inertly exit in every other mode. Debug reads and gizmo rendering must be lifecycle-side-effect free: selecting an object or switching between Game and Scene views may not initialize an inactive simulation system. Legacy cell inspection, markers, atmosphere/resource HUD fields, vent visuals, and resource gizmos are suppressed when Geodesic is authoritative. Legacy and Geodesic logical vent datasets remain separate migration-era systems and are never merged or substituted for one another.
+
 ### PR #238 correction notes — resource availability diagnostics
 
 Runtime testing found picker resource rows could show channel-level `--` values for every layer, which made it impossible to distinguish a missing/stale picker reference from an uninitialized resource field or inactive node. The correction keeps the same ownership/storage contract but adds explicit initialization failure reporting, `LastInitializationFailure` diagnostics, a bool-returning initialization path, PlanetGenerator post-call verification, and a startup sentinel read that confirms configured CO2/O2/CH4/Fe2 values plus zero H2/H2S/OrganicC reached one deterministic active node.

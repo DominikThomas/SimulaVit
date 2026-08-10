@@ -499,9 +499,14 @@ public class SimulationStartupController : MonoBehaviour
         }
         else if (config.gridType == PlanetGridType.GeodesicIcosphere)
         {
+            planetResourceMap?.DeinitializeForStartupMenu("geodesic prototype mode selected");
             Debug.Log("[StartupLifecycle] Geodesic mode: skipping legacy PlanetResourceMap resource initialization and vent/resource overlays; GeodesicOceanResourceField owns dissolved-ocean concentrations.", this);
             ventVisualizer?.ClearRuntimeVisuals("geodesic prototype mode selected");
             planetGenerator?.GetComponent<PlanetTemperatureIceVisuals>()?.ClearForGeodesicMode();
+            if (planetResourceMap != null && planetResourceMap.IsInitialized)
+            {
+                Debug.LogError("[StartupLifecycle] Geodesic Legacy-isolation invariant failed: PlanetResourceMap remained initialized.", this);
+            }
         }
 
         if (replicatorManager != null)
