@@ -25,8 +25,10 @@ public class PlanetCellSelectionMarker : MonoBehaviour
 
     public void ShowSelection(int cellIndex, Vector3 directionFromCenter, bool isOcean)
     {
-        if (planetGenerator == null || markerTransform == null)
+        if (planetGenerator == null || markerTransform == null
+            || planetGenerator.CurrentGridType != PlanetGridType.LegacyCubeSphere)
         {
+            Hide();
             return;
         }
 

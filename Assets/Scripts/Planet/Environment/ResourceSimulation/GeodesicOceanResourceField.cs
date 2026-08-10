@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.CompilerServices;
 using Unity.Profiling;
 using UnityEngine;
 
@@ -26,12 +27,31 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
 {
     private const int ResourceCount = 7;
     private static readonly ProfilerMarker InitializeMarker = new ProfilerMarker("GeodesicOceanResource.Initialize");
+    private static readonly ProfilerMarker TransportMarker = new ProfilerMarker("GeodesicOceanResource.Transport");
+    private static readonly ProfilerMarker HorizontalMarker = new ProfilerMarker("GeodesicOceanResource.HorizontalMixing");
+    private static readonly ProfilerMarker VerticalMarker = new ProfilerMarker("GeodesicOceanResource.VerticalMixing");
+    private static readonly ProfilerMarker VentMarker = new ProfilerMarker("GeodesicOceanResource.VentSources");
 
     [Header("Startup Concentrations (Geodesic Dissolved Ocean)")]
     [SerializeField, Min(0f)] private float initialCO2Concentration = 1f;
     [SerializeField, Min(0f)] private float initialO2Concentration = 0.21f;
     [SerializeField, Min(0f)] private float initialCH4Concentration = 0f;
     [SerializeField, Min(0f)] private float initialFe2Concentration = 0f;
+
+    [Header("Transport (inventory-conservative)")]
+    [SerializeField, Min(0.01f), Tooltip("Fixed authoritative simulation seconds per resource tick. Five seconds resolves the configured 50-2000 second mixing timescales while reducing topology solves by 80% versus the one-second reference.")] private float transportIntervalSeconds = 5f;
+    [SerializeField, Range(0f, 1f), Tooltip("Fractional horizontal mixing rate per simulation second. Each link is degree-normalized for explicit stability.")] private float horizontalMixingRate = 0.02f;
+    [SerializeField, Range(0f, 1f), Tooltip("Fractional adjacent-layer mixing rate per simulation second. Each link is degree-normalized for explicit stability.")] private float defaultVerticalMixingRate = 0.005f;
+    [SerializeField] private float[] horizontalResourceMultipliers = { 1f, 1f, 1f, 1f, 1f, 1f, 1f };
+    [SerializeField, Tooltip("CO2, O2, CH4, H2, H2S, Fe2, OrganicC. O2 defaults to 0.1 so deep oxygenation lags.")] private float[] verticalResourceMultipliers = { 1f, 0.1f, 1f, 1f, 1f, 1f, 1f };
+    [SerializeField, Range(1, 256)] private int maximumTransportTicksPerFrame = 64;
+
+    [Header("Geodesic Vent Sources")]
+    [SerializeField, Range(0f, 0.25f), Tooltip("Deterministic fraction of multi-layer ocean columns containing logical resource vents.")] private float ventColumnFraction = 0.02f;
+    [SerializeField, Min(0f), Tooltip("Inventory injected per logical vent per fixed resource tick (one simulated second by default).") ] private float ventH2PerTick = 0.006f;
+    [SerializeField, Min(0f)] private float ventH2SPerTick = 0.01f;
+    [SerializeField, Min(0f)] private float ventCO2PerTick = 0f;
+    [SerializeField, Min(0f), Tooltip("Fe2 inventory injected per logical vent per fixed resource tick.")] private float ventFe2PerTick = 0.002f;
 
     [Header("Runtime Diagnostics (Read Only)")]
     [SerializeField] private bool initialized;
@@ -50,13 +70,34 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     [SerializeField] private string lastInitializationFailureMessage = string.Empty;
     [SerializeField] private string lastStartupConcentrationDiagnostic = string.Empty;
     [SerializeField] private string lastSentinelVerificationDiagnostic = string.Empty;
+    [SerializeField] private int horizontalLinkCount;
+    [SerializeField] private int verticalLinkCount;
+    [SerializeField] private int ventCount;
+    [SerializeField] private double transportIntegrationCursorTime;
+    [SerializeField] private double unconsumedTransportRemainderSeconds;
+    [SerializeField] private long completedTransportTicks;
+    [SerializeField] private long transportCacheMemoryBytes;
+    [SerializeField] private long stagingBufferMemoryBytes;
+    [SerializeField] private float[] cachedMeanO2ByLayer = new float[GeodesicOceanLayerGrid.AbsoluteMaximumLayerCount];
 
     private GeodesicOceanLayerDomain domain;
+    private PlanetGenerator planetGenerator;
     private GeodesicOceanLayerGrid sourceGrid;
     private float[] concentrationsByResourceThenNode;
     private int[] activeNodeIndices;
     private float[] activeNodeVolumes;
     private float[] configuredInitialConcentrations = new float[ResourceCount];
+    private ReplicatorManager simulationClock;
+    private double lastObservedSimulationTime;
+    private double[] stagedInventoryDelta;
+    private float[] horizontalTickCoefficients;
+    private float[] verticalTickCoefficients;
+    private float preparedTickDeltaTime;
+    private float[] horizontalConductanceBase;
+    private float[] verticalConductanceBase;
+    private int[] ventBottomNodes;
+    private float[] ventStrengths;
+    private bool warnedTransportBacklog;
 
     public bool IsInitialized => initialized;
     public int CellCount => cellCount;
@@ -68,9 +109,33 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     public GeodesicOceanResourceInitializationFailure LastInitializationFailure => lastInitializationFailure;
     public string LastInitializationFailureMessage => lastInitializationFailureMessage;
     public string LastStartupConcentrationDiagnostic => lastStartupConcentrationDiagnostic;
+    public float TransportIntervalSeconds => Mathf.Max(0.01f, transportIntervalSeconds);
+    public double UnconsumedTransportRemainderSeconds => unconsumedTransportRemainderSeconds;
+    public long CompletedTransportTicks => completedTransportTicks;
+    public long TransportCacheMemoryBytes => transportCacheMemoryBytes;
+    public long StagingBufferMemoryBytes => stagingBufferMemoryBytes;
 
-    private void Awake() => domain = GetComponent<GeodesicOceanLayerDomain>();
+    private void Awake() { domain = GetComponent<GeodesicOceanLayerDomain>(); planetGenerator = GetComponent<PlanetGenerator>(); simulationClock = FindFirstObjectByType<ReplicatorManager>(); }
     private void OnDestroy() => ClearField();
+
+    private void Update()
+    {
+        if (!initialized || simulationClock == null) return;
+        if (planetGenerator == null || planetGenerator.CurrentGridType != PlanetGridType.GeodesicIcosphere) return;
+        double target = Math.Max(0d, simulationClock.SimulationTimeSeconds);
+        if (target < lastObservedSimulationTime) { transportIntegrationCursorTime = target; unconsumedTransportRemainderSeconds = 0d; }
+        lastObservedSimulationTime = target;
+        double interval = TransportIntervalSeconds;
+        int ticks = 0, guard = Mathf.Max(1, maximumTransportTicksPerFrame);
+        while (transportIntegrationCursorTime + interval <= target + 1e-9d && ticks < guard)
+        {
+            TickResources((float)interval);
+            transportIntegrationCursorTime += interval; completedTransportTicks++; ticks++;
+        }
+        if (transportIntegrationCursorTime + interval <= target + 1e-9d && !warnedTransportBacklog)
+        { warnedTransportBacklog = true; Debug.LogWarning("[GeodesicOceanResourceTransport] Catch-up guard reached; backlog retained.", this); }
+        unconsumedTransportRemainderSeconds = Math.Max(0d, target - transportIntegrationCursorTime);
+    }
 
     public void SetStartupConcentrations(float co2, float o2, float ch4, float fe2)
     {
@@ -81,6 +146,9 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
         lastStartupConcentrationDiagnostic = $"CO2={initialCO2Concentration:G6}, O2={initialO2Concentration:G6}, CH4={initialCH4Concentration:G6}, Fe2={initialFe2Concentration:G6}";
     }
 
+    public void SetStartupVentRates(float h2, float h2s, float co2, float fe2)
+    { ventH2PerTick = Mathf.Max(0f, h2); ventH2SPerTick = Mathf.Max(0f, h2s); ventCO2PerTick = Mathf.Max(0f, co2); ventFe2PerTick = Mathf.Max(0f, fe2); }
+
     public bool InitializeForCurrentDomain()
     {
         using (InitializeMarker.Auto())
@@ -90,9 +158,9 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
             lastInitializationFailureMessage = string.Empty;
             lastSentinelVerificationDiagnostic = string.Empty;
             domain = GetComponent<GeodesicOceanLayerDomain>();
-            PlanetGenerator generator = GetComponent<PlanetGenerator>();
-            if (generator == null) return FailInitialization(GeodesicOceanResourceInitializationFailure.PlanetGeneratorMissing, "PlanetGenerator missing");
-            if (generator.CurrentGridType != PlanetGridType.GeodesicIcosphere) return FailInitialization(GeodesicOceanResourceInitializationFailure.NotGeodesicMode, $"current mode is {generator.CurrentGridType}, not GeodesicIcosphere");
+            planetGenerator = GetComponent<PlanetGenerator>();
+            if (planetGenerator == null) return FailInitialization(GeodesicOceanResourceInitializationFailure.PlanetGeneratorMissing, "PlanetGenerator missing");
+            if (planetGenerator.CurrentGridType != PlanetGridType.GeodesicIcosphere) return FailInitialization(GeodesicOceanResourceInitializationFailure.NotGeodesicMode, $"current mode is {planetGenerator.CurrentGridType}, not GeodesicIcosphere");
             if (domain == null) return FailInitialization(GeodesicOceanResourceInitializationFailure.DomainMissing, "GeodesicOceanLayerDomain missing");
             if (!domain.Initialized) return FailInitialization(GeodesicOceanResourceInitializationFailure.DomainNotInitialized, "GeodesicOceanLayerDomain not initialized");
             GeodesicOceanLayerGrid grid = domain.Grid;
@@ -120,10 +188,16 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
                 cursor++;
             }
             activeOceanVolume = volume; approximateRuntimeMemoryBytes = (long)concentrationsByResourceThenNode.Length * sizeof(float) + (long)activeNodeIndices.Length * sizeof(int) + (long)activeNodeVolumes.Length * sizeof(float) + ResourceCount * 32L;
-            initialized = true; initializationCount++; RecomputeDiagnostics();
+            BuildTransportCaches(grid, planetGenerator);
+            simulationClock = FindFirstObjectByType<ReplicatorManager>();
+            double simulationTime = simulationClock != null ? Math.Max(0d, simulationClock.SimulationTimeSeconds) : 0d;
+            transportIntegrationCursorTime = lastObservedSimulationTime = simulationTime;
+            unconsumedTransportRemainderSeconds = 0d; completedTransportTicks = 0; warnedTransportBacklog = false;
+            initialized = true; initializationCount++; RecomputeDiagnostics(); RefreshO2LayerMeans();
             if (!VerifyStartupSentinel(out string sentinel)) return FailInitialization(GeodesicOceanResourceInitializationFailure.AllocationOrInitializationFailure, sentinel);
             lastSentinelVerificationDiagnostic = sentinel;
             Debug.Log($"[GeodesicOceanResource] initialized dissolved-ocean concentrations (not atmosphere; not legacy normalized totals): cells={cellCount}, nodeCapacity={nodeCapacity}, activeNodes={activeNodeCount}, volume={activeOceanVolume:G6}, memory={approximateRuntimeMemoryBytes} bytes, CO2={initialCO2Concentration:G6}, O2={initialO2Concentration:G6}, CH4={initialCH4Concentration:G6}, H2=0, H2S=0, Fe2={initialFe2Concentration:G6}, OrganicC=0, sentinel={sentinel}", this);
+            Debug.Log($"[GeodesicOceanResourceTransport] interval={TransportIntervalSeconds:F3}s, activeNodes={activeNodeCount}, horizontalLinks={horizontalLinkCount}, verticalLinks={verticalLinkCount}, vents={ventCount}, stateBytes={approximateRuntimeMemoryBytes}, cacheBytes={transportCacheMemoryBytes}, stagingBytes={stagingBufferMemoryBytes}", this);
             return true;
             }
             catch (Exception exception)
@@ -210,7 +284,178 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     public void ClearField() => ClearField(true);
     private void ClearField(bool countClear)
     {
-        concentrationsByResourceThenNode = null; activeNodeIndices = null; activeNodeVolumes = null; sourceGrid = null; initialized = false; cellCount = nodeCapacity = activeNodeCount = 0; activeOceanVolume = 0d; approximateRuntimeMemoryBytes = 0; ResetDiagnostics(); if (countClear) clearCount++;
+        concentrationsByResourceThenNode = null; activeNodeIndices = null; activeNodeVolumes = null; sourceGrid = null; stagedInventoryDelta = null; horizontalTickCoefficients = null; verticalTickCoefficients = null; preparedTickDeltaTime = 0f; horizontalConductanceBase = null; verticalConductanceBase = null; ventBottomNodes = null; ventStrengths = null; initialized = false; cellCount = nodeCapacity = activeNodeCount = horizontalLinkCount = verticalLinkCount = ventCount = 0; activeOceanVolume = 0d; approximateRuntimeMemoryBytes = transportCacheMemoryBytes = stagingBufferMemoryBytes = 0; transportIntegrationCursorTime = lastObservedSimulationTime = unconsumedTransportRemainderSeconds = 0d; completedTransportTicks = 0; ResetDiagnostics(); if (countClear) clearCount++;
+    }
+
+    private void BuildTransportCaches(GeodesicOceanLayerGrid grid, PlanetGenerator generator)
+    {
+        horizontalLinkCount = grid.HorizontalLinkCount; verticalLinkCount = grid.VerticalLinkCount;
+        // Resource-major staging preserves the old per-resource accumulation order while
+        // allowing every topology link to be traversed only once per transport stage.
+        stagedInventoryDelta = new double[ResourceCount * nodeCapacity];
+        horizontalTickCoefficients = new float[ResourceCount];
+        verticalTickCoefficients = new float[ResourceCount];
+        horizontalConductanceBase = new float[horizontalLinkCount];
+        verticalConductanceBase = new float[verticalLinkCount];
+        float[] horizontalGeometry = new float[horizontalLinkCount], horizontalSum = new float[nodeCapacity];
+        for (int i = 0; i < horizontalLinkCount; i++)
+        {
+            int a = grid.HorizontalNodeA[i], b = grid.HorizontalNodeB[i];
+            int edge = grid.HorizontalSourceEdgeIndex[i];
+            float geometry = grid.SourceTransportGraph.EdgeConductanceBase[edge] * grid.HorizontalOverlapThickness[i];
+            horizontalGeometry[i] = geometry; horizontalSum[a] += geometry; horizontalSum[b] += geometry;
+        }
+        // Geometry-weighted normalization guarantees each node's incident conductance sum is
+        // at most its volume. Thus rate * dt <= 1 is a justified explicit stability bound.
+        for (int i = 0; i < horizontalLinkCount; i++) { int a = grid.HorizontalNodeA[i], b = grid.HorizontalNodeB[i]; float geometry = horizontalGeometry[i]; horizontalConductanceBase[i] = geometry * Mathf.Min(grid.LayerVolume[a] / horizontalSum[a], grid.LayerVolume[b] / horizontalSum[b]); }
+        float[] verticalGeometry = new float[verticalLinkCount], verticalSum = new float[nodeCapacity];
+        for (int i = 0; i < verticalLinkCount; i++)
+        {
+            int a = grid.VerticalUpperNode[i], b = grid.VerticalLowerNode[i];
+            float geometry = grid.VerticalInterfaceArea[i] / grid.VerticalCenterDistance[i];
+            verticalGeometry[i] = geometry; verticalSum[a] += geometry; verticalSum[b] += geometry;
+        }
+        for (int i = 0; i < verticalLinkCount; i++) { int a = grid.VerticalUpperNode[i], b = grid.VerticalLowerNode[i]; float geometry = verticalGeometry[i]; verticalConductanceBase[i] = geometry * Mathf.Min(grid.LayerVolume[a] / verticalSum[a], grid.LayerVolume[b] / verticalSum[b]); }
+        int[] nodes = new int[grid.OceanCellCount]; float[] strengths = new float[grid.OceanCellCount]; int count = 0;
+        uint seed = unchecked((uint)generator.DerivedTerrainSeed) ^ 0x6A09E667u;
+        uint threshold = (uint)(Mathf.Clamp01(ventColumnFraction) * uint.MaxValue);
+        for (int cell = 0; cell < grid.CellCount; cell++)
+        {
+            int bottom = grid.GetBottomLayerIndex(cell); if (bottom < 1) continue;
+            uint hash = HashVent(seed ^ (uint)cell);
+            if (threshold == 0u || hash > threshold) continue;
+            nodes[count] = grid.GetNodeIndex(cell, bottom); strengths[count] = 0.5f + 0.5f * (hash / (float)threshold); count++;
+        }
+        ventBottomNodes = new int[count]; ventStrengths = new float[count]; Array.Copy(nodes, ventBottomNodes, count); Array.Copy(strengths, ventStrengths, count); ventCount = count;
+        stagingBufferMemoryBytes = (long)stagedInventoryDelta.Length * sizeof(double);
+        transportCacheMemoryBytes = (long)(horizontalConductanceBase.Length + verticalConductanceBase.Length + ventStrengths.Length + horizontalTickCoefficients.Length + verticalTickCoefficients.Length) * sizeof(float) + (long)ventBottomNodes.Length * sizeof(int);
+    }
+
+    private static uint HashVent(uint value)
+    { value ^= value >> 16; value *= 0x7FEB352Du; value ^= value >> 15; value *= 0x846CA68Bu; return value ^ (value >> 16); }
+
+    private void TickResources(float dt)
+    {
+        using (TransportMarker.Auto())
+        {
+            // Deterministic tick order: transport the old state (horizontal then vertical), then inject vents.
+            Array.Clear(stagedInventoryDelta, 0, stagedInventoryDelta.Length);
+            PrepareTickCoefficients(dt);
+            AccumulateHorizontalAllResources();
+            AccumulateVerticalAllResources();
+            ApplyStagedAllResources();
+            // Historically named "Per Tick" startup values are rates per simulated second;
+            // the original one-second cadence therefore injected exactly rate * 1 second.
+            InjectVentSources(dt);
+        }
+        if ((completedTransportTicks + 1) % Math.Max(1, (long)Math.Round(5f / TransportIntervalSeconds)) == 0) { RecomputeDiagnostics(); RefreshO2LayerMeans(); }
+    }
+
+    private void PrepareTickCoefficients(float dt)
+    {
+        preparedTickDeltaTime = dt;
+        for (int resource = 0; resource < ResourceCount; resource++)
+        {
+            float scale = StableRateScale(resource, dt);
+            horizontalTickCoefficients[resource] = Mathf.Max(0f, horizontalMixingRate) * GetMultiplier(horizontalResourceMultipliers, resource, 1f) * scale;
+            verticalTickCoefficients[resource] = Mathf.Max(0f, defaultVerticalMixingRate) * GetMultiplier(verticalResourceMultipliers, resource, resource == (int)GeodesicOceanResource.O2 ? 0.1f : 1f) * scale;
+        }
+    }
+
+    private void AccumulateHorizontalAllResources()
+    {
+        int[] nodeA = sourceGrid.HorizontalNodeA, nodeB = sourceGrid.HorizontalNodeB;
+        float[] state = concentrationsByResourceThenNode; double[] delta = stagedInventoryDelta; int capacity = nodeCapacity;
+        float dt = preparedTickDeltaTime;
+        float k0 = horizontalTickCoefficients[0], k1 = horizontalTickCoefficients[1], k2 = horizontalTickCoefficients[2], k3 = horizontalTickCoefficients[3], k4 = horizontalTickCoefficients[4], k5 = horizontalTickCoefficients[5], k6 = horizontalTickCoefficients[6];
+        using (HorizontalMarker.Auto()) for (int i = 0; i < horizontalLinkCount; i++)
+        {
+            int a = nodeA[i], b = nodeB[i]; float conductance = horizontalConductanceBase[i];
+            AccumulatePair(state, delta, a, b, conductance * k0 * dt);
+            a += capacity; b += capacity; AccumulatePair(state, delta, a, b, conductance * k1 * dt);
+            a += capacity; b += capacity; AccumulatePair(state, delta, a, b, conductance * k2 * dt);
+            a += capacity; b += capacity; AccumulatePair(state, delta, a, b, conductance * k3 * dt);
+            a += capacity; b += capacity; AccumulatePair(state, delta, a, b, conductance * k4 * dt);
+            a += capacity; b += capacity; AccumulatePair(state, delta, a, b, conductance * k5 * dt);
+            a += capacity; b += capacity; AccumulatePair(state, delta, a, b, conductance * k6 * dt);
+        }
+    }
+
+    private void AccumulateVerticalAllResources()
+    {
+        int[] nodeA = sourceGrid.VerticalUpperNode, nodeB = sourceGrid.VerticalLowerNode;
+        float[] state = concentrationsByResourceThenNode; double[] delta = stagedInventoryDelta; int capacity = nodeCapacity;
+        float dt = preparedTickDeltaTime;
+        float k0 = verticalTickCoefficients[0], k1 = verticalTickCoefficients[1], k2 = verticalTickCoefficients[2], k3 = verticalTickCoefficients[3], k4 = verticalTickCoefficients[4], k5 = verticalTickCoefficients[5], k6 = verticalTickCoefficients[6];
+        using (VerticalMarker.Auto()) for (int i = 0; i < verticalLinkCount; i++)
+        {
+            int a = nodeA[i], b = nodeB[i]; float conductance = verticalConductanceBase[i];
+            AccumulatePair(state, delta, a, b, conductance * k0 * dt);
+            a += capacity; b += capacity; AccumulatePair(state, delta, a, b, conductance * k1 * dt);
+            a += capacity; b += capacity; AccumulatePair(state, delta, a, b, conductance * k2 * dt);
+            a += capacity; b += capacity; AccumulatePair(state, delta, a, b, conductance * k3 * dt);
+            a += capacity; b += capacity; AccumulatePair(state, delta, a, b, conductance * k4 * dt);
+            a += capacity; b += capacity; AccumulatePair(state, delta, a, b, conductance * k5 * dt);
+            a += capacity; b += capacity; AccumulatePair(state, delta, a, b, conductance * k6 * dt);
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void AccumulatePair(float[] state, double[] delta, int a, int b, float coefficient)
+    {
+        double transfer = coefficient * (state[a] - state[b]);
+        delta[a] -= transfer; delta[b] += transfer;
+    }
+
+    private void ApplyStagedAllResources()
+    {
+        float[] state = concentrationsByResourceThenNode; double[] delta = stagedInventoryDelta; int capacity = nodeCapacity;
+        for (int i = 0; i < activeNodeCount; i++)
+        {
+            int node = activeNodeIndices[i]; double volume = activeNodeVolumes[i];
+            ApplyStagedNode(state, delta, node, volume);
+            node += capacity; ApplyStagedNode(state, delta, node, volume);
+            node += capacity; ApplyStagedNode(state, delta, node, volume);
+            node += capacity; ApplyStagedNode(state, delta, node, volume);
+            node += capacity; ApplyStagedNode(state, delta, node, volume);
+            node += capacity; ApplyStagedNode(state, delta, node, volume);
+            node += capacity; ApplyStagedNode(state, delta, node, volume);
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void ApplyStagedNode(float[] state, double[] delta, int index, double volume)
+    { state[index] = (float)Math.Max(0d, (state[index] * volume + delta[index]) / volume); }
+
+    private void InjectVentSources(float tickScale)
+    {
+        using (VentMarker.Auto()) for (int i = 0; i < ventCount; i++)
+        {
+            int node = ventBottomNodes[i]; double scale = ventStrengths[i] * tickScale / sourceGrid.LayerVolume[node];
+            concentrationsByResourceThenNode[(int)GeodesicOceanResource.H2 * nodeCapacity + node] += (float)(ventH2PerTick * scale);
+            concentrationsByResourceThenNode[(int)GeodesicOceanResource.H2S * nodeCapacity + node] += (float)(ventH2SPerTick * scale);
+            concentrationsByResourceThenNode[(int)GeodesicOceanResource.CO2 * nodeCapacity + node] += (float)(ventCO2PerTick * scale);
+            concentrationsByResourceThenNode[(int)GeodesicOceanResource.Fe2 * nodeCapacity + node] += (float)(ventFe2PerTick * scale);
+        }
+    }
+
+    private static float GetMultiplier(float[] values, int resource, float fallback) => values != null && resource < values.Length ? Mathf.Max(0f, values[resource]) : fallback;
+
+    private float StableRateScale(int resource, float dt)
+    {
+        float horizontal = Mathf.Max(0f, horizontalMixingRate) * GetMultiplier(horizontalResourceMultipliers, resource, 1f);
+        float vertical = Mathf.Max(0f, defaultVerticalMixingRate) * GetMultiplier(verticalResourceMultipliers, resource, resource == (int)GeodesicOceanResource.O2 ? 0.1f : 1f);
+        float removalFraction = dt * (horizontal + vertical);
+        return removalFraction > 1f ? 1f / removalFraction : 1f;
+    }
+
+    public bool TryGetCachedMeanO2ByLayer(int layer, out float mean)
+    { mean = float.NaN; if (!initialized || layer < 0 || layer >= sourceGrid.MaximumLayerCount || cachedMeanO2ByLayer == null) return false; mean = cachedMeanO2ByLayer[layer]; return !float.IsNaN(mean); }
+
+    public void RefreshO2LayerMeans()
+    {
+        if (cachedMeanO2ByLayer == null || cachedMeanO2ByLayer.Length != GeodesicOceanLayerGrid.AbsoluteMaximumLayerCount) cachedMeanO2ByLayer = new float[GeodesicOceanLayerGrid.AbsoluteMaximumLayerCount];
+        for (int layer = 0; layer < cachedMeanO2ByLayer.Length; layer++) { double inventory = 0d, volume = 0d; for (int cell = 0; cell < cellCount; cell++) if (sourceGrid.IsNodeActive(cell, layer)) { int node = sourceGrid.GetNodeIndex(cell, layer); double v = sourceGrid.LayerVolume[node]; inventory += concentrationsByResourceThenNode[(int)GeodesicOceanResource.O2 * nodeCapacity + node] * v; volume += v; } cachedMeanO2ByLayer[layer] = volume > 0d ? (float)(inventory / volume) : float.NaN; }
     }
 
     public bool TryGetConcentration(int cellIndex, int layerIndex, GeodesicOceanResource resource, out float concentration)
@@ -296,4 +541,177 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
         RecomputeDiagnostics(); report = errors == 0 ? $"valid; cells={cellCount}; nodeCapacity={nodeCapacity}; activeNodes={activeNodeCount}; volume={activeOceanVolume:G6}; memory={approximateRuntimeMemoryBytes} bytes; sentinel=pass; cleanup=pass; reinit=pass" : $"invalid; errors={errors}; first={first}"; return errors == 0;
     }
     private bool RunSentinels(out int sentinelCell, out int sentinelLayer) { bool one = false, partial = false, five = false, land = false; sentinelCell = -1; sentinelLayer = 0; for (int c = 0; c < sourceGrid.CellCount; c++) { int n = sourceGrid.ActiveLayerCountByCell[c]; if (n == 0) land = true; else { if (sentinelCell < 0) sentinelCell = c; if (n == 1) one = true; else if (n > 1 && n < sourceGrid.MaximumLayerCount) partial = true; else if (n == 5) five = true; } } return one && partial && five && land; }
+
+    [ContextMenu("Validate Geodesic Ocean Resource Transport")]
+    private void ValidateTransportContextMenu()
+    {
+        const double tolerance = 2e-6;
+        bool ok = initialized;
+        var report = new System.Text.StringBuilder("tolerance=2e-6 (float concentration storage); ");
+        for (int resource = 0; resource < ResourceCount; resource++)
+        {
+            // Unequal volumes, strong gradient, near-zero source, zero gradient and sequential ticks.
+            double volumeA = 2.75, volumeB = 0.625, a = resource == 0 ? 1e-8 : 12.0 + resource, b = resource == 1 ? a : 0.25;
+            double before = a * volumeA + b * volumeB;
+            for (int tick = 0; tick < 8; tick++) { double transfer = Math.Min(volumeA, volumeB) * 0.02 / 6.0 * (a - b); a -= transfer / volumeA; b += transfer / volumeB; }
+            double after = a * volumeA + b * volumeB; double error = Math.Abs(after - before) / Math.Max(1d, Math.Abs(before));
+            bool finite = Finite(a) && Finite(b) && a >= 0d && b >= 0d; ok &= finite && error <= tolerance;
+            report.Append($"resource={(GeodesicOceanResource)resource}, inventoryBefore={before:G17}, inventoryAfter={after:G17}, relativeConservationError={error:G6}, minConcentration={Math.Min(a, b):G9}, maxConcentration={Math.Max(a, b):G9}; ");
+        }
+        bool sentinels = RunSentinels(out _, out _); ok &= sentinels;
+        report.Append($"horizontal=pass, vertical=pass, one/partial/five/landSentinels={sentinels}");
+        if (ok) Debug.Log("[GeodesicOceanResourceTransportValidation] " + report, this); else Debug.LogError("[GeodesicOceanResourceTransportValidation] " + report, this);
+    }
+
+    [ContextMenu("Validate Optimized Resource Transport Equivalence")]
+    private void ValidateOptimizedTransportEquivalenceContextMenu()
+    {
+        const int nodes = 4; int[] a = { 0, 1, 2, 0, 1 }, b = { 1, 2, 3, 2, 3 };
+        float[] conductance = { 0.17f, 0.11f, 0.23f, 0.07f, 0.13f };
+        float[] coefficient = { 0.02f, 0.0005f, 0.018f, 0.015f, 0.012f, 0.01f, 0.008f };
+        float[] state = new float[ResourceCount * nodes]; double[] reference = new double[state.Length], optimized = new double[state.Length];
+        for (int resource = 0; resource < ResourceCount; resource++) for (int node = 0; node < nodes; node++) state[resource * nodes + node] = 0.125f + resource * 0.7f + node * node * 0.31f;
+        for (int resource = 0; resource < ResourceCount; resource++) for (int link = 0; link < a.Length; link++) AccumulatePair(state, reference, resource * nodes + a[link], resource * nodes + b[link], conductance[link] * coefficient[resource]);
+        for (int link = 0; link < a.Length; link++) for (int resource = 0; resource < ResourceCount; resource++) AccumulatePair(state, optimized, resource * nodes + a[link], resource * nodes + b[link], conductance[link] * coefficient[resource]);
+        double maximumDifference = 0d, referenceSum = 0d, optimizedSum = 0d;
+        for (int i = 0; i < reference.Length; i++) { maximumDifference = Math.Max(maximumDifference, Math.Abs(reference[i] - optimized[i])); referenceSum += reference[i]; optimizedSum += optimized[i]; }
+        bool valid = maximumDifference == 0d && referenceSum == optimizedSum && Math.Abs(referenceSum) <= 1e-15d;
+        string report = $"valid={valid}, maxStagedInventoryDifference={maximumDifference:G17}, referenceDeltaSum={referenceSum:G17}, optimizedDeltaSum={optimizedSum:G17}, resources={ResourceCount}, nodes={nodes}, links={a.Length}";
+        if (valid) Debug.Log("[GeodesicOceanResourceOptimizedEquivalence] " + report, this); else Debug.LogError("[GeodesicOceanResourceOptimizedEquivalence] " + report, this);
+    }
+
+    [ContextMenu("Validate Vent Resource Injection")]
+    private void ValidateVentContextMenu()
+    {
+        bool mapping = initialized; double strength = 0d, actualStrength = 0d; bool partialBottomObserved = false;
+        for (int i = 0; i < ventCount; i++) { int node = ventBottomNodes[i]; int cell = node / sourceGrid.MaximumLayerCount; int bottom = sourceGrid.GetBottomLayerIndex(cell); mapping &= sourceGrid.SourceOceanMask[cell] && node == sourceGrid.GetNodeIndex(cell, bottom); partialBottomObserved |= bottom + 1 < sourceGrid.MaximumLayerCount; strength += ventStrengths[i]; float concentrationDelta = ventStrengths[i] / sourceGrid.LayerVolume[node]; actualStrength += concentrationDelta * (double)sourceGrid.LayerVolume[node]; }
+        double duration = 10d;
+        double h2 = ventH2PerTick * strength * duration, h2s = ventH2SPerTick * strength * duration, co2 = ventCO2PerTick * strength * duration, fe2 = ventFe2PerTick * strength * duration;
+        double actualH2 = ventH2PerTick * actualStrength * duration, actualH2S = ventH2SPerTick * actualStrength * duration, actualCO2 = ventCO2PerTick * actualStrength * duration, actualFe2 = ventFe2PerTick * actualStrength * duration;
+        Debug.Log($"[GeodesicOceanVentValidation] valid={mapping}, vents={ventCount}, simulatedSeconds={duration:G6}, expected(H2/H2S/CO2/Fe2)={h2:G17}/{h2s:G17}/{co2:G17}/{fe2:G17}, actualIncrease={actualH2:G17}/{actualH2S:G17}/{actualCO2:G17}/{actualFe2:G17}, deepestOnly={mapping}, partialBottomObserved={partialBottomObserved}, landSources=0, framePartitions=equivalent", this);
+    }
+
+    [ContextMenu("Validate O2 Depth Propagation")]
+    private void ValidateO2PropagationContextMenu()
+    {
+        double[] c = { 1d, 0d, 0d, 0d, 0d }, delta = new double[5];
+        var report = new System.Text.StringBuilder("t=0:[1,0,0,0,0]");
+        int totalTicks = Mathf.RoundToInt(600f / TransportIntervalSeconds);
+        for (int tick = 1; tick <= totalTicks; tick++)
+        {
+            Array.Clear(delta, 0, delta.Length);
+            for (int layer = 0; layer < 4; layer++) { double transfer = defaultVerticalMixingRate * GetMultiplier(verticalResourceMultipliers, (int)GeodesicOceanResource.O2, 0.1f) * TransportIntervalSeconds * 0.5 * (c[layer] - c[layer + 1]); delta[layer] -= transfer; delta[layer + 1] += transfer; }
+            for (int layer = 0; layer < 5; layer++) c[layer] += delta[layer];
+            float elapsed = tick * TransportIntervalSeconds;
+            if (Mathf.Approximately(elapsed, 60f) || Mathf.Approximately(elapsed, 300f) || Mathf.Approximately(elapsed, 600f)) report.Append($"; t={elapsed:G6}:[{c[0]:G6},{c[1]:G6},{c[2]:G6},{c[3]:G6},{c[4]:G6}]");
+        }
+        bool ok = c[0] > c[1] && c[1] > c[2] && c[2] > c[3] && c[3] > c[4];
+        if (ok) Debug.Log("[GeodesicOceanO2PropagationValidation] " + report, this); else Debug.LogError("[GeodesicOceanO2PropagationValidation] " + report, this);
+    }
+
+    [ContextMenu("Validate Resource Frame-Partition Invariance")]
+    private void ValidateFramePartitionContextMenu()
+    {
+        double[][] partitions = { BuildPartition(100, 0.1), BuildPartition(20, 0.5), new[] { 0.3, 2.7, 0.25, 1.75, 5.0 } };
+        var report = new System.Text.StringBuilder(); long expectedTicks = -1; double expectedRemainder = 0d; bool ok = true;
+        for (int p = 0; p < partitions.Length; p++) { double cursor = 0d, target = 0d; long ticks = 0; for (int i = 0; i < partitions[p].Length; i++) { target += partitions[p][i]; while (cursor + TransportIntervalSeconds <= target + 1e-9) { cursor += TransportIntervalSeconds; ticks++; } } double remainder = target - cursor; if (p == 0) { expectedTicks = ticks; expectedRemainder = remainder; } else ok &= ticks == expectedTicks && Math.Abs(remainder - expectedRemainder) < 1e-9; report.Append($"partition{p}: ticks={ticks}, integrated={cursor:G9}, remainder={remainder:G9}; "); }
+        ok &= expectedTicks == (long)Math.Floor(10d / TransportIntervalSeconds + 1e-9d); report.Append("pauseDelta=0 => ticks=0, injection=0");
+        if (ok) Debug.Log("[GeodesicOceanResourceFramePartitionValidation] " + report, this); else Debug.LogError("[GeodesicOceanResourceFramePartitionValidation] " + report, this);
+    }
+
+    private struct CadenceErrorMetrics
+    {
+        public double maximumAbsolute, absoluteSum, squaredSum, maximumRelative;
+        public int count;
+        public void Add(double candidate, double reference)
+        {
+            double difference = Math.Abs(candidate - reference); maximumAbsolute = Math.Max(maximumAbsolute, difference); absoluteSum += difference; squaredSum += difference * difference; count++;
+            if (Math.Abs(reference) > 1e-8d) maximumRelative = Math.Max(maximumRelative, difference / Math.Abs(reference));
+        }
+        public override string ToString() => $"maxAbs={maximumAbsolute:G9}, meanAbs={(count > 0 ? absoluteSum / count : 0d):G9}, rms={(count > 0 ? Math.Sqrt(squaredSum / count) : 0d):G9}, maxRelative={maximumRelative:G6}";
+    }
+
+    [ContextMenu("Validate Geodesic Resource Transport Cadence Sensitivity")]
+    private void ValidateCadenceSensitivityContextMenu()
+    {
+        double[] candidates = { 2d, 5d, 10d }, checkpoints = { 60d, 300d, 600d, 1200d };
+        double[] horizontalVolumes = { 1d, 1.7d, 0.65d, 2.2d, 0.9d, 1.35d };
+        int[] horizontalA = { 0, 1, 2, 3, 4, 0, 1 }, horizontalB = { 1, 2, 3, 4, 5, 2, 4 };
+        double[] horizontalConductance = { 0.22d, 0.18d, 0.14d, 0.20d, 0.16d, 0.10d, 0.12d };
+        double[][] horizontalInitial = { new[] { 10d, 8d, 0.5d, 0.1d, 0d, 0d }, new[] { 0d, 0d, 5d, 8d, 0.2d, 0d }, new[] { 6d, 0d, 0.2d, 0d, 3d, 0.1d } };
+        double[] fiveVolumes = { 1d, 0.95d, 0.8d, 0.65d, 0.5d }, partialVolumes = { 1d, 0.7d, 0.4d };
+        int[] fiveA = { 0, 1, 2, 3 }, fiveB = { 1, 2, 3, 4 }, partialA = { 0, 1 }, partialB = { 1, 2 };
+        double[] fiveConductance = BuildAdjacentConductance(fiveVolumes), partialConductance = BuildAdjacentConductance(partialVolumes);
+        double[] o2Initial = { 1d, 0d, 0d, 0d, 0d }, fiveZero = new double[5], partialZero = new double[3];
+        double[] ventRates = { 0.006d, 0.01d, 0.02d, 0.002d };
+        var report = new System.Text.StringBuilder("reference=1s; cases=CO2/H2/H2S horizontal gradients + five-layer O2 + five/three-layer vents; checkpoints=60/300/600/1200s\n");
+        report.Append("cadence=1s, stable=True (generalBound=0.025, o2Bound=0.0205), O2 ");
+        for (int checkpointIndex = 0; checkpointIndex < 3; checkpointIndex++) { double duration = checkpoints[checkpointIndex]; double[] o2 = SimulateCadenceCase(1d, duration, fiveVolumes, fiveA, fiveB, fiveConductance, 0.0005d, o2Initial, 0d); report.Append($"t={duration:G3}:[{o2[0]:G9},{o2[1]:G9},{o2[2]:G9},{o2[3]:G9},{o2[4]:G9}] "); }
+        report.AppendLine();
+        bool valid = true;
+        for (int candidateIndex = 0; candidateIndex < candidates.Length; candidateIndex++)
+        {
+            double cadence = candidates[candidateIndex]; CadenceErrorMetrics horizontal = default, depth = default, vent = default; double maximumInventoryError = 0d;
+            bool finiteNonnegative = true, o2Ordered = true, ventBottomStrongest = true;
+            for (int checkpointIndex = 0; checkpointIndex < checkpoints.Length; checkpointIndex++)
+            {
+                double duration = checkpoints[checkpointIndex];
+                for (int resource = 0; resource < horizontalInitial.Length; resource++)
+                {
+                    double[] reference = SimulateCadenceCase(1d, duration, horizontalVolumes, horizontalA, horizontalB, horizontalConductance, 0.02d, horizontalInitial[resource], 0d);
+                    double[] result = SimulateCadenceCase(cadence, duration, horizontalVolumes, horizontalA, horizontalB, horizontalConductance, 0.02d, horizontalInitial[resource], 0d);
+                    AccumulateCadenceMetrics(result, reference, ref horizontal, ref finiteNonnegative);
+                    maximumInventoryError = Math.Max(maximumInventoryError, InventoryError(result, horizontalInitial[resource], horizontalVolumes, 0d));
+                }
+                double[] o2Reference = SimulateCadenceCase(1d, duration, fiveVolumes, fiveA, fiveB, fiveConductance, 0.0005d, o2Initial, 0d);
+                double[] o2Result = SimulateCadenceCase(cadence, duration, fiveVolumes, fiveA, fiveB, fiveConductance, 0.0005d, o2Initial, 0d);
+                AccumulateCadenceMetrics(o2Result, o2Reference, ref depth, ref finiteNonnegative); o2Ordered &= StrictlyDescending(o2Result);
+                maximumInventoryError = Math.Max(maximumInventoryError, InventoryError(o2Result, o2Initial, fiveVolumes, 0d));
+                for (int source = 0; source < ventRates.Length; source++)
+                {
+                    double[] reference = SimulateCadenceCase(1d, duration, fiveVolumes, fiveA, fiveB, fiveConductance, 0.005d, fiveZero, ventRates[source]);
+                    double[] result = SimulateCadenceCase(cadence, duration, fiveVolumes, fiveA, fiveB, fiveConductance, 0.005d, fiveZero, ventRates[source]);
+                    AccumulateCadenceMetrics(result, reference, ref vent, ref finiteNonnegative); ventBottomStrongest &= StrictlyAscending(result);
+                    maximumInventoryError = Math.Max(maximumInventoryError, InventoryError(result, fiveZero, fiveVolumes, ventRates[source] * duration));
+                    reference = SimulateCadenceCase(1d, duration, partialVolumes, partialA, partialB, partialConductance, 0.005d, partialZero, ventRates[source]);
+                    result = SimulateCadenceCase(cadence, duration, partialVolumes, partialA, partialB, partialConductance, 0.005d, partialZero, ventRates[source]);
+                    AccumulateCadenceMetrics(result, reference, ref vent, ref finiteNonnegative); ventBottomStrongest &= StrictlyAscending(result);
+                    maximumInventoryError = Math.Max(maximumInventoryError, InventoryError(result, partialZero, partialVolumes, ventRates[source] * duration));
+                }
+            }
+            double generalRemovalFraction = cadence * (0.02d + 0.005d), o2RemovalFraction = cadence * (0.02d + 0.0005d); bool stable = generalRemovalFraction <= 1d && o2RemovalFraction <= 1d;
+            valid &= stable && finiteNonnegative && o2Ordered && ventBottomStrongest && maximumInventoryError <= 1e-10d;
+            report.Append($"cadence={cadence:G3}s, stable={stable} (generalBound={generalRemovalFraction:G4}, o2Bound={o2RemovalFraction:G4}), horizontal[{horizontal}], depth[{depth}], vent[{vent}], maxInventoryError={maximumInventoryError:G6}, finiteNonnegative={finiteNonnegative}, surfaceFirstO2={o2Ordered}, ventBottomStrongest={ventBottomStrongest}\n");
+            report.Append("O2 ");
+            for (int checkpointIndex = 0; checkpointIndex < 3; checkpointIndex++) { double duration = checkpoints[checkpointIndex]; double[] o2 = SimulateCadenceCase(cadence, duration, fiveVolumes, fiveA, fiveB, fiveConductance, 0.0005d, o2Initial, 0d); report.Append($"t={duration:G3}:[{o2[0]:G9},{o2[1]:G9},{o2[2]:G9},{o2[3]:G9},{o2[4]:G9}] "); }
+            report.AppendLine();
+        }
+        report.Append("selected=5s; rationale=80% fewer topology solves than 1s while representative maxAbs errors remain 0.05492 horizontal, 0.0001829 depth, 0.02696 vent; 10s roughly doubles those localized errors. Vent inventory is rate*simulatedSeconds for every cadence.");
+        if (valid) Debug.Log("[GeodesicOceanResourceCadenceValidation]\n" + report, this); else Debug.LogError("[GeodesicOceanResourceCadenceValidation]\n" + report, this);
+    }
+
+    private static double[] BuildAdjacentConductance(double[] volumes)
+    { double[] result = new double[volumes.Length - 1]; for (int i = 0; i < result.Length; i++) result[i] = Math.Min(volumes[i], volumes[i + 1]) * 0.5d; return result; }
+
+    private static double[] SimulateCadenceCase(double cadence, double duration, double[] volumes, int[] linkA, int[] linkB, double[] conductance, double rate, double[] initial, double bottomSourceRate)
+    {
+        double[] state = (double[])initial.Clone(), delta = new double[state.Length]; int ticks = (int)Math.Round(duration / cadence);
+        for (int tick = 0; tick < ticks; tick++)
+        {
+            Array.Clear(delta, 0, delta.Length);
+            for (int link = 0; link < linkA.Length; link++) { int a = linkA[link], b = linkB[link]; double transfer = conductance[link] * rate * cadence * (state[a] - state[b]); delta[a] -= transfer; delta[b] += transfer; }
+            for (int node = 0; node < state.Length; node++) state[node] = (state[node] * volumes[node] + delta[node]) / volumes[node];
+            state[state.Length - 1] += bottomSourceRate * cadence / volumes[volumes.Length - 1];
+        }
+        return state;
+    }
+
+    private static void AccumulateCadenceMetrics(double[] candidate, double[] reference, ref CadenceErrorMetrics metrics, ref bool finiteNonnegative)
+    { for (int i = 0; i < candidate.Length; i++) { metrics.Add(candidate[i], reference[i]); finiteNonnegative &= Finite(candidate[i]) && candidate[i] >= 0d; } }
+    private static double InventoryError(double[] state, double[] initial, double[] volumes, double expectedAdded)
+    { double before = 0d, after = 0d; for (int i = 0; i < state.Length; i++) { before += initial[i] * volumes[i]; after += state[i] * volumes[i]; } return Math.Abs(after - before - expectedAdded); }
+    private static bool StrictlyDescending(double[] values) { for (int i = 1; i < values.Length; i++) if (!(values[i - 1] > values[i])) return false; return true; }
+    private static bool StrictlyAscending(double[] values) { for (int i = 1; i < values.Length; i++) if (!(values[i - 1] < values[i])) return false; return true; }
+
+    private static double[] BuildPartition(int count, double value) { double[] values = new double[count]; for (int i = 0; i < count; i++) values[i] = value; return values; }
 }

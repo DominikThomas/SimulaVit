@@ -79,6 +79,12 @@ public class VentVisualizer : MonoBehaviour
 
     public void RebuildVentVisuals(string reason)
     {
+        if (resourceMap == null || !resourceMap.IsLegacyWorldAuthoritative)
+        {
+            ClearVentVisuals(reason);
+            return;
+        }
+
         if (resourceMap == null || planetGenerator == null || resourceMap.ventStrength == null)
         {
             ClearVentVisuals(reason);

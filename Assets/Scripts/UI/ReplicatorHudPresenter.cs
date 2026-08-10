@@ -122,9 +122,11 @@ public class ReplicatorHudPresenter
             }
         }
 
-        float globalCo2 = planetResourceMap != null ? planetResourceMap.debugGlobalCO2 : 0f;
-        float globalO2 = planetResourceMap != null ? planetResourceMap.debugGlobalO2 : 0f;
-        float globalCH4 = planetResourceMap != null ? planetResourceMap.debugGlobalCH4 : 0f;
+        PlanetGenerator hudGenerator = ResolveHudPlanetGenerator(planetResourceMap);
+        bool geodesicWorld = hudGenerator != null && hudGenerator.CurrentGridType == PlanetGridType.GeodesicIcosphere;
+        float globalCo2 = !geodesicWorld && planetResourceMap != null ? planetResourceMap.debugGlobalCO2 : 0f;
+        float globalO2 = !geodesicWorld && planetResourceMap != null ? planetResourceMap.debugGlobalO2 : 0f;
+        float globalCH4 = !geodesicWorld && planetResourceMap != null ? planetResourceMap.debugGlobalCH4 : 0f;
 
         float atmosphereTotal = Mathf.Max(0.0001f, globalCo2 + globalO2 + globalCH4);
         float co2Pct = (globalCo2 / atmosphereTotal) * 100f;
@@ -134,15 +136,20 @@ public class ReplicatorHudPresenter
         SampleHudTemperatureStats(planetResourceMap);
         string dissolvedOceanText = BuildDissolvedOceanHudText(planetResourceMap);
 
-        string atmosphereText =
-            GetAtmosphereHudHeader(planetResourceMap) + "\n" +
-            $"CO2: {globalCo2:0.000} ({co2Pct:0.0}%)\n" +
-            $"O2: {globalO2:0.000} ({o2Pct:0.0}%)\n" +
-            $"CH4: {globalCH4:0.000} ({ch4Pct:0.0}%)\n" +
-            dissolvedOceanText +
-            $"Temp Mean: {ReplicatorManager.FormatTemperature(hudMeanTempKelvin, temperatureDisplayUnit)}\n" +
-            $"Temp Min: {ReplicatorManager.FormatTemperature(hudMinTempKelvin, temperatureDisplayUnit)}\n" +
-            $"Temp Max: {ReplicatorManager.FormatTemperature(hudMaxTempKelvin, temperatureDisplayUnit)}";
+        string atmosphereText = geodesicWorld
+            ? "Environment (geodesic)\n" +
+              dissolvedOceanText +
+              $"Temp Mean: {ReplicatorManager.FormatTemperature(hudMeanTempKelvin, temperatureDisplayUnit)}\n" +
+              $"Temp Min: {ReplicatorManager.FormatTemperature(hudMinTempKelvin, temperatureDisplayUnit)}\n" +
+              $"Temp Max: {ReplicatorManager.FormatTemperature(hudMaxTempKelvin, temperatureDisplayUnit)}"
+            : GetAtmosphereHudHeader(planetResourceMap) + "\n" +
+              $"CO2: {globalCo2:0.000} ({co2Pct:0.0}%)\n" +
+              $"O2: {globalO2:0.000} ({o2Pct:0.0}%)\n" +
+              $"CH4: {globalCH4:0.000} ({ch4Pct:0.0}%)\n" +
+              dissolvedOceanText +
+              $"Temp Mean: {ReplicatorManager.FormatTemperature(hudMeanTempKelvin, temperatureDisplayUnit)}\n" +
+              $"Temp Min: {ReplicatorManager.FormatTemperature(hudMinTempKelvin, temperatureDisplayUnit)}\n" +
+              $"Temp Max: {ReplicatorManager.FormatTemperature(hudMaxTempKelvin, temperatureDisplayUnit)}";
 
         float safeTotal = Mathf.Max(1f, totalAgents);
         string replicatorsText =
