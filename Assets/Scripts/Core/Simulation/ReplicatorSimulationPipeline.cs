@@ -1,5 +1,6 @@
 using System;
 using UnityEngine;
+using Unity.Profiling;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
@@ -7,6 +8,9 @@ using UnityEditor;
 [DefaultExecutionOrder(-1000)]
 public class ReplicatorSimulationPipeline : MonoBehaviour
 {
+    private static readonly ProfilerMarker SimulationMarker = new ProfilerMarker("ReplicatorManager.Simulation");
+    private static readonly ProfilerMarker TelemetryMarker = new ProfilerMarker("ReplicatorManager.Telemetry");
+    private static readonly ProfilerMarker VisualSyncMarker = new ProfilerMarker("ReplicatorManager.VisualSync");
     [Serializable]
     public struct SpeedProfile
     {
@@ -176,7 +180,10 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
             ResetFrameTiming();
             if (!pauseDetected && replicatorManager.enableRendering && replicatorManager.ShouldRenderThisFrame(simulationStepsPerFrame))
             {
-                replicatorManager.RenderAgents();
+                using (VisualSyncMarker.Auto())
+                {
+                    replicatorManager.RenderAgents();
+                }
             }
 
             return;
@@ -208,18 +215,27 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
         }
         else consecutiveClampedFrames = 0;
 
-        for (int i = 0; i < simulationStepsPerFrame; i++)
+        using (SimulationMarker.Auto())
         {
-            RunSimulationStep(simulationDeltaTime);
+            for (int i = 0; i < simulationStepsPerFrame; i++)
+            {
+                RunSimulationStep(simulationDeltaTime);
+            }
         }
 
         if (replicatorManager.enableRendering && replicatorManager.ShouldRenderThisFrame(simulationStepsPerFrame))
         {
-            replicatorManager.RenderAgents();
+            using (VisualSyncMarker.Auto())
+            {
+                replicatorManager.RenderAgents();
+            }
         }
 
-        replicatorManager.UpdateMetabolismCounts();
-        replicatorManager.LogMetabolismDebugThrottled();
+        using (TelemetryMarker.Auto())
+        {
+            replicatorManager.UpdateMetabolismCounts();
+            replicatorManager.LogMetabolismDebugThrottled();
+        }
     }
 
     private void ResetFrameTiming()

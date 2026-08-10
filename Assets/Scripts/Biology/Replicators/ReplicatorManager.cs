@@ -14,6 +14,8 @@ public enum TemperatureDisplayUnit
 
 public class ReplicatorManager : MonoBehaviour
 {
+    private static readonly int MetabolismTypeCount = Enum.GetValues(typeof(MetabolismType)).Length;
+    private static readonly int MutationGateBlockReasonCount = Enum.GetValues(typeof(MetabolismMutationGateBlockReason)).Length;
     private static readonly ProfilerMarker PredatorScentUpdateMarker = new ProfilerMarker("ReplicatorManager.UpdateScentFields");
     private static readonly ProfilerMarker PredatorScentSkipNoPredatorsMarker = new ProfilerMarker("ReplicatorManager.SkipScentFields.NoPredators");
     private static readonly ProfilerMarker PopulationStatePrepareForLocomotionMarker = new ProfilerMarker("ReplicatorManager.PopulationStatePrepareForLocomotion");
@@ -836,6 +838,18 @@ public class ReplicatorManager : MonoBehaviour
         ResetScentDebugState();
     }
 
+    public void DeinitializeForStartupMenu()
+    {
+        isInitialized = false;
+        ClearPopulation();
+        UpdateMetabolismCounts();
+        ResetDeathCauseCounters();
+        ResetMetabolismMutationGateTelemetry();
+        replicationHabitatTelemetry = new ReplicationHabitatTelemetry();
+        predationKillsWindow = 0;
+        debugTelemetry.ResetRuntimeState();
+    }
+
     void Update()
     {
         if (!IsInitializedForSimulation) return;
@@ -976,12 +990,14 @@ public class ReplicatorManager : MonoBehaviour
 
     internal void LogMetabolismDebugThrottled()
     {
-        bool didLog = debugTelemetry.LogMetabolismDebugThrottled(BuildTelemetrySnapshot());
-        if (!didLog)
+        // Building this snapshot scans the legacy resource arrays and used to happen every
+        // rendered frame even though the result is emitted only once every three seconds.
+        if (!debugTelemetry.IsMetabolismDebugLogDue())
         {
             return;
         }
 
+        debugTelemetry.LogMetabolismDebug(BuildTelemetrySnapshot());
         predationKillsWindow = 0;
         ResetDeathCauseCounters();
     }
@@ -2494,8 +2510,8 @@ public class ReplicatorManager : MonoBehaviour
             metabolismMutationGateTelemetry = new MetabolismMutationGateTelemetry();
         }
 
-        int metabolismCount = Enum.GetValues(typeof(MetabolismType)).Length;
-        int reasonCount = Enum.GetValues(typeof(MetabolismMutationGateBlockReason)).Length;
+        int metabolismCount = MetabolismTypeCount;
+        int reasonCount = MutationGateBlockReasonCount;
         EnsureTelemetryArray(ref metabolismMutationGateTelemetry.AttemptsByTarget, metabolismCount);
         EnsureTelemetryArray(ref metabolismMutationGateTelemetry.AllowedByTarget, metabolismCount);
         EnsureTelemetryArray(ref metabolismMutationGateTelemetry.BlockedByTarget, metabolismCount);
@@ -2531,13 +2547,13 @@ public class ReplicatorManager : MonoBehaviour
 
     int GetMutationGatePairIndex(MetabolismType target, MetabolismMutationGateBlockReason reason)
     {
-        int reasonCount = Enum.GetValues(typeof(MetabolismMutationGateBlockReason)).Length;
+        int reasonCount = MutationGateBlockReasonCount;
         return ((int)target * reasonCount) + (int)reason;
     }
 
     void DecodeMutationGatePairIndex(int pairIndex, out MetabolismType target, out MetabolismMutationGateBlockReason reason)
     {
-        int reasonCount = Enum.GetValues(typeof(MetabolismMutationGateBlockReason)).Length;
+        int reasonCount = MutationGateBlockReasonCount;
         int targetIndex = reasonCount > 0 ? pairIndex / reasonCount : 0;
         int reasonIndex = reasonCount > 0 ? pairIndex % reasonCount : 0;
         target = Enum.IsDefined(typeof(MetabolismType), targetIndex) ? (MetabolismType)targetIndex : default;

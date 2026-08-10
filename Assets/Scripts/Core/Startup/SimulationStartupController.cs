@@ -229,6 +229,7 @@ public class SimulationStartupController : MonoBehaviour
 
     private void ClearRuntimePlanetState(string reason)
     {
+        replicatorManager?.DeinitializeForStartupMenu();
         ventVisualizer?.ClearRuntimeVisuals(reason);
         planetResourceMap?.DeinitializeForStartupMenu(reason);
         planetGenerator?.ClearGeneratedPlanetRuntime();
