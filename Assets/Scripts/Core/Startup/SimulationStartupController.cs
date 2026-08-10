@@ -473,6 +473,7 @@ public class SimulationStartupController : MonoBehaviour
             {
                 planetGenerator.GetComponent<GeodesicSurfaceTemperatureField>()?.SetStartupTemperatureParameters(config.baseTempKelvin, config.insolationTempGain);
                 planetGenerator.GetComponent<GeodesicOceanResourceField>()?.SetStartupConcentrations(config.initialCO2, config.initialO2, config.initialCH4, config.initialDissolvedFe2Plus);
+                planetGenerator.GetComponent<GeodesicOceanResourceField>()?.SetStartupVentRates(config.ventH2PerTick, config.ventH2SPerTick, config.ventCO2PerTick, config.ventFe2PerTick);
             }
             planetGenerator.InitializeAuthoritativePlanet("New Game startup selection");
         }
@@ -644,6 +645,7 @@ public class SimulationStartupController : MonoBehaviour
         config.ventH2PerTick = Mathf.Clamp(config.ventH2PerTick, VentPerTickMin, VentH2MaxPerTick);
         config.ventH2SPerTick = Mathf.Clamp(config.ventH2SPerTick, VentPerTickMin, VentH2SMaxPerTick);
         config.ventCO2PerTick = Mathf.Clamp(config.ventCO2PerTick, VentPerTickMin, VentCO2MaxPerTick);
+        config.ventFe2PerTick = Mathf.Clamp(config.ventFe2PerTick, VentPerTickMin, VentCO2MaxPerTick);
         config.initialSpawnCount = Mathf.Clamp(config.initialSpawnCount, InitialSpawnMin, InitialSpawnMax);
         config.cubeSphereResolution = Mathf.Clamp(config.cubeSphereResolution, 3, 240);
         config.geodesicSubdivisionLevel = Mathf.Clamp(config.geodesicSubdivisionLevel, 0, GeodesicGridTopology.MaxSupportedSubdivision);
@@ -683,6 +685,7 @@ public class SimulationStartupController : MonoBehaviour
         builder.AppendLine($"Vent H2 Per Tick: {config.ventH2PerTick:0.####}");
         builder.AppendLine($"Vent H2S Per Tick: {config.ventH2SPerTick:0.####}");
         builder.AppendLine($"Vent CO2 Per Tick: {config.ventCO2PerTick:0.####}");
+        builder.AppendLine($"Vent Fe2 Per Tick: {config.ventFe2PerTick:0.####}");
         builder.AppendLine($"Initial Spawn Count: {config.initialSpawnCount}");
         builder.AppendLine($"Start Paused: {startPaused}");
         builder.AppendLine($"Saved Config Path: {SavedStartupConfigPath}");
@@ -710,6 +713,7 @@ public class SimulationStartupController : MonoBehaviour
         public float ventH2PerTick;
         public float ventH2SPerTick;
         public float ventCO2PerTick;
+        public float ventFe2PerTick;
         public int initialSpawnCount;
         public bool startPaused;
 
@@ -741,6 +745,7 @@ public class SimulationStartupController : MonoBehaviour
                 ventH2PerTick = config.ventH2PerTick,
                 ventH2SPerTick = config.ventH2SPerTick,
                 ventCO2PerTick = config.ventCO2PerTick,
+                ventFe2PerTick = config.ventFe2PerTick,
                 initialSpawnCount = config.initialSpawnCount,
                 startPaused = config.startPaused
             };
@@ -766,6 +771,7 @@ public class SimulationStartupController : MonoBehaviour
             config.ventH2PerTick = ventH2PerTick;
             config.ventH2SPerTick = ventH2SPerTick;
             config.ventCO2PerTick = ventCO2PerTick;
+            config.ventFe2PerTick = ventFe2PerTick > 0f ? ventFe2PerTick : config.ventFe2PerTick;
             config.initialSpawnCount = initialSpawnCount;
             config.startPaused = startPaused;
             return config;
@@ -1057,6 +1063,8 @@ public class SimulationStartupController : MonoBehaviour
         DrawFloat(new Rect(controlX, y, contentWidth, line), "Vent H2S / Tick", ref currentConfig.ventH2SPerTick, VentPerTickMin, VentH2SMaxPerTick);
         y += line + gap;
         DrawFloat(new Rect(controlX, y, contentWidth, line), "Vent CO2 / Tick", ref currentConfig.ventCO2PerTick, VentPerTickMin, VentCO2MaxPerTick);
+        y += line + gap;
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Vent Fe2 / Tick", ref currentConfig.ventFe2PerTick, VentPerTickMin, VentCO2MaxPerTick);
         y += line + gap;
         DrawInt(new Rect(controlX, y, contentWidth, line), "Initial Spawn Count", ref currentConfig.initialSpawnCount, true, InitialSpawnMin, InitialSpawnMax);
         y += line + (gap * 2f);

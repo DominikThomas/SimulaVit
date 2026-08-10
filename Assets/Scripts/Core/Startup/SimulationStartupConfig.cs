@@ -32,6 +32,8 @@ public class SimulationStartupConfig
     public float ventH2PerTick = 0.006f;
     public float ventH2SPerTick = 0.01f;
     public float ventCO2PerTick = 0f;
+    [Tooltip("Fe2 inventory injected by each Geodesic logical vent per fixed resource tick. Legacy resource behavior is unchanged.")]
+    public float ventFe2PerTick = 0.002f;
 
     [Header("Population")]
     [Min(0)] public int initialSpawnCount = 100;
