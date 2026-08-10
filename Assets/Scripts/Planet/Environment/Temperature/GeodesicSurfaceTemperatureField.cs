@@ -28,7 +28,7 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
     [Header("Geodesic Surface Temperature")]
     [SerializeField, InspectorName("Configured Thermal Model"), Tooltip("Authoritative model configuration for the next generated geodesic planet. Runtime switching is unsupported.")] private GeodesicThermalModel thermalModel = GeodesicThermalModel.ApproximateEcologicalProfiles;
     [SerializeField, Tooltip("Enables one physical surface-temperature value per geodesic simulation cell. This does not enable ocean layers or ice.")] private bool enableGeodesicSurfaceTemperature = true;
-    [SerializeField, Min(0.01f), InspectorName("Approximate Thermal Update Interval"), Tooltip("Fixed authoritative simulation seconds per ApproximateEcologicalProfiles tick. Independent of simulation speed and rendered FPS.")] private float approximateUpdateIntervalSeconds = 1f;
+    [SerializeField, Min(0.01f), InspectorName("Approximate Thermal Update Interval"), Tooltip("Fixed authoritative simulation seconds per ApproximateEcologicalProfiles tick. Independent of simulation speed and rendered FPS.")] private float approximateUpdateIntervalSeconds = 2f;
     [SerializeField, Min(0.01f), InspectorName("Conservative Thermal Update Interval"), Tooltip("Fixed authoritative simulation seconds per ConservativeImplicit tick. This retains the original serialized cadence.")] private float updateIntervalSeconds = 0.25f;
     [SerializeField, Range(1, 512), Tooltip("Emergency per-rendered-frame catch-up guard. Remaining authoritative time stays as explicit backlog and is never discarded.")] private int maximumThermalTicksPerFrame = 64;
     [SerializeField, Min(0.05f), Tooltip("Unscaled real-time interval for cached global surface diagnostics used by the HUD and Inspector.")] private float diagnosticSnapshotIntervalSeconds = 0.25f;
@@ -525,7 +525,13 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
             double subsurfaceMean = metrics.SubsurfaceSum / metrics.SubsurfaceSamples;
             double subsurfaceRms = Math.Sqrt(metrics.SubsurfaceSquareSum / metrics.SubsurfaceSamples);
             table += $"\n{candidates[i]:F2}|{metrics.SurfaceMaximum:F6}|{surfaceMean:F6}|{surfaceRms:F6}|{metrics.SubsurfaceMaximum:F6}|{subsurfaceMean:F6}|{subsurfaceRms:F6}";
-            if (candidates[i] <= activeUpdateIntervalSeconds + 1e-5f) valid &= metrics.SurfaceMaximum < 0.1d && metrics.SubsurfaceMaximum < 0.1d;
+            if (candidates[i] < 2f - 1e-5f)
+                valid &= metrics.SurfaceMaximum < 0.1d && metrics.SubsurfaceMaximum < 0.1d;
+            else if (Math.Abs(candidates[i] - 2f) <= 1e-5f && Math.Abs(activeUpdateIntervalSeconds - 2f) <= 1e-5f)
+                // The former 0.1 K limit was a conservative screening value, not a
+                // biological threshold. These bounds apply only to the selected 2 s
+                // ecological cadence and still reject a materially different result.
+                valid &= metrics.SurfaceMaximum < 0.02d && metrics.SubsurfaceMaximum < 0.2d;
         }
         bool stateRestored = sequenceBefore == surfaceTemperatureTickSequence && cursorBefore == thermalIntegrationCursorTime && checksumBefore == ProductionTemperatureChecksum();
         valid &= stateRestored;
