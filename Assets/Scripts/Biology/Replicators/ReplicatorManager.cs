@@ -785,7 +785,15 @@ public class ReplicatorManager : MonoBehaviour
 
     void Start()
     {
-        InitializeForSimulation(autoStartOnSceneLoad);
+        if (autoStartOnSceneLoad)
+        {
+            InitializeForSimulation(true);
+            return;
+        }
+
+        // Deferred startup owns world-specific biology initialization. Resolve reusable
+        // component references here without making the not-yet-selected world biological.
+        ResolvePlanetResourceMapReference();
     }
 
     public bool InitializeForSimulation(bool spawnInitialPopulation)

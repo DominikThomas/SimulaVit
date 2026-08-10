@@ -36,6 +36,19 @@ public class ReplicatorManagerLifecycleTests
     }
 
     [Test]
+    public void DeferredComponentStart_PreparesWithoutInitializingBiology()
+    {
+        manager.autoStartOnSceneLoad = false;
+        MethodInfo startMethod = typeof(ReplicatorManager).GetMethod("Start", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.That(startMethod, Is.Not.Null);
+
+        startMethod.Invoke(manager, null);
+
+        Assert.That(manager.IsInitializedForSimulation, Is.False,
+            "Waiting at startup selection must not activate biology before a world mode is chosen.");
+    }
+
+    [Test]
     public void DeinitializeForStartupMenu_ClearsRuntimeLifecycleAndPopulation()
     {
         initializedField.SetValue(manager, true);
