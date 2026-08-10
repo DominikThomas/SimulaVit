@@ -134,6 +134,11 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
     public double ThermalIntegrationCursorTime => thermalIntegrationCursorTime;
     public GeodesicThermalModel ConfiguredThermalModel => thermalModel;
     public GeodesicThermalModel ActiveThermalModel => activeThermalModel;
+
+    public void SetStartupApproximateUpdateInterval(float intervalSeconds)
+    {
+        approximateUpdateIntervalSeconds = Mathf.Max(0.01f, intervalSeconds);
+    }
     public bool HasActiveThermalModel => hasActiveThermalModel;
     public float ActiveUpdateIntervalSeconds => activeUpdateIntervalSeconds;
     public float BaseTemperatureKelvin => baseTemperatureKelvin;
