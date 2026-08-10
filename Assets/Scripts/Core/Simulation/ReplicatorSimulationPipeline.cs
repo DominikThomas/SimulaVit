@@ -56,6 +56,17 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
     public int SimulationStepsExecutedThisFrame => simulationStepsExecutedThisFrame;
     public float EffectiveSimulationTimeAdvanceThisFrame => effectiveSimulationTimeAdvanceThisFrame;
 
+    public static double CalculateAuthoritativeFrameAdvance(float unscaledFrameDelta, float requestedMultiplier, float maximumStepDeltaSeconds)
+    {
+        if (unscaledFrameDelta <= 0f || requestedMultiplier <= 0f)
+        {
+            return 0d;
+        }
+
+        float stepDelta = Mathf.Min(unscaledFrameDelta, Mathf.Max(0.001f, maximumStepDeltaSeconds));
+        return (double)stepDelta * requestedMultiplier;
+    }
+
     private void Awake()
     {
         replicatorManager = GetComponent<ReplicatorManager>();
@@ -204,8 +215,11 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
         simulationSpeedMultiplier = simulationStepsPerFrame;
         simulationDeltaTime = simulationStepsPerFrame > 0 ? Mathf.Min(rawRenderedFrameDelta, Mathf.Max(0.001f, maximumSimulationStepDeltaSeconds)) : 0f;
         simulationStepDeltaClamped = simulationDeltaTime + 1e-7f < rawRenderedFrameDelta;
-        frameSimulationDeltaTime = simulationDeltaTime * simulationStepsPerFrame;
-        simulationStepsExecutedThisFrame = simulationStepsPerFrame;
+        frameSimulationDeltaTime = (float)CalculateAuthoritativeFrameAdvance(
+            rawRenderedFrameDelta,
+            simulationSpeedMultiplier,
+            maximumSimulationStepDeltaSeconds);
+        simulationStepsExecutedThisFrame = replicatorManager.IsInitializedForSimulation ? simulationStepsPerFrame : 0;
         effectiveSimulationTimeAdvanceThisFrame = frameSimulationDeltaTime;
         if (simulationStepDeltaClamped)
         {
@@ -231,11 +245,9 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
         else
         {
             // World time remains authoritative when the current world has no biology runtime.
-            // Keep the same per-step accumulation order without entering any biological phase.
-            for (int i = 0; i < simulationStepsPerFrame; i++)
-            {
-                simulationTimeSeconds += simulationDeltaTime;
-            }
+            // No stability-sensitive integration is active, so advance the clock once instead
+            // of performing requestedMultiplier empty iterations in current Geodesic mode.
+            simulationTimeSeconds += frameSimulationDeltaTime;
         }
 
         if (replicatorManager.IsInitializedForSimulation

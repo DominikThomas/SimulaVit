@@ -1810,3 +1810,19 @@ The measured before-change subdivision-6 thermal frame was 43.729 ms CPU / 39.74
 `ApproximateEcologicalProfiles` now builds a compact structure-of-arrays cache during ocean-temperature initialization, after the active model and its 1.0-s simulation-time interval have been latched. For each active subsurface node it stores the owning surface-cell index, depth-profile coefficient, fixed-interval relaxation response, and geometric vent-gain coefficient. The production relaxation tick therefore performs no per-node invariant `Pow`, `Exp`, normalized-depth, layer-center, layer-timescale, node-to-cell, or bottom-layer calculations. Dynamic authoritative surface temperatures are still read from `GeodesicSurfaceTemperatureField` every tick, and vent strength is still resolved dynamically; only its immutable layer geometry/gain coefficient is cached.
 
 The approximate-only cache adds exactly 16 bytes per active subsurface node (one `int` and three `float` arrays), or 1,229,680 bytes for 76,855 nodes, excluding managed-array headers. It is not allocated for `ConservativeImplicit` and is cleared with the existing ocean-temperature lifecycle. Approximate cadence remains 1.0 simulated second, conservative cadence and solver behavior remain unchanged, and no Unity Profiler result is claimed because the Editor was unavailable in the implementation environment.
+
+### Authoritative simulation-speed semantics
+
+Simulation-speed HUD labels are requested/target authoritative world-clock multipliers relative to unscaled real time, not guarantees of achieved throughput. The configured choices are `0x`, `1x`, `2x`, `5x`, `10x`, `20x`, `50x`, and `100x`, and each now maps to the same numeric requested multiplier. Achieved speed is measured independently over a throttled real-time window as the change in `SimulationTimeSeconds` divided by unscaled elapsed real time.
+
+For an advancing rendered frame, the shared clock uses:
+
+```text
+stepDelta = min(Time.unscaledDeltaTime, maximumSimulationStepDeltaSeconds)
+frameSimulationDelta = stepDelta * requestedSimulationSpeedMultiplier
+SimulationTimeSeconds += frameSimulationDelta
+```
+
+The maximum-step clamp intentionally means achieved throughput can fall below the requested multiplier on slow rendered frames; accumulated environmental scheduler time is not discarded to improve displayed FPS. Current Geodesic mode has no initialized biology, so it advances authoritative time once per rendered frame and does not perform empty biological substep iterations. The fixed simulation-time environmental schedulers consume the resulting clock normally (approximate temperature at 1 simulated second and dissolved-ocean resources at 5 simulated seconds).
+
+Initialized Legacy biology preserves its stability-sensitive integration semantics: the requested integer multiplier remains the biological substep count and each substep uses `stepDelta`. Consequently, requesting 50x or 100x in Legacy can execute 50 or 100 full biological iterations per rendered frame and may achieve less than requested on hardware that cannot keep up. This focused correction does not combine those iterations into a large biological timestep.
