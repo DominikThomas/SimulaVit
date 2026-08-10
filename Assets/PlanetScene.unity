@@ -1168,7 +1168,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: SimulaVit::GeodesicSurfaceTemperatureField
   thermalModel: 0
   enableGeodesicSurfaceTemperature: 1
-  approximateUpdateIntervalSeconds: 1
+  approximateUpdateIntervalSeconds: 2
   updateIntervalSeconds: 0.25
   maximumThermalTicksPerFrame: 64
   diagnosticSnapshotIntervalSeconds: 0.25
