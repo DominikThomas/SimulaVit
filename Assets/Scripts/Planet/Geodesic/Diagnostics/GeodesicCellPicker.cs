@@ -69,6 +69,8 @@ public class GeodesicCellPicker : MonoBehaviour
     private GeodesicSurfaceTemperatureField temperatureField;
     private GeodesicOceanTemperatureField oceanTemperatureField;
     private GeodesicOceanResourceField oceanResourceField;
+    private GeodesicExperiencedTemperatureField experiencedTemperatureField;
+    private Vector3 selectedWorldPosition;
     private ReplicatorManager temperatureDisplayAuthority;
     private string selectedLayeredOceanLog = ", layeredOcean=unavailable";
     private string selectedLayeredOceanPopup = "unavailable";
@@ -112,6 +114,7 @@ public class GeodesicCellPicker : MonoBehaviour
         temperatureField = GetComponent<GeodesicSurfaceTemperatureField>();
         oceanTemperatureField = GetComponent<GeodesicOceanTemperatureField>();
         oceanResourceField = GetComponent<GeodesicOceanResourceField>();
+        experiencedTemperatureField = GetComponent<GeodesicExperiencedTemperatureField>();
     }
 
     private bool TryGetResourceFieldStatus(int cellIndex, out string status)
@@ -249,6 +252,7 @@ public class GeodesicCellPicker : MonoBehaviour
             return false;
         }
 
+        selectedWorldPosition = worldHitPoint;
         Vector3 localDirection = transform.InverseTransformPoint(worldHitPoint).normalized;
         int selected = SelectNearest(localDirection);
         return selected >= 0;
@@ -629,6 +633,13 @@ public class GeodesicCellPicker : MonoBehaviour
         string compactDynamic = $"\nSurface temperature: {temperatureText}\nIllumination / insolation: {illumination} / {insolation:F4}";
         string detailedDynamic = $"\n\nSurface Temperature\nTemperature: {temperatureText}\nInsolation cosine: {insolation:F4}\nIllumination: {illumination}\nTarget equilibrium: {ReplicatorManager.FormatTemperature(temperatureField.GetCellTargetTemperatureKelvin(selectedCellIndex), displayUnit)}\nResponse multiplier: {temperatureField.GetCellEffectiveThermalResponseMultiplier(selectedCellIndex):F3}\nThermal category: {temperatureField.GetCellThermalCategory(selectedCellIndex)}\nNeighbor min/mean/max: {ReplicatorManager.FormatTemperature(neighborMin, displayUnit)} / {ReplicatorManager.FormatTemperature(neighborMean, displayUnit)} / {ReplicatorManager.FormatTemperature(neighborMax, displayUnit)}";
         selectedCompactPopup = selectedCompactStaticHeader + compactDynamic + selectedCompactStaticOcean + compactLayers;
+        if (experiencedTemperatureField != null && experiencedTemperatureField.IsInitialized)
+        {
+            GeodesicOceanLayerGrid localGrid = oceanLayerDomain != null ? oceanLayerDomain.Grid : null;
+            int localLayer = localGrid != null && localGrid.ActiveLayerCountByCell[selectedCellIndex] > 0 ? localGrid.GetBottomLayerIndex(selectedCellIndex) : 0;
+            if (experiencedTemperatureField.TryGetLocalTemperatureKelvin(selectedCellIndex, localLayer, selectedWorldPosition, out float localKelvin))
+                detailedDynamic += $"\n\nExperienced Temperature\nClicked position: {ReplicatorManager.FormatTemperature(localKelvin, displayUnit)}\nSample layer: {localLayer}\nOutlets / radius: {experiencedTemperatureField.OutletCount} / {experiencedTemperatureField.VentMicrothermalRadius:F4}\nLookup cells / bytes: {experiencedTemperatureField.IndexedCellCount} / {experiencedTemperatureField.LookupMemoryBytes}";
+        }
         selectedDetailedPopup = selectedDetailedStaticPopup + detailedDynamic + detailedLayers;
         }
     }

@@ -28,69 +28,24 @@ public sealed class GeodesicVentVisualizer : MonoBehaviour
 
     public int MarkerCount => markerCount;
 
-    public void Initialize(GeodesicOceanResourceField resourceField, PlanetGenerator generator)
+    public void Initialize(GeodesicExperiencedTemperatureField temperatureField, PlanetGenerator generator)
     {
         ClearMarkers();
-        if (resourceField == null || !resourceField.IsInitialized || generator == null) return;
-
-        markerRoot = new GameObject("Geodesic Vent Markers");
-        markerRoot.transform.SetParent(transform, false);
-        markerRoot.layer = gameObject.layer;
-        markerRoot.SetActive(showVentMarkers);
-        sharedMarkerMesh = BuildSharedDiscMesh();
-        Shader shader = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
-        if (shader != null)
+        if (temperatureField == null || !temperatureField.IsInitialized || generator == null) return;
+        markerRoot = new GameObject("Geodesic Vent Markers"); markerRoot.transform.SetParent(transform, false); markerRoot.layer = gameObject.layer; markerRoot.SetActive(showVentMarkers);
+        sharedMarkerMesh = BuildSharedDiscMesh(); Shader shader = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
+        if (shader != null) { sharedMarkerMaterial = new Material(shader) { name = "Geodesic Vent Marker (Runtime)", color = markerColor }; if (sharedMarkerMaterial.HasProperty("_BaseColor")) sharedMarkerMaterial.SetColor("_BaseColor", markerColor); sharedMarkerMaterial.EnableKeyword("_EMISSION"); if (sharedMarkerMaterial.HasProperty("_EmissionColor")) sharedMarkerMaterial.SetColor("_EmissionColor", markerColor * emissionIntensity); }
+        for (int i = 0; i < temperatureField.OutletCount; i++)
         {
-            sharedMarkerMaterial = new Material(shader) { name = "Geodesic Vent Marker (Runtime)", color = markerColor };
-            if (sharedMarkerMaterial.HasProperty("_BaseColor")) sharedMarkerMaterial.SetColor("_BaseColor", markerColor);
-            Color emission = markerColor * emissionIntensity;
-            sharedMarkerMaterial.EnableKeyword("_EMISSION");
-            if (sharedMarkerMaterial.HasProperty("_EmissionColor")) sharedMarkerMaterial.SetColor("_EmissionColor", emission);
+            if (!temperatureField.TryGetOutlet(i, out GeodesicVentOutlet outlet)) continue;
+            GameObject marker = new GameObject($"{outlet.Habitat} Vent Outlet {i + 1}"); marker.layer = gameObject.layer; marker.transform.SetParent(markerRoot.transform, false);
+            Vector3 normal = outlet.PlanetLocalNormal; marker.transform.localPosition = outlet.PlanetLocalPosition + normal * seafloorOffset;
+            Vector3 tangent = Vector3.Cross(normal, Vector3.up); if (tangent.sqrMagnitude < 1e-8f) tangent = Vector3.Cross(normal, Vector3.right);
+            marker.transform.localRotation = Quaternion.LookRotation(normal, Vector3.Cross(tangent.normalized, normal));
+            marker.transform.localScale = Vector3.one * markerScale * Mathf.Lerp(minimumMarkerScaleMultiplier, maximumMarkerScaleMultiplier, Mathf.Pow(outlet.Strength01, markerStrengthResponse));
+            marker.AddComponent<MeshFilter>().sharedMesh = sharedMarkerMesh; marker.AddComponent<MeshRenderer>().sharedMaterial = sharedMarkerMaterial; markerCount++;
         }
-
-        int vents = resourceField.VentCount;
-        float maximumRawStrength = 0f;
-        for (int i = 0; i < vents; i++) if (resourceField.TryGetVentSystem(i, out GeodesicVentSystem measured)) maximumRawStrength = Mathf.Max(maximumRawStrength, measured.RawStrengthSum);
-        Vector3[] cellDirections = resourceField.SourceGrid.SourceTopology.CellDirections;
-        int[] selectedMembers = new int[Mathf.Max(1, maxVisibleOutletsPerSystem)];
-        int minimumOutlets = int.MaxValue, maximumOutlets = 0;
-        float minimumScale = float.PositiveInfinity, maximumScale = 0f, scaleSum = 0f;
-        for (int i = 0; i < vents; i++)
-        {
-            if (!resourceField.TryGetVentSystem(i, out GeodesicVentSystem system)) continue;
-            GeodesicVentVisualArchetype archetype = GeodesicVentOutletSelector.GetArchetype(system.RepresentativeCell);
-            int requestedOutlets = archetype == GeodesicVentVisualArchetype.SingleDominant ? 1 :
-                archetype == GeodesicVentVisualArchetype.DominantWithSatellites ? 3 + (system.RepresentativeCell & 1) : 3 + (system.RepresentativeCell % 3);
-            int outletTarget = GeodesicVentOutletSelector.SelectLocalMembers(system, cellDirections, visualOutletRadiusDegrees, Mathf.Min(requestedOutlets, maxVisibleOutletsPerSystem), selectedMembers);
-            int outlets = 0;
-            for (int selection = 0; selection < outletTarget; selection++)
-            {
-                int member = selectedMembers[selection];
-                int cell = system.Members[member].CellIndex;
-                if (!generator.TryGetVisibleGeodesicSeafloorWorldAnchor(cell, out Vector3 seafloorPosition, out Vector3 seafloorNormal)) continue;
-                GameObject marker = new GameObject($"{system.Habitat} Vent System {i} Outlet {outlets + 1}");
-                marker.layer = gameObject.layer;
-                marker.transform.SetParent(markerRoot.transform, true);
-                marker.transform.position = seafloorPosition + seafloorNormal * seafloorOffset;
-                Vector3 tangent = Vector3.Cross(seafloorNormal, Vector3.up);
-                if (tangent.sqrMagnitude < 1e-8f) tangent = Vector3.Cross(seafloorNormal, Vector3.right);
-                marker.transform.rotation = Quaternion.LookRotation(seafloorNormal, Vector3.Cross(tangent.normalized, seafloorNormal));
-                float relativeSystemStrength = maximumRawStrength > 0f ? system.RawStrengthSum / maximumRawStrength : 0f;
-                float relativeOutletStrength = system.RawStrengthMax > 0f ? system.Members[member].RawStrength / system.RawStrengthMax : 0f;
-                float systemScale = Mathf.Lerp(minimumMarkerScaleMultiplier, maximumMarkerScaleMultiplier, Mathf.Pow(Mathf.Clamp01(relativeSystemStrength), markerStrengthResponse));
-                float outletScale = GeodesicVentOutletSelector.GetOutletScale(archetype, selection, relativeOutletStrength);
-                float weightScale = systemScale * outletScale;
-                marker.transform.localScale = Vector3.one * markerScale * weightScale;
-                marker.AddComponent<MeshFilter>().sharedMesh = sharedMarkerMesh;
-                marker.AddComponent<MeshRenderer>().sharedMaterial = sharedMarkerMaterial;
-                float absoluteScale = markerScale * weightScale;
-                minimumScale = Mathf.Min(minimumScale, absoluteScale); maximumScale = Mathf.Max(maximumScale, absoluteScale); scaleSum += absoluteScale;
-                markerCount++; outlets++;
-            }
-            minimumOutlets = Mathf.Min(minimumOutlets, outlets); maximumOutlets = Mathf.Max(maximumOutlets, outlets);
-        }
-
-        Debug.Log($"[GeodesicVentVisualizer] systems={vents}, visibleOutlets={markerCount}, visualRadius={visualOutletRadiusDegrees:F2}deg, maxOutlets={maxVisibleOutletsPerSystem}, outletsMinMeanMax={(vents > 0 ? minimumOutlets : 0)}/{(vents > 0 ? markerCount / (float)vents : 0f):F2}/{maximumOutlets}, markerScaleMinMeanMax={(markerCount > 0 ? minimumScale : 0f):F4}/{(markerCount > 0 ? scaleSum / markerCount : 0f):F4}/{maximumScale:F4}, sizeSource=relative raw system/member strength, anchors=completed visible terrain", this);
+        Debug.Log($"[GeodesicVentVisualizer] outlets={markerCount}, authority=GeodesicExperiencedTemperatureField immutable outlet records, anchors=completed visible terrain", this);
     }
 
     [ContextMenu("Toggle Geodesic Vent Markers")]

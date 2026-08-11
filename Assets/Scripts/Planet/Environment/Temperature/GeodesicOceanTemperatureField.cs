@@ -25,7 +25,7 @@ public sealed class GeodesicOceanTemperatureField : MonoBehaviour
     [SerializeField, Min(0.01f), Tooltip("Approximate-profile relaxation time at the shallowest subsurface center.")] private float shallowResponseTimescaleSeconds = 80f;
     [SerializeField, Min(0.01f), Tooltip("Approximate-profile relaxation time at maximum depth.")] private float deepResponseTimescaleSeconds = 1200f;
     [SerializeField, Range(0.1f, 4f), Tooltip("Power controlling how quickly surface influence decreases with normalized center depth.")] private float depthProfileExponent = 1.4f;
-    [SerializeField, Tooltip("Intrinsic hydrothermal-fluid source temperature; coarse ocean cells are only weakly blended toward this value.")] private float submarineVentSourceTemperatureC = 350f;
+    [SerializeField, Tooltip("Intrinsic hydrothermal-fluid source temperature; coarse ocean cells are only weakly blended toward this value.")] private float submarineVentSourceTemperatureC = GeodesicVentThermalModel.SourceTemperatureC;
     [SerializeField, Range(0f, 0.25f), Tooltip("Maximum bounded coarse-grid blend toward source-fluid temperature at a strongest bottom outlet.")] private float ventThermalInfluence = 0.08f;
     [SerializeField, Range(0f, 1f), Tooltip("Fraction of bottom vent heating applied only to the layer immediately above the bottom.")] private float aboveBottomVentHeatingFactor = 0.35f;
     [SerializeField, Min(1e-8f), Tooltip("Thermal capacity per unit ocean-layer volume.")] private float subsurfaceHeatCapacityPerVolume = 1f;
