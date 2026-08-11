@@ -33,7 +33,7 @@ public class SimulationStartupController : MonoBehaviour
     private const float VentCO2MaxPerTick = 1f;
     private const int InitialSpawnMin = 0;
     private const int InitialSpawnMax = 10000;
-    private const int SavedStartupConfigVersion = 3;
+    private const int SavedStartupConfigVersion = 4;
     public const float DefaultApproximateThermalIntervalSeconds = 2f;
     public const float DefaultResourceTransportIntervalSeconds = 5f;
     public static readonly float[] ApproximateThermalIntervalPresets = { 0.5f, 1f, 2f, 5f };
@@ -490,6 +490,7 @@ public class SimulationStartupController : MonoBehaviour
                 planetGenerator.GetComponent<GeodesicSurfaceTemperatureField>()?.SetStartupApproximateUpdateInterval(config.approximateThermalIntervalSeconds);
                 planetGenerator.GetComponent<GeodesicOceanResourceField>()?.SetStartupConcentrations(config.initialCO2, config.initialO2, config.initialCH4, config.initialDissolvedFe2Plus);
                 planetGenerator.GetComponent<GeodesicOceanResourceField>()?.SetStartupVentRates(config.ventH2PerTick, config.ventH2SPerTick, config.ventCO2PerTick, config.ventFe2PerTick);
+                planetGenerator.GetComponent<GeodesicOceanResourceField>()?.SetStartupVentGeography(config.ventClustering, config.terrestrialVentFraction);
                 planetGenerator.GetComponent<GeodesicOceanResourceField>()?.SetStartupTransportInterval(config.geodesicResourceTransportIntervalSeconds);
             }
             planetGenerator.InitializeAuthoritativePlanet("New Game startup selection");
@@ -668,6 +669,8 @@ public class SimulationStartupController : MonoBehaviour
         config.ventH2SPerTick = Mathf.Clamp(config.ventH2SPerTick, VentPerTickMin, VentH2SMaxPerTick);
         config.ventCO2PerTick = Mathf.Clamp(config.ventCO2PerTick, VentPerTickMin, VentCO2MaxPerTick);
         config.ventFe2PerTick = Mathf.Clamp(config.ventFe2PerTick, VentPerTickMin, VentCO2MaxPerTick);
+        config.ventClustering = Mathf.Clamp01(config.ventClustering);
+        config.terrestrialVentFraction = Mathf.Clamp01(config.terrestrialVentFraction);
         config.initialSpawnCount = Mathf.Clamp(config.initialSpawnCount, InitialSpawnMin, InitialSpawnMax);
         config.cubeSphereResolution = Mathf.Clamp(config.cubeSphereResolution, 3, 240);
         config.geodesicSubdivisionLevel = Mathf.Clamp(config.geodesicSubdivisionLevel, 0, GeodesicGridTopology.MaxSupportedSubdivision);
@@ -721,10 +724,12 @@ public class SimulationStartupController : MonoBehaviour
         builder.AppendLine($"Initial O2: {config.initialO2:0.###}");
         builder.AppendLine($"Initial CH4: {config.initialCH4:0.###}");
         builder.AppendLine($"Initial Dissolved Fe2+: {config.initialDissolvedFe2Plus:0.###}");
-        builder.AppendLine($"Vent H2 Per Tick: {config.ventH2PerTick:0.####}");
-        builder.AppendLine($"Vent H2S Per Tick: {config.ventH2SPerTick:0.####}");
-        builder.AppendLine($"Vent CO2 Per Tick: {config.ventCO2PerTick:0.####}");
-        builder.AppendLine($"Vent Fe2 Per Tick: {config.ventFe2PerTick:0.####}");
+        builder.AppendLine($"Vent Clustering: {config.ventClustering:0.###}");
+        builder.AppendLine($"Global Vent H2 / sim s: {config.ventH2PerTick:0.####}");
+        builder.AppendLine($"Global Vent H2S / sim s: {config.ventH2SPerTick:0.####}");
+        builder.AppendLine($"Global Vent CO2 / sim s: {config.ventCO2PerTick:0.####}");
+        builder.AppendLine($"Global Vent Fe2 / sim s: {config.ventFe2PerTick:0.####}");
+        builder.AppendLine($"Terrestrial Vent Fraction: {config.terrestrialVentFraction:0.###}");
         builder.AppendLine($"Initial Spawn Count: {config.initialSpawnCount}");
         builder.AppendLine($"Start Paused: {startPaused}");
         builder.AppendLine($"Saved Config Path: {SavedStartupConfigPath}");
@@ -753,6 +758,8 @@ public class SimulationStartupController : MonoBehaviour
         public float ventH2SPerTick;
         public float ventCO2PerTick;
         public float ventFe2PerTick;
+        public float ventClustering;
+        public float terrestrialVentFraction;
         public int initialSpawnCount;
         public bool startPaused;
         public float approximateThermalIntervalSeconds;
@@ -787,6 +794,8 @@ public class SimulationStartupController : MonoBehaviour
                 ventH2SPerTick = config.ventH2SPerTick,
                 ventCO2PerTick = config.ventCO2PerTick,
                 ventFe2PerTick = config.ventFe2PerTick,
+                ventClustering = config.ventClustering,
+                terrestrialVentFraction = config.terrestrialVentFraction,
                 initialSpawnCount = config.initialSpawnCount,
                 startPaused = config.startPaused,
                 approximateThermalIntervalSeconds = config.approximateThermalIntervalSeconds,
@@ -815,6 +824,7 @@ public class SimulationStartupController : MonoBehaviour
             config.ventH2SPerTick = ventH2SPerTick;
             config.ventCO2PerTick = ventCO2PerTick;
             config.ventFe2PerTick = ventFe2PerTick > 0f ? ventFe2PerTick : config.ventFe2PerTick;
+            if (version >= 4) { config.ventClustering = ventClustering; config.terrestrialVentFraction = terrestrialVentFraction; }
             config.initialSpawnCount = initialSpawnCount;
             config.startPaused = startPaused;
             config.approximateThermalIntervalSeconds = approximateThermalIntervalSeconds;
@@ -1062,7 +1072,7 @@ public class SimulationStartupController : MonoBehaviour
         setupGuiScrollPosition = GUILayout.BeginScrollView(setupGuiScrollPosition, GUILayout.Width(width), GUILayout.Height(scrollHeight));
 
         float contentWidth = Mathf.Max(1f, width - 20f);
-        float advancedHeight = advancedSettingsExpanded ? 190f : 0f;
+        float advancedHeight = advancedSettingsExpanded ? 300f : 0f;
         float contentHeight = 44f + ((line + gap) * 18f) + advancedHeight + (gap * 2f) + 42f + 30f + 82f;
         Rect contentRect = GUILayoutUtility.GetRect(contentWidth, contentHeight, GUILayout.Width(contentWidth), GUILayout.Height(contentHeight));
         float controlX = contentRect.x;
@@ -1081,18 +1091,12 @@ public class SimulationStartupController : MonoBehaviour
         {
             DrawInt(new Rect(controlX, y, contentWidth, line), "Cube Sphere Resolution", ref currentConfig.cubeSphereResolution, true, 3, 240);
         }
-        else
-        {
-            DrawInt(new Rect(controlX, y, contentWidth, line), "Geodesic Subdivision Level", ref currentConfig.geodesicSubdivisionLevel, true, 0, GeodesicGridTopology.MaxSupportedSubdivision);
-        }
         y += line + gap;
         DrawFloat(new Rect(controlX, y, contentWidth, line), "Axis Tilt (deg)", ref currentConfig.axisTiltDegrees, AxisTiltMinDegrees, AxisTiltMaxDegrees);
         y += line + gap;
         DrawFloat(new Rect(controlX, y, contentWidth, line), "Day Length (sec)", ref currentConfig.dayLengthSeconds, DayLengthMinSeconds, DayLengthMaxSeconds);
         y += line + gap;
         DrawFloat(new Rect(controlX, y, contentWidth, line), "Year Length (days)", ref currentConfig.yearLengthInDays, YearLengthMinDays, YearLengthMaxDays);
-        y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Base Temp (K)", ref currentConfig.baseTempKelvin, BaseTempMinKelvin, BaseTempMaxKelvin);
         y += line + gap;
         DrawFloat(new Rect(controlX, y, contentWidth, line), "Insolation Gain", ref currentConfig.insolationTempGain, InsolationGainMin, InsolationGainMax);
         y += line + gap;
@@ -1104,13 +1108,15 @@ public class SimulationStartupController : MonoBehaviour
         y += line + gap;
         DrawFloat(new Rect(controlX, y, contentWidth, line), "Initial Fe2+", ref currentConfig.initialDissolvedFe2Plus, InitialFe2Min, InitialFe2Max);
         y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Vent H2 / Tick", ref currentConfig.ventH2PerTick, VentPerTickMin, VentH2MaxPerTick);
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Vent Clustering", ref currentConfig.ventClustering, 0f, 1f);
         y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Vent H2S / Tick", ref currentConfig.ventH2SPerTick, VentPerTickMin, VentH2SMaxPerTick);
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Global Vent H2 / sim s", ref currentConfig.ventH2PerTick, VentPerTickMin, VentH2MaxPerTick);
         y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Vent CO2 / Tick", ref currentConfig.ventCO2PerTick, VentPerTickMin, VentCO2MaxPerTick);
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Global Vent H2S / sim s", ref currentConfig.ventH2SPerTick, VentPerTickMin, VentH2SMaxPerTick);
         y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Vent Fe2 / Tick", ref currentConfig.ventFe2PerTick, VentPerTickMin, VentCO2MaxPerTick);
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Global Vent CO2 / sim s", ref currentConfig.ventCO2PerTick, VentPerTickMin, VentCO2MaxPerTick);
+        y += line + gap;
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Global Vent Fe2 / sim s", ref currentConfig.ventFe2PerTick, VentPerTickMin, VentCO2MaxPerTick);
         y += line + gap;
         DrawInt(new Rect(controlX, y, contentWidth, line), "Initial Spawn Count", ref currentConfig.initialSpawnCount, true, InitialSpawnMin, InitialSpawnMax);
         y += line + (gap * 2f);
@@ -1122,6 +1128,15 @@ public class SimulationStartupController : MonoBehaviour
         y += 40f;
         if (advancedSettingsExpanded)
         {
+            if (currentConfig.gridType == PlanetGridType.GeodesicIcosphere)
+            {
+                DrawInt(new Rect(controlX, y, contentWidth, line), "Geodesic Subdivision Level", ref currentConfig.geodesicSubdivisionLevel, true, 0, GeodesicGridTopology.MaxSupportedSubdivision);
+                y += line + gap;
+            }
+            DrawFloat(new Rect(controlX, y, contentWidth, line), "Base Temperature (K)", ref currentConfig.baseTempKelvin, BaseTempMinKelvin, BaseTempMaxKelvin);
+            y += line + gap;
+            DrawFloat(new Rect(controlX, y, contentWidth, line), "Terrestrial Vent Fraction", ref currentConfig.terrestrialVentFraction, 0f, 1f);
+            y += line + gap;
             GUI.Label(new Rect(controlX, y, contentWidth, 24f), "Environment Timing", labelStyle);
             y += 26f;
             DrawPreset(new Rect(controlX, y, contentWidth, line), "Temperature update interval", ref currentConfig.approximateThermalIntervalSeconds, ApproximateThermalIntervalPresets);
