@@ -5,7 +5,12 @@ using UnityEngine;
 public sealed class GeodesicVentVisualizer : MonoBehaviour
 {
     [SerializeField] private bool showVentMarkers = true;
-    [SerializeField, Min(0.001f)] private float markerScale = 0.028f;
+    [SerializeField, Min(0.001f), Tooltip("Base diameter scale shared by every visible outlet.")] private float markerScale = 0.05f;
+    [SerializeField, Min(0.1f), Tooltip("Multiplier used by the weakest authoritative system.")] private float minimumMarkerScaleMultiplier = 0.8f;
+    [SerializeField, Min(0.1f), Tooltip("Multiplier used by the strongest authoritative system.")] private float maximumMarkerScaleMultiplier = 3.2f;
+    [SerializeField, Range(0.1f, 2f), Tooltip("Exponent controlling visual response to relative raw system strength. Lower values emphasize differences among weaker systems.")] private float markerStrengthResponse = 0.65f;
+    [SerializeField, Range(0.1f, 20f), Tooltip("Maximum angular distance from the representative cell for real member outlets. This is visual-only and independent of authoritative clustering.")] private float visualOutletRadiusDegrees = 3.5f;
+    [SerializeField, Range(1, 8), Tooltip("Maximum visual-only outlets rendered for one authoritative system.")] private int maxVisibleOutletsPerSystem = 5;
     [SerializeField, Min(0.00001f)] private float seafloorOffset = 0.0015f;
     [SerializeField] private Color markerColor = new Color(1f, 0.12f, 0.015f, 1f);
     [SerializeField, Min(1f)] private float emissionIntensity = 4f;
@@ -46,15 +51,21 @@ public sealed class GeodesicVentVisualizer : MonoBehaviour
         int vents = resourceField.VentCount;
         float maximumRawStrength = 0f;
         for (int i = 0; i < vents; i++) if (resourceField.TryGetVentSystem(i, out GeodesicVentSystem measured)) maximumRawStrength = Mathf.Max(maximumRawStrength, measured.RawStrengthSum);
+        Vector3[] cellDirections = resourceField.SourceGrid.SourceTopology.CellDirections;
+        int[] selectedMembers = new int[Mathf.Max(1, maxVisibleOutletsPerSystem)];
         int minimumOutlets = int.MaxValue, maximumOutlets = 0;
         float minimumScale = float.PositiveInfinity, maximumScale = 0f, scaleSum = 0f;
         for (int i = 0; i < vents; i++)
         {
             if (!resourceField.TryGetVentSystem(i, out GeodesicVentSystem system)) continue;
-            int outletTarget = Mathf.Clamp(1 + Mathf.FloorToInt(Mathf.Sqrt(Mathf.Max(0, system.MemberCount - 1))), 1, 5);
+            GeodesicVentVisualArchetype archetype = GeodesicVentOutletSelector.GetArchetype(system.RepresentativeCell);
+            int requestedOutlets = archetype == GeodesicVentVisualArchetype.SingleDominant ? 1 :
+                archetype == GeodesicVentVisualArchetype.DominantWithSatellites ? 3 + (system.RepresentativeCell & 1) : 3 + (system.RepresentativeCell % 3);
+            int outletTarget = GeodesicVentOutletSelector.SelectLocalMembers(system, cellDirections, visualOutletRadiusDegrees, Mathf.Min(requestedOutlets, maxVisibleOutletsPerSystem), selectedMembers);
             int outlets = 0;
-            for (int member = 0; member < system.MemberCount && outlets < outletTarget; member++)
+            for (int selection = 0; selection < outletTarget; selection++)
             {
+                int member = selectedMembers[selection];
                 int cell = system.Members[member].CellIndex;
                 if (!generator.TryGetVisibleGeodesicSeafloorWorldAnchor(cell, out Vector3 seafloorPosition, out Vector3 seafloorNormal)) continue;
                 GameObject marker = new GameObject($"{system.Habitat} Vent System {i} Outlet {outlets + 1}");
@@ -66,7 +77,9 @@ public sealed class GeodesicVentVisualizer : MonoBehaviour
                 marker.transform.rotation = Quaternion.LookRotation(seafloorNormal, Vector3.Cross(tangent.normalized, seafloorNormal));
                 float relativeSystemStrength = maximumRawStrength > 0f ? system.RawStrengthSum / maximumRawStrength : 0f;
                 float relativeOutletStrength = system.RawStrengthMax > 0f ? system.Members[member].RawStrength / system.RawStrengthMax : 0f;
-                float weightScale = Mathf.Lerp(0.55f, 1.9f, Mathf.Log10(1f + 9f * relativeSystemStrength)) * Mathf.Lerp(0.65f, 1f, Mathf.Sqrt(relativeOutletStrength));
+                float systemScale = Mathf.Lerp(minimumMarkerScaleMultiplier, maximumMarkerScaleMultiplier, Mathf.Pow(Mathf.Clamp01(relativeSystemStrength), markerStrengthResponse));
+                float outletScale = GeodesicVentOutletSelector.GetOutletScale(archetype, selection, relativeOutletStrength);
+                float weightScale = systemScale * outletScale;
                 marker.transform.localScale = Vector3.one * markerScale * weightScale;
                 marker.AddComponent<MeshFilter>().sharedMesh = sharedMarkerMesh;
                 marker.AddComponent<MeshRenderer>().sharedMaterial = sharedMarkerMaterial;
@@ -77,7 +90,7 @@ public sealed class GeodesicVentVisualizer : MonoBehaviour
             minimumOutlets = Mathf.Min(minimumOutlets, outlets); maximumOutlets = Mathf.Max(maximumOutlets, outlets);
         }
 
-        Debug.Log($"[GeodesicVentVisualizer] systems={vents}, visibleOutlets={markerCount}, outletsMinMeanMax={(vents > 0 ? minimumOutlets : 0)}/{(vents > 0 ? markerCount / (float)vents : 0f):F2}/{maximumOutlets}, markerScaleMinMeanMax={(markerCount > 0 ? minimumScale : 0f):F4}/{(markerCount > 0 ? scaleSum / markerCount : 0f):F4}/{maximumScale:F4}, sizeSource=relative raw cluster/member strength, anchors=completed visible terrain", this);
+        Debug.Log($"[GeodesicVentVisualizer] systems={vents}, visibleOutlets={markerCount}, visualRadius={visualOutletRadiusDegrees:F2}deg, maxOutlets={maxVisibleOutletsPerSystem}, outletsMinMeanMax={(vents > 0 ? minimumOutlets : 0)}/{(vents > 0 ? markerCount / (float)vents : 0f):F2}/{maximumOutlets}, markerScaleMinMeanMax={(markerCount > 0 ? minimumScale : 0f):F4}/{(markerCount > 0 ? scaleSum / markerCount : 0f):F4}/{maximumScale:F4}, sizeSource=relative raw system/member strength, anchors=completed visible terrain", this);
     }
 
     [ContextMenu("Toggle Geodesic Vent Markers")]
@@ -118,4 +131,52 @@ public sealed class GeodesicVentVisualizer : MonoBehaviour
     }
 
     private void OnDestroy() => ClearMarkers();
+}
+
+public enum GeodesicVentVisualArchetype { SingleDominant, DominantWithSatellites, SimilarOutlets }
+
+/// <summary>Pure deterministic visual selection; it never mutates vent systems or simulation weights.</summary>
+public static class GeodesicVentOutletSelector
+{
+    public static GeodesicVentVisualArchetype GetArchetype(int representativeCell)
+    {
+        uint value = unchecked((uint)representativeCell) ^ 0xB5297A4Du;
+        value ^= value >> 16; value *= 0x68E31DA4u; value ^= value >> 15;
+        return (GeodesicVentVisualArchetype)(value % 3u);
+    }
+
+    public static int SelectLocalMembers(GeodesicVentSystem system, Vector3[] cellDirections, float radiusDegrees, int maximumOutlets, int[] destination)
+    {
+        if (system == null || system.Members == null || cellDirections == null || destination == null || maximumOutlets <= 0) return 0;
+        int capacity = Mathf.Min(maximumOutlets, destination.Length);
+        float minimumDot = Mathf.Cos(Mathf.Clamp(radiusDegrees, 0.1f, 180f) * Mathf.Deg2Rad);
+        Vector3 representativeDirection = cellDirections[system.RepresentativeCell];
+        int count = 0;
+        while (count < capacity)
+        {
+            int best = -1; float bestDot = -2f; float bestStrength = -1f; int bestCell = int.MaxValue;
+            for (int member = 0; member < system.Members.Length; member++)
+            {
+                int cell = system.Members[member].CellIndex;
+                float dot = Vector3.Dot(representativeDirection, cellDirections[cell]);
+                if (dot < minimumDot || AlreadySelected(destination, count, member)) continue;
+                float strength = system.Members[member].RawStrength;
+                if (dot > bestDot + 1e-7f || (Mathf.Abs(dot - bestDot) <= 1e-7f && (strength > bestStrength || (Mathf.Approximately(strength, bestStrength) && cell < bestCell))))
+                { best = member; bestDot = dot; bestStrength = strength; bestCell = cell; }
+            }
+            if (best < 0) break;
+            destination[count++] = best;
+        }
+        return count;
+    }
+
+    public static float GetOutletScale(GeodesicVentVisualArchetype archetype, int outletIndex, float relativeMemberStrength)
+    {
+        if (outletIndex == 0) return archetype == GeodesicVentVisualArchetype.SimilarOutlets ? 1f : 1.2f;
+        float memberScale = Mathf.Lerp(0.72f, 1f, Mathf.Sqrt(Mathf.Clamp01(relativeMemberStrength)));
+        return archetype == GeodesicVentVisualArchetype.DominantWithSatellites ? memberScale * 0.72f : memberScale;
+    }
+
+    private static bool AlreadySelected(int[] selected, int count, int candidate)
+    { for (int i = 0; i < count; i++) if (selected[i] == candidate) return true; return false; }
 }

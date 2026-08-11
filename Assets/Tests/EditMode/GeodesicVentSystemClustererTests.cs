@@ -88,6 +88,41 @@ public sealed class GeodesicVentSystemClustererTests
         Assert.That(Mathf.Sqrt(systems[0].RawStrengthSum / systems[0].RawStrengthSum), Is.GreaterThanOrEqualTo(Mathf.Sqrt(systems[1].RawStrengthSum / systems[0].RawStrengthSum)));
     }
 
+    [Test]
+    public void VisualOutletSelection_IsDeterministicAndRepresentativeLocal()
+    {
+        Vector3[] directions = { Direction(0f), Direction(1f), Direction(2.5f), Direction(12f), Direction(18f) };
+        var candidates = new[]
+        {
+            new GeodesicVentCandidate(0, 10, 2f, GeodesicVentHabitat.Submarine),
+            new GeodesicVentCandidate(1, 11, 1.1f, GeodesicVentHabitat.Submarine),
+            new GeodesicVentCandidate(2, 12, 1f, GeodesicVentHabitat.Submarine),
+            new GeodesicVentCandidate(3, 13, 1.8f, GeodesicVentHabitat.Submarine),
+            new GeodesicVentCandidate(4, 14, 1.7f, GeodesicVentHabitat.Submarine)
+        };
+        GeodesicVentSystem system = GeodesicVentSystemClusterer.Cluster(candidates, directions, 20f)[0];
+        int[] first = new int[5], repeated = new int[5];
+        int firstCount = GeodesicVentOutletSelector.SelectLocalMembers(system, directions, 3f, 5, first);
+        int repeatedCount = GeodesicVentOutletSelector.SelectLocalMembers(system, directions, 3f, 5, repeated);
+        Assert.That(firstCount, Is.EqualTo(3));
+        Assert.That(repeatedCount, Is.EqualTo(firstCount));
+        for (int i = 0; i < firstCount; i++)
+        {
+            Assert.That(repeated[i], Is.EqualTo(first[i]));
+            int selectedCell = system.Members[first[i]].CellIndex;
+            Assert.That(Vector3.Angle(directions[system.RepresentativeCell], directions[selectedCell]), Is.LessThanOrEqualTo(3.001f));
+        }
+        Assert.That(system.MemberCount, Is.EqualTo(5), "The authoritative system remains geographically broad.");
+    }
+
+    [Test]
+    public void VisualArchetypeAndScale_AreDeterministicAndVisualOnly()
+    {
+        Assert.That(GeodesicVentOutletSelector.GetArchetype(42), Is.EqualTo(GeodesicVentOutletSelector.GetArchetype(42)));
+        Assert.That(GeodesicVentOutletSelector.GetOutletScale(GeodesicVentVisualArchetype.DominantWithSatellites, 0, 1f), Is.GreaterThan(GeodesicVentOutletSelector.GetOutletScale(GeodesicVentVisualArchetype.DominantWithSatellites, 1, 1f)));
+        Assert.That(GeodesicVentOutletSelector.GetOutletScale(GeodesicVentVisualArchetype.SimilarOutlets, 1, 1f), Is.EqualTo(1f));
+    }
+
     private static Vector3 Direction(float degrees) => new Vector3(Mathf.Cos(degrees * Mathf.Deg2Rad), Mathf.Sin(degrees * Mathf.Deg2Rad), 0f);
     private static double SumWeight(GeodesicVentSystem[] systems, GeodesicVentHabitat habitat) { double sum = 0d; foreach (GeodesicVentSystem system in systems) if (system.Habitat == habitat) sum += system.NormalizedHabitatWeight; return sum; }
     private static void AssertEveryCandidateExactlyOnce(GeodesicVentSystem[] systems, int count) { var seen = new bool[count]; int members = 0; foreach (GeodesicVentSystem system in systems) { Assert.That(system.MemberCount, Is.GreaterThan(0)); foreach (GeodesicVentCandidate member in system.Members) { Assert.That(seen[member.CellIndex], Is.False); seen[member.CellIndex] = true; members++; } } Assert.That(members, Is.EqualTo(count)); }
