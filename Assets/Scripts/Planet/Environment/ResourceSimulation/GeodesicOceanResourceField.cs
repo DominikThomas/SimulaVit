@@ -368,7 +368,7 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
             else if (!grid.SourceOceanMask[cell] && HashVent(hash ^ 0xBB67AE85u) / (float)uint.MaxValue <= terrestrialVentFraction)
                 candidates.Add(new GeodesicVentCandidate(cell, -1, strength, GeodesicVentHabitat.Terrestrial));
         }
-        float clusterRadiusDegrees = Mathf.Lerp(4f, 16f, ventClustering);
+        float clusterRadiusDegrees = Mathf.Lerp(4f, 40f, ventClustering);
         float[] sweepRadii = { 8f, 10f, 12f, 14f };
         for (int sweepIndex = 0; sweepIndex < sweepRadii.Length; sweepIndex++)
         {
