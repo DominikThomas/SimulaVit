@@ -610,6 +610,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
         GetComponent<PlanetTemperatureIceVisuals>()?.ClearForGeodesicMode();
         GetComponent<GeodesicVentVisualizer>()?.ClearMarkers();
+        GetComponent<GeodesicExperiencedTemperatureField>()?.Clear();
         GetComponent<GeodesicOceanFe2Visual>()?.ClearVisual();
 
         GetComponent<GeodesicOceanResourceField>()?.ClearField();
@@ -848,8 +849,10 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         if (meshRenderer != null) meshRenderer.enabled = true;
         LogStage("terrain mesh assignment/upload", stage);
 
+        var experiencedTemperatureField = GetOrAddComponent<GeodesicExperiencedTemperatureField>(gameObject);
+        experiencedTemperatureField.Initialize(oceanResourceField, this);
         var ventVisualizer = GetOrAddComponent<GeodesicVentVisualizer>(gameObject);
-        ventVisualizer.Initialize(oceanResourceField, this);
+        ventVisualizer.Initialize(experiencedTemperatureField, this);
 
         stage = System.Diagnostics.Stopwatch.StartNew();
         IcosphereRenderGeometry colliderGeometry = IcosphereRenderGeometryCache.GetOrBuild(colliderSubdivision);
