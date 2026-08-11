@@ -137,11 +137,11 @@ public class ReplicatorHudPresenter
         string dissolvedOceanText = BuildDissolvedOceanHudText(planetResourceMap);
 
         string atmosphereText = geodesicWorld
-            ? "Environment (geodesic)\n" +
+            ? "Environment — Geodesic\n" +
               dissolvedOceanText +
-              $"Temp Mean: {ReplicatorManager.FormatTemperature(hudMeanTempKelvin, temperatureDisplayUnit)}\n" +
-              $"Temp Min: {ReplicatorManager.FormatTemperature(hudMinTempKelvin, temperatureDisplayUnit)}\n" +
-              $"Temp Max: {ReplicatorManager.FormatTemperature(hudMaxTempKelvin, temperatureDisplayUnit)}"
+              $"Surface Temperature Mean: {ReplicatorManager.FormatTemperature(hudMeanTempKelvin, temperatureDisplayUnit)}\n" +
+              $"Surface Temperature Min: {ReplicatorManager.FormatTemperature(hudMinTempKelvin, temperatureDisplayUnit)}\n" +
+              $"Surface Temperature Max: {ReplicatorManager.FormatTemperature(hudMaxTempKelvin, temperatureDisplayUnit)}"
             : GetAtmosphereHudHeader(planetResourceMap) + "\n" +
               $"CO2: {globalCo2:0.000} ({co2Pct:0.0}%)\n" +
               $"O2: {globalO2:0.000} ({o2Pct:0.0}%)\n" +
@@ -280,7 +280,6 @@ public class ReplicatorHudPresenter
 
     private PlanetGenerator ResolveHudPlanetGenerator(PlanetResourceMap planetResourceMap)
     {
-        if (planetResourceMap != null) return planetResourceMap.GetComponent<PlanetGenerator>();
         if (geodesicResourcePlanetGenerator == null)
         {
             geodesicResourcePlanetGenerator = UnityEngine.Object.FindFirstObjectByType<PlanetGenerator>();
@@ -315,15 +314,18 @@ public class ReplicatorHudPresenter
 
         if (geodesicOceanResourceField == null || !geodesicOceanResourceField.IsInitialized)
         {
-            return "Dissolved ocean: unavailable\n";
+            return "Ocean dissolved resources: unavailable\n";
         }
 
         return
-            "Dissolved ocean (geodesic volume-weighted mean)\n" +
+            "Ocean dissolved resources (volume-weighted mean)\n" +
             $"CO2: {geodesicOceanResourceField.GetVolumeWeightedMeanConcentration(GeodesicOceanResource.CO2):0.###}\n" +
             $"O2: {geodesicOceanResourceField.GetVolumeWeightedMeanConcentration(GeodesicOceanResource.O2):0.###}\n" +
             $"CH4: {geodesicOceanResourceField.GetVolumeWeightedMeanConcentration(GeodesicOceanResource.CH4):0.###}\n" +
-            $"Fe2+: {geodesicOceanResourceField.GetVolumeWeightedMeanConcentration(GeodesicOceanResource.Fe2):0.###} avg / {geodesicOceanResourceField.GetGlobalInventory(GeodesicOceanResource.Fe2):0.###} total\n";
+            $"H2: {geodesicOceanResourceField.GetVolumeWeightedMeanConcentration(GeodesicOceanResource.H2):0.###}\n" +
+            $"H2S: {geodesicOceanResourceField.GetVolumeWeightedMeanConcentration(GeodesicOceanResource.H2S):0.###}\n" +
+            $"Fe2: {geodesicOceanResourceField.GetVolumeWeightedMeanConcentration(GeodesicOceanResource.Fe2):0.###}\n" +
+            $"OrganicC: {geodesicOceanResourceField.GetVolumeWeightedMeanConcentration(GeodesicOceanResource.OrganicC):0.###}\n";
     }
 
     private void SampleHudTemperatureStats(PlanetResourceMap planetResourceMap)

@@ -114,6 +114,18 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     public long CompletedTransportTicks => completedTransportTicks;
     public long TransportCacheMemoryBytes => transportCacheMemoryBytes;
     public long StagingBufferMemoryBytes => stagingBufferMemoryBytes;
+    public int VentCount => initialized ? ventCount : 0;
+
+    public bool TryGetVent(int index, out int cellIndex, out int bottomLayerIndex, out float strength)
+    {
+        cellIndex = -1; bottomLayerIndex = -1; strength = 0f;
+        if (!initialized || sourceGrid == null || ventBottomNodes == null || ventStrengths == null || index < 0 || index >= ventCount) return false;
+        int node = ventBottomNodes[index];
+        cellIndex = node / sourceGrid.MaximumLayerCount;
+        bottomLayerIndex = node % sourceGrid.MaximumLayerCount;
+        strength = ventStrengths[index];
+        return sourceGrid.SourceOceanMask[cellIndex] && sourceGrid.GetBottomLayerIndex(cellIndex) == bottomLayerIndex;
+    }
 
     public void SetStartupTransportInterval(float intervalSeconds)
     {
