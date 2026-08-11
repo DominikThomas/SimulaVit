@@ -1,6 +1,6 @@
 using UnityEngine;
 
-/// <summary>One static marker per authoritative vent system owned by GeodesicOceanResourceField.</summary>
+/// <summary>Static outlets selected from real members of authoritative vent systems.</summary>
 [DisallowMultipleComponent]
 public sealed class GeodesicVentVisualizer : MonoBehaviour
 {
@@ -44,28 +44,40 @@ public sealed class GeodesicVentVisualizer : MonoBehaviour
         }
 
         int vents = resourceField.VentCount;
+        float maximumRawStrength = 0f;
+        for (int i = 0; i < vents; i++) if (resourceField.TryGetVentSystem(i, out GeodesicVentSystem measured)) maximumRawStrength = Mathf.Max(maximumRawStrength, measured.RawStrengthSum);
+        int minimumOutlets = int.MaxValue, maximumOutlets = 0;
+        float minimumScale = float.PositiveInfinity, maximumScale = 0f, scaleSum = 0f;
         for (int i = 0; i < vents; i++)
         {
-            if (!resourceField.TryGetVentSystem(i, out GeodesicVentSystem system) ||
-                !resourceField.TryGetVent(i, out int cell, out _, out _) ||
-                !generator.TryGetVisibleGeodesicSeafloorWorldAnchor(cell, out Vector3 seafloorPosition, out Vector3 seafloorNormal)) continue;
-            GameObject marker = new GameObject($"{system.Habitat} Vent System {i}");
-            marker.layer = gameObject.layer;
-            marker.transform.SetParent(markerRoot.transform, true);
-            marker.transform.position = seafloorPosition + seafloorNormal * seafloorOffset;
-            Vector3 tangent = Vector3.Cross(seafloorNormal, Vector3.up);
-            if (tangent.sqrMagnitude < 1e-8f) tangent = Vector3.Cross(seafloorNormal, Vector3.right);
-            marker.transform.rotation = Quaternion.LookRotation(seafloorNormal, Vector3.Cross(tangent.normalized, seafloorNormal));
-            // Area-like system weight maps to diameter sublinearly; it never affects production.
-            float weightScale = 0.65f + 2.25f * Mathf.Sqrt(Mathf.Max(0f, system.NormalizedHabitatWeight));
-            marker.transform.localScale = Vector3.one * markerScale * weightScale;
-            marker.AddComponent<MeshFilter>().sharedMesh = sharedMarkerMesh;
-            marker.AddComponent<MeshRenderer>().sharedMaterial = sharedMarkerMaterial;
-            markerCount++;
+            if (!resourceField.TryGetVentSystem(i, out GeodesicVentSystem system)) continue;
+            int outletTarget = Mathf.Clamp(1 + Mathf.FloorToInt(Mathf.Sqrt(Mathf.Max(0, system.MemberCount - 1))), 1, 5);
+            int outlets = 0;
+            for (int member = 0; member < system.MemberCount && outlets < outletTarget; member++)
+            {
+                int cell = system.Members[member].CellIndex;
+                if (!generator.TryGetVisibleGeodesicSeafloorWorldAnchor(cell, out Vector3 seafloorPosition, out Vector3 seafloorNormal)) continue;
+                GameObject marker = new GameObject($"{system.Habitat} Vent System {i} Outlet {outlets + 1}");
+                marker.layer = gameObject.layer;
+                marker.transform.SetParent(markerRoot.transform, true);
+                marker.transform.position = seafloorPosition + seafloorNormal * seafloorOffset;
+                Vector3 tangent = Vector3.Cross(seafloorNormal, Vector3.up);
+                if (tangent.sqrMagnitude < 1e-8f) tangent = Vector3.Cross(seafloorNormal, Vector3.right);
+                marker.transform.rotation = Quaternion.LookRotation(seafloorNormal, Vector3.Cross(tangent.normalized, seafloorNormal));
+                float relativeSystemStrength = maximumRawStrength > 0f ? system.RawStrengthSum / maximumRawStrength : 0f;
+                float relativeOutletStrength = system.RawStrengthMax > 0f ? system.Members[member].RawStrength / system.RawStrengthMax : 0f;
+                float weightScale = Mathf.Lerp(0.55f, 1.9f, Mathf.Log10(1f + 9f * relativeSystemStrength)) * Mathf.Lerp(0.65f, 1f, Mathf.Sqrt(relativeOutletStrength));
+                marker.transform.localScale = Vector3.one * markerScale * weightScale;
+                marker.AddComponent<MeshFilter>().sharedMesh = sharedMarkerMesh;
+                marker.AddComponent<MeshRenderer>().sharedMaterial = sharedMarkerMaterial;
+                float absoluteScale = markerScale * weightScale;
+                minimumScale = Mathf.Min(minimumScale, absoluteScale); maximumScale = Mathf.Max(maximumScale, absoluteScale); scaleSum += absoluteScale;
+                markerCount++; outlets++;
+            }
+            minimumOutlets = Mathf.Min(minimumOutlets, outlets); maximumOutlets = Mathf.Max(maximumOutlets, outlets);
         }
 
-        Debug.Log($"[GeodesicVentVisualizer] vents={vents}, markers={markerCount}, source=authoritative Geodesic vent records", this);
-        if (markerCount != vents) Debug.LogError($"[GeodesicVentVisualizer] Marker invariant failed: vents={vents}, markers={markerCount}.", this);
+        Debug.Log($"[GeodesicVentVisualizer] systems={vents}, visibleOutlets={markerCount}, outletsMinMeanMax={(vents > 0 ? minimumOutlets : 0)}/{(vents > 0 ? markerCount / (float)vents : 0f):F2}/{maximumOutlets}, markerScaleMinMeanMax={(markerCount > 0 ? minimumScale : 0f):F4}/{(markerCount > 0 ? scaleSum / markerCount : 0f):F4}/{maximumScale:F4}, sizeSource=relative raw cluster/member strength, anchors=completed visible terrain", this);
     }
 
     [ContextMenu("Toggle Geodesic Vent Markers")]

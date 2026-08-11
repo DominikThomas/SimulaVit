@@ -25,9 +25,9 @@ public sealed class GeodesicOceanTemperatureField : MonoBehaviour
     [SerializeField, Min(0.01f), Tooltip("Approximate-profile relaxation time at the shallowest subsurface center.")] private float shallowResponseTimescaleSeconds = 80f;
     [SerializeField, Min(0.01f), Tooltip("Approximate-profile relaxation time at maximum depth.")] private float deepResponseTimescaleSeconds = 1200f;
     [SerializeField, Range(0.1f, 4f), Tooltip("Power controlling how quickly surface influence decreases with normalized center depth.")] private float depthProfileExponent = 1.4f;
-    [SerializeField, Min(0f), Tooltip("Kelvin added at full vent strength to the deepest active layer.")] private float bottomVentTemperatureGainKelvin = 25f;
+    [SerializeField, Tooltip("Intrinsic hydrothermal-fluid source temperature; coarse ocean cells are only weakly blended toward this value.")] private float submarineVentSourceTemperatureC = 350f;
+    [SerializeField, Range(0f, 0.25f), Tooltip("Maximum bounded coarse-grid blend toward source-fluid temperature at a strongest bottom outlet.")] private float ventThermalInfluence = 0.08f;
     [SerializeField, Range(0f, 1f), Tooltip("Fraction of bottom vent heating applied only to the layer immediately above the bottom.")] private float aboveBottomVentHeatingFactor = 0.35f;
-    [SerializeField, Range(0f, 0.25f), Tooltip("Deterministic fraction of ocean columns used as ecological thermal vent refuges; this does not create resource sources.")] private float thermalVentColumnFraction = 0.02f;
     [SerializeField, Min(1e-8f), Tooltip("Thermal capacity per unit ocean-layer volume.")] private float subsurfaceHeatCapacityPerVolume = 1f;
     [SerializeField, Min(0f), Tooltip("Simulation-unit vertical diffusivity; this is not SI calibrated and will be tuned later.")] private float verticalThermalDiffusivity = 0.00002f;
     [SerializeField, Tooltip("Initializes subsurface layers from the surface or with a per-layer depth gradient.")] private GeodesicOceanTemperatureStartupMode startupMode = GeodesicOceanTemperatureStartupMode.DepthGradient;
@@ -84,12 +84,11 @@ public sealed class GeodesicOceanTemperatureField : MonoBehaviour
     private GeodesicOceanLayerDomain domain;
     private GeodesicSurfaceTemperatureField surfaceField;
     private GeodesicOceanLayerGrid sourceGrid;
-    private PlanetResourceMap resourceMap;
+    private GeodesicOceanResourceField resourceField;
     [NonSerialized] private GeodesicThermalModel activeThermalModel;
     private float[] subsurfaceTemperatureKelvinByNode;
     private float[] heatCapacityByNode;
     private float[] inverseHeatCapacityByNode;
-    private float[] thermalVentStrengthByCell;
     private float[] approximateSurfaceTemperatureByCell;
     private int[] approximateSurfaceCellByCompactNode;
     private float[] approximateDepthProfileByCompactNode;
@@ -157,7 +156,7 @@ public sealed class GeodesicOceanTemperatureField : MonoBehaviour
     public double LastCompletedOceanTemperatureTick => liveCompletedOceanTemperatureTick;
     public long ApproximateRuntimeMemoryBytes => approximateRuntimeMemoryBytes;
 
-    private void Awake() { generator = GetComponent<PlanetGenerator>(); domain = GetComponent<GeodesicOceanLayerDomain>(); surfaceField = GetComponent<GeodesicSurfaceTemperatureField>(); resourceMap = GetComponent<PlanetResourceMap>(); }
+    private void Awake() { generator = GetComponent<PlanetGenerator>(); domain = GetComponent<GeodesicOceanLayerDomain>(); surfaceField = GetComponent<GeodesicSurfaceTemperatureField>(); resourceField = GetComponent<GeodesicOceanResourceField>(); }
     private void OnDestroy() => ClearField();
 
     public void InitializeForCurrentDomain()
@@ -171,7 +170,6 @@ public sealed class GeodesicOceanTemperatureField : MonoBehaviour
         activeThermalModelDiagnostic = activeThermalModel.ToString();
         solverMode = activeThermalModel.ToString();
         AllocateState();
-        BuildThermalVentStrengths();
         BuildActiveSubsurfaceNodes();
         if (activeThermalModel == GeodesicThermalModel.ApproximateEcologicalProfiles) BuildApproximateRelaxationCache();
         else BuildCompactParticipationTables();
@@ -190,27 +188,13 @@ public sealed class GeodesicOceanTemperatureField : MonoBehaviour
         lastProcessedSurfaceTickSequence = -1;
         Subscribe();
         RefreshInspectorSnapshot(true);
-        UnityEngine.Debug.Log($"[GeodesicOceanTemperature] initialized configuredModel={surfaceField.ConfiguredThermalModel}, activeModel={activeThermalModel}, thermalIntervalSeconds={surfaceField.ActiveUpdateIntervalSeconds:F3}, {sourceGridSummary}, subsurfaceNodes={activeSubsurfaceNodeCount}, participatingSurfaces={participatingSurfaceCellCount}, capacity={totalSubsurfaceThermalCapacity:E4}, memory={approximateRuntimeMemoryBytes} bytes", this);
+        UnityEngine.Debug.Log($"[GeodesicOceanTemperature] initialized configuredModel={surfaceField.ConfiguredThermalModel}, activeModel={activeThermalModel}, thermalIntervalSeconds={surfaceField.ActiveUpdateIntervalSeconds:F3}, ventSourceTemperatureC={submarineVentSourceTemperatureC:F1}, ventThermalInfluence={ventThermalInfluence:F3}, bottomFocused=true, {sourceGridSummary}, subsurfaceNodes={activeSubsurfaceNodeCount}, participatingSurfaces={participatingSurfaceCellCount}, capacity={totalSubsurfaceThermalCapacity:E4}, memory={approximateRuntimeMemoryBytes} bytes", this);
     }
 
     private void AllocateState()
     {
         int nodes = sourceGrid.NodeCapacity, cells = sourceGrid.CellCount;
         subsurfaceTemperatureKelvinByNode = new float[nodes]; heatCapacityByNode = new float[nodes]; inverseHeatCapacityByNode = new float[nodes];
-    }
-
-    private void BuildThermalVentStrengths()
-    {
-        thermalVentStrengthByCell = new float[sourceGrid.CellCount];
-        uint seed = unchecked((uint)generator.DerivedTerrainSeed) ^ 0xA511E9B3u;
-        uint threshold = (uint)(Mathf.Clamp01(thermalVentColumnFraction) * uint.MaxValue);
-        for (int cell = 0; cell < sourceGrid.CellCount; cell++)
-        {
-            if (sourceGrid.ActiveLayerCountByCell[cell] < 2) continue;
-            uint hash = unchecked((uint)cell) ^ seed;
-            hash ^= hash >> 16; hash *= 0x7FEB352Du; hash ^= hash >> 15; hash *= 0x846CA68Bu; hash ^= hash >> 16;
-            if (threshold > 0u && hash <= threshold) thermalVentStrengthByCell[cell] = 0.5f + 0.5f * (hash / (float)threshold);
-        }
     }
 
     private void BuildActiveSubsurfaceNodes()
@@ -247,7 +231,7 @@ public sealed class GeodesicOceanTemperatureField : MonoBehaviour
             approximateSurfaceCellByCompactNode[i] = cell;
             approximateDepthProfileByCompactNode[i] = Mathf.Pow(depth01, exponent);
             approximateResponseByCompactNode[i] = 1f - Mathf.Exp(-Mathf.Max(0f, interval) / Mathf.Max(0.01f, timescale));
-            approximateVentGainByCompactNode[i] = bottomVentTemperatureGainKelvin *
+            approximateVentGainByCompactNode[i] = SourceTemperatureAnomalyKelvin() * ventThermalInfluence *
                 (layer == bottom ? 1f : layer == bottom - 1 ? aboveBottomVentHeatingFactor : 0f);
         }
 
@@ -300,7 +284,7 @@ public sealed class GeodesicOceanTemperatureField : MonoBehaviour
     public void ClearField() { Unsubscribe(); ClearState(); }
     private void ClearState()
     {
-        initialized = false; sourceGrid = null; subsurfaceTemperatureKelvinByNode = heatCapacityByNode = inverseHeatCapacityByNode = solvedSurfaceTemperatureByColumn = solvedSubsurfaceTemperatureByCompactNode = columnInterfaceConductanceBase = null; thermalVentStrengthByCell = null;
+        initialized = false; sourceGrid = null; subsurfaceTemperatureKelvinByNode = heatCapacityByNode = inverseHeatCapacityByNode = solvedSurfaceTemperatureByColumn = solvedSubsurfaceTemperatureByCompactNode = columnInterfaceConductanceBase = null;
         approximateSurfaceTemperatureByCell = approximateDepthProfileByCompactNode = approximateResponseByCompactNode = approximateVentGainByCompactNode = null;
         approximateSurfaceCellByCompactNode = null; approximateDeepTargetKelvin = 0f; approximateRelaxationCacheBytes = 0L;
         activeThermalModel = default;
@@ -359,16 +343,17 @@ public sealed class GeodesicOceanTemperatureField : MonoBehaviour
         float profile = Mathf.Pow(NormalizedCenterDepth(node), Mathf.Max(0.1f, depthProfileExponent));
         float deepTarget = Mathf.Clamp(surfaceField.BaseTemperatureKelvin + deepOceanTemperatureOffsetKelvin, 0f, 10000f);
         int bottom = sourceGrid.GetBottomLayerIndex(cell);
-        float vent = GetVentStrength(cell) * bottomVentTemperatureGainKelvin * (layer == bottom ? 1f : layer == bottom - 1 ? aboveBottomVentHeatingFactor : 0f);
+        float vent = GetVentStrength(cell) * SourceTemperatureAnomalyKelvin() * ventThermalInfluence * (layer == bottom ? 1f : layer == bottom - 1 ? aboveBottomVentHeatingFactor : 0f);
         return Mathf.Clamp(Mathf.Lerp(surfaceTemperature, deepTarget, profile) + vent, 0f, 10000f);
     }
 
     private float NormalizedCenterDepth(int node) => sourceGrid.MaximumOceanDepth > 1e-7f ? Mathf.Clamp01((sourceGrid.OceanSurfaceRadius - sourceGrid.LayerCenterRadius[node]) / sourceGrid.MaximumOceanDepth) : 0f;
     private float GetVentStrength(int cell)
     {
-        if (resourceMap != null && resourceMap.ventStrength != null && cell >= 0 && cell < resourceMap.ventStrength.Length) return Mathf.Max(0f, resourceMap.ventStrength[cell]);
-        return thermalVentStrengthByCell != null && cell >= 0 && cell < thermalVentStrengthByCell.Length ? thermalVentStrengthByCell[cell] : 0f;
+        return resourceField != null ? resourceField.GetSubmarineThermalInfluence(cell) : 0f;
     }
+
+    private float SourceTemperatureAnomalyKelvin() => Mathf.Max(0f, submarineVentSourceTemperatureC + 273.15f - (surfaceField.BaseTemperatureKelvin + deepOceanTemperatureOffsetKelvin));
 
     public float GetLayerTemperatureKelvin(int cellIndex, int layerIndex) => TryGetLayerTemperatureKelvin(cellIndex, layerIndex, out float value) ? value : float.NaN;
     public bool TryGetLayerTemperatureKelvin(int cellIndex, int layerIndex, out float temperatureKelvin) { temperatureKelvin = float.NaN; if (!initialized || !sourceGrid.IsNodeActive(cellIndex, layerIndex)) return false; temperatureKelvin = layerIndex == 0 ? surfaceField.GetCellTemperatureKelvin(cellIndex) : subsurfaceTemperatureKelvinByNode[sourceGrid.GetNodeIndex(cellIndex, layerIndex)]; return Finite(temperatureKelvin); }
@@ -548,8 +533,8 @@ public sealed class GeodesicOceanTemperatureField : MonoBehaviour
             maximumOvershoot = Mathf.Max(maximumOvershoot, Mathf.Max(0f, once - Mathf.Max(280f, target)), Mathf.Max(0f, Mathf.Min(280f, target) - once));
             valid &= Finite(once) && once >= 0f && RelaxScalar(once, target, 0f, timescale) == once;
         }
-        float bottomVent = bottomVentTemperatureGainKelvin;
-        float aboveVent = bottomVentTemperatureGainKelvin * aboveBottomVentHeatingFactor;
+        float bottomVent = SourceTemperatureAnomalyKelvin() * ventThermalInfluence;
+        float aboveVent = bottomVent * aboveBottomVentHeatingFactor;
         valid &= bottomVent >= aboveVent && aboveVent >= 0f && maximumPartitionDifference < 0.001f && maximumOvershoot < 0.001f;
         string result = $"[GeodesicApproximateTemperatureValidation] {(valid ? "valid" : "invalid")}; cases={cases}; maxFramePartitionDifferenceK={maximumPartitionDifference:E3}; maxTargetOvershootK={maximumOvershoot:E3}; horizontalEdges=0; verticalInterfaces=0; implicitColumns=0; stateRestore=pass";
         if (valid) UnityEngine.Debug.Log(result, this); else UnityEngine.Debug.LogError(result, this);
@@ -577,7 +562,7 @@ public sealed class GeodesicOceanTemperatureField : MonoBehaviour
             float cachedResponse = 1f - Mathf.Exp(-Mathf.Max(0f, interval) / Mathf.Max(0.01f, timescale));
             float ventStrength = layerCase >= 3 ? 0.8f : 0f;
             float ventFactor = layerCase == 4 ? 1f : layerCase == 3 ? aboveBottomVentHeatingFactor : 0f;
-            float cachedVentGain = bottomVentTemperatureGainKelvin * ventFactor;
+            float cachedVentGain = SourceTemperatureAnomalyKelvin() * ventThermalInfluence * ventFactor;
             float reference = 282f - layerCase;
             float optimized = reference;
 
@@ -586,7 +571,7 @@ public sealed class GeodesicOceanTemperatureField : MonoBehaviour
                 float referenceProfile = Mathf.Pow(depth, Mathf.Max(0.1f, depthProfileExponent));
                 float referenceTimescale = Mathf.Lerp(shallowResponseTimescaleSeconds, deepResponseTimescaleSeconds, depth);
                 float referenceResponse = 1f - Mathf.Exp(-Mathf.Max(0f, interval) / Mathf.Max(0.01f, referenceTimescale));
-                float referenceTarget = Mathf.Clamp(Mathf.Lerp(surfaces[tick], deepTarget, referenceProfile) + ventStrength * bottomVentTemperatureGainKelvin * ventFactor, 0f, 10000f);
+                float referenceTarget = Mathf.Clamp(Mathf.Lerp(surfaces[tick], deepTarget, referenceProfile) + ventStrength * SourceTemperatureAnomalyKelvin() * ventThermalInfluence * ventFactor, 0f, 10000f);
                 reference = Mathf.Clamp(reference + (referenceTarget - reference) * referenceResponse, 0f, 10000f);
 
                 float optimizedTarget = Mathf.Clamp(Mathf.Lerp(surfaces[tick], deepTarget, cachedProfile) + ventStrength * cachedVentGain, 0f, 10000f);

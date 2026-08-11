@@ -39,6 +39,8 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
     [SerializeField, Min(0.01f), Tooltip("Land surface heat-capacity multiplier used by inertia and diffusion.")] private float landHeatCapacityMultiplier = 1f;
     [SerializeField, Min(0.01f), Tooltip("Ocean surface heat-capacity multiplier. This is not vertical ocean heat storage.")] private float oceanSurfaceHeatCapacityMultiplier = 2f;
     [SerializeField, Range(0.1f, 4f), Tooltip("Exponent applied to direct insolation in the interim surface-energy approximation.")] private float insolationExponent = 1f;
+    [SerializeField, Tooltip("Intrinsic terrestrial geothermal source temperature; land cells receive only a bounded local anomaly.")] private float terrestrialVentSourceTemperatureC = 350f;
+    [SerializeField, Range(0f, 0.25f), Tooltip("Maximum coarse land-cell blend toward geothermal source temperature.")] private float terrestrialVentThermalInfluence = 0.06f;
     [SerializeField, Tooltip("Reserved opt-in diagnostic flag; authoritative terrain colours are never modified by this field.")] private bool debugTemperatureVisualization;
     [SerializeField, Tooltip("Logs temperature tick stage timings and sun/light agreement diagnostics.")] private bool enableProfilingDiagnostics;
 
@@ -85,6 +87,7 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
     private ReplicatorManager simulationClock;
     private GeodesicGridTopology topology;
     private GeodesicTransportGraph transportGraph;
+    private GeodesicOceanResourceField resourceField;
     private float[] surfaceTemperatureKelvinByCell;
     private float[] targetTemperatureKelvinByCell;
     private float[] workingTemperatureKelvinByCell;
@@ -384,7 +387,10 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
         {
             float insolation = Mathf.Max(0f, Vector3.Dot(topology.CellDirections[i], localSunDirection));
             float shapedInsolation = linearInsolation ? insolation : squareInsolation ? insolation * insolation : Mathf.Pow(insolation, insolationExponent);
-            targetTemperatureKelvinByCell[i] = baseTemperatureKelvin + insolationTemperatureGainKelvin * shapedInsolation;
+            float environmentalTarget = baseTemperatureKelvin + insolationTemperatureGainKelvin * shapedInsolation;
+            float geothermalStrength = resourceField != null ? resourceField.GetTerrestrialThermalInfluence(i) : 0f;
+            float sourceKelvin = terrestrialVentSourceTemperatureC + 273.15f;
+            targetTemperatureKelvinByCell[i] = environmentalTarget + geothermalStrength * terrestrialVentThermalInfluence * Mathf.Max(0f, sourceKelvin - environmentalTarget);
         }
     }
 
@@ -705,6 +711,7 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
     private void ResolveReferences()
     {
         planetGenerator = GetComponent<PlanetGenerator>();
+        resourceField = GetComponent<GeodesicOceanResourceField>();
         if (sunDirectionProvider == null) sunDirectionProvider = FindFirstObjectByType<SunSkyRotator>();
         ResolveClockOnly();
         currentSunDirectionProvider = sunDirectionProvider != null ? sunDirectionProvider.name : "None";

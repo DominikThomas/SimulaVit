@@ -1929,3 +1929,15 @@ Do not independently re-evaluate terrain or bathymetry inside each consumer.
 The analytical bottom-layer centre remains appropriate for simulation,
 transport and habitat ownership, but it is not authoritative for final visible
 placement.
+
+### Patchy geothermal provinces and authoritative vent heating
+
+Geodesic geothermal generation now evaluates a deterministic, direction-only low-frequency activity field made from four seed-derived spherical provinces before raw-candidate selection. The Advanced Inspector parameter `geothermalPatchiness` defaults to `0.8`: it blends the former uniform candidate probability/strength with correlated province activity. This creates broad inactive areas, isolated systems, and groups of systems inside active provinces without introducing latitude/longitude coordinates or render seams. Existing strongest-first clustering remains deterministic, habitat-separated, and non-transitive.
+
+The clustered `GeodesicVentSystem[]` owned by `GeodesicOceanResourceField` is also the sole thermal-source authority. Generation precomputes one-ring submarine and terrestrial influence maps from real system members. Local heat uses square-root-bounded raw cluster/member strength, not normalized global production share: member cells receive the strongest influence, matching-habitat immediate neighbors receive `0.3`, and distant cells receive none. Geography and thermal settings therefore do not change the independently normalized global H2/H2S/CO2/Fe2 budgets.
+
+Hydrothermal and terrestrial source-fluid temperatures default to `350 C`; these intrinsic geological temperatures are not ecological cell temperatures. Approximate submarine profiles blend at most `0.08` toward the source in the bottom layer and apply `0.35` of that anomaly only to the layer immediately above. Terrestrial surface targets blend at most `0.06` toward the source. Submarine influence is restricted to ocean-bottom habitat, terrestrial influence to land, and terrestrial chemical injection remains pending an authoritative Geodesic atmosphere.
+
+The cold-vent regression was an authority and initialization-order mismatch: `GeodesicOceanTemperatureField` still read the Legacy `PlanetResourceMap.ventStrength` or generated a private hash fallback before the new clustered resource field existed. Planet generation now builds authoritative clustered vent systems before surface/ocean temperature initialization, and both thermal consumers read their precomputed influence maps directly. No second thermal vent geography remains.
+
+Authoritative systems may render one to five outlets selected from their strongest real members. Outlet count remains visual-only and cannot multiply system production. Marker diameter uses a bounded logarithmic mapping of observed raw cluster strength, with a secondary bounded member-strength factor, instead of square-root-compressed normalized global production weight. All outlets retain the completed-visible-terrain anchor, final normal, and small normal-offset contract.
