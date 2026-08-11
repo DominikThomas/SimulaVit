@@ -610,6 +610,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
         GetComponent<PlanetTemperatureIceVisuals>()?.ClearForGeodesicMode();
         GetComponent<GeodesicVentVisualizer>()?.ClearMarkers();
+        GetComponent<GeodesicOceanFe2Visual>()?.ClearVisual();
 
         GetComponent<GeodesicOceanResourceField>()?.ClearField();
         GetComponent<GeodesicOceanTemperatureField>()?.ClearField();
@@ -869,7 +870,9 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         if (atmosphereMeshRenderer != null) atmosphereMeshRenderer.enabled = false;
 
         stage = System.Diagnostics.Stopwatch.StartNew();
-        BuildGeodesicOceanVisual();
+        IcosphereDirectionMapping oceanMapping = BuildGeodesicOceanVisual();
+        GetOrAddComponent<GeodesicOceanFe2Visual>(gameObject).Initialize(
+            this, oceanResourceField, geodesicOceanMesh, geodesicOceanMeshRenderer, oceanMapping);
         LogStage("ocean mesh generation", stage);
         var picker = GetOrAddComponent<GeodesicCellPicker>(gameObject);
         picker.SetTemperatureDisplayAuthority(replicatorManager);
@@ -2220,26 +2223,61 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         if (land > 0) for (int i = 0; i < count; i++) if (!geodesicOceanMask[i] && !Mathf.Approximately(geodesicRawTerrainRadius[i], geodesicSeafloorRadius[i])) { Debug.LogWarning("[GeodesicBathymetryDiagnostics] Land cell was displaced by bathymetry pass.", this); break; }
     }
 
-    void BuildGeodesicOceanVisual()
+    IcosphereDirectionMapping BuildGeodesicOceanVisual()
     {
-        int oceanSubdivision = Mathf.Clamp(geodesicOceanRenderSubdivisionLevel, 0, GeodesicGridTopology.MaxSupportedSubdivision);
-        IcosphereRenderGeometry oceanGeometry = IcosphereRenderGeometryCache.GetOrBuild(oceanSubdivision);
-        IcosphereDirectionMapping oceanMapping = GetOrBuildDirectionMapping(oceanGeometry);
-        geodesicOceanMesh = IcosphereRenderMeshBuilder.BuildSurfaceMesh(oceanGeometry, resolvedGeodesicSeaLevelRadius, $"Geodesic Ocean Render L{oceanSubdivision}");
-        ApplyGeodesicOceanDepthColours(geodesicOceanMesh, oceanGeometry, oceanMapping);
+        int oceanSubdivision = Mathf.Clamp(
+            geodesicOceanRenderSubdivisionLevel,
+            0,
+            GeodesicGridTopology.MaxSupportedSubdivision);
+
+        IcosphereRenderGeometry oceanGeometry =
+            IcosphereRenderGeometryCache.GetOrBuild(oceanSubdivision);
+
+        IcosphereDirectionMapping oceanMapping =
+            GetOrBuildDirectionMapping(oceanGeometry);
+
+        geodesicOceanMesh = IcosphereRenderMeshBuilder.BuildSurfaceMesh(
+            oceanGeometry,
+            resolvedGeodesicSeaLevelRadius,
+            $"Geodesic Ocean Render L{oceanSubdivision}");
+
+        ApplyGeodesicOceanDepthColours(
+            geodesicOceanMesh,
+            oceanGeometry,
+            oceanMapping);
+
         Transform existing = transform.Find("Geodesic Ocean");
-        geodesicOceanObject = existing != null ? existing.gameObject : new GameObject("Geodesic Ocean");
+        geodesicOceanObject =
+            existing != null
+                ? existing.gameObject
+                : new GameObject("Geodesic Ocean");
+
         geodesicOceanObject.transform.SetParent(transform, false);
         geodesicOceanObject.SetActive(true);
-        geodesicOceanObject.layer = gameObject.layer; // no collider is added; terrain MeshCollider remains the explicit picking target.
-        geodesicOceanMeshFilter = GetOrAddComponent<MeshFilter>(geodesicOceanObject);
-        geodesicOceanMeshRenderer = GetOrAddComponent<MeshRenderer>(geodesicOceanObject);
+        geodesicOceanObject.layer = gameObject.layer;
+
+        geodesicOceanMeshFilter =
+            GetOrAddComponent<MeshFilter>(geodesicOceanObject);
+
+        geodesicOceanMeshRenderer =
+            GetOrAddComponent<MeshRenderer>(geodesicOceanObject);
+
         geodesicOceanMeshFilter.sharedMesh = geodesicOceanMesh;
+
         EnsureGeodesicOceanMaterial();
+
         geodesicOceanMeshRenderer.enabled = enableOcean;
-        geodesicOceanMeshRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        geodesicOceanMeshRenderer.shadowCastingMode =
+            UnityEngine.Rendering.ShadowCastingMode.Off;
         geodesicOceanMeshRenderer.receiveShadows = false;
-        LogOceanRendererDiagnostics("GeodesicIcosphere", geodesicOceanMeshRenderer.sharedMaterial, GetGeodesicOceanAppearanceSample(), false);
+
+        LogOceanRendererDiagnostics(
+            "GeodesicIcosphere",
+            geodesicOceanMeshRenderer.sharedMaterial,
+            GetGeodesicOceanAppearanceSample(),
+            false);
+
+        return oceanMapping;
     }
 
     void ApplyGeodesicOceanDepthColours(Mesh oceanSurfaceMesh, IcosphereRenderGeometry geometry, IcosphereDirectionMapping mapping)

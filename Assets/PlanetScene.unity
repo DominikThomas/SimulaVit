@@ -166,8 +166,11 @@ MonoBehaviour:
     ventH2PerTick: 0.006
     ventH2SPerTick: 0.01
     ventCO2PerTick: 0
+    ventFe2PerTick: 0.002
     initialSpawnCount: 100
     startPaused: 0
+    approximateThermalIntervalSeconds: 2
+    geodesicResourceTransportIntervalSeconds: 5
   currentConfig:
     planetSeed: 12345
     useRandomSeed: 1
@@ -186,8 +189,11 @@ MonoBehaviour:
     ventH2PerTick: 0.006
     ventH2SPerTick: 0.01
     ventCO2PerTick: 0
+    ventFe2PerTick: 0.002
     initialSpawnCount: 100
     startPaused: 0
+    approximateThermalIntervalSeconds: 2
+    geodesicResourceTransportIntervalSeconds: 5
   loadSavedStartupConfig: 1
   saveStartupConfigOnStart: 1
   logAppliedStartupConfig: 1
@@ -890,6 +896,7 @@ GameObject:
   - component: {fileID: 382753107}
   - component: {fileID: 382753108}
   - component: {fileID: 382753109}
+  - component: {fileID: 382753110}
   m_Layer: 0
   m_Name: Planet Generator
   m_TagString: Planet
@@ -1213,6 +1220,10 @@ MonoBehaviour:
   lastExactDiffusionAuditSimulationTime: 0
   ticksSinceLastExactDiffusionAudit: 0
   lastTickUsedAlgebraicDiffusionConservationOnly: 0
+  activeThermalModelDiagnostic: Not initialized
+  hasActiveThermalModel: 0
+  surfaceCellsUpdatedLastTick: 0
+  horizontalEdgesProcessedLastTick: 0
 --- !u!114 &382753107
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1254,34 +1265,6 @@ MonoBehaviour:
   approximateMemoryBytes: 0
   sampleCellIndex: 0
   sampleCellOutput: Grid not initialized.
---- !u!114 &382753109
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 382753101}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 2019979015eb4f069151bac084de2ab2, type: 3}
-  m_Name: GeodesicOceanResourceField
-  m_EditorClassIdentifier: SimulaVit::GeodesicOceanResourceField
-  initialCO2Concentration: 1
-  initialO2Concentration: 0.21
-  initialCH4Concentration: 0
-  initialFe2Concentration: 0
-  initialized: 0
-  cellCount: 0
-  nodeCapacity: 0
-  activeNodeCount: 0
-  activeOceanVolume: 0
-  approximateRuntimeMemoryBytes: 0
-  initializationCount: 0
-  clearCount: 0
-  invalidQueryCount: 0
-  rejectedNonfiniteWriteCount: 0
-  rejectedNegativeWriteCount: 0
-  resourceDiagnostics: []
 --- !u!114 &382753108
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1317,8 +1300,14 @@ MonoBehaviour:
   sourceGridSummary: None
   lastCompletedOceanTemperatureTick: 0
   lastVerticalExchangeSimulationDelta: 0
-  lastVerticalSubstepCount: 0
+  solverMode: ImplicitBackwardEuler
+  columnsSolvedLastTick: 0
+  layersSolvedLastTick: 0
   lastVerticalExchangeDurationMilliseconds: 0
+  lastSurfaceBatchDurationMilliseconds: 0
+  lastSubsurfaceCommitDurationMilliseconds: 0
+  maximumEquationResidual: 0
+  failedColumnCount: 0
   latestVerticalConservationRelativeError: 0
   lastExactConservationAuditSimulationTime: 0
   ticksSinceLastExactConservationAudit: 0
@@ -1333,6 +1322,14 @@ MonoBehaviour:
   verticalLinksProcessedLastRenderedFrame: 0
   oceanTemperatureMillisecondsLastRenderedFrame: 0
   duplicateOrStaleCallbackCount: 0
+  activeThermalModelDiagnostic: Not initialized
+  subsurfaceNodesUpdatedLastTick: 0
+  verticalInterfacesProcessedLastTick: 0
+  implicitColumnsSolvedLastTick: 0
+  approximateNodesRelaxedLastTick: 0
+  thermalSubstepsLastTick: 0
+  lastApproximateOceanUpdateDurationMilliseconds: 0
+  lastConservativeOceanCallbackDurationMilliseconds: 0
   layerActiveCellCount: 0000000000000000000000000000000000000000
   layerMinimumTemperatureKelvin:
   - 0
@@ -1352,6 +1349,96 @@ MonoBehaviour:
   - 0
   - 0
   - 0
+--- !u!114 &382753109
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 382753101}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2019979015eb4f069151bac084de2ab2, type: 3}
+  m_Name: GeodesicOceanResourceField
+  m_EditorClassIdentifier: SimulaVit::GeodesicOceanResourceField
+  initialCO2Concentration: 1
+  initialO2Concentration: 0.21
+  initialCH4Concentration: 0
+  initialFe2Concentration: 0
+  transportIntervalSeconds: 5
+  horizontalMixingRate: 0.02
+  defaultVerticalMixingRate: 0.005
+  horizontalResourceMultipliers:
+  - 1
+  - 1
+  - 1
+  - 1
+  - 1
+  - 1
+  - 1
+  verticalResourceMultipliers:
+  - 1
+  - 0.1
+  - 1
+  - 1
+  - 1
+  - 1
+  - 1
+  maximumTransportTicksPerFrame: 64
+  ventColumnFraction: 0.02
+  ventH2PerTick: 0.006
+  ventH2SPerTick: 0.01
+  ventCO2PerTick: 0
+  ventFe2PerTick: 0.002
+  initialized: 0
+  cellCount: 0
+  nodeCapacity: 0
+  activeNodeCount: 0
+  activeOceanVolume: 0
+  approximateRuntimeMemoryBytes: 0
+  initializationCount: 0
+  clearCount: 0
+  invalidQueryCount: 0
+  rejectedNonfiniteWriteCount: 0
+  rejectedNegativeWriteCount: 0
+  resourceDiagnostics: []
+  lastInitializationFailure: 0
+  lastInitializationFailureMessage: 
+  lastStartupConcentrationDiagnostic: 
+  lastSentinelVerificationDiagnostic: 
+  horizontalLinkCount: 0
+  verticalLinkCount: 0
+  ventCount: 0
+  transportIntegrationCursorTime: 0
+  unconsumedTransportRemainderSeconds: 0
+  completedTransportTicks: 0
+  transportCacheMemoryBytes: 0
+  stagingBufferMemoryBytes: 0
+  cachedMeanO2ByLayer:
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+--- !u!114 &382753110
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 382753101}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 92de4c5e03f147e3ab7ff12762f21d8c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: SimulaVit::GeodesicOceanFe2Visual
+  minimumVisualizedFe2: 0.00001
+  maximumVisualizedFe2: 0.01
+  lowFe2Tint: {r: 0.2, g: 0.36, b: 0.44, a: 1}
+  highFe2Tint: {r: 0.12156861, g: 0.5803922, b: 0.16663016, a: 1}
+  intensityMultiplier: 0.42
+  refreshIntervalSeconds: 0.5
+  deeperLayerWeightMultiplier: 0.55
 --- !u!1 &581314702
 GameObject:
   m_ObjectHideFlags: 0
