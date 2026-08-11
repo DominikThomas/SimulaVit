@@ -53,7 +53,8 @@ public class GeodesicCellPicker : MonoBehaviour
     [SerializeField] private bool rememberPopupPosition = true;
     [Tooltip("Unscaled-time interval between dynamic simulation-value refreshes while the popup is visible.")]
     [Min(0.05f)]
-    [SerializeField] private float popupDynamicRefreshInterval = 0.25f;
+    [Range(0.25f, 1f)]
+    [SerializeField] private float popupDynamicRefreshInterval = 0.5f;
 
     [Header("Selected Cell (Runtime Debug)")]
     public int selectedCellIndex = -1;
@@ -94,6 +95,8 @@ public class GeodesicCellPicker : MonoBehaviour
     private GUIStyle popupButtonStyle;
     private float cachedUiScale = -1f;
     private readonly StringBuilder neighborBuilder = new StringBuilder(96);
+    private readonly StringBuilder compactDynamicBuilder = new StringBuilder(1024);
+    private readonly StringBuilder detailedDynamicBuilder = new StringBuilder(1536);
 
     private void Awake()
     {
@@ -512,9 +515,6 @@ public class GeodesicCellPicker : MonoBehaviour
             .Append("\nlocalOceanDepth=").Append(localDepth.ToString("F6"))
             .Append("\nnormalizedDepth=").Append(normalizedDepth.ToString("F3"));
         compactPopup.Append("Active layers: ").Append(activeCount);
-        bool resourceFieldAvailable = TryGetResourceFieldStatus(cellIndex, out string resourceStatus);
-        if (!resourceFieldAvailable) { compactPopup.Append("\n").Append(resourceStatus); popup.Append("\n").Append(resourceStatus); }
-
         for (int layer = 0; layer < activeCount; layer++)
         {
             int node = grid.GetNodeIndex(cellIndex, layer);
@@ -531,22 +531,6 @@ public class GeodesicCellPicker : MonoBehaviour
                 .Append(", volume=").Append(grid.LayerVolume[node].ToString("G6"))
                 .Append(", centerDepth=").Append(centerDepth.ToString("F6"))
                 .Append(", H/V degree=").Append(horizontalDegree).Append('/').Append(verticalDegree);
-            if (resourceFieldAvailable)
-            {
-                popup.Append(", CO2=").Append(GetResourceText(cellIndex, layer, GeodesicOceanResource.CO2))
-                    .Append(", O2=").Append(GetResourceText(cellIndex, layer, GeodesicOceanResource.O2))
-                    .Append(", CH4=").Append(GetResourceText(cellIndex, layer, GeodesicOceanResource.CH4))
-                    .Append(", H2=").Append(GetResourceText(cellIndex, layer, GeodesicOceanResource.H2))
-                    .Append(", H2S=").Append(GetResourceText(cellIndex, layer, GeodesicOceanResource.H2S))
-                    .Append(", Fe2=").Append(GetResourceText(cellIndex, layer, GeodesicOceanResource.Fe2))
-                    .Append(", OrganicC=").Append(GetResourceText(cellIndex, layer, GeodesicOceanResource.OrganicC));
-                compactPopup.Append("\nL").Append(layer)
-                    .Append(": O2 ").Append(GetResourceText(cellIndex, layer, GeodesicOceanResource.O2))
-                    .Append(" | CO2 ").Append(GetResourceText(cellIndex, layer, GeodesicOceanResource.CO2))
-                    .Append(" | H2 ").Append(GetResourceText(cellIndex, layer, GeodesicOceanResource.H2))
-                    .Append(" | H2S ").Append(GetResourceText(cellIndex, layer, GeodesicOceanResource.H2S))
-                    .Append(" | Fe2 ").Append(GetResourceText(cellIndex, layer, GeodesicOceanResource.Fe2));
-            }
         }
 
         selectedLayeredOceanLog = log.ToString();
@@ -640,8 +624,8 @@ public class GeodesicCellPicker : MonoBehaviour
         TemperatureDisplayUnit displayUnit = temperatureDisplayAuthority != null ? temperatureDisplayAuthority.CurrentTemperatureDisplayUnit : TemperatureDisplayUnit.Kelvin;
         string temperatureText = ReplicatorManager.FormatTemperature(kelvin, displayUnit);
         string illumination = insolation > 0f ? "Day" : "Night";
-        string compactLayers = BuildDynamicLayerTemperatureText(false);
-        string detailedLayers = BuildDynamicLayerTemperatureText(true);
+        string compactLayers = BuildDynamicLayerEnvironmentText(false);
+        string detailedLayers = BuildDynamicLayerEnvironmentText(true);
         string compactDynamic = $"\nSurface temperature: {temperatureText}\nIllumination / insolation: {illumination} / {insolation:F4}";
         string detailedDynamic = $"\n\nSurface Temperature\nTemperature: {temperatureText}\nInsolation cosine: {insolation:F4}\nIllumination: {illumination}\nTarget equilibrium: {ReplicatorManager.FormatTemperature(temperatureField.GetCellTargetTemperatureKelvin(selectedCellIndex), displayUnit)}\nResponse multiplier: {temperatureField.GetCellEffectiveThermalResponseMultiplier(selectedCellIndex):F3}\nThermal category: {temperatureField.GetCellThermalCategory(selectedCellIndex)}\nNeighbor min/mean/max: {ReplicatorManager.FormatTemperature(neighborMin, displayUnit)} / {ReplicatorManager.FormatTemperature(neighborMean, displayUnit)} / {ReplicatorManager.FormatTemperature(neighborMax, displayUnit)}";
         selectedCompactPopup = selectedCompactStaticHeader + compactDynamic + selectedCompactStaticOcean + compactLayers;
@@ -649,21 +633,37 @@ public class GeodesicCellPicker : MonoBehaviour
         }
     }
 
-    private string BuildDynamicLayerTemperatureText(bool detailed)
+    private string BuildDynamicLayerEnvironmentText(bool detailed)
     {
         GeodesicOceanLayerGrid grid = oceanLayerDomain != null ? oceanLayerDomain.Grid : null;
-        if (grid == null || oceanTemperatureField == null || !oceanTemperatureField.IsInitialized || selectedCellIndex < 0 || selectedCellIndex >= grid.CellCount || grid.ActiveLayerCountByCell[selectedCellIndex] == 0) return string.Empty;
-        var text = new StringBuilder(detailed ? 384 : 256);
-        text.Append(detailed ? "\n\nOcean Layer Temperatures" : "\n\nLayer temperatures");
+        if (grid == null || selectedCellIndex < 0 || selectedCellIndex >= grid.CellCount || grid.ActiveLayerCountByCell[selectedCellIndex] == 0) return string.Empty;
+        StringBuilder text = detailed ? detailedDynamicBuilder : compactDynamicBuilder;
+        text.Clear();
+        text.Append(detailed ? "\n\nOcean Environment (authoritative)" : "\n\nOcean environment");
         int count = grid.ActiveLayerCountByCell[selectedCellIndex];
-        for (int layer = 0; layer < count; layer++)
+        bool temperaturesAvailable = oceanTemperatureField != null && oceanTemperatureField.IsInitialized;
+        bool resourcesAvailable = TryGetResourceFieldStatus(selectedCellIndex, out string resourceStatus);
+        if (!resourcesAvailable) text.Append("\n").Append(resourceStatus);
+        for (int layer = 0; layer < grid.MaximumLayerCount; layer++)
         {
+            if (layer >= count)
+            {
+                text.Append("\nL").Append(layer).Append(": inactive");
+                continue;
+            }
             int node = grid.GetNodeIndex(selectedCellIndex, layer);
-            float kelvin = oceanTemperatureField.GetLayerTemperatureKelvin(selectedCellIndex, layer);
             float depth = grid.OceanSurfaceRadius - grid.LayerCenterRadius[node];
             TemperatureDisplayUnit displayUnit = temperatureDisplayAuthority != null ? temperatureDisplayAuthority.CurrentTemperatureDisplayUnit : TemperatureDisplayUnit.Kelvin;
-            if (detailed) text.Append("\nL").Append(layer).Append(": ").Append(ReplicatorManager.FormatTemperature(kelvin, displayUnit)).Append(" | capacity ").Append(oceanTemperatureField.GetLayerHeatCapacity(selectedCellIndex, layer).ToString("G6")).Append(" | authority ").Append(layer == 0 ? "SurfaceField" : "SubsurfaceField");
-            else text.Append("\nL").Append(layer).Append(": ").Append(ReplicatorManager.FormatTemperature(kelvin, displayUnit)).Append(" | depth ").Append(depth.ToString("F3")).Append(" | thickness ").Append(grid.LayerThickness[node].ToString("F3"));
+            text.Append("\nL").Append(layer).Append(": temperature ");
+            text.Append(temperaturesAvailable ? ReplicatorManager.FormatTemperature(oceanTemperatureField.GetLayerTemperatureKelvin(selectedCellIndex, layer), displayUnit) : "--");
+            text.Append(" | CO2 ").Append(resourcesAvailable ? GetResourceText(selectedCellIndex, layer, GeodesicOceanResource.CO2) : "--")
+                .Append(" | O2 ").Append(resourcesAvailable ? GetResourceText(selectedCellIndex, layer, GeodesicOceanResource.O2) : "--")
+                .Append(" | CH4 ").Append(resourcesAvailable ? GetResourceText(selectedCellIndex, layer, GeodesicOceanResource.CH4) : "--")
+                .Append(" | H2 ").Append(resourcesAvailable ? GetResourceText(selectedCellIndex, layer, GeodesicOceanResource.H2) : "--")
+                .Append(" | H2S ").Append(resourcesAvailable ? GetResourceText(selectedCellIndex, layer, GeodesicOceanResource.H2S) : "--")
+                .Append(" | Fe2 ").Append(resourcesAvailable ? GetResourceText(selectedCellIndex, layer, GeodesicOceanResource.Fe2) : "--")
+                .Append(" | OrganicC ").Append(resourcesAvailable ? GetResourceText(selectedCellIndex, layer, GeodesicOceanResource.OrganicC) : "--");
+            if (detailed) text.Append(" | depth ").Append(depth.ToString("F3")).Append(" | authority ").Append(layer == 0 ? "SurfaceField" : "SubsurfaceField");
         }
         return text.ToString();
     }

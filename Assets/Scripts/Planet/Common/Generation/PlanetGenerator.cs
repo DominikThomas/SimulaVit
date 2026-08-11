@@ -607,6 +607,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         }
 
         GetComponent<PlanetTemperatureIceVisuals>()?.ClearForGeodesicMode();
+        GetComponent<GeodesicVentVisualizer>()?.ClearMarkers();
 
         GetComponent<GeodesicOceanResourceField>()?.ClearField();
         GetComponent<GeodesicOceanTemperatureField>()?.ClearField();
@@ -815,6 +816,9 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
             }
         }
         LogStage("ocean-resource initialization", stage);
+
+        var ventVisualizer = GetOrAddComponent<GeodesicVentVisualizer>(gameObject);
+        ventVisualizer.Initialize(GeodesicTopology, oceanResourceField);
 
         stage = System.Diagnostics.Stopwatch.StartNew();
         IcosphereRenderGeometry renderGeometry = IcosphereRenderGeometryCache.GetOrBuild(renderSubdivision);
