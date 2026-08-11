@@ -610,6 +610,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
         GetComponent<PlanetTemperatureIceVisuals>()?.ClearForGeodesicMode();
         GetComponent<GeodesicVentVisualizer>()?.ClearMarkers();
+        GetComponent<GeodesicOceanFe2Visual>()?.ClearVisual();
 
         GetComponent<GeodesicOceanResourceField>()?.ClearField();
         GetComponent<GeodesicOceanTemperatureField>()?.ClearField();
@@ -870,6 +871,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
         stage = System.Diagnostics.Stopwatch.StartNew();
         BuildGeodesicOceanVisual();
+        GetOrAddComponent<GeodesicOceanFe2Visual>(gameObject).Initialize(
+            this, oceanResourceField, geodesicOceanMesh, geodesicOceanMeshRenderer, oceanMapping);
         LogStage("ocean mesh generation", stage);
         var picker = GetOrAddComponent<GeodesicCellPicker>(gameObject);
         picker.SetTemperatureDisplayAuthority(replicatorManager);

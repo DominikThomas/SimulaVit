@@ -17,6 +17,9 @@ Shader "SimulaVit/GeodesicOceanURP"
         _FeOxTint ("Suspended FeOx Tint", Color) = (0.72, 0.36, 0.12, 1)
         _SulfurTint ("Suspended Sulfur Tint", Color) = (0.95, 0.82, 0.20, 1)
         _Turbidity ("Turbidity", Range(0, 1)) = 0
+        _Fe2VisualLowTint ("Fe2 Visual Low Tint", Color) = (0.20, 0.36, 0.44, 1)
+        _Fe2VisualHighTint ("Fe2 Visual High Tint", Color) = (0.58, 0.30, 0.12, 1)
+        _Fe2VisualIntensity ("Fe2 Visual Intensity", Range(0, 1)) = 0
     }
     SubShader
     {
@@ -54,6 +57,9 @@ Shader "SimulaVit/GeodesicOceanURP"
                 half4 _FeOxTint;
                 half4 _SulfurTint;
                 half _Turbidity;
+                half4 _Fe2VisualLowTint;
+                half4 _Fe2VisualHighTint;
+                half _Fe2VisualIntensity;
             CBUFFER_END
 
             struct Attributes
@@ -70,6 +76,7 @@ Shader "SimulaVit/GeodesicOceanURP"
                 half3 viewDirWS : TEXCOORD1;
                 half depth01 : TEXCOORD2;
                 float3 positionWS : TEXCOORD3;
+                half fe2Visual01 : TEXCOORD4;
             };
 
             Varyings vert(Attributes input)
@@ -80,6 +87,7 @@ Shader "SimulaVit/GeodesicOceanURP"
                 output.normalWS = TransformObjectToWorldNormal(input.normalOS);
                 output.viewDirWS = GetWorldSpaceViewDir(pos.positionWS);
                 output.depth01 = saturate(input.color.r);
+                output.fe2Visual01 = saturate(input.color.g);
                 output.positionWS = pos.positionWS;
                 return output;
             }
@@ -93,6 +101,8 @@ Shader "SimulaVit/GeodesicOceanURP"
                 half3 depthColor = lerp(_ShallowColor.rgb, _DeepColor.rgb, depth01);
                 half3 color = lerp(depthColor, _BaseColor.rgb, saturate(0.25 + fresnel * 0.35));
                 color = lerp(color, _DeepColor.rgb, saturate(_Turbidity * 0.35));
+                half3 fe2Tint = lerp(_Fe2VisualLowTint.rgb, _Fe2VisualHighTint.rgb, input.fe2Visual01);
+                color = lerp(color, fe2Tint, saturate(input.fe2Visual01 * _Fe2VisualIntensity));
                 color *= _AmbientResponse * _ColorIntensity;
                 Light mainLight = GetMainLight(TransformWorldToShadowCoord(input.positionWS));
                 half diffuse = saturate(dot(normalWS, mainLight.direction));
