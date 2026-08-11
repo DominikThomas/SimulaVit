@@ -1852,3 +1852,74 @@ Selected-cell diagnostics separate immutable topology, terrain, bathymetry, and 
 The environment HUD now has explicit mode ownership. Geodesic mode reports authoritative surface-temperature summaries and cached volume-weighted means for CO2, O2, CH4, H2, H2S, Fe2, and OrganicC under an ocean-dissolved-resource heading; it does not read `PlanetResourceMap`. Legacy mode retains its existing atmosphere/resource presentation.
 
 `GeodesicVentVisualizer` renders static, toggleable seafloor markers from allocation-free indexed read-only access to the logical vent records already owned and consumed by `GeodesicOceanResourceField`. Each marker uses the exact vent cell, while its visual anchor and normal come from the corresponding vertex of the completed visible terrain mesh rather than the logical bottom-layer centre. A small uniform normal offset prevents z-fighting, and a shared emissive disc mesh lies tangent to the rendered seafloor. Visualization performs no vent selection or RNG, so no second vent dataset exists. The single manager owns shared runtime geometry/material and clears its marker root during Geodesic cleanup and mode transitions.
+
+### Visible Geodesic Seafloor Geometry Contract
+
+Geodesic simulation coordinates and visible terrain coordinates are deliberately
+separate concepts.
+
+Simulation systems own logical state using:
+
+- Geodesic simulation-cell index;
+- ocean-layer index;
+- authoritative layer/node resources.
+
+Visual systems attached to the seabed must use the completed visible terrain
+mesh rather than analytical layer-centre or seafloor radii.
+
+PlanetGenerator currently establishes this mapping after final render-terrain
+displacement and normal recalculation:
+
+1. The final Geodesic terrain mesh is displaced using the authoritative
+   bathymetry/terrain mapping.
+2. Mesh normals are recalculated from the completed visible geometry.
+3. `CacheVisibleGeodesicSeafloorAnchors(...)` maps simulation cells onto the
+   best corresponding final render vertices.
+4. For each simulation cell it caches:
+   - final local visible seafloor position;
+   - final visible terrain normal.
+5. `TryGetVisibleGeodesicSeafloorWorldAnchor(...)` converts these into world
+   position and correctly transformed world normal.
+
+This fixed the earlier Geodesic vent-marker artifact where logical bottom-layer
+centres could place markers above or below the terrain actually rendered to the
+player.
+
+#### Reuse requirement
+
+The visible-seafloor mapping is a reusable geometry boundary and should be
+preferred for future seabed-attached visuals.
+
+Expected consumers include:
+
+- Geodesic hydrothermal vent markers;
+- sessile/bottom-layer replicators; - Bottom habitat rendering: bottom-layer/sessile replicators must use the shared visible-seafloor geometry contract for render position/orientation rather than the analytical bottom-layer shell.
+- bottom-crawling replicator visual placement;
+- S0 seabed deposits;
+- Fe3+/iron-oxide seabed deposits;
+- OrganicC or other future sediment overlays;
+- other discrete seafloor structures.
+
+Simulation ownership remains cell/layer based. Visual placement must not become
+a second simulation state.
+
+For discrete objects:
+
+    simulation cell/layer
+        -> visible seafloor anchor
+        -> small normal offset
+        -> orientation from visible terrain normal
+
+For continuous seabed fields such as S0/Fe3+ tint:
+
+    authoritative bottom-cell state
+        -> simulation-to-render mapping
+        -> completed visible terrain mesh
+        -> vertex/shader/overlay representation
+	or better yet: Seafloor precipitates: S0/Fe3 and other sediment/deposit visuals should consume authoritative bottom-layer state through the shared simulation→visible-seafloor mapping.
+
+Do not independently re-evaluate terrain or bathymetry inside each consumer.
+
+The analytical bottom-layer centre remains appropriate for simulation,
+transport and habitat ownership, but it is not authoritative for final visible
+placement.
