@@ -86,6 +86,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     private double geodesicSurfaceRadiusQueryMilliseconds;
     private Dictionary<GeodesicDebugDirectionKey, float> geodesicDebugSurfaceRadiusCache;
     private GeodesicRenderTerrainData geodesicCurrentRenderTerrainData;
+    private Vector3[] geodesicVisibleSeafloorPositionByCell;
+    private Vector3[] geodesicVisibleSeafloorNormalByCell;
     private float maximumGeneratedOpaqueSurfaceRadius;
     private double geodesicLastShorelineDistanceMilliseconds;
     private double geodesicLastCoreGenerationMilliseconds;
@@ -629,6 +631,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         geodesicCoastlineMask = null;
         geodesicDebugSurfaceRadiusCache = null;
         geodesicCurrentRenderTerrainData = default;
+        geodesicVisibleSeafloorPositionByCell = null;
+        geodesicVisibleSeafloorNormalByCell = null;
         maximumGeneratedOpaqueSurfaceRadius = BasePlanetRadius;
 
         if (geodesicOceanMeshRenderer != null)
@@ -817,9 +821,6 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         }
         LogStage("ocean-resource initialization", stage);
 
-        var ventVisualizer = GetOrAddComponent<GeodesicVentVisualizer>(gameObject);
-        ventVisualizer.Initialize(GeodesicTopology, oceanResourceField);
-
         stage = System.Diagnostics.Stopwatch.StartNew();
         IcosphereRenderGeometry renderGeometry = IcosphereRenderGeometryCache.GetOrBuild(renderSubdivision);
         IcosphereDirectionMapping renderMapping = GetOrBuildDirectionMapping(renderGeometry);
@@ -835,6 +836,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         LogStage("vertex-colour generation", stage);
         stage = System.Diagnostics.Stopwatch.StartNew();
         mesh.RecalculateNormals();
+        CacheVisibleGeodesicSeafloorAnchors(mesh, renderGeometry, renderMapping);
         LogStage("normal recalculation", stage);
         stage = System.Diagnostics.Stopwatch.StartNew();
         mesh.RecalculateBounds();
@@ -844,6 +846,9 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         meshFilter.sharedMesh = mesh;
         if (meshRenderer != null) meshRenderer.enabled = true;
         LogStage("terrain mesh assignment/upload", stage);
+
+        var ventVisualizer = GetOrAddComponent<GeodesicVentVisualizer>(gameObject);
+        ventVisualizer.Initialize(oceanResourceField, this);
 
         stage = System.Diagnostics.Stopwatch.StartNew();
         IcosphereRenderGeometry colliderGeometry = IcosphereRenderGeometryCache.GetOrBuild(colliderSubdivision);
@@ -1324,6 +1329,44 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         if (recalculateNormals) targetMesh.RecalculateNormals();
         if (recalculateBounds) targetMesh.RecalculateBounds();
         return data;
+    }
+
+    private void CacheVisibleGeodesicSeafloorAnchors(Mesh renderMesh, IcosphereRenderGeometry geometry, IcosphereDirectionMapping mapping)
+    {
+        if (renderMesh == null || GeodesicTopology == null || mapping == null || geometry.UnitVertices == null) return;
+        Vector3[] vertices = renderMesh.vertices;
+        Vector3[] normals = renderMesh.normals;
+        int cellCount = GeodesicTopology.CellCount;
+        geodesicVisibleSeafloorPositionByCell = new Vector3[cellCount];
+        geodesicVisibleSeafloorNormalByCell = new Vector3[cellCount];
+        float[] bestDot = new float[cellCount];
+        for (int cell = 0; cell < cellCount; cell++) bestDot[cell] = -2f;
+
+        int sampleCount = Mathf.Min(mapping.SampleCount, Mathf.Min(vertices.Length, geometry.VertexCount));
+        for (int sampleIndex = 0; sampleIndex < sampleCount; sampleIndex++)
+        {
+            int cell = mapping.Samples[sampleIndex].NearestCell;
+            if (cell < 0 || cell >= cellCount) continue;
+            float dot = Vector3.Dot(geometry.UnitVertices[sampleIndex], GeodesicTopology.CellDirections[cell]);
+            if (dot <= bestDot[cell]) continue;
+            bestDot[cell] = dot;
+            geodesicVisibleSeafloorPositionByCell[cell] = vertices[sampleIndex];
+            geodesicVisibleSeafloorNormalByCell[cell] = sampleIndex < normals.Length ? normals[sampleIndex].normalized : geometry.UnitVertices[sampleIndex];
+        }
+    }
+
+    public bool TryGetVisibleGeodesicSeafloorWorldAnchor(int cellIndex, out Vector3 worldPosition, out Vector3 worldNormal)
+    {
+        worldPosition = default;
+        worldNormal = Vector3.up;
+        if (CurrentGridType != PlanetGridType.GeodesicIcosphere || geodesicVisibleSeafloorPositionByCell == null ||
+            geodesicVisibleSeafloorNormalByCell == null || cellIndex < 0 || cellIndex >= geodesicVisibleSeafloorPositionByCell.Length) return false;
+        Vector3 localPosition = geodesicVisibleSeafloorPositionByCell[cellIndex];
+        Vector3 localNormal = geodesicVisibleSeafloorNormalByCell[cellIndex];
+        if (localPosition.sqrMagnitude <= 1e-10f || localNormal.sqrMagnitude <= 1e-10f) return false;
+        worldPosition = transform.TransformPoint(localPosition);
+        worldNormal = transform.localToWorldMatrix.inverse.transpose.MultiplyVector(localNormal).normalized;
+        return true;
     }
 
     float SampleGeodesicSurfaceRadiusMapped(Vector3 direction, int sampleIndex, IcosphereDirectionMapping mapping)
