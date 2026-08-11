@@ -1,6 +1,6 @@
 using UnityEngine;
 
-/// <summary>Static debug markers for the authoritative vents owned by GeodesicOceanResourceField.</summary>
+/// <summary>One static marker per authoritative vent system owned by GeodesicOceanResourceField.</summary>
 [DisallowMultipleComponent]
 public sealed class GeodesicVentVisualizer : MonoBehaviour
 {
@@ -46,16 +46,19 @@ public sealed class GeodesicVentVisualizer : MonoBehaviour
         int vents = resourceField.VentCount;
         for (int i = 0; i < vents; i++)
         {
-            if (!resourceField.TryGetVent(i, out int cell, out _, out _) ||
+            if (!resourceField.TryGetVentSystem(i, out GeodesicVentSystem system) ||
+                !resourceField.TryGetVent(i, out int cell, out _, out _) ||
                 !generator.TryGetVisibleGeodesicSeafloorWorldAnchor(cell, out Vector3 seafloorPosition, out Vector3 seafloorNormal)) continue;
-            GameObject marker = new GameObject($"Vent {i}");
+            GameObject marker = new GameObject($"{system.Habitat} Vent System {i}");
             marker.layer = gameObject.layer;
             marker.transform.SetParent(markerRoot.transform, true);
             marker.transform.position = seafloorPosition + seafloorNormal * seafloorOffset;
             Vector3 tangent = Vector3.Cross(seafloorNormal, Vector3.up);
             if (tangent.sqrMagnitude < 1e-8f) tangent = Vector3.Cross(seafloorNormal, Vector3.right);
             marker.transform.rotation = Quaternion.LookRotation(seafloorNormal, Vector3.Cross(tangent.normalized, seafloorNormal));
-            marker.transform.localScale = Vector3.one * markerScale;
+            // Area-like system weight maps to diameter sublinearly; it never affects production.
+            float weightScale = 0.65f + 2.25f * Mathf.Sqrt(Mathf.Max(0f, system.NormalizedHabitatWeight));
+            marker.transform.localScale = Vector3.one * markerScale * weightScale;
             marker.AddComponent<MeshFilter>().sharedMesh = sharedMarkerMesh;
             marker.AddComponent<MeshRenderer>().sharedMaterial = sharedMarkerMaterial;
             markerCount++;
