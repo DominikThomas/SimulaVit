@@ -612,6 +612,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         GetComponent<GeodesicVentVisualizer>()?.ClearMarkers();
         GetComponent<GeodesicExperiencedTemperatureField>()?.Clear();
         GetComponent<GeodesicOceanFe2Visual>()?.ClearVisual();
+        GetComponent<GeodesicOceanSedimentVisual>()?.ClearVisual();
 
         GetComponent<GeodesicOceanResourceField>()?.ClearField();
         GetComponent<GeodesicOceanSedimentField>()?.Clear();
@@ -877,6 +878,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         IcosphereDirectionMapping oceanMapping = BuildGeodesicOceanVisual();
         GetOrAddComponent<GeodesicOceanFe2Visual>(gameObject).Initialize(
             this, oceanResourceField, geodesicOceanMesh, geodesicOceanMeshRenderer, oceanMapping);
+        GetOrAddComponent<GeodesicOceanSedimentVisual>(gameObject).Initialize(
+            this, GetComponent<GeodesicOceanSedimentField>(), mesh, renderMapping, geodesicOceanMask);
         LogStage("ocean mesh generation", stage);
         var picker = GetOrAddComponent<GeodesicCellPicker>(gameObject);
         picker.SetTemperatureDisplayAuthority(replicatorManager);

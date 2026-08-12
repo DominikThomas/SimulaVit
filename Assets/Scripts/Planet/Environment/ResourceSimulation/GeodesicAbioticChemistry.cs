@@ -9,6 +9,7 @@ public struct GeodesicAbioticReactionResult
     public double reactedH2S;
     public double reactedFe2;
     public double consumedO2;
+    public double precipitatedFeS;
 }
 
 /// <summary>Local, inventory-conservative oxidation for authoritative Geodesic ocean nodes.</summary>
@@ -21,6 +22,11 @@ public sealed class GeodesicAbioticChemistry : MonoBehaviour
     [SerializeField, Min(0f)] private float h2OxidationHalfLifeSeconds = 60f;
     [SerializeField, Min(0f)] private float h2sOxidationHalfLifeSeconds = 120f;
     [SerializeField, Min(0f)] private float fe2OxidationHalfLifeSeconds = 180f;
+    [SerializeField, Min(0f), Tooltip("Fe2 + H2S -> FeS(s) half-life. Non-positive disables the reaction.")]
+    private float feSPrecipitationHalfLifeSeconds = 90f;
+
+    [Header("Visual-only rusty water memory")]
+    [SerializeField, Min(0.01f)] private float rustyWaterMemoryHalfLifeSeconds = 30f;
 
     [Header("Cumulative inventories (read only)")]
     [SerializeField] private double reactedH2;
@@ -29,19 +35,24 @@ public sealed class GeodesicAbioticChemistry : MonoBehaviour
     [SerializeField] private double consumedO2;
     [SerializeField] private double depositedS0;
     [SerializeField] private double depositedFe3;
+    [SerializeField] private double depositedFeS;
+    private float[] recentOxidizedIronByCell;
 
     public float H2OxidationHalfLifeSeconds => h2OxidationHalfLifeSeconds;
     public float H2SOxidationHalfLifeSeconds => h2sOxidationHalfLifeSeconds;
     public float Fe2OxidationHalfLifeSeconds => fe2OxidationHalfLifeSeconds;
+    public float FeSPrecipitationHalfLifeSeconds => feSPrecipitationHalfLifeSeconds;
     public double ReactedH2Inventory => reactedH2;
     public double ReactedH2SInventory => reactedH2S;
     public double ReactedFe2Inventory => reactedFe2;
     public double ConsumedO2Inventory => consumedO2;
     public double DepositedS0Inventory => depositedS0;
     public double DepositedFe3Inventory => depositedFe3;
+    public double DepositedFeSInventory => depositedFeS;
+    public float GetRecentOxidizedIronSignal(int cell) => recentOxidizedIronByCell != null && cell >= 0 && cell < recentOxidizedIronByCell.Length ? recentOxidizedIronByCell[cell] : 0f;
 
     public void ResetCounters()
-    { reactedH2 = reactedH2S = reactedFe2 = consumedO2 = depositedS0 = depositedFe3 = 0d; }
+    { reactedH2 = reactedH2S = reactedFe2 = consumedO2 = depositedS0 = depositedFe3 = depositedFeS = 0d; recentOxidizedIronByCell = null; }
 
     internal void Step(GeodesicOceanResourceField resources, GeodesicOceanSedimentField sediments, float simulatedDeltaTime)
     {
@@ -49,7 +60,10 @@ public sealed class GeodesicAbioticChemistry : MonoBehaviour
         double h2Fraction = ReactionFraction(simulatedDeltaTime, h2OxidationHalfLifeSeconds);
         double h2sFraction = ReactionFraction(simulatedDeltaTime, h2sOxidationHalfLifeSeconds);
         double fe2Fraction = ReactionFraction(simulatedDeltaTime, fe2OxidationHalfLifeSeconds);
-        if (h2Fraction <= 0d && h2sFraction <= 0d && fe2Fraction <= 0d) return;
+        double feSFraction = ReactionFraction(simulatedDeltaTime, feSPrecipitationHalfLifeSeconds);
+        if (recentOxidizedIronByCell == null || recentOxidizedIronByCell.Length != resources.CellCount) recentOxidizedIronByCell = new float[resources.CellCount];
+        float memoryRetention = (float)(1d - ReactionFraction(simulatedDeltaTime, rustyWaterMemoryHalfLifeSeconds));
+        if (h2Fraction <= 0d && h2sFraction <= 0d && fe2Fraction <= 0d && feSFraction <= 0d) return;
 
         using (ChemistryMarker.Auto())
         {
@@ -63,18 +77,32 @@ public sealed class GeodesicAbioticChemistry : MonoBehaviour
                 double h2 = resources.GetInventoryForChemistry(node, GeodesicOceanResource.H2, volume);
                 double h2s = resources.GetInventoryForChemistry(node, GeodesicOceanResource.H2S, volume);
                 double fe2 = resources.GetInventoryForChemistry(node, GeodesicOceanResource.Fe2, volume);
+                int cell = node / resources.SourceGrid.MaximumLayerCount;
+                if (node % resources.SourceGrid.MaximumLayerCount == 0) recentOxidizedIronByCell[cell] *= memoryRetention;
                 GeodesicAbioticReactionResult result = ReactNode(ref o2, ref h2, ref h2s, ref fe2, h2Fraction, h2sFraction, fe2Fraction);
-                if (result.consumedO2 <= 0d) continue;
+                // Deliberate operator split: oxidation consumes first; FeS then uses only remaining Fe2/H2S.
+                result.precipitatedFeS = PrecipitateFeS(ref fe2, ref h2s, feSFraction);
+                if (result.consumedO2 <= 0d && result.precipitatedFeS <= 0d) continue;
                 resources.SetInventoryForChemistry(node, GeodesicOceanResource.O2, o2, volume);
                 resources.SetInventoryForChemistry(node, GeodesicOceanResource.H2, h2, volume);
                 resources.SetInventoryForChemistry(node, GeodesicOceanResource.H2S, h2s, volume);
                 resources.SetInventoryForChemistry(node, GeodesicOceanResource.Fe2, fe2, volume);
-                int cell = node / resources.SourceGrid.MaximumLayerCount;
-                sediments.DepositSameColumn(cell, result.reactedH2S, result.reactedFe2);
+                sediments.DepositSameColumn(cell, result.reactedH2S, result.reactedFe2, result.precipitatedFeS);
+                recentOxidizedIronByCell[cell] += (float)(result.reactedFe2 / Math.Max(1e-12d, volume));
                 reactedH2 += result.reactedH2; reactedH2S += result.reactedH2S; reactedFe2 += result.reactedFe2;
                 consumedO2 += result.consumedO2; depositedS0 += result.reactedH2S; depositedFe3 += result.reactedFe2;
+                depositedFeS += result.precipitatedFeS;
             }
         }
+    }
+
+    public static double PrecipitateFeS(ref double fe2, ref double h2s, double reactionFraction)
+    {
+        fe2 = SafeInventory(fe2); h2s = SafeInventory(h2s);
+        double extent = Math.Min(fe2, h2s) * Clamp01(reactionFraction);
+        if (!(extent > 0d)) return 0d;
+        fe2 = Math.Max(0d, fe2 - extent); h2s = Math.Max(0d, h2s - extent);
+        return extent;
     }
 
     public static double ReactionFraction(double simulatedDeltaTime, double halfLifeSeconds)

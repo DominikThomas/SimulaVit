@@ -694,6 +694,7 @@ public class GeodesicCellPicker : MonoBehaviour
             text.Append("\n\nSediment / precipitate (column inventory)");
             text.Append("\nS0: ").Append(oceanSedimentField != null && oceanSedimentField.IsInitialized ? oceanSedimentField.GetElementalSulfurInventory(selectedCellIndex).ToString("G6") : "--");
             text.Append("\nOxidized Fe(III): ").Append(oceanSedimentField != null && oceanSedimentField.IsInitialized ? oceanSedimentField.GetOxidizedIronInventory(selectedCellIndex).ToString("G6") : "--");
+            text.Append("\nFeS: ").Append(oceanSedimentField != null && oceanSedimentField.IsInitialized ? oceanSedimentField.GetIronSulphideInventory(selectedCellIndex).ToString("G6") : "--");
         }
         return text.ToString();
     }

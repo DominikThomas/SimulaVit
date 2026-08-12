@@ -88,6 +88,38 @@ public class GeodesicAbioticChemistryTests
         Assert.That(GeodesicAbioticChemistry.ReactionFraction(5d, 0d), Is.Zero);
     }
 
+    [Test]
+    public void FeSUsesOneToOneStoichiometryAndRequiresBothReactants()
+    {
+        double fe2 = 8d, h2s = 3d;
+        Assert.That(GeodesicAbioticChemistry.PrecipitateFeS(ref fe2, ref h2s, 1d), Is.EqualTo(3d));
+        Assert.That(fe2, Is.EqualTo(5d)); Assert.That(h2s, Is.Zero);
+        Assert.That(GeodesicAbioticChemistry.PrecipitateFeS(ref fe2, ref h2s, 1d), Is.Zero, "No H2S means no FeS.");
+        fe2 = 0d; h2s = 5d;
+        Assert.That(GeodesicAbioticChemistry.PrecipitateFeS(ref fe2, ref h2s, 1d), Is.Zero, "No Fe2 means no FeS.");
+    }
+
+    [Test]
+    public void NonPositiveHalfLifeDisablesFeSAndPartitioningIsStable()
+    {
+        double disabledFe = 4d, disabledS = 4d;
+        Assert.That(GeodesicAbioticChemistry.PrecipitateFeS(ref disabledFe, ref disabledS, GeodesicAbioticChemistry.ReactionFraction(5d, 0d)), Is.Zero);
+        double fe = 10d, sulphide = 10d;
+        for (int i = 0; i < 12; i++) GeodesicAbioticChemistry.PrecipitateFeS(ref fe, ref sulphide, GeodesicAbioticChemistry.ReactionFraction(10d, 60d));
+        Assert.That(fe, Is.EqualTo(2.5d).Within(1e-9)); Assert.That(sulphide, Is.EqualTo(2.5d).Within(1e-9));
+    }
+
+    [Test]
+    public void OxidationFirstLeavesOnlyRemainderForFeS()
+    {
+        double o2 = 0.25d, h2 = 0d, h2s = 10d, fe2 = 2d;
+        GeodesicAbioticReactionResult oxidation = GeodesicAbioticChemistry.ReactNode(ref o2, ref h2, ref h2s, ref fe2, 0d, 0d, 1d);
+        double feS = GeodesicAbioticChemistry.PrecipitateFeS(ref fe2, ref h2s, 1d);
+        Assert.That(oxidation.reactedFe2, Is.EqualTo(1d).Within(Tolerance));
+        Assert.That(feS, Is.EqualTo(1d).Within(Tolerance));
+        AssertFiniteNonnegative(o2, h2s, fe2, feS);
+    }
+
     private static void AssertReaction(double startH2, double startH2S, double startFe2, double fraction, double expectedH2, double expectedH2S, double expectedFe2, double expectedProduct, double expectedO2)
     {
         double o2 = 100d, h2 = startH2, h2s = startH2S, fe2 = startFe2;
