@@ -1278,13 +1278,14 @@ MonoBehaviour:
   m_Name: GeodesicOceanTemperatureField
   m_EditorClassIdentifier: SimulaVit::GeodesicOceanTemperatureField
   enableGeodesicOceanTemperature: 1
-  deepOceanTemperatureOffsetKelvin: -8
+  abyssalBaselineTemperatureC: 1.5
+  abyssalClimateCoupling: 0.25
   shallowResponseTimescaleSeconds: 80
   deepResponseTimescaleSeconds: 1200
   depthProfileExponent: 1.4
-  bottomVentTemperatureGainKelvin: 25
+  submarineVentSourceTemperatureC: 350
+  ventThermalInfluence: 0.08
   aboveBottomVentHeatingFactor: 0.35
-  thermalVentColumnFraction: 0.02
   subsurfaceHeatCapacityPerVolume: 1
   verticalThermalDiffusivity: 0.00002
   startupMode: 1
