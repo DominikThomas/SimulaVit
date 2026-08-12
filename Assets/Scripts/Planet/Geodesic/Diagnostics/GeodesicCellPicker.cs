@@ -602,7 +602,7 @@ public class GeodesicCellPicker : MonoBehaviour
             .Append("\nRidge relief: ").Append(planetGenerator.GetGeodesicCellRidgeContribution(cellIndex).ToString("F5")).Append("\nPlateau relief: ").Append(planetGenerator.GetGeodesicCellPlateauContribution(cellIndex).ToString("F5")).Append("\nSeamount relief: ").Append(planetGenerator.GetGeodesicCellSeamountContribution(cellIndex).ToString("F5")).Append("\nOcean relief: ").Append(planetGenerator.GetGeodesicCellTotalOceanicReliefContribution(cellIndex).ToString("F5"))
             .Append("\nModified: ").Append(!Mathf.Approximately(finalDepth, baseDepth) || !Mathf.Approximately(radialDisplacement, 0f));
         selectedDetailedStaticPopup = detailed.ToString();
-        selectedCompactPopup = selectedCompactStaticHeader + "\nSurface temperature: unavailable\nIllumination / insolation: unavailable" + selectedCompactStaticOcean;
+        selectedCompactPopup = selectedCompactStaticHeader + "\nLocal temperature: unavailable\nIllumination / insolation: unavailable" + selectedCompactStaticOcean;
         selectedDetailedPopup = selectedDetailedStaticPopup + "\n\nSurface Temperature\nunavailable";
     }
 
@@ -627,19 +627,30 @@ public class GeodesicCellPicker : MonoBehaviour
         temperatureField.GetNeighborTemperatureStats(selectedCellIndex, out float neighborMin, out float neighborMean, out float neighborMax);
         TemperatureDisplayUnit displayUnit = temperatureDisplayAuthority != null ? temperatureDisplayAuthority.CurrentTemperatureDisplayUnit : TemperatureDisplayUnit.Kelvin;
         string temperatureText = ReplicatorManager.FormatTemperature(kelvin, displayUnit);
+        GeodesicOceanLayerGrid localGrid = oceanLayerDomain != null ? oceanLayerDomain.Grid : null;
+        bool hasActiveOceanLayer = localGrid != null && localGrid.ActiveLayerCountByCell[selectedCellIndex] > 0;
+        int localLayer = hasActiveOceanLayer ? localGrid.GetBottomLayerIndex(selectedCellIndex) : 0;
+        float localKelvin = kelvin;
+        if (hasActiveOceanLayer && oceanTemperatureField != null && oceanTemperatureField.IsInitialized)
+            localKelvin = oceanTemperatureField.GetLayerTemperatureKelvin(selectedCellIndex, localLayer);
+        float experiencedKelvin = float.NaN;
+        bool hasExperiencedTemperature = experiencedTemperatureField != null
+            && experiencedTemperatureField.IsInitialized
+            && experiencedTemperatureField.TryGetLocalTemperatureKelvin(selectedCellIndex, localLayer, selectedWorldPosition, out experiencedKelvin)
+            && float.IsFinite(experiencedKelvin);
+        if (hasExperiencedTemperature)
+            localKelvin = experiencedKelvin;
+        if (!float.IsFinite(localKelvin))
+            localKelvin = kelvin;
+        string localTemperatureText = ReplicatorManager.FormatTemperature(localKelvin, displayUnit);
         string illumination = insolation > 0f ? "Day" : "Night";
         string compactLayers = BuildDynamicLayerEnvironmentText(false);
         string detailedLayers = BuildDynamicLayerEnvironmentText(true);
-        string compactDynamic = $"\nSurface temperature: {temperatureText}\nIllumination / insolation: {illumination} / {insolation:F4}";
+        string compactDynamic = $"\nLocal temperature: {localTemperatureText}\nIllumination / insolation: {illumination} / {insolation:F4}";
         string detailedDynamic = $"\n\nSurface Temperature\nTemperature: {temperatureText}\nInsolation cosine: {insolation:F4}\nIllumination: {illumination}\nTarget equilibrium: {ReplicatorManager.FormatTemperature(temperatureField.GetCellTargetTemperatureKelvin(selectedCellIndex), displayUnit)}\nResponse multiplier: {temperatureField.GetCellEffectiveThermalResponseMultiplier(selectedCellIndex):F3}\nThermal category: {temperatureField.GetCellThermalCategory(selectedCellIndex)}\nNeighbor min/mean/max: {ReplicatorManager.FormatTemperature(neighborMin, displayUnit)} / {ReplicatorManager.FormatTemperature(neighborMean, displayUnit)} / {ReplicatorManager.FormatTemperature(neighborMax, displayUnit)}";
         selectedCompactPopup = selectedCompactStaticHeader + compactDynamic + selectedCompactStaticOcean + compactLayers;
-        if (experiencedTemperatureField != null && experiencedTemperatureField.IsInitialized)
-        {
-            GeodesicOceanLayerGrid localGrid = oceanLayerDomain != null ? oceanLayerDomain.Grid : null;
-            int localLayer = localGrid != null && localGrid.ActiveLayerCountByCell[selectedCellIndex] > 0 ? localGrid.GetBottomLayerIndex(selectedCellIndex) : 0;
-            if (experiencedTemperatureField.TryGetLocalTemperatureKelvin(selectedCellIndex, localLayer, selectedWorldPosition, out float localKelvin))
-                detailedDynamic += $"\n\nExperienced Temperature\nClicked position: {ReplicatorManager.FormatTemperature(localKelvin, displayUnit)}\nSample layer: {localLayer}\nOutlets / radius: {experiencedTemperatureField.OutletCount} / {experiencedTemperatureField.VentMicrothermalRadius:F4}\nLookup cells / bytes: {experiencedTemperatureField.IndexedCellCount} / {experiencedTemperatureField.LookupMemoryBytes}";
-        }
+        if (hasExperiencedTemperature)
+            detailedDynamic += $"\n\nExperienced Temperature\nClicked position: {ReplicatorManager.FormatTemperature(experiencedKelvin, displayUnit)}\nSample layer: {localLayer}\nOutlets / radius: {experiencedTemperatureField.OutletCount} / {experiencedTemperatureField.VentMicrothermalRadius:F4}\nLookup cells / bytes: {experiencedTemperatureField.IndexedCellCount} / {experiencedTemperatureField.LookupMemoryBytes}";
         selectedDetailedPopup = selectedDetailedStaticPopup + detailedDynamic + detailedLayers;
         }
     }
