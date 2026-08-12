@@ -5,10 +5,6 @@ using UnityEngine;
 public sealed class GeodesicVentVisualizer : MonoBehaviour
 {
     [SerializeField] private bool showVentMarkers = true;
-    [SerializeField, Min(0.001f), Tooltip("Base diameter scale shared by every visible outlet.")] private float markerScale = 0.05f;
-    [SerializeField, Min(0.1f), Tooltip("Multiplier used by the weakest authoritative system.")] private float minimumMarkerScaleMultiplier = 0.8f;
-    [SerializeField, Min(0.1f), Tooltip("Multiplier used by the strongest authoritative system.")] private float maximumMarkerScaleMultiplier = 3.2f;
-    [SerializeField, Range(0.1f, 2f), Tooltip("Exponent controlling visual response to relative raw system strength. Lower values emphasize differences among weaker systems.")] private float markerStrengthResponse = 0.65f;
     [SerializeField, Range(0.1f, 20f), Tooltip("Maximum angular distance from the representative cell for real member outlets. This is visual-only and independent of authoritative clustering.")] private float visualOutletRadiusDegrees = 3.5f;
     [SerializeField, Range(1, 8), Tooltip("Maximum visual-only outlets rendered for one authoritative system.")] private int maxVisibleOutletsPerSystem = 5;
     [SerializeField, Min(0.00001f)] private float seafloorOffset = 0.0015f;
@@ -42,7 +38,8 @@ public sealed class GeodesicVentVisualizer : MonoBehaviour
             Vector3 normal = outlet.PlanetLocalNormal; marker.transform.localPosition = outlet.PlanetLocalPosition + normal * seafloorOffset;
             Vector3 tangent = Vector3.Cross(normal, Vector3.up); if (tangent.sqrMagnitude < 1e-8f) tangent = Vector3.Cross(normal, Vector3.right);
             marker.transform.localRotation = Quaternion.LookRotation(normal, Vector3.Cross(tangent.normalized, normal));
-            marker.transform.localScale = Vector3.one * markerScale * Mathf.Lerp(minimumMarkerScaleMultiplier, maximumMarkerScaleMultiplier, Mathf.Pow(outlet.Strength01, markerStrengthResponse));
+            // The disc has unit diameter. Its edge is therefore exactly the thermal hot-core edge.
+            marker.transform.localScale = Vector3.one * (outlet.HotCoreRadius * 2f);
             marker.AddComponent<MeshFilter>().sharedMesh = sharedMarkerMesh; marker.AddComponent<MeshRenderer>().sharedMaterial = sharedMarkerMaterial; markerCount++;
         }
         Debug.Log($"[GeodesicVentVisualizer] outlets={markerCount}, authority=GeodesicExperiencedTemperatureField immutable outlet records, anchors=completed visible terrain", this);
