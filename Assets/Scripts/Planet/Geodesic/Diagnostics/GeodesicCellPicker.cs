@@ -69,6 +69,7 @@ public class GeodesicCellPicker : MonoBehaviour
     private GeodesicSurfaceTemperatureField temperatureField;
     private GeodesicOceanTemperatureField oceanTemperatureField;
     private GeodesicOceanResourceField oceanResourceField;
+    private GeodesicOceanSedimentField oceanSedimentField;
     private GeodesicExperiencedTemperatureField experiencedTemperatureField;
     private Vector3 selectedWorldPosition;
     private ReplicatorManager temperatureDisplayAuthority;
@@ -114,6 +115,7 @@ public class GeodesicCellPicker : MonoBehaviour
         temperatureField = GetComponent<GeodesicSurfaceTemperatureField>();
         oceanTemperatureField = GetComponent<GeodesicOceanTemperatureField>();
         oceanResourceField = GetComponent<GeodesicOceanResourceField>();
+        oceanSedimentField = GetComponent<GeodesicOceanSedimentField>();
         experiencedTemperatureField = GetComponent<GeodesicExperiencedTemperatureField>();
     }
 
@@ -686,6 +688,12 @@ public class GeodesicCellPicker : MonoBehaviour
                 .Append(" | Fe2 ").Append(resourcesAvailable ? GetResourceText(selectedCellIndex, layer, GeodesicOceanResource.Fe2) : "--")
                 .Append(" | OrganicC ").Append(resourcesAvailable ? GetResourceText(selectedCellIndex, layer, GeodesicOceanResource.OrganicC) : "--");
             if (detailed) text.Append(" | depth ").Append(depth.ToString("F3")).Append(" | authority ").Append(layer == 0 ? "SurfaceField" : "SubsurfaceField");
+        }
+        if (detailed)
+        {
+            text.Append("\n\nSediment / precipitate (column inventory)");
+            text.Append("\nS0: ").Append(oceanSedimentField != null && oceanSedimentField.IsInitialized ? oceanSedimentField.GetElementalSulfurInventory(selectedCellIndex).ToString("G6") : "--");
+            text.Append("\nOxidized Fe(III): ").Append(oceanSedimentField != null && oceanSedimentField.IsInitialized ? oceanSedimentField.GetOxidizedIronInventory(selectedCellIndex).ToString("G6") : "--");
         }
         return text.ToString();
     }

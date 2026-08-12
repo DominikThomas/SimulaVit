@@ -614,6 +614,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         GetComponent<GeodesicOceanFe2Visual>()?.ClearVisual();
 
         GetComponent<GeodesicOceanResourceField>()?.ClearField();
+        GetComponent<GeodesicOceanSedimentField>()?.Clear();
         GetComponent<GeodesicOceanTemperatureField>()?.ClearField();
         GetComponent<GeodesicSurfaceTemperatureField>()?.ClearField();
         GetComponent<GeodesicOceanLayerDomain>()?.ClearGrid();
