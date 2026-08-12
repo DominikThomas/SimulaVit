@@ -46,6 +46,8 @@ public class SimulationStartupConfig
     public float approximateThermalIntervalSeconds = 2f;
     [Tooltip("Fixed simulated-time interval used by Geodesic dissolved-ocean resource transport.")]
     public float geodesicResourceTransportIntervalSeconds = 5f;
+    [Tooltip("Authoritative simulated seconds between Geodesic chemistry diagnostics. Zero or less disables them.")]
+    public float chemistryTelemetryIntervalSimSeconds = 60f;
 
     public SimulationStartupConfig Clone()
     {

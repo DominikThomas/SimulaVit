@@ -108,6 +108,7 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     private bool warnedTransportBacklog;
     private GeodesicAbioticChemistry abioticChemistry;
     private GeodesicOceanSedimentField sedimentField;
+    private GeodesicChemistryTelemetry chemistryTelemetry;
 
     public bool IsInitialized => initialized;
     public int CellCount => cellCount;
@@ -148,6 +149,12 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     public void SetStartupTransportInterval(float intervalSeconds)
     {
         transportIntervalSeconds = Mathf.Max(0.01f, intervalSeconds);
+    }
+
+    public void SetStartupChemistryTelemetryInterval(float intervalSeconds)
+    {
+        ResolveChemistryComponents();
+        chemistryTelemetry.SetInterval(intervalSeconds);
     }
 
     private void Awake() { domain = GetComponent<GeodesicOceanLayerDomain>(); planetGenerator = GetComponent<PlanetGenerator>(); simulationClock = FindFirstObjectByType<ReplicatorManager>(); ResolveChemistryComponents(); }
@@ -233,6 +240,7 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
             transportIntegrationCursorTime = lastObservedSimulationTime = simulationTime;
             unconsumedTransportRemainderSeconds = 0d; completedTransportTicks = 0; warnedTransportBacklog = false;
             initialized = true; initializationCount++; RecomputeDiagnostics(); RefreshO2LayerMeans();
+            chemistryTelemetry.InitializeForWorld(this, abioticChemistry, sedimentField, simulationTime);
             if (!VerifyStartupSentinel(out string sentinel)) return FailInitialization(GeodesicOceanResourceInitializationFailure.AllocationOrInitializationFailure, sentinel);
             lastSentinelVerificationDiagnostic = sentinel;
             Debug.Log($"[GeodesicOceanResource] initialized dissolved-ocean concentrations (not atmosphere; not legacy normalized totals): cells={cellCount}, nodeCapacity={nodeCapacity}, activeNodes={activeNodeCount}, volume={activeOceanVolume:G6}, memory={approximateRuntimeMemoryBytes} bytes, CO2={initialCO2Concentration:G6}, O2={initialO2Concentration:G6}, CH4={initialCH4Concentration:G6}, H2=0, H2S=0, Fe2={initialFe2Concentration:G6}, OrganicC=0, sentinel={sentinel}", this);
@@ -325,7 +333,7 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     private void ClearField(bool countClear)
     {
         sedimentField?.Clear(); abioticChemistry?.ResetCounters();
-        concentrationsByResourceThenNode = null; activeNodeIndices = null; activeNodeVolumes = null; sourceGrid = null; stagedInventoryDelta = null; horizontalTickCoefficients = null; verticalTickCoefficients = null; preparedTickDeltaTime = 0f; horizontalConductanceBase = null; verticalConductanceBase = null; ventSystems = null; submarineThermalInfluenceByCell = terrestrialThermalInfluenceByCell = null; initialized = false; cellCount = nodeCapacity = activeNodeCount = horizontalLinkCount = verticalLinkCount = ventCount = rawVentCandidateCount = submarineVentCount = terrestrialVentCount = 0; normalizedSubmarineWeightSum = 0f; activeOceanVolume = 0d; approximateRuntimeMemoryBytes = transportCacheMemoryBytes = stagingBufferMemoryBytes = 0; transportIntegrationCursorTime = lastObservedSimulationTime = unconsumedTransportRemainderSeconds = 0d; completedTransportTicks = 0; ResetDiagnostics(); if (countClear) clearCount++;
+        chemistryTelemetry?.ClearWorld(); concentrationsByResourceThenNode = null; activeNodeIndices = null; activeNodeVolumes = null; sourceGrid = null; stagedInventoryDelta = null; horizontalTickCoefficients = null; verticalTickCoefficients = null; preparedTickDeltaTime = 0f; horizontalConductanceBase = null; verticalConductanceBase = null; ventSystems = null; submarineThermalInfluenceByCell = terrestrialThermalInfluenceByCell = null; initialized = false; cellCount = nodeCapacity = activeNodeCount = horizontalLinkCount = verticalLinkCount = ventCount = rawVentCandidateCount = submarineVentCount = terrestrialVentCount = 0; normalizedSubmarineWeightSum = 0f; activeOceanVolume = 0d; approximateRuntimeMemoryBytes = transportCacheMemoryBytes = stagingBufferMemoryBytes = 0; transportIntegrationCursorTime = lastObservedSimulationTime = unconsumedTransportRemainderSeconds = 0d; completedTransportTicks = 0; ResetDiagnostics(); if (countClear) clearCount++;
     }
 
     private void BuildTransportCaches(GeodesicOceanLayerGrid grid, PlanetGenerator generator)
@@ -598,6 +606,12 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     { return concentrationsByResourceThenNode[(int)resource * nodeCapacity + node] * volume; }
     internal void SetInventoryForChemistry(int node, GeodesicOceanResource resource, double inventory, double volume)
     { concentrationsByResourceThenNode[(int)resource * nodeCapacity + node] = (float)(Math.Max(0d, inventory) / volume); }
+    internal float GetConcentrationForTelemetry(int node, GeodesicOceanResource resource)
+    { return concentrationsByResourceThenNode[(int)resource * nodeCapacity + node]; }
+    internal float VentH2Rate => ventH2PerTick;
+    internal float VentH2SRate => ventH2SPerTick;
+    internal float VentCO2Rate => ventCO2PerTick;
+    internal float VentFe2Rate => ventFe2PerTick;
 
     private void ResolveChemistryComponents()
     {
@@ -605,6 +619,8 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
         if (abioticChemistry == null) abioticChemistry = gameObject.AddComponent<GeodesicAbioticChemistry>();
         sedimentField = GetComponent<GeodesicOceanSedimentField>();
         if (sedimentField == null) sedimentField = gameObject.AddComponent<GeodesicOceanSedimentField>();
+        chemistryTelemetry = GetComponent<GeodesicChemistryTelemetry>();
+        if (chemistryTelemetry == null) chemistryTelemetry = gameObject.AddComponent<GeodesicChemistryTelemetry>();
     }
     public bool TrySetConcentration(int cellIndex, int layerIndex, GeodesicOceanResource resource, float concentration)
     {

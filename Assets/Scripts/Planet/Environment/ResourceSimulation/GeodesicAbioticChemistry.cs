@@ -37,6 +37,8 @@ public sealed class GeodesicAbioticChemistry : MonoBehaviour
     public double ReactedH2SInventory => reactedH2S;
     public double ReactedFe2Inventory => reactedFe2;
     public double ConsumedO2Inventory => consumedO2;
+    public double DepositedS0Inventory => depositedS0;
+    public double DepositedFe3Inventory => depositedFe3;
 
     public void ResetCounters()
     { reactedH2 = reactedH2S = reactedFe2 = consumedO2 = depositedS0 = depositedFe3 = 0d; }
