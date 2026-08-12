@@ -33,9 +33,10 @@ public class SimulationStartupController : MonoBehaviour
     private const float VentCO2MaxPerTick = 1f;
     private const int InitialSpawnMin = 0;
     private const int InitialSpawnMax = 10000;
-    private const int SavedStartupConfigVersion = 4;
+    private const int SavedStartupConfigVersion = 5;
     public const float DefaultApproximateThermalIntervalSeconds = 2f;
     public const float DefaultResourceTransportIntervalSeconds = 5f;
+    public const float DefaultChemistryTelemetryIntervalSimSeconds = 60f;
     public static readonly float[] ApproximateThermalIntervalPresets = { 0.5f, 1f, 2f, 5f };
     public static readonly float[] ResourceTransportIntervalPresets = { 1f, 2f, 5f, 10f };
 
@@ -393,6 +394,7 @@ public class SimulationStartupController : MonoBehaviour
         if (currentConfig == null) return;
         currentConfig.approximateThermalIntervalSeconds = DefaultApproximateThermalIntervalSeconds;
         currentConfig.geodesicResourceTransportIntervalSeconds = DefaultResourceTransportIntervalSeconds;
+        currentConfig.chemistryTelemetryIntervalSimSeconds = DefaultChemistryTelemetryIntervalSimSeconds;
         RefreshStartupPanels();
     }
 
@@ -492,6 +494,7 @@ public class SimulationStartupController : MonoBehaviour
                 planetGenerator.GetComponent<GeodesicOceanResourceField>()?.SetStartupVentRates(config.ventH2PerTick, config.ventH2SPerTick, config.ventCO2PerTick, config.ventFe2PerTick);
                 planetGenerator.GetComponent<GeodesicOceanResourceField>()?.SetStartupVentGeography(config.ventClustering, config.terrestrialVentFraction);
                 planetGenerator.GetComponent<GeodesicOceanResourceField>()?.SetStartupTransportInterval(config.geodesicResourceTransportIntervalSeconds);
+                planetGenerator.GetComponent<GeodesicOceanResourceField>()?.SetStartupChemistryTelemetryInterval(config.chemistryTelemetryIntervalSimSeconds);
             }
             planetGenerator.InitializeAuthoritativePlanet("New Game startup selection");
         }
@@ -676,6 +679,7 @@ public class SimulationStartupController : MonoBehaviour
         config.geodesicSubdivisionLevel = Mathf.Clamp(config.geodesicSubdivisionLevel, 0, GeodesicGridTopology.MaxSupportedSubdivision);
         config.approximateThermalIntervalSeconds = NormalizeToPreset(config.approximateThermalIntervalSeconds, ApproximateThermalIntervalPresets, DefaultApproximateThermalIntervalSeconds);
         config.geodesicResourceTransportIntervalSeconds = NormalizeToPreset(config.geodesicResourceTransportIntervalSeconds, ResourceTransportIntervalPresets, DefaultResourceTransportIntervalSeconds);
+        if (float.IsNaN(config.chemistryTelemetryIntervalSimSeconds) || float.IsInfinity(config.chemistryTelemetryIntervalSimSeconds)) config.chemistryTelemetryIntervalSimSeconds = DefaultChemistryTelemetryIntervalSimSeconds;
     }
 
     public static float NormalizeToPreset(float value, float[] presets, float fallback)
@@ -715,6 +719,7 @@ public class SimulationStartupController : MonoBehaviour
         builder.AppendLine($"Geodesic Subdivision Level: {config.geodesicSubdivisionLevel}");
         builder.AppendLine($"Approx Thermal Interval: {config.approximateThermalIntervalSeconds:0.###} s simulated time");
         builder.AppendLine($"Resource Transport Interval: {config.geodesicResourceTransportIntervalSeconds:0.###} s simulated time");
+        builder.AppendLine($"Chemistry Telemetry Interval: {config.chemistryTelemetryIntervalSimSeconds:0.###} s simulated time (<=0 disabled)");
         builder.AppendLine($"Axis Tilt Degrees: {config.axisTiltDegrees:0.###}");
         builder.AppendLine($"Day Length Seconds: {config.dayLengthSeconds:0.###}");
         builder.AppendLine($"Year Length In Days: {config.yearLengthInDays:0.###}");
@@ -764,6 +769,7 @@ public class SimulationStartupController : MonoBehaviour
         public bool startPaused;
         public float approximateThermalIntervalSeconds;
         public float geodesicResourceTransportIntervalSeconds;
+        public float chemistryTelemetryIntervalSimSeconds;
 
         public static SavedStartupConfig FromDefaults(SimulationStartupConfig defaults)
         {
@@ -799,7 +805,8 @@ public class SimulationStartupController : MonoBehaviour
                 initialSpawnCount = config.initialSpawnCount,
                 startPaused = config.startPaused,
                 approximateThermalIntervalSeconds = config.approximateThermalIntervalSeconds,
-                geodesicResourceTransportIntervalSeconds = config.geodesicResourceTransportIntervalSeconds
+                geodesicResourceTransportIntervalSeconds = config.geodesicResourceTransportIntervalSeconds,
+                chemistryTelemetryIntervalSimSeconds = config.chemistryTelemetryIntervalSimSeconds
             };
         }
 
@@ -829,6 +836,7 @@ public class SimulationStartupController : MonoBehaviour
             config.startPaused = startPaused;
             config.approximateThermalIntervalSeconds = approximateThermalIntervalSeconds;
             config.geodesicResourceTransportIntervalSeconds = geodesicResourceTransportIntervalSeconds;
+            config.chemistryTelemetryIntervalSimSeconds = version >= 5 ? chemistryTelemetryIntervalSimSeconds : config.chemistryTelemetryIntervalSimSeconds;
             return config;
         }
     }
@@ -1146,6 +1154,10 @@ public class SimulationStartupController : MonoBehaviour
             DrawPreset(new Rect(controlX, y, contentWidth, line), "Resource transport interval", ref currentConfig.geodesicResourceTransportIntervalSeconds, ResourceTransportIntervalPresets);
             y += line;
             GUI.Label(new Rect(controlX, y, contentWidth, 22f), "Simulated time. Lower gives finer transport but costs more CPU. Recommended: 5 s.", labelStyle);
+            y += 30f;
+            DrawFloat(new Rect(controlX, y, contentWidth, line), "Chemistry telemetry interval", ref currentConfig.chemistryTelemetryIntervalSimSeconds, -1f, 3600f);
+            y += line;
+            GUI.Label(new Rect(controlX, y, contentWidth, 22f), "Authoritative simulated time. Recommended: 60 s; <= 0 disables.", labelStyle);
             y += 30f;
             if (GUI.Button(new Rect(controlX, y, contentWidth, 30f), "Reset Advanced to Defaults", buttonStyle)) ResetAdvancedToDefaults();
             y += 38f;

@@ -32,6 +32,7 @@ public class SimulationStartupPanel : MonoBehaviour
     [SerializeField] private GameObject advancedSettingsRoot;
     [SerializeField] private TMP_Dropdown approximateThermalIntervalDropdown;
     [SerializeField] private TMP_Dropdown resourceTransportIntervalDropdown;
+    [SerializeField] private TMP_InputField chemistryTelemetryIntervalInput;
 
     [Header("Labels")]
     [SerializeField] private TMP_Text axisTiltValueLabel;
@@ -112,6 +113,7 @@ public class SimulationStartupPanel : MonoBehaviour
         SetText(initialSpawnCountInput, config.initialSpawnCount.ToString());
         SetPresetDropdown(approximateThermalIntervalDropdown, config.approximateThermalIntervalSeconds, SimulationStartupController.ApproximateThermalIntervalPresets);
         SetPresetDropdown(resourceTransportIntervalDropdown, config.geodesicResourceTransportIntervalSeconds, SimulationStartupController.ResourceTransportIntervalPresets);
+        SetText(chemistryTelemetryIntervalInput, config.chemistryTelemetryIntervalSimSeconds.ToString("0.###"));
         OnAxisTiltChanged(config.axisTiltDegrees);
     }
 
@@ -143,6 +145,7 @@ public class SimulationStartupPanel : MonoBehaviour
         config.initialSpawnCount = Mathf.Max(0, ReadInt(initialSpawnCountInput, config.initialSpawnCount));
         config.approximateThermalIntervalSeconds = ReadPresetDropdown(approximateThermalIntervalDropdown, config.approximateThermalIntervalSeconds, SimulationStartupController.ApproximateThermalIntervalPresets);
         config.geodesicResourceTransportIntervalSeconds = ReadPresetDropdown(resourceTransportIntervalDropdown, config.geodesicResourceTransportIntervalSeconds, SimulationStartupController.ResourceTransportIntervalPresets);
+        config.chemistryTelemetryIntervalSimSeconds = ReadFloat(chemistryTelemetryIntervalInput, config.chemistryTelemetryIntervalSimSeconds);
     }
 
     private void StartSimulation()
