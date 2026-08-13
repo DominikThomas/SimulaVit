@@ -253,7 +253,25 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
             lastSentinelVerificationDiagnostic = sentinel;
             Debug.Log($"[GeodesicOceanResource] initialized dissolved-ocean concentrations (not atmosphere; not legacy normalized totals): cells={cellCount}, nodeCapacity={nodeCapacity}, activeNodes={activeNodeCount}, volume={activeOceanVolume:G6}, memory={approximateRuntimeMemoryBytes} bytes, CO2={initialCO2Concentration:G6}, O2={initialO2Concentration:G6}, CH4={initialCH4Concentration:G6}, H2=0, H2S=0, Fe2={initialFe2Concentration:G6}, OrganicC=0, sentinel={sentinel}", this);
             Debug.Log($"[GeodesicOceanResourceTransport] interval={TransportIntervalSeconds:F3}s, activeNodes={activeNodeCount}, horizontalLinks={horizontalLinkCount}, verticalLinks={verticalLinkCount}, vents={ventCount}, stateBytes={approximateRuntimeMemoryBytes}, cacheBytes={transportCacheMemoryBytes}, stagingBytes={stagingBufferMemoryBytes}", this);
-            Debug.Log($"[GeodesicAbioticChemistry] interval={TransportIntervalSeconds:F3}s, activeNodes={activeNodeCount}, h2HalfLife={abioticChemistry.H2OxidationHalfLifeSeconds:G6}, h2sHalfLife={abioticChemistry.H2SOxidationHalfLifeSeconds:G6}, fe2HalfLife={abioticChemistry.Fe2OxidationHalfLifeSeconds:G6}, feS={(abioticChemistry.FeSPrecipitationHalfLifeSeconds > 0f ? \"enabled\" : \"disabled\")}, feSHalfLife={abioticChemistry.FeSPrecipitationHalfLifeSeconds:G6}, products=S0/Fe3Precipitate/FeS, settling=sameColumnImmediate, sedimentBytes={sedimentField.ApproximateRuntimeMemoryBytes}, rustyWater=visual-only recent-oxidation proxy", this);
+            string feSStatus =
+                abioticChemistry.FeSPrecipitationHalfLifeSeconds > 0f
+                    ? "enabled"
+                    : "disabled";
+
+            Debug.Log(
+                $"[GeodesicAbioticChemistry] " +
+                $"interval={TransportIntervalSeconds:F3}s, " +
+                $"activeNodes={activeNodeCount}, " +
+                $"h2HalfLife={abioticChemistry.H2OxidationHalfLifeSeconds:G6}, " +
+                $"h2sHalfLife={abioticChemistry.H2SOxidationHalfLifeSeconds:G6}, " +
+                $"fe2HalfLife={abioticChemistry.Fe2OxidationHalfLifeSeconds:G6}, " +
+                $"feS={feSStatus}, " +
+                $"feSHalfLife={abioticChemistry.FeSPrecipitationHalfLifeSeconds:G6}, " +
+                $"products=S0/Fe3Precipitate/FeS, " +
+                $"settling=sameColumnImmediate, " +
+                $"sedimentBytes={sedimentField.ApproximateRuntimeMemoryBytes}, " +
+                $"rustyWater=visual-only recent-oxidation proxy",
+                this);
             return true;
             }
             catch (Exception exception)
