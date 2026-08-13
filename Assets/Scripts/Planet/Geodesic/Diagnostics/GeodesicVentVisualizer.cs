@@ -42,7 +42,7 @@ public sealed class GeodesicVentVisualizer : MonoBehaviour
             marker.transform.localScale = Vector3.one * (outlet.HotCoreRadius * 2f);
             marker.AddComponent<MeshFilter>().sharedMesh = sharedMarkerMesh; marker.AddComponent<MeshRenderer>().sharedMaterial = sharedMarkerMaterial; markerCount++;
         }
-        Debug.Log($"[GeodesicVentVisualizer] outlets={markerCount}, authority=GeodesicExperiencedTemperatureField immutable outlet records, anchors=completed visible terrain", this);
+        Debug.Log($"[GeodesicVentVisualizer] outlets={markerCount}, authority=GeodesicOceanResourceField compactOutlets via experienced-temperature anchored records, anchors=completed visible terrain", this);
     }
 
     [ContextMenu("Toggle Geodesic Vent Markers")]
@@ -83,52 +83,4 @@ public sealed class GeodesicVentVisualizer : MonoBehaviour
     }
 
     private void OnDestroy() => ClearMarkers();
-}
-
-public enum GeodesicVentVisualArchetype { SingleDominant, DominantWithSatellites, SimilarOutlets }
-
-/// <summary>Pure deterministic visual selection; it never mutates vent systems or simulation weights.</summary>
-public static class GeodesicVentOutletSelector
-{
-    public static GeodesicVentVisualArchetype GetArchetype(int representativeCell)
-    {
-        uint value = unchecked((uint)representativeCell) ^ 0xB5297A4Du;
-        value ^= value >> 16; value *= 0x68E31DA4u; value ^= value >> 15;
-        return (GeodesicVentVisualArchetype)(value % 3u);
-    }
-
-    public static int SelectLocalMembers(GeodesicVentSystem system, Vector3[] cellDirections, float radiusDegrees, int maximumOutlets, int[] destination)
-    {
-        if (system == null || system.Members == null || cellDirections == null || destination == null || maximumOutlets <= 0) return 0;
-        int capacity = Mathf.Min(maximumOutlets, destination.Length);
-        float minimumDot = Mathf.Cos(Mathf.Clamp(radiusDegrees, 0.1f, 180f) * Mathf.Deg2Rad);
-        Vector3 representativeDirection = cellDirections[system.RepresentativeCell];
-        int count = 0;
-        while (count < capacity)
-        {
-            int best = -1; float bestDot = -2f; float bestStrength = -1f; int bestCell = int.MaxValue;
-            for (int member = 0; member < system.Members.Length; member++)
-            {
-                int cell = system.Members[member].CellIndex;
-                float dot = Vector3.Dot(representativeDirection, cellDirections[cell]);
-                if (dot < minimumDot || AlreadySelected(destination, count, member)) continue;
-                float strength = system.Members[member].RawStrength;
-                if (dot > bestDot + 1e-7f || (Mathf.Abs(dot - bestDot) <= 1e-7f && (strength > bestStrength || (Mathf.Approximately(strength, bestStrength) && cell < bestCell))))
-                { best = member; bestDot = dot; bestStrength = strength; bestCell = cell; }
-            }
-            if (best < 0) break;
-            destination[count++] = best;
-        }
-        return count;
-    }
-
-    public static float GetOutletScale(GeodesicVentVisualArchetype archetype, int outletIndex, float relativeMemberStrength)
-    {
-        if (outletIndex == 0) return archetype == GeodesicVentVisualArchetype.SimilarOutlets ? 1f : 1.2f;
-        float memberScale = Mathf.Lerp(0.72f, 1f, Mathf.Sqrt(Mathf.Clamp01(relativeMemberStrength)));
-        return archetype == GeodesicVentVisualArchetype.DominantWithSatellites ? memberScale * 0.72f : memberScale;
-    }
-
-    private static bool AlreadySelected(int[] selected, int count, int candidate)
-    { for (int i = 0; i < count; i++) if (selected[i] == candidate) return true; return false; }
 }

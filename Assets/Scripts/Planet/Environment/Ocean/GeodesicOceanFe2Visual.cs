@@ -6,6 +6,7 @@ using UnityEngine.Serialization;
 /// its authoritative GeodesicOceanResourceField column. Only the optically relevant L0 and L1
 /// layers contribute, so deeper enrichment must propagate upward before it becomes visible.
 /// It never reads PlanetResourceMap.
+/// Blue vertex data is a short-lived, visual-only memory of local Fe2 oxidation, not transported inventory.
 /// </summary>
 [DisallowMultipleComponent]
 public sealed class GeodesicOceanFe2Visual : MonoBehaviour
@@ -23,12 +24,19 @@ public sealed class GeodesicOceanFe2Visual : MonoBehaviour
     [FormerlySerializedAs("deeperLayerWeightMultiplier")]
     [SerializeField, Range(0f, 1f), Tooltip("Visual weight of ocean layer L1. Layers L2-L4 do not contribute to dissolved Fe2+ ocean colour.")]
     private float layer1VisualWeight = 0.4f;
+    [Header("Visual-only rusty oxidation turbidity")]
+    [SerializeField, Min(0f)] private float maximumVisualizedRecentOxidation = 2f;
+    [SerializeField] private Color rustyOxidationTint = new Color(0.72f, 0.30f, 0.08f, 1f);
+    [SerializeField, Range(0f, 1f)] private float rustyOxidationIntensity = 0.65f;
 
     private static readonly int LowTintId = Shader.PropertyToID("_Fe2VisualLowTint");
     private static readonly int HighTintId = Shader.PropertyToID("_Fe2VisualHighTint");
     private static readonly int IntensityId = Shader.PropertyToID("_Fe2VisualIntensity");
+    private static readonly int RustTintId = Shader.PropertyToID("_RustVisualTint");
+    private static readonly int RustIntensityId = Shader.PropertyToID("_RustVisualIntensity");
     private PlanetGenerator generator;
     private GeodesicOceanResourceField resourceField;
+    private GeodesicAbioticChemistry chemistry;
     private Mesh oceanMesh;
     private MeshRenderer oceanRenderer;
     private IcosphereDirectionMapping directionMapping;
@@ -40,6 +48,7 @@ public sealed class GeodesicOceanFe2Visual : MonoBehaviour
     {
         ClearVisual();
         generator = owner; resourceField = field; oceanMesh = mesh; oceanRenderer = renderer; directionMapping = mapping;
+        chemistry = owner != null ? owner.GetComponent<GeodesicAbioticChemistry>() : null;
         if (generator == null || generator.CurrentGridType != PlanetGridType.GeodesicIcosphere || resourceField == null ||
             !resourceField.IsInitialized || oceanMesh == null || directionMapping == null) return;
         vertexColours = oceanMesh.colors;
@@ -65,6 +74,8 @@ public sealed class GeodesicOceanFe2Visual : MonoBehaviour
         material.SetColor(LowTintId, lowFe2Tint);
         material.SetColor(HighTintId, highFe2Tint);
         material.SetFloat(IntensityId, Mathf.Clamp01(intensityMultiplier));
+        material.SetColor(RustTintId, rustyOxidationTint);
+        material.SetFloat(RustIntensityId, Mathf.Clamp01(rustyOxidationIntensity));
     }
 
     private void RefreshColours()
@@ -78,7 +89,7 @@ public sealed class GeodesicOceanFe2Visual : MonoBehaviour
             float concentration = GetSurfaceFacingColumnFe2(resourceField, cell, layer1VisualWeight);
             Color colour = vertexColours[vertex]; // red remains the existing bathymetric depth channel.
             colour.g = NormalizeVisualizedFe2(concentration, minimum, maximum);
-            colour.b = 0f; colour.a = 1f;
+            colour.b = NormalizeRustSignal(chemistry != null ? chemistry.GetRecentOxidizedIronSignal(cell) : 0f, maximumVisualizedRecentOxidation); colour.a = 1f;
             vertexColours[vertex] = colour;
         }
         oceanMesh.colors = vertexColours;
@@ -109,11 +120,12 @@ public sealed class GeodesicOceanFe2Visual : MonoBehaviour
         float maximum = Mathf.Max(minimum + 1e-8f, maximumFe2);
         return Mathf.InverseLerp(minimum, maximum, visibleFe2);
     }
+    public static float NormalizeRustSignal(float signal, float maximum) => Mathf.Clamp01(signal / Mathf.Max(1e-8f, maximum));
 
     public void ClearVisual()
     {
-        if (oceanRenderer != null && oceanRenderer.sharedMaterial != null) oceanRenderer.sharedMaterial.SetFloat(IntensityId, 0f);
-        generator = null; resourceField = null; oceanMesh = null; oceanRenderer = null; directionMapping = null; vertexColours = null;
+        if (oceanRenderer != null && oceanRenderer.sharedMaterial != null) { oceanRenderer.sharedMaterial.SetFloat(IntensityId, 0f); oceanRenderer.sharedMaterial.SetFloat(RustIntensityId, 0f); }
+        generator = null; resourceField = null; chemistry = null; oceanMesh = null; oceanRenderer = null; directionMapping = null; vertexColours = null;
         lastTransportTick = long.MinValue; nextRefreshTime = 0f; enabled = false;
     }
 

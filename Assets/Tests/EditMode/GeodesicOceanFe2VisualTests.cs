@@ -9,6 +9,14 @@ public sealed class GeodesicOceanFe2VisualTests
     }
 
     [Test]
+    public void RustProxyNormalizesIndependentlyFromDissolvedFe2()
+    {
+        Assert.That(GeodesicOceanFe2Visual.NormalizeRustSignal(0f, 2f), Is.Zero);
+        Assert.That(GeodesicOceanFe2Visual.NormalizeRustSignal(1f, 2f), Is.EqualTo(0.5f));
+        Assert.That(GeodesicOceanFe2Visual.NormalizeRustSignal(5f, 2f), Is.EqualTo(1f));
+    }
+
+    [Test]
     public void VisibleFe2_TwoLayers_UsesNormalizedLayer1Weight()
     {
         float expected = (2f + 6f * 0.4f) / 1.4f;

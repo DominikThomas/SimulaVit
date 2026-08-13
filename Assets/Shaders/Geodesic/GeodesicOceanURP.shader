@@ -20,6 +20,8 @@ Shader "SimulaVit/GeodesicOceanURP"
         _Fe2VisualLowTint ("Fe2 Visual Low Tint", Color) = (0.20, 0.36, 0.44, 1)
         _Fe2VisualHighTint ("Fe2 Visual High Tint", Color) = (0.58, 0.30, 0.12, 1)
         _Fe2VisualIntensity ("Fe2 Visual Intensity", Range(0, 1)) = 0
+        _RustVisualTint ("Recent Oxidation Rust Tint", Color) = (0.72, 0.30, 0.08, 1)
+        _RustVisualIntensity ("Recent Oxidation Rust Intensity", Range(0, 1)) = 0
     }
     SubShader
     {
@@ -60,6 +62,8 @@ Shader "SimulaVit/GeodesicOceanURP"
                 half4 _Fe2VisualLowTint;
                 half4 _Fe2VisualHighTint;
                 half _Fe2VisualIntensity;
+                half4 _RustVisualTint;
+                half _RustVisualIntensity;
             CBUFFER_END
 
             struct Attributes
@@ -77,6 +81,7 @@ Shader "SimulaVit/GeodesicOceanURP"
                 half depth01 : TEXCOORD2;
                 float3 positionWS : TEXCOORD3;
                 half fe2Visual01 : TEXCOORD4;
+                half rustVisual01 : TEXCOORD5;
             };
 
             Varyings vert(Attributes input)
@@ -88,6 +93,7 @@ Shader "SimulaVit/GeodesicOceanURP"
                 output.viewDirWS = GetWorldSpaceViewDir(pos.positionWS);
                 output.depth01 = saturate(input.color.r);
                 output.fe2Visual01 = saturate(input.color.g);
+                output.rustVisual01 = saturate(input.color.b);
                 output.positionWS = pos.positionWS;
                 return output;
             }
@@ -103,6 +109,7 @@ Shader "SimulaVit/GeodesicOceanURP"
                 color = lerp(color, _DeepColor.rgb, saturate(_Turbidity * 0.35));
                 half3 fe2Tint = lerp(_Fe2VisualLowTint.rgb, _Fe2VisualHighTint.rgb, input.fe2Visual01);
                 color = lerp(color, fe2Tint, saturate(input.fe2Visual01 * _Fe2VisualIntensity));
+                color = lerp(color, _RustVisualTint.rgb, saturate(input.rustVisual01 * _RustVisualIntensity));
                 color *= _AmbientResponse * _ColorIntensity;
                 Light mainLight = GetMainLight(TransformWorldToShadowCoord(input.positionWS));
                 half diffuse = saturate(dot(normalWS, mainLight.direction));
