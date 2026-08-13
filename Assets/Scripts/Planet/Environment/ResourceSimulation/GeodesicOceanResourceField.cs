@@ -31,6 +31,9 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     private static readonly ProfilerMarker HorizontalMarker = new ProfilerMarker("GeodesicOceanResource.HorizontalMixing");
     private static readonly ProfilerMarker VerticalMarker = new ProfilerMarker("GeodesicOceanResource.VerticalMixing");
     private static readonly ProfilerMarker VentMarker = new ProfilerMarker("GeodesicOceanResource.VentSources");
+    private static ProfilerCounterValue<int> TicksPerFrameCounter = new ProfilerCounterValue<int>(ProfilerCategory.Scripts, "Geodesic Resource Ticks / Frame", ProfilerMarkerDataUnit.Count, ProfilerCounterOptions.FlushOnEndOfFrame);
+    private static ProfilerCounterValue<float> SimSecondsPerFrameCounter = new ProfilerCounterValue<float>(ProfilerCategory.Scripts, "Geodesic Resource Sim Seconds / Frame", ProfilerMarkerDataUnit.Count, ProfilerCounterOptions.FlushOnEndOfFrame);
+    private static ProfilerCounterValue<float> BacklogCounter = new ProfilerCounterValue<float>(ProfilerCategory.Scripts, "Geodesic Resource Backlog Seconds", ProfilerMarkerDataUnit.Count, ProfilerCounterOptions.FlushOnEndOfFrame);
 
     [Header("Startup Concentrations (Geodesic Dissolved Ocean)")]
     [SerializeField, Min(0f)] private float initialCO2Concentration = 1f;
@@ -87,6 +90,8 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     [SerializeField] private long completedTransportTicks;
     [SerializeField] private long transportCacheMemoryBytes;
     [SerializeField] private long stagingBufferMemoryBytes;
+    [SerializeField] private int resourceTicksExecutedThisFrame;
+    [SerializeField] private float resourceSimSecondsProcessedThisFrame;
     [SerializeField] private float[] cachedMeanO2ByLayer = new float[GeodesicOceanLayerGrid.AbsoluteMaximumLayerCount];
 
     private GeodesicOceanLayerDomain domain;
@@ -129,6 +134,9 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     public long CompletedTransportTicks => completedTransportTicks;
     public long TransportCacheMemoryBytes => transportCacheMemoryBytes;
     public long StagingBufferMemoryBytes => stagingBufferMemoryBytes;
+    public int ResourceTicksExecutedThisFrame => resourceTicksExecutedThisFrame;
+    public float ResourceSimSecondsProcessedThisFrame => resourceSimSecondsProcessedThisFrame;
+    public double ResourceIntegrationCursorTime => transportIntegrationCursorTime;
     public int VentCount => initialized ? ventCount : 0;
     public int RawVentCandidateCount => initialized ? rawVentCandidateCount : 0;
     public int CompactOutletCount => initialized && ventOutlets != null ? ventOutlets.Length : 0;
@@ -173,6 +181,7 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
         if (!initialized || simulationClock == null) return;
         if (planetGenerator == null || planetGenerator.CurrentGridType != PlanetGridType.GeodesicIcosphere) return;
         double target = Math.Max(0d, simulationClock.SimulationTimeSeconds);
+        resourceTicksExecutedThisFrame = 0; resourceSimSecondsProcessedThisFrame = 0f;
         if (target < lastObservedSimulationTime) { transportIntegrationCursorTime = target; unconsumedTransportRemainderSeconds = 0d; }
         lastObservedSimulationTime = target;
         double interval = TransportIntervalSeconds;
@@ -185,6 +194,8 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
         if (transportIntegrationCursorTime + interval <= target + 1e-9d && !warnedTransportBacklog)
         { warnedTransportBacklog = true; Debug.LogWarning("[GeodesicOceanResourceTransport] Catch-up guard reached; backlog retained.", this); }
         unconsumedTransportRemainderSeconds = Math.Max(0d, target - transportIntegrationCursorTime);
+        resourceTicksExecutedThisFrame = ticks; resourceSimSecondsProcessedThisFrame = (float)(ticks * interval);
+        TicksPerFrameCounter.Value = ticks; SimSecondsPerFrameCounter.Value = resourceSimSecondsProcessedThisFrame; BacklogCounter.Value = (float)unconsumedTransportRemainderSeconds;
     }
 
     public void SetStartupConcentrations(float co2, float o2, float ch4, float fe2)
@@ -359,7 +370,7 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     private void ClearField(bool countClear)
     {
         sedimentField?.Clear(); abioticChemistry?.ResetCounters();
-        chemistryTelemetry?.ClearWorld(); concentrationsByResourceThenNode = null; activeNodeIndices = null; activeNodeVolumes = null; sourceGrid = null; stagedInventoryDelta = null; horizontalTickCoefficients = null; verticalTickCoefficients = null; preparedTickDeltaTime = 0f; horizontalConductanceBase = null; verticalConductanceBase = null; ventSystems = null; ventOutlets = null; submarineThermalInfluenceByCell = terrestrialThermalInfluenceByCell = null; directThermalSourceByCell = null; initialized = false; cellCount = nodeCapacity = activeNodeCount = horizontalLinkCount = verticalLinkCount = ventCount = rawVentCandidateCount = submarineVentCount = terrestrialVentCount = 0; normalizedSubmarineWeightSum = 0f; activeOceanVolume = 0d; approximateRuntimeMemoryBytes = transportCacheMemoryBytes = stagingBufferMemoryBytes = 0; transportIntegrationCursorTime = lastObservedSimulationTime = unconsumedTransportRemainderSeconds = 0d; completedTransportTicks = 0; ResetDiagnostics(); if (countClear) clearCount++;
+        chemistryTelemetry?.ClearWorld(); concentrationsByResourceThenNode = null; activeNodeIndices = null; activeNodeVolumes = null; sourceGrid = null; stagedInventoryDelta = null; horizontalTickCoefficients = null; verticalTickCoefficients = null; preparedTickDeltaTime = 0f; horizontalConductanceBase = null; verticalConductanceBase = null; ventSystems = null; ventOutlets = null; submarineThermalInfluenceByCell = terrestrialThermalInfluenceByCell = null; directThermalSourceByCell = null; initialized = false; cellCount = nodeCapacity = activeNodeCount = horizontalLinkCount = verticalLinkCount = ventCount = rawVentCandidateCount = submarineVentCount = terrestrialVentCount = resourceTicksExecutedThisFrame = 0; resourceSimSecondsProcessedThisFrame = normalizedSubmarineWeightSum = 0f; activeOceanVolume = 0d; approximateRuntimeMemoryBytes = transportCacheMemoryBytes = stagingBufferMemoryBytes = 0; transportIntegrationCursorTime = lastObservedSimulationTime = unconsumedTransportRemainderSeconds = 0d; completedTransportTicks = 0; ResetDiagnostics(); if (countClear) clearCount++;
     }
 
     private void BuildTransportCaches(GeodesicOceanLayerGrid grid, PlanetGenerator generator)

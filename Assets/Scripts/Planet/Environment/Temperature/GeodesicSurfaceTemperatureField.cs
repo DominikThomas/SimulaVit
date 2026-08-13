@@ -19,6 +19,9 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
     private static readonly ProfilerMarker ResponseMarker = new ProfilerMarker("GeodesicTemperature.SurfaceResponse");
     private static readonly ProfilerMarker DiffusionMarker = new ProfilerMarker("GeodesicTemperature.HorizontalDiffusion");
     private static readonly ProfilerMarker CommitMarker = new ProfilerMarker("GeodesicTemperature.CommittedEvent");
+    private static ProfilerCounterValue<int> TicksPerFrameCounter = new ProfilerCounterValue<int>(ProfilerCategory.Scripts, "Geodesic Thermal Ticks / Frame", ProfilerMarkerDataUnit.Count, ProfilerCounterOptions.FlushOnEndOfFrame);
+    private static ProfilerCounterValue<float> SimSecondsPerFrameCounter = new ProfilerCounterValue<float>(ProfilerCategory.Scripts, "Geodesic Thermal Sim Seconds / Frame", ProfilerMarkerDataUnit.Count, ProfilerCounterOptions.FlushOnEndOfFrame);
+    private static ProfilerCounterValue<float> BacklogCounter = new ProfilerCounterValue<float>(ProfilerCategory.Scripts, "Geodesic Thermal Backlog Seconds", ProfilerMarkerDataUnit.Count, ProfilerCounterOptions.FlushOnEndOfFrame);
     public event Action<float> SurfaceTemperatureTickCommitted;
     public event Action SurfaceTemperatureFieldReinitialized;
     public event Action SurfaceTemperatureFieldClearing;
@@ -62,6 +65,7 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
     [SerializeField] private double unconsumedThermalRemainderSeconds;
     [SerializeField] private double discardedSimulationSeconds;
     [SerializeField] private int thermalTicksCurrentRenderedFrame;
+    [SerializeField] private float thermalSimSecondsProcessedThisFrame;
     [SerializeField] private int maximumThermalTicksPerRenderedFrame;
     [SerializeField] private double currentAuthoritativeSimulationTime;
     [SerializeField] private double thermalIntegrationCursorTime;
@@ -151,6 +155,7 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
     public int SurfaceCellsUpdatedLastTick => surfaceCellsUpdatedLastTick;
     public int HorizontalEdgesProcessedLastTick => horizontalEdgesProcessedLastTick;
     public int ThermalTicksCurrentRenderedFrame => thermalTicksCurrentRenderedFrame;
+    public float ThermalSimSecondsProcessedThisFrame => thermalSimSecondsProcessedThisFrame;
 
     private void Awake() => ResolveReferences();
 
@@ -162,6 +167,7 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
         double target = Math.Max(0d, simulationClock.SimulationTimeSeconds);
         currentAuthoritativeSimulationTime = target;
         thermalTicksCurrentRenderedFrame = 0;
+        thermalSimSecondsProcessedThisFrame = 0f;
         if (target < lastObservedAuthoritativeSimulationTime)
         {
             // Clock restoration/regression establishes a new integration epoch; old-world backlog never survives.
@@ -195,6 +201,8 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
         }
         maximumThermalTicksPerRenderedFrame = Mathf.Max(maximumThermalTicksPerRenderedFrame, thermalTicksCurrentRenderedFrame);
         unconsumedThermalRemainderSeconds = Math.Max(0d, target - thermalIntegrationCursorTime);
+        thermalSimSecondsProcessedThisFrame = thermalTicksCurrentRenderedFrame * (float)interval;
+        TicksPerFrameCounter.Value = thermalTicksCurrentRenderedFrame; SimSecondsPerFrameCounter.Value = thermalSimSecondsProcessedThisFrame; BacklogCounter.Value = (float)unconsumedThermalRemainderSeconds;
         currentSunOrbitTime = sunDirectionProvider != null ? sunDirectionProvider.CurrentOrbitTimeSeconds : target;
         currentSunPhase01 = sunDirectionProvider != null ? sunDirectionProvider.GetDayPhase01AtSimulationTime(target) : 0f;
         maximumSolarAngularAdvancePerThermalTickDegrees = sunDirectionProvider != null ? Mathf.Abs(sunDirectionProvider.orbitDegreesPerSecond * (float)interval) : 0f;
@@ -246,6 +254,7 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
         double simulationTime = simulationClock != null ? Math.Max(0d, simulationClock.SimulationTimeSeconds) : 0d;
         thermalIntegrationCursorTime = lastObservedAuthoritativeSimulationTime = currentAuthoritativeSimulationTime = simulationTime;
         totalAuthoritativeSimulationSecondsReceived = totalSimulationSecondsConsumedByThermalTicks = unconsumedThermalRemainderSeconds = discardedSimulationSeconds = 0d;
+        thermalTicksCurrentRenderedFrame = 0; thermalSimSecondsProcessedThisFrame = 0f;
         surfaceTemperatureTickSequence = 0;
         accumulatingSolarDayIndex = lastCompletedSolarDayIndex = -1; accumulatingDaySampleCount = 0;
         nextDiagnosticSnapshotUnscaledTime = 0d; nextDiffusionConservationAuditSimulationTime = simulationTime + Mathf.Max(0.1f, diffusionConservationAuditIntervalSeconds);
@@ -280,6 +289,7 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
         runtimeCellCount = 0;
         thermalIntegrationCursorTime = lastObservedAuthoritativeSimulationTime = currentAuthoritativeSimulationTime = 0d;
         totalAuthoritativeSimulationSecondsReceived = totalSimulationSecondsConsumedByThermalTicks = unconsumedThermalRemainderSeconds = discardedSimulationSeconds = 0d;
+        thermalTicksCurrentRenderedFrame = 0; thermalSimSecondsProcessedThisFrame = 0f;
         surfaceTemperatureTickSequence = 0;
         accumulatingSolarDayIndex = lastCompletedSolarDayIndex = -1; accumulatingDaySampleCount = 0;
     }
