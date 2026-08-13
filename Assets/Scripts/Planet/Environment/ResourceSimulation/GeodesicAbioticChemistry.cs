@@ -69,24 +69,39 @@ public sealed class GeodesicAbioticChemistry : MonoBehaviour
         {
             int[] nodes = resources.ActiveNodeIndicesForChemistry;
             float[] volumes = resources.ActiveNodeVolumesForChemistry;
+            float[] concentrations = resources.ConcentrationsForChemistry;
+            int capacity = resources.NodeCapacityForChemistry;
+            int o2Offset = (int)GeodesicOceanResource.O2 * capacity;
+            int h2Offset = (int)GeodesicOceanResource.H2 * capacity;
+            int h2sOffset = (int)GeodesicOceanResource.H2S * capacity;
+            int fe2Offset = (int)GeodesicOceanResource.Fe2 * capacity;
+            int layersPerCell = resources.SourceGrid.MaximumLayerCount;
             for (int i = 0; i < nodes.Length; i++)
             {
                 int node = nodes[i];
+                int cell = node / layersPerCell;
+                if (node % layersPerCell == 0) recentOxidizedIronByCell[cell] *= memoryRetention;
+
+                // Most ocean nodes contain none of the reduced reactants. Reject them before
+                // volume conversion, reaction helpers, sediment access, and authoritative writes.
+                float h2Concentration = concentrations[h2Offset + node];
+                float h2sConcentration = concentrations[h2sOffset + node];
+                float fe2Concentration = concentrations[fe2Offset + node];
+                if (!HasReducedReactants(h2Concentration, h2sConcentration, fe2Concentration)) continue;
+
                 double volume = volumes[i];
-                double o2 = resources.GetInventoryForChemistry(node, GeodesicOceanResource.O2, volume);
-                double h2 = resources.GetInventoryForChemistry(node, GeodesicOceanResource.H2, volume);
-                double h2s = resources.GetInventoryForChemistry(node, GeodesicOceanResource.H2S, volume);
-                double fe2 = resources.GetInventoryForChemistry(node, GeodesicOceanResource.Fe2, volume);
-                int cell = node / resources.SourceGrid.MaximumLayerCount;
-                if (node % resources.SourceGrid.MaximumLayerCount == 0) recentOxidizedIronByCell[cell] *= memoryRetention;
+                double o2 = concentrations[o2Offset + node] * volume;
+                double h2 = h2Concentration * volume;
+                double h2s = h2sConcentration * volume;
+                double fe2 = fe2Concentration * volume;
                 GeodesicAbioticReactionResult result = ReactNode(ref o2, ref h2, ref h2s, ref fe2, h2Fraction, h2sFraction, fe2Fraction);
                 // Deliberate operator split: oxidation consumes first; FeS then uses only remaining Fe2/H2S.
                 result.precipitatedFeS = PrecipitateFeS(ref fe2, ref h2s, feSFraction);
                 if (result.consumedO2 <= 0d && result.precipitatedFeS <= 0d) continue;
-                resources.SetInventoryForChemistry(node, GeodesicOceanResource.O2, o2, volume);
-                resources.SetInventoryForChemistry(node, GeodesicOceanResource.H2, h2, volume);
-                resources.SetInventoryForChemistry(node, GeodesicOceanResource.H2S, h2s, volume);
-                resources.SetInventoryForChemistry(node, GeodesicOceanResource.Fe2, fe2, volume);
+                concentrations[o2Offset + node] = (float)(Math.Max(0d, o2) / volume);
+                concentrations[h2Offset + node] = (float)(Math.Max(0d, h2) / volume);
+                concentrations[h2sOffset + node] = (float)(Math.Max(0d, h2s) / volume);
+                concentrations[fe2Offset + node] = (float)(Math.Max(0d, fe2) / volume);
                 sediments.DepositSameColumn(cell, result.reactedH2S, result.reactedFe2, result.precipitatedFeS);
                 recentOxidizedIronByCell[cell] += (float)(result.reactedFe2 / Math.Max(1e-12d, volume));
                 reactedH2 += result.reactedH2; reactedH2S += result.reactedH2S; reactedFe2 += result.reactedFe2;
@@ -110,6 +125,9 @@ public sealed class GeodesicAbioticChemistry : MonoBehaviour
         if (!(simulatedDeltaTime > 0d) || !(halfLifeSeconds > 0d) || !Finite(simulatedDeltaTime) || !Finite(halfLifeSeconds)) return 0d;
         return 1d - Math.Exp(-Math.Log(2d) * simulatedDeltaTime / halfLifeSeconds);
     }
+
+    public static bool HasReducedReactants(float h2, float h2s, float fe2)
+    { return h2 > 0f || h2s > 0f || fe2 > 0f; }
 
     public static GeodesicAbioticReactionResult ReactNode(ref double o2, ref double h2, ref double h2s, ref double fe2, double h2Fraction, double h2sFraction, double fe2Fraction)
     {

@@ -654,6 +654,8 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     { concentrationsByResourceThenNode[(int)resource * nodeCapacity + node] = (float)(Math.Max(0d, inventory) / volume); }
     internal float GetConcentrationForTelemetry(int node, GeodesicOceanResource resource)
     { return concentrationsByResourceThenNode[(int)resource * nodeCapacity + node]; }
+    internal float[] ConcentrationsForChemistry => concentrationsByResourceThenNode;
+    internal int NodeCapacityForChemistry => nodeCapacity;
     internal float VentH2Rate => ventH2PerTick;
     internal float VentH2SRate => ventH2SPerTick;
     internal float VentCO2Rate => ventCO2PerTick;

@@ -23,6 +23,28 @@ public class GeodesicAbioticChemistryTests
     }
 
     [Test]
+    public void FastRejectionSkipsOnlyNodesWithoutPositiveReducedReactants()
+    {
+        Assert.That(GeodesicAbioticChemistry.HasReducedReactants(0f, 0f, 0f), Is.False);
+        Assert.That(GeodesicAbioticChemistry.HasReducedReactants(-1f, float.NaN, 0f), Is.False);
+        Assert.That(GeodesicAbioticChemistry.HasReducedReactants(float.Epsilon, 0f, 0f), Is.True, "Tiny positive H2 must retain the existing chemistry path.");
+        Assert.That(GeodesicAbioticChemistry.HasReducedReactants(0f, float.Epsilon, 0f), Is.True);
+        Assert.That(GeodesicAbioticChemistry.HasReducedReactants(0f, 0f, float.Epsilon), Is.True);
+    }
+
+    [Test]
+    public void ZeroOxygenStillAllowsFeSAfterOxidationNoOp()
+    {
+        double o2 = 0d, h2 = 0d, h2s = 3d, fe2 = 5d;
+        GeodesicAbioticReactionResult oxidation = GeodesicAbioticChemistry.ReactNode(ref o2, ref h2, ref h2s, ref fe2, 1d, 1d, 1d);
+        double feS = GeodesicAbioticChemistry.PrecipitateFeS(ref fe2, ref h2s, 1d);
+        Assert.That(oxidation.consumedO2, Is.Zero);
+        Assert.That(feS, Is.EqualTo(3d));
+        Assert.That(fe2, Is.EqualTo(2d));
+        Assert.That(h2s, Is.Zero);
+    }
+
+    [Test]
     public void SharedOxygenLimitScalesEveryRequestedExtentEqually()
     {
         double o2 = 1.25d, h2 = 10d, h2s = 20d, fe2 = 40d;
