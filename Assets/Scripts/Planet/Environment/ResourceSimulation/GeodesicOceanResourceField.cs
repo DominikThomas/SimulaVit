@@ -55,6 +55,8 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     [SerializeField, Min(0f)] private float ventH2SPerTick = 0.01f;
     [SerializeField, Min(0f)] private float ventCO2PerTick = 0f;
     [SerializeField, Min(0f), Tooltip("Global submarine Fe2 inventory injected per authoritative simulated second.")] private float ventFe2PerTick = 0.002f;
+    [SerializeField, Range(1, 8), Tooltip("Maximum compact physical vent mouths retained per clustered system.")] private int maximumOutletsPerSystem = 5;
+    [SerializeField, Range(0.1f, 20f), Tooltip("Maximum angular distance from a system representative for compact physical outlets.")] private float outletSelectionRadiusDegrees = 3.5f;
 
     [Header("Runtime Diagnostics (Read Only)")]
     [SerializeField] private bool initialized;
@@ -103,8 +105,10 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     private float[] horizontalConductanceBase;
     private float[] verticalConductanceBase;
     private GeodesicVentSystem[] ventSystems;
+    private GeodesicVentSourceOutlet[] ventOutlets;
     private float[] submarineThermalInfluenceByCell;
     private float[] terrestrialThermalInfluenceByCell;
+    private bool[] directThermalSourceByCell;
     private bool warnedTransportBacklog;
     private GeodesicAbioticChemistry abioticChemistry;
     private GeodesicOceanSedimentField sedimentField;
@@ -127,6 +131,7 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     public long StagingBufferMemoryBytes => stagingBufferMemoryBytes;
     public int VentCount => initialized ? ventCount : 0;
     public int RawVentCandidateCount => initialized ? rawVentCandidateCount : 0;
+    public int CompactOutletCount => initialized && ventOutlets != null ? ventOutlets.Length : 0;
     public float GeothermalPatchiness => geothermalPatchiness;
     public float GetSubmarineThermalInfluence(int cell) => initialized && submarineThermalInfluenceByCell != null && cell >= 0 && cell < submarineThermalInfluenceByCell.Length ? submarineThermalInfluenceByCell[cell] : 0f;
     public float GetTerrestrialThermalInfluence(int cell) => initialized && terrestrialThermalInfluenceByCell != null && cell >= 0 && cell < terrestrialThermalInfluenceByCell.Length ? terrestrialThermalInfluenceByCell[cell] : 0f;
@@ -145,6 +150,9 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
 
     public bool TryGetVentSystem(int index, out GeodesicVentSystem system)
     { system = null; if (!initialized || ventSystems == null || index < 0 || index >= ventSystems.Length) return false; system = ventSystems[index]; return system != null; }
+
+    public bool TryGetVentOutlet(int index, out GeodesicVentSourceOutlet outlet)
+    { if (!initialized || ventOutlets == null || index < 0 || index >= ventOutlets.Length) { outlet = default; return false; } outlet = ventOutlets[index]; return true; }
 
     public void SetStartupTransportInterval(float intervalSeconds)
     {
@@ -333,7 +341,7 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     private void ClearField(bool countClear)
     {
         sedimentField?.Clear(); abioticChemistry?.ResetCounters();
-        chemistryTelemetry?.ClearWorld(); concentrationsByResourceThenNode = null; activeNodeIndices = null; activeNodeVolumes = null; sourceGrid = null; stagedInventoryDelta = null; horizontalTickCoefficients = null; verticalTickCoefficients = null; preparedTickDeltaTime = 0f; horizontalConductanceBase = null; verticalConductanceBase = null; ventSystems = null; submarineThermalInfluenceByCell = terrestrialThermalInfluenceByCell = null; initialized = false; cellCount = nodeCapacity = activeNodeCount = horizontalLinkCount = verticalLinkCount = ventCount = rawVentCandidateCount = submarineVentCount = terrestrialVentCount = 0; normalizedSubmarineWeightSum = 0f; activeOceanVolume = 0d; approximateRuntimeMemoryBytes = transportCacheMemoryBytes = stagingBufferMemoryBytes = 0; transportIntegrationCursorTime = lastObservedSimulationTime = unconsumedTransportRemainderSeconds = 0d; completedTransportTicks = 0; ResetDiagnostics(); if (countClear) clearCount++;
+        chemistryTelemetry?.ClearWorld(); concentrationsByResourceThenNode = null; activeNodeIndices = null; activeNodeVolumes = null; sourceGrid = null; stagedInventoryDelta = null; horizontalTickCoefficients = null; verticalTickCoefficients = null; preparedTickDeltaTime = 0f; horizontalConductanceBase = null; verticalConductanceBase = null; ventSystems = null; ventOutlets = null; submarineThermalInfluenceByCell = terrestrialThermalInfluenceByCell = null; directThermalSourceByCell = null; initialized = false; cellCount = nodeCapacity = activeNodeCount = horizontalLinkCount = verticalLinkCount = ventCount = rawVentCandidateCount = submarineVentCount = terrestrialVentCount = 0; normalizedSubmarineWeightSum = 0f; activeOceanVolume = 0d; approximateRuntimeMemoryBytes = transportCacheMemoryBytes = stagingBufferMemoryBytes = 0; transportIntegrationCursorTime = lastObservedSimulationTime = unconsumedTransportRemainderSeconds = 0d; completedTransportTicks = 0; ResetDiagnostics(); if (countClear) clearCount++;
     }
 
     private void BuildTransportCaches(GeodesicOceanLayerGrid grid, PlanetGenerator generator)
@@ -393,6 +401,7 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
             Debug.Log($"[GeodesicVentRadiusSweep] radius={sweepRadii[sweepIndex]:F2}deg, rawCandidates={candidates.Count}, clusteredVents={sweep.Length}, memberCountMinMeanMax={(sweep.Length > 0 ? sweepMin : 0)}/{(sweep.Length > 0 ? sweepMembers / (double)sweep.Length : 0d):F2}/{sweepMax}, largestClusterMembers={sweepMax}, largestProductionShare={largestShare:G6}", this);
         }
         ventSystems = GeodesicVentSystemClusterer.Cluster(candidates, grid.SourceTopology.CellDirections, clusterRadiusDegrees);
+        ventOutlets = BuildCompactOutlets(ventSystems, grid.SourceTopology.CellDirections, outletSelectionRadiusDegrees, maximumOutletsPerSystem);
         BuildVentThermalInfluence(grid);
         rawVentCandidateCount = candidates.Count; ventCount = ventSystems.Length;
         int memberMin = int.MaxValue, memberMax = 0, members = 0; double rawWeight = 0d, normalized = 0d; float rawStrengthMin = float.PositiveInfinity, rawStrengthMax = 0f;
@@ -403,7 +412,8 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
         }
         normalizedSubmarineWeightSum = (float)normalized;
         double oldStrength = 0d; for (int i = 0; i < candidates.Count; i++) if (candidates[i].Habitat == GeodesicVentHabitat.Submarine) oldStrength += candidates[i].RawStrength;
-        Debug.Log($"[GeodesicVentSystems] patchiness={geothermalPatchiness:F2}, activityField=4 spherical provinces, rawCandidates={rawVentCandidateCount}, clusteredVents={ventCount} (submarine={submarineVentCount}, terrestrial={terrestrialVentCount}), clusterRadius={clusterRadiusDegrees:F2}deg, memberCountMinMeanMax={(ventCount > 0 ? memberMin : 0)}/{(ventCount > 0 ? members / (double)ventCount : 0d):F2}/{memberMax}, clusterStrengthMinMeanMax={(ventCount > 0 ? rawStrengthMin : 0f):G6}/{(ventCount > 0 ? rawWeight / ventCount : 0d):G6}/{rawStrengthMax:G6}, rawWeightTotal={rawWeight:G6}, normalizedSubmarineWeightSum={normalized:G9}, sourceDistribution=localFootprint, globalRates(H2/H2S/CO2/Fe2)={ventH2PerTick:G6}/{ventH2SPerTick:G6}/{ventCO2PerTick:G6}/{ventFe2PerTick:G6}; oldEffective={ventH2PerTick * oldStrength:G6}/{ventH2SPerTick * oldStrength:G6}/{ventCO2PerTick * oldStrength:G6}/{ventFe2PerTick * oldStrength:G6}; terrestrialAtmosphereInjection=pending", this);
+        int submarineOutletCount = 0; for (int i = 0; i < ventOutlets.Length; i++) if (ventOutlets[i].Habitat == GeodesicVentHabitat.Submarine) submarineOutletCount++;
+        Debug.Log($"[GeodesicVentSystems] patchiness={geothermalPatchiness:F2}, activityField=4 spherical provinces, rawCandidates={rawVentCandidateCount}, clusteredVents={ventCount} (submarine={submarineVentCount}, terrestrial={terrestrialVentCount}), compactOutlets={ventOutlets.Length}, resourceSourceNodes={submarineOutletCount}, coarseThermalSourceNodes={ventOutlets.Length}, authority=compactOutlets, rawMembersGenerationOnly=true, clusterRadius={clusterRadiusDegrees:F2}deg, memberCountMinMeanMax={(ventCount > 0 ? memberMin : 0)}/{(ventCount > 0 ? members / (double)ventCount : 0d):F2}/{memberMax}, clusterStrengthMinMeanMax={(ventCount > 0 ? rawStrengthMin : 0f):G6}/{(ventCount > 0 ? rawWeight / ventCount : 0d):G6}/{rawStrengthMax:G6}, rawWeightTotal={rawWeight:G6}, normalizedSubmarineWeightSum={normalized:G9}, sourceDistribution=compactOutlets, globalRates(H2/H2S/CO2/Fe2)={ventH2PerTick:G6}/{ventH2SPerTick:G6}/{ventCO2PerTick:G6}/{ventFe2PerTick:G6}; oldEffective={ventH2PerTick * oldStrength:G6}/{ventH2SPerTick * oldStrength:G6}/{ventCO2PerTick * oldStrength:G6}/{ventFe2PerTick * oldStrength:G6}; terrestrialAtmosphereInjection=pending", this);
         double[] diagnosticDurations = { 10d, 60d, 600d };
         for (int i = 0; i < diagnosticDurations.Length; i++)
         {
@@ -430,29 +440,51 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
         return activity;
     }
 
+    public static GeodesicVentSourceOutlet[] BuildCompactOutlets(GeodesicVentSystem[] systems, Vector3[] directions, float radiusDegrees, int maximumPerSystem)
+    {
+        if (systems == null || directions == null || maximumPerSystem <= 0) return Array.Empty<GeodesicVentSourceOutlet>();
+        var result = new System.Collections.Generic.List<GeodesicVentSourceOutlet>(systems.Length * maximumPerSystem);
+        int[] selected = new int[maximumPerSystem];
+        for (int systemIndex = 0; systemIndex < systems.Length; systemIndex++)
+        {
+            GeodesicVentSystem system = systems[systemIndex];
+            GeodesicVentVisualArchetype archetype = GeodesicVentOutletSelector.GetArchetype(system.RepresentativeCell);
+            int requested = archetype == GeodesicVentVisualArchetype.SingleDominant ? 1 : archetype == GeodesicVentVisualArchetype.DominantWithSatellites ? 3 + (system.RepresentativeCell & 1) : 3 + system.RepresentativeCell % 3;
+            int count = GeodesicVentOutletSelector.SelectLocalMembers(system, directions, radiusDegrees, Mathf.Min(requested, maximumPerSystem), selected);
+            double selectedStrength = 0d; for (int i = 0; i < count; i++) selectedStrength += system.Members[selected[i]].RawStrength;
+            if (!(selectedStrength > 0d)) continue;
+            for (int i = 0; i < count; i++)
+            {
+                GeodesicVentCandidate member = system.Members[selected[i]];
+                result.Add(new GeodesicVentSourceOutlet(system.Habitat, member.CellIndex, member.SourceNode, systemIndex, member.RawStrength, system.NormalizedHabitatWeight, (float)(member.RawStrength / selectedStrength)));
+            }
+        }
+        return result.ToArray();
+    }
+
     private void BuildVentThermalInfluence(GeodesicOceanLayerGrid grid)
     {
         submarineThermalInfluenceByCell = new float[grid.CellCount];
         terrestrialThermalInfluenceByCell = new float[grid.CellCount];
+        directThermalSourceByCell = new bool[grid.CellCount];
         float maximum = 0f;
         for (int i = 0; i < ventSystems.Length; i++) maximum = Mathf.Max(maximum, ventSystems[i].RawStrengthSum);
         if (maximum <= 0f) return;
-        for (int i = 0; i < ventSystems.Length; i++)
+        for (int i = 0; i < ventOutlets.Length; i++)
         {
-            GeodesicVentSystem system = ventSystems[i];
+            GeodesicVentSourceOutlet outlet = ventOutlets[i];
+            GeodesicVentSystem system = ventSystems[outlet.SystemIndex];
             float systemStrength = Mathf.Sqrt(system.RawStrengthSum / maximum);
-            float[] map = system.Habitat == GeodesicVentHabitat.Submarine ? submarineThermalInfluenceByCell : terrestrialThermalInfluenceByCell;
-            for (int m = 0; m < system.Members.Length; m++)
+            float[] map = outlet.Habitat == GeodesicVentHabitat.Submarine ? submarineThermalInfluenceByCell : terrestrialThermalInfluenceByCell;
+            int cell = outlet.CellIndex;
+            directThermalSourceByCell[cell] = true;
+            float memberStrength = systemStrength * Mathf.Sqrt(outlet.RawStrength / Mathf.Max(system.RawStrengthMax, 1e-6f));
+            map[cell] = Mathf.Max(map[cell], memberStrength);
+            for (int slot = 0; slot < grid.SourceTopology.NeighborCounts[cell]; slot++)
             {
-                int cell = system.Members[m].CellIndex;
-                float memberStrength = systemStrength * Mathf.Sqrt(system.Members[m].RawStrength / Mathf.Max(system.RawStrengthMax, 1e-6f));
-                map[cell] = Mathf.Max(map[cell], memberStrength);
-                for (int slot = 0; slot < grid.SourceTopology.NeighborCounts[cell]; slot++)
-                {
-                    int neighbor = grid.SourceTopology.Neighbors6[cell * 6 + slot];
-                    bool matchingHabitat = system.Habitat == GeodesicVentHabitat.Submarine ? grid.SourceOceanMask[neighbor] : !grid.SourceOceanMask[neighbor];
-                    if (matchingHabitat) map[neighbor] = Mathf.Max(map[neighbor], memberStrength * 0.3f);
-                }
+                int neighbor = grid.SourceTopology.Neighbors6[cell * 6 + slot];
+                bool matchingHabitat = outlet.Habitat == GeodesicVentHabitat.Submarine ? grid.SourceOceanMask[neighbor] : !grid.SourceOceanMask[neighbor];
+                if (matchingHabitat) map[neighbor] = Mathf.Max(map[neighbor], memberStrength * 0.3f);
             }
         }
         int heatedSubmarine = 0, heatedTerrestrial = 0; float minimum = float.PositiveInfinity, maximumInfluence = 0f, sum = 0f; int samples = 0;
@@ -464,7 +496,7 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
             if (influence <= 0f) continue;
             minimum = Mathf.Min(minimum, influence); maximumInfluence = Mathf.Max(maximumInfluence, influence); sum += influence; samples++;
         }
-        Debug.Log($"[GeodesicVentThermalFootprint] heatedOceanBottomCells={heatedSubmarine}, heatedLandSurfaceCells={heatedTerrestrial}, localInfluenceMinMeanMax={(samples > 0 ? minimum : 0f):F4}/{(samples > 0 ? sum / samples : 0f):F4}/{maximumInfluence:F4}, memberNeighborFalloff=1/0.3", this);
+        Debug.Log($"[GeodesicVentThermalFootprint] heatedOceanBottomCells={heatedSubmarine}, heatedLandSurfaceCells={heatedTerrestrial}, localInfluenceMinMeanMax={(samples > 0 ? minimum : 0f):F4}/{(samples > 0 ? sum / samples : 0f):F4}/{maximumInfluence:F4}, outletNeighborFalloff=1/0.3, authority=compactOutlets", this);
     }
 
     private void TickResources(float dt)
@@ -562,20 +594,16 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
 
     private void InjectVentSources(float tickScale)
     {
-        using (VentMarker.Auto()) for (int i = 0; i < ventCount; i++)
+        using (VentMarker.Auto()) for (int i = 0; i < ventOutlets.Length; i++)
         {
-            GeodesicVentSystem system = ventSystems[i];
-            if (system.Habitat != GeodesicVentHabitat.Submarine || system.RawStrengthSum <= 0f) continue;
-            double systemScale = system.NormalizedHabitatWeight * tickScale;
-            for (int memberIndex = 0; memberIndex < system.Members.Length; memberIndex++)
-            {
-                GeodesicVentCandidate member = system.Members[memberIndex]; int node = member.SourceNode;
-                double scale = systemScale * (member.RawStrength / system.RawStrengthSum) / sourceGrid.LayerVolume[node];
-                concentrationsByResourceThenNode[(int)GeodesicOceanResource.H2 * nodeCapacity + node] += (float)(ventH2PerTick * scale);
-                concentrationsByResourceThenNode[(int)GeodesicOceanResource.H2S * nodeCapacity + node] += (float)(ventH2SPerTick * scale);
-                concentrationsByResourceThenNode[(int)GeodesicOceanResource.CO2 * nodeCapacity + node] += (float)(ventCO2PerTick * scale);
-                concentrationsByResourceThenNode[(int)GeodesicOceanResource.Fe2 * nodeCapacity + node] += (float)(ventFe2PerTick * scale);
-            }
+            GeodesicVentSourceOutlet outlet = ventOutlets[i];
+            if (outlet.Habitat != GeodesicVentHabitat.Submarine) continue;
+            int node = outlet.SourceNode;
+            double scale = outlet.SystemBudgetWeight * outlet.WithinSystemWeight * tickScale / sourceGrid.LayerVolume[node];
+            concentrationsByResourceThenNode[(int)GeodesicOceanResource.H2 * nodeCapacity + node] += (float)(ventH2PerTick * scale);
+            concentrationsByResourceThenNode[(int)GeodesicOceanResource.H2S * nodeCapacity + node] += (float)(ventH2SPerTick * scale);
+            concentrationsByResourceThenNode[(int)GeodesicOceanResource.CO2 * nodeCapacity + node] += (float)(ventCO2PerTick * scale);
+            concentrationsByResourceThenNode[(int)GeodesicOceanResource.Fe2 * nodeCapacity + node] += (float)(ventFe2PerTick * scale);
         }
     }
 
@@ -744,22 +772,21 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     private void ValidateVentContextMenu()
     {
         bool mapping = initialized; double normalized = 0d, localShares = 0d; bool partialBottomObserved = false;
-        for (int i = 0; i < ventCount; i++)
+        bool[] outletCells = initialized ? new bool[cellCount] : Array.Empty<bool>();
+        for (int i = 0; i < ventCount; i++) if (ventSystems[i].Habitat == GeodesicVentHabitat.Submarine) normalized += ventSystems[i].NormalizedHabitatWeight;
+        for (int i = 0; i < CompactOutletCount; i++)
         {
-            GeodesicVentSystem system = ventSystems[i]; if (system.Habitat != GeodesicVentHabitat.Submarine) continue;
-            normalized += system.NormalizedHabitatWeight; double memberShareSum = 0d;
-            for (int memberIndex = 0; memberIndex < system.Members.Length; memberIndex++)
-            {
-                GeodesicVentCandidate member = system.Members[memberIndex]; int node = member.SourceNode; int cell = member.CellIndex; int bottom = sourceGrid.GetBottomLayerIndex(cell);
-                mapping &= sourceGrid.SourceOceanMask[cell] && node == sourceGrid.GetNodeIndex(cell, bottom); partialBottomObserved |= bottom + 1 < sourceGrid.MaximumLayerCount;
-                memberShareSum += member.RawStrength / system.RawStrengthSum;
-            }
-            mapping &= Math.Abs(memberShareSum - 1d) <= 1e-6d; localShares += system.NormalizedHabitatWeight * memberShareSum;
+            GeodesicVentSourceOutlet outlet = ventOutlets[i]; outletCells[outlet.CellIndex] = true; if (outlet.Habitat != GeodesicVentHabitat.Submarine) continue;
+            int node = outlet.SourceNode; int cell = outlet.CellIndex; int bottom = sourceGrid.GetBottomLayerIndex(cell);
+            mapping &= sourceGrid.SourceOceanMask[cell] && node == sourceGrid.GetNodeIndex(cell, bottom); partialBottomObserved |= bottom + 1 < sourceGrid.MaximumLayerCount;
+            localShares += outlet.SystemBudgetWeight * outlet.WithinSystemWeight;
         }
+        bool noGhostSources = true;
+        for (int cell = 0; cell < cellCount; cell++) if (directThermalSourceByCell[cell] != outletCells[cell]) noGhostSources = false;
         double duration = 10d;
         double h2 = ventH2PerTick * duration, h2s = ventH2SPerTick * duration, co2 = ventCO2PerTick * duration, fe2 = ventFe2PerTick * duration;
-        bool valid = mapping && Math.Abs(normalized - 1d) <= 1e-6d && Math.Abs(localShares - 1d) <= 1e-6d;
-        Debug.Log($"[GeodesicOceanVentValidation] valid={valid}, systems={ventCount}, submarine={submarineVentCount}, terrestrial={terrestrialVentCount}, simulatedSeconds={duration:G6}, expectedAndDistributed(H2/H2S/CO2/Fe2)={h2:G17}/{h2s:G17}/{co2:G17}/{fe2:G17}, normalizedWeightSum={normalized:G17}, localShareSum={localShares:G17}, deepestOnly={mapping}, partialBottomObserved={partialBottomObserved}, terrestrialAtmosphereInjection=pending, cadence=rate*simulatedSeconds", this);
+        bool valid = mapping && noGhostSources && Math.Abs(normalized - 1d) <= 1e-6d && Math.Abs(localShares - 1d) <= 1e-6d;
+        Debug.Log($"[GeodesicOceanVentValidation] valid={valid}, authority=compactOutlets, rawMembersGenerationOnly=true, systems={ventCount}, compactOutlets={CompactOutletCount}, submarine={submarineVentCount}, terrestrial={terrestrialVentCount}, simulatedSeconds={duration:G6}, expectedAndDistributed(H2/H2S/CO2/Fe2)={h2:G17}/{h2s:G17}/{co2:G17}/{fe2:G17}, normalizedWeightSum={normalized:G17}, localShareSum={localShares:G17}, directSourcesAreOutlets={mapping}, fullStrengthThermalSourcesAreOutlets={noGhostSources}, partialBottomObserved={partialBottomObserved}, terrestrialAtmosphereInjection=pending, cadence=rate*simulatedSeconds", this);
     }
 
     [ContextMenu("Validate O2 Depth Propagation")]

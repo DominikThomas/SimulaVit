@@ -55,8 +55,6 @@ public sealed class GeodesicExperiencedTemperatureField : MonoBehaviour
     [SerializeField, Min(0.001f), Tooltip("Planet-local falloff distance outside each visible hot core; independent of clustering and chemistry.")] private float ventMicrothermalFalloffDistance = 0.12f;
     [SerializeField, Min(0f), Tooltip("Planet-local visible/hot-core radius of the weakest outlet. The visual marker uses this same footprint.")] private float minimumOutletCoreRadius = 0.02f;
     [SerializeField, Min(0f), Tooltip("Planet-local visible/hot-core radius of the strongest outlet. The visual marker uses this same footprint.")] private float maximumOutletCoreRadius = 0.08f;
-    [SerializeField, Range(1, 8)] private int maximumOutletsPerSystem = 5;
-    [SerializeField, Range(0.1f, 20f)] private float outletSelectionRadiusDegrees = 3.5f;
     [SerializeField] private int outletCount;
     [SerializeField] private int indexedCellCount;
     [SerializeField] private int minimumNearbyOutlets;
@@ -88,34 +86,26 @@ public sealed class GeodesicExperiencedTemperatureField : MonoBehaviour
         surface = GetComponent<GeodesicSurfaceTemperatureField>(); ocean = GetComponent<GeodesicOceanTemperatureField>();
         if (resources == null || !resources.IsInitialized || generator == null || resources.SourceGrid == null) return;
         BuildOutlets(); BuildLookup();
-        Debug.Log($"[GeodesicExperiencedTemperature] outlets={outletCount}, indexedCells={indexedCellCount}, nearbyMinMeanMax={minimumNearbyOutlets}/{meanNearbyOutlets:F2}/{maximumNearbyOutlets}, lookupBytes={lookupMemoryBytes}, coreRadius={minimumOutletCoreRadius:F4}-{maximumOutletCoreRadius:F4}, outsideCoreFalloff={ventMicrothermalFalloffDistance:F4}, falloff=smootherstep*sqrt(localStrength), combination=max", this);
+        Debug.Log($"[GeodesicExperiencedTemperature] outlets={outletCount}, authority=GeodesicOceanResourceField compactOutlets, indexedCells={indexedCellCount}, nearbyMinMeanMax={minimumNearbyOutlets}/{meanNearbyOutlets:F2}/{maximumNearbyOutlets}, lookupBytes={lookupMemoryBytes}, coreRadius={minimumOutletCoreRadius:F4}-{maximumOutletCoreRadius:F4}, outsideCoreFalloff={ventMicrothermalFalloffDistance:F4}, falloff=smootherstep*sqrt(localStrength), combination=max", this);
     }
 
     private void BuildOutlets()
     {
-        int capacity = Mathf.Max(1, resources.VentCount * maximumOutletsPerSystem);
+        int capacity = Mathf.Max(1, resources.CompactOutletCount);
         var built = new GeodesicVentOutlet[capacity]; int count = 0;
-        int[] selected = new int[Mathf.Max(1, maximumOutletsPerSystem)];
-        Vector3[] directions = resources.SourceGrid.SourceTopology.CellDirections;
         float maximumRaw = 0f;
         for (int i = 0; i < resources.VentCount; i++) if (resources.TryGetVentSystem(i, out GeodesicVentSystem s)) maximumRaw = Mathf.Max(maximumRaw, s.RawStrengthSum);
-        for (int systemIndex = 0; systemIndex < resources.VentCount; systemIndex++)
+        for (int outletIndex = 0; outletIndex < resources.CompactOutletCount; outletIndex++)
         {
-            if (!resources.TryGetVentSystem(systemIndex, out GeodesicVentSystem system)) continue;
-            GeodesicVentVisualArchetype archetype = GeodesicVentOutletSelector.GetArchetype(system.RepresentativeCell);
-            int requested = archetype == GeodesicVentVisualArchetype.SingleDominant ? 1 : archetype == GeodesicVentVisualArchetype.DominantWithSatellites ? 3 + (system.RepresentativeCell & 1) : 3 + system.RepresentativeCell % 3;
-            int selectedCount = GeodesicVentOutletSelector.SelectLocalMembers(system, directions, outletSelectionRadiusDegrees, Mathf.Min(requested, maximumOutletsPerSystem), selected);
-            for (int i = 0; i < selectedCount; i++)
-            {
-                GeodesicVentCandidate member = system.Members[selected[i]]; int cell = member.CellIndex;
-                if (!generator.TryGetVisibleGeodesicSeafloorWorldAnchor(cell, out Vector3 worldPosition, out Vector3 worldNormal)) continue;
-                float systemStrength = maximumRaw > 0f ? Mathf.Sqrt(system.RawStrengthSum / maximumRaw) : 0f;
-                float memberStrength = Mathf.Sqrt(member.RawStrength / Mathf.Max(system.RawStrengthMax, 1e-6f));
-                int bottom = system.Habitat == GeodesicVentHabitat.Submarine ? resources.SourceGrid.GetBottomLayerIndex(cell) : -1;
-                float strength = Mathf.Clamp01(systemStrength * memberStrength);
-                float coreRadius = Mathf.Lerp(Mathf.Max(0f, minimumOutletCoreRadius), Mathf.Max(minimumOutletCoreRadius, maximumOutletCoreRadius), strength);
-                built[count++] = new GeodesicVentOutlet(system.Habitat, cell, bottom, systemIndex, transform.InverseTransformPoint(worldPosition), transform.InverseTransformDirection(worldNormal).normalized, strength, coreRadius);
-            }
+            if (!resources.TryGetVentOutlet(outletIndex, out GeodesicVentSourceOutlet source) || !resources.TryGetVentSystem(source.SystemIndex, out GeodesicVentSystem system)) continue;
+            int cell = source.CellIndex;
+            if (!generator.TryGetVisibleGeodesicSeafloorWorldAnchor(cell, out Vector3 worldPosition, out Vector3 worldNormal)) continue;
+            float systemStrength = maximumRaw > 0f ? Mathf.Sqrt(system.RawStrengthSum / maximumRaw) : 0f;
+            float memberStrength = Mathf.Sqrt(source.RawStrength / Mathf.Max(system.RawStrengthMax, 1e-6f));
+            int bottom = source.Habitat == GeodesicVentHabitat.Submarine ? resources.SourceGrid.GetBottomLayerIndex(cell) : -1;
+            float strength = Mathf.Clamp01(systemStrength * memberStrength);
+            float coreRadius = Mathf.Lerp(Mathf.Max(0f, minimumOutletCoreRadius), Mathf.Max(minimumOutletCoreRadius, maximumOutletCoreRadius), strength);
+            built[count++] = new GeodesicVentOutlet(source.Habitat, cell, bottom, source.SystemIndex, transform.InverseTransformPoint(worldPosition), transform.InverseTransformDirection(worldNormal).normalized, strength, coreRadius);
         }
         outlets = new GeodesicVentOutlet[count]; Array.Copy(built, outlets, count); outletCount = count;
     }

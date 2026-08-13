@@ -125,8 +125,8 @@ public sealed class GeodesicChemistryTelemetry : MonoBehaviour
     private void BuildVentFootprint()
     {
         ventFootprintCells = resources.CellCount > 0 ? new bool[resources.CellCount] : null;
-        for (int i = 0; i < resources.VentCount; i++) if (resources.TryGetVentSystem(i, out GeodesicVentSystem system) && system.Habitat == GeodesicVentHabitat.Submarine)
-            for (int member = 0; member < system.MemberCount; member++) ventFootprintCells[system.Members[member].CellIndex] = true;
+        for (int i = 0; i < resources.CompactOutletCount; i++)
+            if (resources.TryGetVentOutlet(i, out GeodesicVentSourceOutlet outlet) && outlet.Habitat == GeodesicVentHabitat.Submarine) ventFootprintCells[outlet.CellIndex] = true;
     }
 
     private void ResetStatistics()

@@ -123,6 +123,29 @@ public sealed class GeodesicVentSystemClustererTests
         Assert.That(GeodesicVentOutletSelector.GetOutletScale(GeodesicVentVisualArchetype.SimilarOutlets, 1, 1f), Is.EqualTo(1f));
     }
 
+    [Test]
+    public void CompactOutletsAreOnlyEmittersAndPreserveSystemBudgets()
+    {
+        Vector3[] directions = { Direction(0f), Direction(1f), Direction(2f), Direction(15f), Direction(16f) };
+        var candidates = new[]
+        {
+            new GeodesicVentCandidate(0, 10, 3f, GeodesicVentHabitat.Submarine),
+            new GeodesicVentCandidate(1, 11, 2f, GeodesicVentHabitat.Submarine),
+            new GeodesicVentCandidate(2, 12, 1f, GeodesicVentHabitat.Submarine),
+            new GeodesicVentCandidate(3, 13, 2f, GeodesicVentHabitat.Submarine),
+            new GeodesicVentCandidate(4, 14, 1f, GeodesicVentHabitat.Submarine)
+        };
+        GeodesicVentSystem[] systems = GeodesicVentSystemClusterer.Cluster(candidates, directions, 20f);
+        GeodesicVentSourceOutlet[] outlets = GeodesicOceanResourceField.BuildCompactOutlets(systems, directions, 3.5f, 2);
+        Assert.That(outlets.Length, Is.LessThan(candidates.Length), "Clustering must remove physical mouths in this fixture.");
+        double distributed = 0d;
+        var outletCells = new System.Collections.Generic.HashSet<int>();
+        for (int i = 0; i < outlets.Length; i++) { distributed += outlets[i].SystemBudgetWeight * outlets[i].WithinSystemWeight; outletCells.Add(outlets[i].CellIndex); }
+        Assert.That(distributed, Is.EqualTo(1d).Within(1e-6d), "Compact mouths preserve the configured global budget.");
+        for (int i = 0; i < outlets.Length; i++) Assert.That(outlets[i].SourceNode, Is.EqualTo(10 + outlets[i].CellIndex));
+        Assert.That(outletCells.Count, Is.EqualTo(outlets.Length));
+    }
+
     private static Vector3 Direction(float degrees) => new Vector3(Mathf.Cos(degrees * Mathf.Deg2Rad), Mathf.Sin(degrees * Mathf.Deg2Rad), 0f);
     private static double SumWeight(GeodesicVentSystem[] systems, GeodesicVentHabitat habitat) { double sum = 0d; foreach (GeodesicVentSystem system in systems) if (system.Habitat == habitat) sum += system.NormalizedHabitatWeight; return sum; }
     private static void AssertEveryCandidateExactlyOnce(GeodesicVentSystem[] systems, int count) { var seen = new bool[count]; int members = 0; foreach (GeodesicVentSystem system in systems) { Assert.That(system.MemberCount, Is.GreaterThan(0)); foreach (GeodesicVentCandidate member in system.Members) { Assert.That(seen[member.CellIndex], Is.False); seen[member.CellIndex] = true; members++; } } Assert.That(members, Is.EqualTo(count)); }
