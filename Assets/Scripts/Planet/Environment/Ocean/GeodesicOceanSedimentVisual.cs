@@ -8,7 +8,7 @@ public sealed class GeodesicOceanSedimentVisual : MonoBehaviour
     [SerializeField] private Color oxidizedIronTint = new Color(0.62f, 0.20f, 0.06f, 1f);
     [SerializeField] private Color ironSulphideTint = new Color(0.035f, 0.04f, 0.045f, 1f);
     [SerializeField, Min(1e-8f)] private float inventoryAtFullTint = 5f;
-    [SerializeField, Min(0.1f)] private float refreshIntervalSeconds = 1f;
+    [SerializeField, Min(0.1f)] private float refreshIntervalSeconds = 0.25f;
 
     private PlanetGenerator generator;
     private GeodesicOceanSedimentField sediments;
@@ -18,6 +18,10 @@ public sealed class GeodesicOceanSedimentVisual : MonoBehaviour
     private Color[] baseColours;
     private Color[] workingColours;
     private float nextRefresh;
+    private ulong lastAppliedRevision;
+
+    public ulong LastAppliedRevision => lastAppliedRevision;
+    public ulong FullVisualRefreshCount { get; private set; }
 
     public void Initialize(PlanetGenerator owner, GeodesicOceanSedimentField field, Mesh terrainMesh, IcosphereDirectionMapping terrainMapping, bool[] underwaterCells)
     {
@@ -28,12 +32,15 @@ public sealed class GeodesicOceanSedimentVisual : MonoBehaviour
         if (baseColours == null || baseColours.Length != mesh.vertexCount) return;
         workingColours = new Color[baseColours.Length];
         System.Array.Copy(baseColours, workingColours, baseColours.Length);
-        Refresh(); enabled = true;
+        Refresh();
+        nextRefresh = Time.unscaledTime + Mathf.Max(0.1f, refreshIntervalSeconds);
+        enabled = true;
         Debug.Log($"[GeodesicSedimentVisual] vertices={workingColours.Length}, colourBytes~={(long)workingColours.Length * 16L}, mapping=completed visible terrain mapping/anchor authority, threshold={inventoryAtFullTint:G6}", this);
     }
 
     private void Update()
     {
+        if (sediments == null || !sediments.IsInitialized || sediments.VisualRevision == lastAppliedRevision) return;
         if (Time.unscaledTime < nextRefresh) return;
         nextRefresh = Time.unscaledTime + Mathf.Max(0.1f, refreshIntervalSeconds);
         Refresh();
@@ -51,6 +58,8 @@ public sealed class GeodesicOceanSedimentVisual : MonoBehaviour
             workingColours[vertex] = colour;
         }
         mesh.colors = workingColours;
+        lastAppliedRevision = sediments.VisualRevision;
+        FullVisualRefreshCount++;
     }
 
     public static Color BlendSediments(Color baseColour, double s0, double oxidizedIron, double feS, float fullTint, Color s0Tint, Color rustTint, Color feSTint)
@@ -67,7 +76,8 @@ public sealed class GeodesicOceanSedimentVisual : MonoBehaviour
     public void ClearVisual()
     {
         if (mesh != null && baseColours != null && baseColours.Length == mesh.vertexCount) mesh.colors = baseColours;
-        generator = null; sediments = null; mesh = null; mapping = null; oceanMask = null; baseColours = null; workingColours = null; nextRefresh = 0f; enabled = false;
+        generator = null; sediments = null; mesh = null; mapping = null; oceanMask = null; baseColours = null; workingColours = null;
+        nextRefresh = 0f; lastAppliedRevision = 0UL; FullVisualRefreshCount = 0UL; enabled = false;
     }
     private void OnDestroy() => ClearVisual();
 }
