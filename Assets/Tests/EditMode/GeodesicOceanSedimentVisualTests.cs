@@ -5,6 +5,21 @@ using UnityEngine;
 public sealed class GeodesicOceanSedimentVisualTests
 {
     [Test]
+    public void DefaultRefreshIntervalIsOneRealSecond()
+    {
+        GameObject owner = new GameObject("sediment visual interval test");
+        try
+        {
+            GeodesicOceanSedimentVisual visual = owner.AddComponent<GeodesicOceanSedimentVisual>();
+            Assert.That(visual.RefreshIntervalSeconds, Is.EqualTo(1f));
+        }
+        finally
+        {
+            Object.DestroyImmediate(owner);
+        }
+    }
+
+    [Test]
     public void FeSOverridesRustWithDistinctDarkDeposit()
     {
         Color result = GeodesicOceanSedimentVisual.BlendSediments(Color.blue, 0d, 5d, 5d, 5f, Color.yellow, Color.red, Color.black);

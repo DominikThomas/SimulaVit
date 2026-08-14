@@ -8,7 +8,7 @@ public sealed class GeodesicOceanSedimentVisual : MonoBehaviour
     [SerializeField] private Color oxidizedIronTint = new Color(0.62f, 0.20f, 0.06f, 1f);
     [SerializeField] private Color ironSulphideTint = new Color(0.035f, 0.04f, 0.045f, 1f);
     [SerializeField, Min(1e-8f)] private float inventoryAtFullTint = 5f;
-    [SerializeField, Min(0.1f)] private float refreshIntervalSeconds = 0.25f;
+    [SerializeField, Min(0.1f)] private float refreshIntervalSeconds = 1f;
 
     private PlanetGenerator generator;
     private GeodesicOceanSedimentField sediments;
@@ -22,6 +22,7 @@ public sealed class GeodesicOceanSedimentVisual : MonoBehaviour
 
     public ulong LastAppliedRevision => lastAppliedRevision;
     public ulong FullVisualRefreshCount { get; private set; }
+    public float RefreshIntervalSeconds => Mathf.Max(0.1f, refreshIntervalSeconds);
 
     public void Initialize(PlanetGenerator owner, GeodesicOceanSedimentField field, Mesh terrainMesh, IcosphereDirectionMapping terrainMapping, bool[] underwaterCells)
     {
@@ -33,7 +34,7 @@ public sealed class GeodesicOceanSedimentVisual : MonoBehaviour
         workingColours = new Color[baseColours.Length];
         System.Array.Copy(baseColours, workingColours, baseColours.Length);
         Refresh();
-        nextRefresh = Time.unscaledTime + Mathf.Max(0.1f, refreshIntervalSeconds);
+        nextRefresh = Time.unscaledTime + RefreshIntervalSeconds;
         enabled = true;
         Debug.Log($"[GeodesicSedimentVisual] vertices={workingColours.Length}, colourBytes~={(long)workingColours.Length * 16L}, mapping=completed visible terrain mapping/anchor authority, threshold={inventoryAtFullTint:G6}", this);
     }
@@ -42,7 +43,7 @@ public sealed class GeodesicOceanSedimentVisual : MonoBehaviour
     {
         if (sediments == null || !sediments.IsInitialized || sediments.VisualRevision == lastAppliedRevision) return;
         if (Time.unscaledTime < nextRefresh) return;
-        nextRefresh = Time.unscaledTime + Mathf.Max(0.1f, refreshIntervalSeconds);
+        nextRefresh = Time.unscaledTime + RefreshIntervalSeconds;
         Refresh();
     }
 
