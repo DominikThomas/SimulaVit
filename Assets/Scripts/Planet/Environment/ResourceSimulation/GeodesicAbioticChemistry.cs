@@ -124,6 +124,10 @@ public sealed class GeodesicAbioticChemistry : MonoBehaviour
                 // Deliberate operator split: oxidation consumes first; FeS then uses only remaining Fe2/H2S.
                 result.precipitatedFeS = PrecipitateFeS(ref fe2, ref h2s, feSFraction);
                 if (result.consumedO2 <= 0d && result.precipitatedFeS <= 0d) continue;
+                if (result.consumedO2 > 0d) resources.MarkSpatialVariation(GeodesicOceanResource.O2);
+                if (result.reactedH2 > 0d) resources.MarkSpatialVariation(GeodesicOceanResource.H2);
+                if (result.reactedH2S > 0d || result.precipitatedFeS > 0d) resources.MarkSpatialVariation(GeodesicOceanResource.H2S);
+                if (result.reactedFe2 > 0d || result.precipitatedFeS > 0d) resources.MarkSpatialVariation(GeodesicOceanResource.Fe2);
                 if (result.reactedH2S > 0d || result.reactedFe2 > 0d || result.precipitatedFeS > 0d) sedimentNodes++;
                 concentrations[o2Offset + node] = (float)(Math.Max(0d, o2) / volume);
                 concentrations[h2Offset + node] = (float)(Math.Max(0d, h2) / volume);
