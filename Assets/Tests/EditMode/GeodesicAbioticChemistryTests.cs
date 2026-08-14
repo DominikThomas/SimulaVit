@@ -33,6 +33,37 @@ public class GeodesicAbioticChemistryTests
     }
 
     [Test]
+    public void PostTransportCandidateCollectionTracksOnlyCurrentAuthoritativeReactants()
+    {
+        int[] candidates = new int[4];
+        int count = GeodesicOceanResourceField.AppendChemistryCandidate(10, 0f, 0f, 0f, candidates, 0);
+        Assert.That(count, Is.Zero, "A tick with no reduced reactants must not schedule chemistry.");
+
+        count = GeodesicOceanResourceField.AppendChemistryCandidate(10, 1f, 2f, 3f, candidates, count);
+        count = GeodesicOceanResourceField.AppendChemistryCandidate(11, 0.25f, 0f, 0f, candidates, count);
+        count = GeodesicOceanResourceField.AppendChemistryCandidate(12, 0f, 0.5f, 0f, candidates, count);
+        Assert.That(count, Is.EqualTo(3), "Vent, horizontal, and vertical arrivals visible after staged application must be candidates in this tick.");
+        CollectionAssert.AreEqual(new[] { 10, 11, 12 }, new ArraySegment<int>(candidates, 0, count));
+
+        count = 0; // Start of the following resource tick.
+        count = GeodesicOceanResourceField.AppendChemistryCandidate(10, 0f, 0f, 0f, candidates, count);
+        Assert.That(count, Is.Zero, "A node whose reactants disappeared must naturally leave the rebuilt list.");
+    }
+
+    [Test]
+    public void DensePostTransportStateCanScheduleEveryActiveNodeWithoutChangingOrder()
+    {
+        int[] activeNodes = { 2, 5, 9, 14 };
+        int[] candidates = new int[activeNodes.Length];
+        int count = 0;
+        for (int i = 0; i < activeNodes.Length; i++)
+            count = GeodesicOceanResourceField.AppendChemistryCandidate(activeNodes[i], 0f, 0f, 1f, candidates, count);
+
+        Assert.That(count, Is.EqualTo(activeNodes.Length));
+        CollectionAssert.AreEqual(activeNodes, candidates, "Dense chemistry must degrade to the original authoritative active-node order.");
+    }
+
+    [Test]
     public void ZeroOxygenStillAllowsFeSAfterOxidationNoOp()
     {
         double o2 = 0d, h2 = 0d, h2s = 3d, fe2 = 5d;
