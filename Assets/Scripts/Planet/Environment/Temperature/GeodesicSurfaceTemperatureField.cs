@@ -15,10 +15,12 @@ public enum GeodesicThermalModel
 public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
 {
     private static readonly ProfilerMarker TickMarker = new ProfilerMarker("GeodesicTemperature.SurfaceTick");
-    private static readonly ProfilerMarker TargetMarker = new ProfilerMarker("GeodesicTemperature.TargetUpdate");
-    private static readonly ProfilerMarker ResponseMarker = new ProfilerMarker("GeodesicTemperature.SurfaceResponse");
+    private static readonly ProfilerMarker TargetAndResponseMarker = new ProfilerMarker("GeodesicTemperature.TargetAndSurfaceResponse");
     private static readonly ProfilerMarker DiffusionMarker = new ProfilerMarker("GeodesicTemperature.HorizontalDiffusion");
     private static readonly ProfilerMarker CommitMarker = new ProfilerMarker("GeodesicTemperature.CommittedEvent");
+    private static ProfilerCounterValue<int> TicksPerFrameCounter = new ProfilerCounterValue<int>(ProfilerCategory.Scripts, "Geodesic Thermal Ticks / Frame", ProfilerMarkerDataUnit.Count, ProfilerCounterOptions.FlushOnEndOfFrame);
+    private static ProfilerCounterValue<float> SimSecondsPerFrameCounter = new ProfilerCounterValue<float>(ProfilerCategory.Scripts, "Geodesic Thermal Sim Seconds / Frame", ProfilerMarkerDataUnit.Count, ProfilerCounterOptions.FlushOnEndOfFrame);
+    private static ProfilerCounterValue<float> BacklogCounter = new ProfilerCounterValue<float>(ProfilerCategory.Scripts, "Geodesic Thermal Backlog Seconds", ProfilerMarkerDataUnit.Count, ProfilerCounterOptions.FlushOnEndOfFrame);
     public event Action<float> SurfaceTemperatureTickCommitted;
     public event Action SurfaceTemperatureFieldReinitialized;
     public event Action SurfaceTemperatureFieldClearing;
@@ -62,6 +64,7 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
     [SerializeField] private double unconsumedThermalRemainderSeconds;
     [SerializeField] private double discardedSimulationSeconds;
     [SerializeField] private int thermalTicksCurrentRenderedFrame;
+    [SerializeField] private float thermalSimSecondsProcessedThisFrame;
     [SerializeField] private int maximumThermalTicksPerRenderedFrame;
     [SerializeField] private double currentAuthoritativeSimulationTime;
     [SerializeField] private double thermalIntegrationCursorTime;
@@ -151,6 +154,7 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
     public int SurfaceCellsUpdatedLastTick => surfaceCellsUpdatedLastTick;
     public int HorizontalEdgesProcessedLastTick => horizontalEdgesProcessedLastTick;
     public int ThermalTicksCurrentRenderedFrame => thermalTicksCurrentRenderedFrame;
+    public float ThermalSimSecondsProcessedThisFrame => thermalSimSecondsProcessedThisFrame;
 
     private void Awake() => ResolveReferences();
 
@@ -162,6 +166,7 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
         double target = Math.Max(0d, simulationClock.SimulationTimeSeconds);
         currentAuthoritativeSimulationTime = target;
         thermalTicksCurrentRenderedFrame = 0;
+        thermalSimSecondsProcessedThisFrame = 0f;
         if (target < lastObservedAuthoritativeSimulationTime)
         {
             // Clock restoration/regression establishes a new integration epoch; old-world backlog never survives.
@@ -195,6 +200,8 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
         }
         maximumThermalTicksPerRenderedFrame = Mathf.Max(maximumThermalTicksPerRenderedFrame, thermalTicksCurrentRenderedFrame);
         unconsumedThermalRemainderSeconds = Math.Max(0d, target - thermalIntegrationCursorTime);
+        thermalSimSecondsProcessedThisFrame = thermalTicksCurrentRenderedFrame * (float)interval;
+        TicksPerFrameCounter.Value = thermalTicksCurrentRenderedFrame; SimSecondsPerFrameCounter.Value = thermalSimSecondsProcessedThisFrame; BacklogCounter.Value = (float)unconsumedThermalRemainderSeconds;
         currentSunOrbitTime = sunDirectionProvider != null ? sunDirectionProvider.CurrentOrbitTimeSeconds : target;
         currentSunPhase01 = sunDirectionProvider != null ? sunDirectionProvider.GetDayPhase01AtSimulationTime(target) : 0f;
         maximumSolarAngularAdvancePerThermalTickDegrees = sunDirectionProvider != null ? Mathf.Abs(sunDirectionProvider.orbitDegreesPerSecond * (float)interval) : 0f;
@@ -246,6 +253,7 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
         double simulationTime = simulationClock != null ? Math.Max(0d, simulationClock.SimulationTimeSeconds) : 0d;
         thermalIntegrationCursorTime = lastObservedAuthoritativeSimulationTime = currentAuthoritativeSimulationTime = simulationTime;
         totalAuthoritativeSimulationSecondsReceived = totalSimulationSecondsConsumedByThermalTicks = unconsumedThermalRemainderSeconds = discardedSimulationSeconds = 0d;
+        thermalTicksCurrentRenderedFrame = 0; thermalSimSecondsProcessedThisFrame = 0f;
         surfaceTemperatureTickSequence = 0;
         accumulatingSolarDayIndex = lastCompletedSolarDayIndex = -1; accumulatingDaySampleCount = 0;
         nextDiagnosticSnapshotUnscaledTime = 0d; nextDiffusionConservationAuditSimulationTime = simulationTime + Mathf.Max(0.1f, diffusionConservationAuditIntervalSeconds);
@@ -280,6 +288,7 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
         runtimeCellCount = 0;
         thermalIntegrationCursorTime = lastObservedAuthoritativeSimulationTime = currentAuthoritativeSimulationTime = 0d;
         totalAuthoritativeSimulationSecondsReceived = totalSimulationSecondsConsumedByThermalTicks = unconsumedThermalRemainderSeconds = discardedSimulationSeconds = 0d;
+        thermalTicksCurrentRenderedFrame = 0; thermalSimSecondsProcessedThisFrame = 0f;
         surfaceTemperatureTickSequence = 0;
         accumulatingSolarDayIndex = lastCompletedSolarDayIndex = -1; accumulatingDaySampleCount = 0;
     }
@@ -338,21 +347,10 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
         {
         long tickStart = Stopwatch.GetTimestamp();
         if (cachedLandHeatCapacityMultiplier != landHeatCapacityMultiplier || cachedOceanHeatCapacityMultiplier != oceanSurfaceHeatCapacityMultiplier) RebuildThermalCapacities();
-        long targetStart = Stopwatch.GetTimestamp();
+        long targetAndResponseStart = Stopwatch.GetTimestamp();
         Vector3 tickSunDirection = sunDirectionProvider != null ? sunDirectionProvider.GetPlanetToSunDirectionWorldAtSimulationTime(representativeSimulationTime) : Vector3.zero;
-        using (TargetMarker.Auto()) UpdateTemperatureTargets(tickSunDirection);
-        lastTargetUpdateDurationMilliseconds = ElapsedMilliseconds(targetStart);
-        using (ResponseMarker.Auto())
-        {
-        for (int i = 0; i < runtimeCellCount; i++)
-        {
-            float current = surfaceTemperatureKelvinByCell[i];
-            float target = targetTemperatureKelvinByCell[i];
-            float timescale = (target >= current ? heatingTimescaleSeconds : coolingTimescaleSeconds) * GetSurfaceMultiplier(i);
-            float response = 1f - Mathf.Exp(-dt / Mathf.Max(MinimumTimescale, timescale));
-            workingTemperatureKelvinByCell[i] = current + (target - current) * response;
-        }
-        }
+        using (TargetAndResponseMarker.Auto()) UpdateTemperatureTargetsAndApplyResponse(tickSunDirection, dt);
+        lastTargetUpdateDurationMilliseconds = ElapsedMilliseconds(targetAndResponseStart);
         surfaceCellsUpdatedLastTick = runtimeCellCount;
         long diffusionStart = Stopwatch.GetTimestamp();
         if (activeThermalModel == GeodesicThermalModel.ConservativeImplicit)
@@ -373,7 +371,7 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
         using (CommitMarker.Auto()) SurfaceTemperatureTickCommitted?.Invoke(dt);
         lastCompletedTemperatureTick += dt;
         lastTickDurationMilliseconds = ElapsedMilliseconds(tickStart);
-        if (enableProfilingDiagnostics) UnityEngine.Debug.Log($"[GeodesicTemperatureProfile] cells={runtimeCellCount}, edges={transportGraph.EdgeCount}, substeps={lastDiffusionSubstepCount}, targetMs={lastTargetUpdateDurationMilliseconds:F3}, diffusionMs={lastDiffusionDurationMilliseconds:F3}, tickMs={lastTickDurationMilliseconds:F3}, diffusionRelativeError={latestDiffusionConservationRelativeError:E3}", this);
+        if (enableProfilingDiagnostics) UnityEngine.Debug.Log($"[GeodesicTemperatureProfile] cells={runtimeCellCount}, edges={transportGraph.EdgeCount}, substeps={lastDiffusionSubstepCount}, targetResponseMs={lastTargetUpdateDurationMilliseconds:F3}, diffusionMs={lastDiffusionDurationMilliseconds:F3}, tickMs={lastTickDurationMilliseconds:F3}, diffusionRelativeError={latestDiffusionConservationRelativeError:E3}", this);
         }
     }
 
@@ -391,6 +389,29 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
             float geothermalStrength = resourceField != null ? resourceField.GetTerrestrialThermalInfluence(i) : 0f;
             float sourceKelvin = terrestrialVentSourceTemperatureC + 273.15f;
             targetTemperatureKelvinByCell[i] = environmentalTarget + geothermalStrength * terrestrialVentThermalInfluence * Mathf.Max(0f, sourceKelvin - environmentalTarget);
+        }
+    }
+
+    private void UpdateTemperatureTargetsAndApplyResponse(Vector3 sunDirectionWorld, float dt)
+    {
+        Vector3 localSunDirection = transform.InverseTransformDirection(sunDirectionWorld);
+        if (localSunDirection.sqrMagnitude > 1e-12f) localSunDirection.Normalize();
+        bool linearInsolation = Mathf.Approximately(insolationExponent, 1f);
+        bool squareInsolation = Mathf.Approximately(insolationExponent, 2f);
+        float sourceKelvin = terrestrialVentSourceTemperatureC + 273.15f;
+        for (int i = 0; i < runtimeCellCount; i++)
+        {
+            float insolation = Mathf.Max(0f, Vector3.Dot(topology.CellDirections[i], localSunDirection));
+            float shapedInsolation = linearInsolation ? insolation : squareInsolation ? insolation * insolation : Mathf.Pow(insolation, insolationExponent);
+            float environmentalTarget = baseTemperatureKelvin + insolationTemperatureGainKelvin * shapedInsolation;
+            float geothermalStrength = resourceField != null ? resourceField.GetTerrestrialThermalInfluence(i) : 0f;
+            float target = environmentalTarget + geothermalStrength * terrestrialVentThermalInfluence * Mathf.Max(0f, sourceKelvin - environmentalTarget);
+            targetTemperatureKelvinByCell[i] = target;
+
+            float current = surfaceTemperatureKelvinByCell[i];
+            float timescale = (target >= current ? heatingTimescaleSeconds : coolingTimescaleSeconds) * GetSurfaceMultiplier(i);
+            float response = 1f - Mathf.Exp(-dt / Mathf.Max(MinimumTimescale, timescale));
+            workingTemperatureKelvinByCell[i] = current + (target - current) * response;
         }
     }
 

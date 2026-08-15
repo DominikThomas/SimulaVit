@@ -12,6 +12,10 @@ public sealed class GeodesicChemistryTelemetry : MonoBehaviour
     [Header("Periodic chemistry telemetry (diagnostic only)")]
     [SerializeField, Tooltip("Authoritative simulated seconds between summaries. Zero or less disables periodic telemetry.")]
     private float chemistryTelemetryIntervalSimSeconds = 60f;
+    [SerializeField, Tooltip("Enables detailed chemistry summaries. Disabled updates do not scan ocean or sediment state.")]
+    private bool telemetryEnabled = true;
+    [SerializeField, Min(0f), Tooltip("Minimum unscaled real seconds between expensive whole-ocean telemetry snapshots.")]
+    private float minimumRealIntervalSeconds = 5f;
     [SerializeField, Min(0f), Tooltip("Concentration at or below which local water volume is classified as anoxic for telemetry only. This does not gate chemistry or biology.")]
     private float telemetryAnoxicO2Threshold = 0.000001f;
 
@@ -19,7 +23,7 @@ public sealed class GeodesicChemistryTelemetry : MonoBehaviour
     private GeodesicAbioticChemistry chemistry;
     private GeodesicOceanSedimentField sediments;
     private ReplicatorManager simulationClock;
-    private double nextTelemetrySimulationTime;
+    private ChemistryTelemetrySchedule schedule;
     private ChemistryCounters previousCounters;
     private bool initialized;
     private readonly WeightedChemistryStatistics ocean = new WeightedChemistryStatistics();
@@ -30,8 +34,15 @@ public sealed class GeodesicChemistryTelemetry : MonoBehaviour
 
     public float IntervalSimSeconds => chemistryTelemetryIntervalSimSeconds;
     public float AnoxicO2Threshold => telemetryAnoxicO2Threshold;
+    public bool TelemetryEnabled => telemetryEnabled;
+    public float EffectiveMinimumRealIntervalSeconds => Mathf.Max(0f, minimumRealIntervalSeconds);
+    public long FullTelemetrySnapshotCount => schedule.FullSnapshotCount;
+    public double LastTelemetrySimulationTime => schedule.LastSnapshotSimulationTime;
+    public double LastTelemetryRealTime => schedule.LastSnapshotRealTime;
 
     public void SetInterval(float intervalSeconds) => chemistryTelemetryIntervalSimSeconds = float.IsFinite(intervalSeconds) ? intervalSeconds : 0f;
+    public void SetTelemetryEnabled(bool enabled) => telemetryEnabled = enabled;
+    public void SetMinimumRealInterval(float intervalSeconds) => minimumRealIntervalSeconds = float.IsFinite(intervalSeconds) ? Mathf.Max(0f, intervalSeconds) : 0f;
 
     internal void InitializeForWorld(GeodesicOceanResourceField resourceField, GeodesicAbioticChemistry chemistryField, GeodesicOceanSedimentField sedimentField, double simulationTime)
     {
@@ -40,7 +51,7 @@ public sealed class GeodesicChemistryTelemetry : MonoBehaviour
         simulationClock = FindFirstObjectByType<ReplicatorManager>();
         initialized = resources != null && resources.IsInitialized;
         previousCounters = ReadCounters();
-        nextTelemetrySimulationTime = Math.Max(0d, simulationTime) + Math.Max(0d, chemistryTelemetryIntervalSimSeconds);
+        schedule.Reset(simulationTime, Time.unscaledTimeAsDouble, chemistryTelemetryIntervalSimSeconds, EffectiveMinimumRealIntervalSeconds);
         BuildVentFootprint();
         Debug.Log($"[GeodesicChemistryTelemetry] initialized atmosphereChemistry=notYetAuthoritative telemetryInterval={chemistryTelemetryIntervalSimSeconds:G6}s anoxicO2Threshold={telemetryAnoxicO2Threshold:G6} concentrationUnits ventRates={{H2={resources.VentH2Rate:G6},H2S={resources.VentH2SRate:G6},CO2={resources.VentCO2Rate:G6},Fe2={resources.VentFe2Rate:G6}}}", this);
     }
@@ -48,17 +59,15 @@ public sealed class GeodesicChemistryTelemetry : MonoBehaviour
     internal void ClearWorld()
     {
         initialized = false; resources = null; chemistry = null; sediments = null; simulationClock = null;
-        nextTelemetrySimulationTime = 0d; previousCounters = default; ventFootprintCells = null;
+        schedule.Clear(); previousCounters = default; ventFootprintCells = null;
     }
 
     private void Update()
     {
-        if (!initialized || simulationClock == null) return;
+        if (!telemetryEnabled || !initialized || simulationClock == null) return;
         double now = Math.Max(0d, simulationClock.SimulationTimeSeconds);
-        if (!IsDue(chemistryTelemetryIntervalSimSeconds, now, nextTelemetrySimulationTime)) return;
+        if (!schedule.TryTakeSnapshot(true, chemistryTelemetryIntervalSimSeconds, EffectiveMinimumRealIntervalSeconds, now, Time.unscaledTimeAsDouble)) return;
         Emit(now);
-        // Skip crossed historical boundaries: at most one current-state sample in this rendered update.
-        nextTelemetrySimulationTime = now + chemistryTelemetryIntervalSimSeconds;
     }
 
     public static bool IsDue(double interval, double simulationTime, double nextTime)
@@ -158,6 +167,47 @@ public sealed class GeodesicChemistryTelemetry : MonoBehaviour
 
     private static WeightedChemistryStatistics[] CreateLayerStatistics()
     { var result = new WeightedChemistryStatistics[LayerCount]; for (int i = 0; i < result.Length; i++) result[i] = new WeightedChemistryStatistics(); return result; }
+}
+
+/// <summary>Allocation-free, deterministic scheduling for expensive diagnostic snapshots.</summary>
+public struct ChemistryTelemetrySchedule
+{
+    public double NextSimulationTime { get; private set; }
+    public double NextEligibleRealTime { get; private set; }
+    public long FullSnapshotCount { get; private set; }
+    public double LastSnapshotSimulationTime { get; private set; }
+    public double LastSnapshotRealTime { get; private set; }
+
+    public void Reset(double simulationTime, double realTime, double simulatedInterval, double minimumRealInterval)
+    {
+        NextSimulationTime = Nonnegative(simulationTime) + Nonnegative(simulatedInterval);
+        NextEligibleRealTime = Nonnegative(realTime) + Nonnegative(minimumRealInterval);
+        FullSnapshotCount = 0;
+        LastSnapshotSimulationTime = LastSnapshotRealTime = 0d;
+    }
+
+    public void Clear()
+    {
+        NextSimulationTime = NextEligibleRealTime = 0d;
+        FullSnapshotCount = 0;
+        LastSnapshotSimulationTime = LastSnapshotRealTime = 0d;
+    }
+
+    public bool TryTakeSnapshot(bool enabled, double simulatedInterval, double minimumRealInterval, double simulationTime, double realTime)
+    {
+        if (!enabled || !GeodesicChemistryTelemetry.IsDue(simulatedInterval, simulationTime, NextSimulationTime) || realTime + 1e-9d < NextEligibleRealTime) return false;
+        simulationTime = Nonnegative(simulationTime);
+        realTime = Nonnegative(realTime);
+        LastSnapshotSimulationTime = simulationTime;
+        LastSnapshotRealTime = realTime;
+        FullSnapshotCount++;
+        // Crossed simulated-time boundaries are deliberately coalesced; no backlog is retained.
+        NextSimulationTime = simulationTime + Nonnegative(simulatedInterval);
+        NextEligibleRealTime = realTime + Nonnegative(minimumRealInterval);
+        return true;
+    }
+
+    private static double Nonnegative(double value) => double.IsNaN(value) || value < 0d ? 0d : value;
 }
 
 public sealed class WeightedChemistryStatistics
