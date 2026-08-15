@@ -162,15 +162,26 @@ MonoBehaviour:
     initialCO2: 1
     initialO2: 0.01
     initialCH4: 0
+    atmosphericN2Bar: 0
+    atmosphericCO2Bar: 0
+    atmosphericO2Bar: 0
+    atmosphericCH4Bar: 0
+    atmosphericH2Bar: 0
+    atmosphericH2SBar: 0
     initialDissolvedFe2Plus: 8
+    ventClustering: 0.65
     ventH2PerTick: 0.006
     ventH2SPerTick: 0.01
     ventCO2PerTick: 0
     ventFe2PerTick: 0.002
+    terrestrialVentFraction: 0.25
     initialSpawnCount: 100
     startPaused: 0
     approximateThermalIntervalSeconds: 2
     geodesicResourceTransportIntervalSeconds: 5
+    chemistryTelemetryIntervalSimSeconds: 60
+    atmosphereInventoryPerBar: 1
+    airSeaExchangeHalfLifeSeconds: 0
   currentConfig:
     planetSeed: 12345
     useRandomSeed: 1
@@ -185,15 +196,26 @@ MonoBehaviour:
     initialCO2: 1
     initialO2: 0.01
     initialCH4: 0
+    atmosphericN2Bar: 0
+    atmosphericCO2Bar: 0
+    atmosphericO2Bar: 0
+    atmosphericCH4Bar: 0
+    atmosphericH2Bar: 0
+    atmosphericH2SBar: 0
     initialDissolvedFe2Plus: 8
+    ventClustering: 0.65
     ventH2PerTick: 0.006
     ventH2SPerTick: 0.01
     ventCO2PerTick: 0
     ventFe2PerTick: 0.002
+    terrestrialVentFraction: 0.25
     initialSpawnCount: 100
     startPaused: 0
     approximateThermalIntervalSeconds: 2
     geodesicResourceTransportIntervalSeconds: 5
+    chemistryTelemetryIntervalSimSeconds: 60
+    atmosphereInventoryPerBar: 1
+    airSeaExchangeHalfLifeSeconds: 0
   loadSavedStartupConfig: 1
   saveStartupConfigOnStart: 1
   logAppliedStartupConfig: 1
@@ -1081,7 +1103,8 @@ MonoBehaviour:
   shorelinePreservationDistance: 3
   bathymetryVisualStrength: 0.35
   enableAtmosphere: 1
-  atmosphereRadiusMultiplier: 1.06
+  atmosphereRadiusMultiplier: 1.01
+  geodesicAtmosphereRenderSubdivisionLevel: 4
   atmosphereMaterial: {fileID: 2100000, guid: 359c2383b6d970d4e90649d66110cde6, type: 2}
   randomizeOnStart: 0
   useRandomSeed: 1
@@ -1186,6 +1209,8 @@ MonoBehaviour:
   landHeatCapacityMultiplier: 1
   oceanSurfaceHeatCapacityMultiplier: 8
   insolationExponent: 1
+  terrestrialVentSourceTemperatureC: 350
+  terrestrialVentThermalInfluence: 0.06
   debugTemperatureVisualization: 0
   enableProfilingDiagnostics: 0
   initialized: 0
@@ -1205,6 +1230,7 @@ MonoBehaviour:
   unconsumedThermalRemainderSeconds: 0
   discardedSimulationSeconds: 0
   thermalTicksCurrentRenderedFrame: 0
+  thermalSimSecondsProcessedThisFrame: 0
   maximumThermalTicksPerRenderedFrame: 0
   currentAuthoritativeSimulationTime: 0
   thermalIntegrationCursorTime: 0
@@ -1387,10 +1413,15 @@ MonoBehaviour:
   - 1
   maximumTransportTicksPerFrame: 64
   ventColumnFraction: 0.02
+  ventClustering: 0.65
+  geothermalPatchiness: 0.8
+  terrestrialVentFraction: 0.25
   ventH2PerTick: 0.006
   ventH2SPerTick: 0.01
   ventCO2PerTick: 0
   ventFe2PerTick: 0.002
+  maximumOutletsPerSystem: 5
+  outletSelectionRadiusDegrees: 3.5
   initialized: 0
   cellCount: 0
   nodeCapacity: 0
@@ -1410,17 +1441,26 @@ MonoBehaviour:
   horizontalLinkCount: 0
   verticalLinkCount: 0
   ventCount: 0
+  rawVentCandidateCount: 0
+  submarineVentCount: 0
+  terrestrialVentCount: 0
+  normalizedSubmarineWeightSum: 0
   transportIntegrationCursorTime: 0
   unconsumedTransportRemainderSeconds: 0
   completedTransportTicks: 0
   transportCacheMemoryBytes: 0
   stagingBufferMemoryBytes: 0
+  resourceTicksExecutedThisFrame: 0
+  resourceSimSecondsProcessedThisFrame: 0
   cachedMeanO2ByLayer:
   - 0
   - 0
   - 0
   - 0
   - 0
+  horizontalActiveResourceChannelsLastTick: 0
+  horizontalSkippedUniformChannelsLastTick: 0
+  horizontalLinkResourceEvaluationsLastTick: 0
 --- !u!114 &382753110
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1440,6 +1480,9 @@ MonoBehaviour:
   intensityMultiplier: 0.42
   refreshIntervalSeconds: 0.5
   layer1VisualWeight: 0.4
+  maximumVisualizedRecentOxidation: 2
+  rustyOxidationTint: {r: 0.72, g: 0.3, b: 0.08, a: 1}
+  rustyOxidationIntensity: 0.65
 --- !u!1 &581314702
 GameObject:
   m_ObjectHideFlags: 0
@@ -52173,7 +52216,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 1}
   m_AnchorMax: {x: 1, y: 1}
-  m_AnchoredPosition: {x: 0, y: -0.00012207031}
+  m_AnchoredPosition: {x: 0, y: -0.00018310547}
   m_SizeDelta: {x: 0, y: 500}
   m_Pivot: {x: 0, y: 1}
 --- !u!114 &1582151553
