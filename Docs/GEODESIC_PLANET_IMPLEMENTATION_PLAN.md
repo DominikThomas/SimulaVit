@@ -161,6 +161,8 @@ Old saves without grid metadata are legacy cube-sphere saves. Geodesic saves mus
 
 ## Atmosphere v1 authority
 
+The Geodesic visual atmosphere is a separate smooth icosphere shell built from the shared render-only `IcosphereRenderGeometryCache` and `IcosphereRenderMeshBuilder`. It uses subdivision 4 by default, is centered on the planet at `CurrentVisibleOuterRadius * atmosphereRadiusMultiplier` (default multiplier 1.04), and reuses the existing `Atmosphere_Fresnel_Mat` / `Shader Graphs/Atmosphere_Fresnel` asset unchanged. It has no collider or simulation authority and has no dependency on Legacy cube-sphere geometry generation.
+
 The first authoritative Geodesic atmosphere is a dedicated global, well-mixed `GeodesicAtmosphereField`; it is independent of `PlanetResourceMap` and is not spatially resolved. Its gases are N2, CO2, O2, CH4, H2, and H2S. Authoritative state is gas inventory in the same simulation bookkeeping units used by dissolved inventory. Partial pressure is derived as `inventory / atmosphereInventoryPerBar`, where the configurable capacity is an explicit simulation conversion rather than an Earth-derived physical constant; total pressure is the sum of partial pressures.
 
 Ocean startup CO2/O2/CH4/Fe2 remain dissolved concentrations and are configured independently from atmospheric starting partial pressures. Conservative defaults set every atmospheric partial pressure to zero, `atmosphereInventoryPerBar` to 1 inventory unit/bar, all equilibrium-concentration-per-bar coefficients to 1, and every exchange half-life to zero (disabled). No ocean value initializes atmosphere or vice versa.

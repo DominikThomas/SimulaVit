@@ -349,6 +349,9 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     public bool enableAtmosphere = true;
     [Tooltip("Atmosphere shell radius multiplier relative to planet radius.")]
     [Range(1.001f, 1.2f)] public float atmosphereRadiusMultiplier = 1.04f;
+    [Range(0, GeodesicGridTopology.MaxSupportedSubdivision)]
+    [Tooltip("Visual-only Geodesic atmosphere shell subdivision. This is intentionally independent of terrain and simulation resolution.")]
+    public int geodesicAtmosphereRenderSubdivisionLevel = 4;
     public Material atmosphereMaterial;
 
     [Header("Randomization")]
@@ -876,6 +879,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
         stage = System.Diagnostics.Stopwatch.StartNew();
         IcosphereDirectionMapping oceanMapping = BuildGeodesicOceanVisual();
+        BuildGeodesicAtmosphereVisual();
         GetOrAddComponent<GeodesicOceanFe2Visual>(gameObject).Initialize(
             this, oceanResourceField, geodesicOceanMesh, geodesicOceanMeshRenderer, oceanMapping);
         GetOrAddComponent<GeodesicOceanSedimentVisual>(gameObject).Initialize(
@@ -915,7 +919,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         LogModeTransitionRendererInventory("after generation", PlanetGridType.GeodesicIcosphere);
         total.Stop();
         geodesicLastFullSynchronousGenerationMilliseconds = total.Elapsed.TotalMilliseconds;
-        Debug.Log($"[GeodesicPrototype] coreGenerationDurationMs={geodesicLastCoreGenerationMilliseconds:F2}, fullSynchronousGenerationDurationMs={geodesicLastFullSynchronousGenerationMilliseconds:F2}, profilingBoundaryDifferenceMs={(geodesicLastFullSynchronousGenerationMilliseconds - geodesicLastCoreGenerationMilliseconds):F2}, profilingBoundaryDifference=post-core synchronous diagnostics/query logging/inventory reporting,  simulationSubdivision={simulationSubdivision}, renderSubdivision={renderSubdivision}, colliderSubdivision={colliderSubdivision}, oceanSubdivision={geodesicOceanRenderSubdivisionLevel}, cells={GeodesicTopology.CellCount}, renderVertices={mesh.vertexCount}, renderTriangles={mesh.triangles.Length / 3}, colliderVertices={colliderMesh.vertexCount}, colliderTriangles={colliderMesh.triangles.Length / 3}, simulationTriangles={GeodesicTopology.TriangleCount}, edges={GeodesicTopology.EdgeCount}, durationMs={geodesicLastFullSynchronousGenerationMilliseconds:F2}, approxSimulationTopologyMemory={GeodesicTopology.ApproximateMemoryBytes} bytes, approxRenderGeometryMemory={renderGeometry.ApproximateManagedBytes} bytes, approxColliderGeometryMemory={colliderGeometry.ApproximateManagedBytes} bytes, approxRenderMappingMemory={renderMapping.ApproximateManagedBytes} bytes, approxColliderMappingMemory={colliderMapping.ApproximateManagedBytes} bytes, mappingCacheEntries={IcosphereDirectionMappingCache.CachedMappingCount}, renderGeometryCacheEntries={IcosphereRenderGeometryCache.CachedSubdivisionCount}. Validation: {validation}", this);
+        Debug.Log($"[GeodesicPrototype] coreGenerationDurationMs={geodesicLastCoreGenerationMilliseconds:F2}, fullSynchronousGenerationDurationMs={geodesicLastFullSynchronousGenerationMilliseconds:F2}, profilingBoundaryDifferenceMs={(geodesicLastFullSynchronousGenerationMilliseconds - geodesicLastCoreGenerationMilliseconds):F2}, profilingBoundaryDifference=post-core synchronous diagnostics/query logging/inventory reporting,  simulationSubdivision={simulationSubdivision}, renderSubdivision={renderSubdivision}, colliderSubdivision={colliderSubdivision}, oceanSubdivision={geodesicOceanRenderSubdivisionLevel}, atmosphereSubdivision={geodesicAtmosphereRenderSubdivisionLevel}, cells={GeodesicTopology.CellCount}, renderVertices={mesh.vertexCount}, renderTriangles={mesh.triangles.Length / 3}, colliderVertices={colliderMesh.vertexCount}, colliderTriangles={colliderMesh.triangles.Length / 3}, simulationTriangles={GeodesicTopology.TriangleCount}, edges={GeodesicTopology.EdgeCount}, durationMs={geodesicLastFullSynchronousGenerationMilliseconds:F2}, approxSimulationTopologyMemory={GeodesicTopology.ApproximateMemoryBytes} bytes, approxRenderGeometryMemory={renderGeometry.ApproximateManagedBytes} bytes, approxColliderGeometryMemory={colliderGeometry.ApproximateManagedBytes} bytes, approxRenderMappingMemory={renderMapping.ApproximateManagedBytes} bytes, approxColliderMappingMemory={colliderMapping.ApproximateManagedBytes} bytes, mappingCacheEntries={IcosphereDirectionMappingCache.CachedMappingCount}, renderGeometryCacheEntries={IcosphereRenderGeometryCache.CachedSubdivisionCount}. Validation: {validation}", this);
     }
 
 
@@ -2285,6 +2289,32 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
             false);
 
         return oceanMapping;
+    }
+
+    void BuildGeodesicAtmosphereVisual()
+    {
+        int atmosphereSubdivision = Mathf.Clamp(
+            geodesicAtmosphereRenderSubdivisionLevel,
+            0,
+            GeodesicGridTopology.MaxSupportedSubdivision);
+        float shellRadius = CurrentVisibleOuterRadius * atmosphereRadiusMultiplier;
+        IcosphereRenderGeometry atmosphereGeometry =
+            IcosphereRenderGeometryCache.GetOrBuild(atmosphereSubdivision);
+
+        Mesh previousAtmosphereMesh = atmosphereMesh;
+        atmosphereMesh = IcosphereRenderMeshBuilder.BuildSurfaceMesh(
+            atmosphereGeometry,
+            shellRadius,
+            $"Geodesic Atmosphere Render L{atmosphereSubdivision}");
+        if (previousAtmosphereMesh != null) Destroy(previousAtmosphereMesh);
+
+        atmosphereMeshFilter.sharedMesh = atmosphereMesh;
+        atmosphereMeshRenderer.sharedMaterial = atmosphereMaterial;
+        atmosphereMeshRenderer.enabled = enableAtmosphere && atmosphereMaterial != null;
+        atmosphereMeshRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        atmosphereMeshRenderer.receiveShadows = false;
+
+        Debug.Log($"[GeodesicAtmosphereVisual] geometry=icosphere, subdivision={atmosphereSubdivision}, radius={shellRadius:F6}, visibleOuterRadius={CurrentVisibleOuterRadius:F6}, radiusMultiplier={atmosphereRadiusMultiplier:F4}, material={(atmosphereMaterial != null ? atmosphereMaterial.name : "<missing>")}, authority=visual-only", this);
     }
 
     void ApplyGeodesicOceanDepthColours(Mesh oceanSurfaceMesh, IcosphereRenderGeometry geometry, IcosphereDirectionMapping mapping)
