@@ -20,10 +20,18 @@ public class SimulationStartupConfig
     public float baseTempKelvin = 273.15f;
     public float insolationTempGain = 45f;
 
-    [Header("Atmosphere")]
+    [Header("Dissolved Ocean Gases")]
     public float initialCO2 = 1.0f;
     public float initialO2 = 0.01f;
     public float initialCH4 = 0f;
+
+    [Header("Geodesic Atmosphere (partial pressure bar)")]
+    public float atmosphericN2Bar = 0f;
+    public float atmosphericCO2Bar = 0f;
+    public float atmosphericO2Bar = 0f;
+    public float atmosphericCH4Bar = 0f;
+    public float atmosphericH2Bar = 0f;
+    public float atmosphericH2SBar = 0f;
 
     [Header("Ocean Chemistry")]
     public float initialDissolvedFe2Plus = 8f;
@@ -48,6 +56,10 @@ public class SimulationStartupConfig
     public float geodesicResourceTransportIntervalSeconds = 5f;
     [Tooltip("Authoritative simulated seconds between Geodesic chemistry diagnostics. Zero or less disables them.")]
     public float chemistryTelemetryIntervalSimSeconds = 60f;
+    [Tooltip("Simulation inventory units represented by one atmospheric bar; not a physical Earth constant.")]
+    public float atmosphereInventoryPerBar = 1f;
+    [Tooltip("Common v1 air-sea exchange half-life. Zero disables exchange; per-gas coefficients remain available on GeodesicAirSeaGasExchange.")]
+    public float airSeaExchangeHalfLifeSeconds = 0f;
 
     public SimulationStartupConfig Clone()
     {
