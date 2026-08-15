@@ -71,6 +71,8 @@ public class GeodesicCellPicker : MonoBehaviour
     private GeodesicOceanResourceField oceanResourceField;
     private GeodesicOceanSedimentField oceanSedimentField;
     private GeodesicExperiencedTemperatureField experiencedTemperatureField;
+    private GeodesicAtmosphereField atmosphereField;
+    private GeodesicAirSeaGasExchange airSeaGasExchange;
     private Vector3 selectedWorldPosition;
     private ReplicatorManager temperatureDisplayAuthority;
     private string selectedLayeredOceanLog = ", layeredOcean=unavailable";
@@ -117,6 +119,8 @@ public class GeodesicCellPicker : MonoBehaviour
         oceanResourceField = GetComponent<GeodesicOceanResourceField>();
         oceanSedimentField = GetComponent<GeodesicOceanSedimentField>();
         experiencedTemperatureField = GetComponent<GeodesicExperiencedTemperatureField>();
+        atmosphereField = GetComponent<GeodesicAtmosphereField>();
+        airSeaGasExchange = GetComponent<GeodesicAirSeaGasExchange>();
     }
 
     private bool TryGetResourceFieldStatus(int cellIndex, out string status)
@@ -653,8 +657,40 @@ public class GeodesicCellPicker : MonoBehaviour
         selectedCompactPopup = selectedCompactStaticHeader + compactDynamic + selectedCompactStaticOcean + compactLayers;
         if (hasExperiencedTemperature)
             detailedDynamic += $"\n\nExperienced Temperature\nClicked position: {ReplicatorManager.FormatTemperature(experiencedKelvin, displayUnit)}\nSample layer: {localLayer}\nOutlets / radius: {experiencedTemperatureField.OutletCount} / {experiencedTemperatureField.VentMicrothermalRadius:F4}\nLookup cells / bytes: {experiencedTemperatureField.IndexedCellCount} / {experiencedTemperatureField.LookupMemoryBytes}";
-        selectedDetailedPopup = selectedDetailedStaticPopup + detailedDynamic + detailedLayers;
+        selectedDetailedPopup = selectedDetailedStaticPopup + detailedDynamic + detailedLayers + BuildAtmosphereDebugText();
         }
+    }
+
+    private string BuildAtmosphereDebugText()
+    {
+        if (atmosphereField == null || !atmosphereField.IsInitialized)
+            return "\n\nGLOBAL ATMOSPHERE\nunavailable";
+
+        double halfLife = airSeaGasExchange != null ? airSeaGasExchange.EffectiveCommonHalfLifeSeconds : 0d;
+        var text = new StringBuilder(640);
+        text.Append("\n\nGLOBAL ATMOSPHERE")
+            .Append("\nTotal pressure (bar): ").Append(atmosphereField.TotalPressureBar.ToString("G9"))
+            .Append("\nN2 partial pressure: ").Append(atmosphereField.GetPartialPressureBar(GeodesicAtmosphericGas.N2).ToString("G9"))
+            .Append("\nCO2 partial pressure: ").Append(atmosphereField.GetPartialPressureBar(GeodesicAtmosphericGas.CO2).ToString("G9"))
+            .Append("\nO2 partial pressure: ").Append(atmosphereField.GetPartialPressureBar(GeodesicAtmosphericGas.O2).ToString("G9"))
+            .Append("\nCH4 partial pressure: ").Append(atmosphereField.GetPartialPressureBar(GeodesicAtmosphericGas.CH4).ToString("G9"))
+            .Append("\nH2 partial pressure: ").Append(atmosphereField.GetPartialPressureBar(GeodesicAtmosphericGas.H2).ToString("G9"))
+            .Append("\nH2S partial pressure: ").Append(atmosphereField.GetPartialPressureBar(GeodesicAtmosphericGas.H2S).ToString("G9"))
+            .Append("\nAtmosphere inventory / bar: ").Append(atmosphereField.AtmosphereInventoryPerBar.ToString("G9"))
+            .Append("\nEffective air-sea exchange half-life: ").Append(halfLife > 0d ? halfLife.ToString("G9") + " sim s" : "disabled (0)")
+            .Append("\nExchange tick count: ").Append(atmosphereField.CompletedExchangeTicks);
+        AppendAtmosphereTransfer(text, "CO2", GeodesicAtmosphericGas.CO2);
+        AppendAtmosphereTransfer(text, "O2", GeodesicAtmosphericGas.O2);
+        AppendAtmosphereTransfer(text, "CH4", GeodesicAtmosphericGas.CH4);
+        AppendAtmosphereTransfer(text, "H2", GeodesicAtmosphericGas.H2);
+        AppendAtmosphereTransfer(text, "H2S", GeodesicAtmosphericGas.H2S);
+        return text.ToString();
+    }
+
+    private void AppendAtmosphereTransfer(StringBuilder text, string gas, GeodesicAtmosphericGas value)
+    {
+        text.Append("\nCumulative net air-sea transfer ").Append(gas).Append(" (to ocean +): ")
+            .Append(atmosphereField.GetCumulativeNetTransferToOcean(value).ToString("G9"));
     }
 
     private string BuildDynamicLayerEnvironmentText(bool detailed)

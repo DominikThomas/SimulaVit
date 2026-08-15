@@ -35,5 +35,6 @@ public class SimulationStartupConfigTests
         var config = new SimulationStartupConfig();
         Assert.That(config.approximateThermalIntervalSeconds, Is.EqualTo(2f));
         Assert.That(config.geodesicResourceTransportIntervalSeconds, Is.EqualTo(5f));
+        Assert.That(config.atmosphereInventoryPerBar, Is.EqualTo(100f));
     }
 }

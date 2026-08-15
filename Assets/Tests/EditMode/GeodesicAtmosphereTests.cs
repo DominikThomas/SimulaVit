@@ -30,6 +30,17 @@ public class GeodesicAtmosphereTests
     }
 
     [Test]
+    public void CommonHalfLifeReportsConfiguredRelaxationTimescaleAndZeroDisabled()
+    {
+        var exchange = owner.AddComponent<GeodesicAirSeaGasExchange>();
+        Assert.That(exchange.EffectiveCommonHalfLifeSeconds, Is.Zero);
+        exchange.SetCommonHalfLife(300d);
+        Assert.That(exchange.EffectiveCommonHalfLifeSeconds, Is.EqualTo(300d));
+        exchange.SetCommonHalfLife(0d);
+        Assert.That(exchange.EffectiveCommonHalfLifeSeconds, Is.Zero);
+    }
+
+    [Test]
     public void AtmosphericLimitAndConservationLedgerAreExact()
     {
         atmosphere.Configure(1d, 0d, 0d, 0.25d, 0d, 0d, 0d); atmosphere.InitializeForWorld();

@@ -22,6 +22,7 @@ public sealed class GeodesicChemistryTelemetry : MonoBehaviour
     private GeodesicOceanResourceField resources;
     private GeodesicAbioticChemistry chemistry;
     private GeodesicOceanSedimentField sediments;
+    private GeodesicAtmosphereField atmosphere;
     private ReplicatorManager simulationClock;
     private ChemistryTelemetrySchedule schedule;
     private ChemistryCounters previousCounters;
@@ -48,17 +49,18 @@ public sealed class GeodesicChemistryTelemetry : MonoBehaviour
     {
         ClearWorld();
         resources = resourceField; chemistry = chemistryField; sediments = sedimentField;
+        atmosphere = GetComponent<GeodesicAtmosphereField>();
         simulationClock = FindFirstObjectByType<ReplicatorManager>();
         initialized = resources != null && resources.IsInitialized;
         previousCounters = ReadCounters();
         schedule.Reset(simulationTime, Time.unscaledTimeAsDouble, chemistryTelemetryIntervalSimSeconds, EffectiveMinimumRealIntervalSeconds);
         BuildVentFootprint();
-        Debug.Log($"[GeodesicChemistryTelemetry] initialized atmosphereChemistry=notYetAuthoritative telemetryInterval={chemistryTelemetryIntervalSimSeconds:G6}s anoxicO2Threshold={telemetryAnoxicO2Threshold:G6} concentrationUnits ventRates={{H2={resources.VentH2Rate:G6},H2S={resources.VentH2SRate:G6},CO2={resources.VentCO2Rate:G6},Fe2={resources.VentFe2Rate:G6}}}", this);
+        Debug.Log($"[GeodesicChemistryTelemetry] initialized atmosphere=global-authoritative telemetryInterval={chemistryTelemetryIntervalSimSeconds:G6}s anoxicO2Threshold={telemetryAnoxicO2Threshold:G6} concentrationUnits ventRates={{H2={resources.VentH2Rate:G6},H2S={resources.VentH2SRate:G6},CO2={resources.VentCO2Rate:G6},Fe2={resources.VentFe2Rate:G6}}}", this);
     }
 
     internal void ClearWorld()
     {
-        initialized = false; resources = null; chemistry = null; sediments = null; simulationClock = null;
+        initialized = false; resources = null; chemistry = null; sediments = null; atmosphere = null; simulationClock = null;
         schedule.Clear(); previousCounters = default; ventFootprintCells = null;
     }
 
@@ -126,6 +128,7 @@ public sealed class GeodesicChemistryTelemetry : MonoBehaviour
         AppendCounters(text, " chemistryTotal", current);
         text.Append(" sediment={S0=").Append(sedimentS0.ToString("G9")).Append(",Fe3=").Append(sedimentFe3.ToString("G9")).Append(",FeS=").Append(sedimentFeS.ToString("G9"));
         text.Append(",columnsWithS0=").Append(columnsWithS0).Append(",columnsWithFe3=").Append(columnsWithFe3).Append(",columnsWithFeS=").Append(columnsWithFeS).Append('}');
+        AppendAtmosphere(text);
         return text.ToString();
     }
 
@@ -164,6 +167,25 @@ public sealed class GeodesicChemistryTelemetry : MonoBehaviour
 
     private static void AppendCounters(StringBuilder text, string name, ChemistryCounters value)
     { text.Append(name).Append("={reactedH2=").Append(value.H2.ToString("G9")).Append(",reactedH2S=").Append(value.H2S.ToString("G9")).Append(",reactedFe2=").Append(value.Fe2.ToString("G9")).Append(",consumedO2=").Append(value.O2.ToString("G9")).Append(",depositedS0=").Append(value.S0.ToString("G9")).Append(",depositedFe3=").Append(value.Fe3.ToString("G9")).Append(",depositedFeS=").Append(value.FeS.ToString("G9")).Append('}'); }
+
+    private void AppendAtmosphere(StringBuilder text)
+    {
+        text.Append(" atmosphere={");
+        if (atmosphere == null || !atmosphere.IsInitialized) { text.Append("unavailable}"); return; }
+        text.Append("pressure=").Append(atmosphere.TotalPressureBar.ToString("G9"))
+            .Append(",N2=").Append(atmosphere.GetPartialPressureBar(GeodesicAtmosphericGas.N2).ToString("G9"))
+            .Append(",CO2=").Append(atmosphere.GetPartialPressureBar(GeodesicAtmosphericGas.CO2).ToString("G9"))
+            .Append(",O2=").Append(atmosphere.GetPartialPressureBar(GeodesicAtmosphericGas.O2).ToString("G9"))
+            .Append(",CH4=").Append(atmosphere.GetPartialPressureBar(GeodesicAtmosphericGas.CH4).ToString("G9"))
+            .Append(",H2=").Append(atmosphere.GetPartialPressureBar(GeodesicAtmosphericGas.H2).ToString("G9"))
+            .Append(",H2S=").Append(atmosphere.GetPartialPressureBar(GeodesicAtmosphericGas.H2S).ToString("G9"))
+            .Append(",exchangeTicks=").Append(atmosphere.CompletedExchangeTicks)
+            .Append(",transferCO2=").Append(atmosphere.GetCumulativeNetTransferToOcean(GeodesicAtmosphericGas.CO2).ToString("G9"))
+            .Append(",transferO2=").Append(atmosphere.GetCumulativeNetTransferToOcean(GeodesicAtmosphericGas.O2).ToString("G9"))
+            .Append(",transferCH4=").Append(atmosphere.GetCumulativeNetTransferToOcean(GeodesicAtmosphericGas.CH4).ToString("G9"))
+            .Append(",transferH2=").Append(atmosphere.GetCumulativeNetTransferToOcean(GeodesicAtmosphericGas.H2).ToString("G9"))
+            .Append(",transferH2S=").Append(atmosphere.GetCumulativeNetTransferToOcean(GeodesicAtmosphericGas.H2S).ToString("G9")).Append('}');
+    }
 
     private static WeightedChemistryStatistics[] CreateLayerStatistics()
     { var result = new WeightedChemistryStatistics[LayerCount]; for (int i = 0; i < result.Length; i++) result[i] = new WeightedChemistryStatistics(); return result; }
