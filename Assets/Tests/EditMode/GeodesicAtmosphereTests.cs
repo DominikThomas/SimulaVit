@@ -108,4 +108,36 @@ public class GeodesicAtmosphereTests
         atmosphere.Configure(double.MaxValue / 1e100, 1e50, 0d, 0d, 0d, 0d, 0d); atmosphere.InitializeForWorld();
         Assert.That(double.IsFinite(atmosphere.TotalPressureBar), Is.True); Assert.That(atmosphere.GetInventory(GeodesicAtmosphericGas.N2), Is.GreaterThanOrEqualTo(0d));
     }
+
+    [Test]
+    public void LargerInventoryPerBarSlowsPressureChangeWithoutChangingGeologicalInventory()
+    {
+        atmosphere.Configure(100d, 0d, 0d, 0d, 0d, 0d, 0d); atmosphere.InitializeForWorld();
+        double oldAdded = atmosphere.AddGeologicalSource(GeodesicAtmosphericGas.CO2, 10d);
+        double oldPressure = atmosphere.GetPartialPressureBar(GeodesicAtmosphericGas.CO2);
+        atmosphere.ClearField();
+        atmosphere.Configure(1000d, 0d, 0d, 0d, 0d, 0d, 0d); atmosphere.InitializeForWorld();
+        double newAdded = atmosphere.AddGeologicalSource(GeodesicAtmosphericGas.CO2, 10d);
+        double newPressure = atmosphere.GetPartialPressureBar(GeodesicAtmosphericGas.CO2);
+        Assert.That(newAdded, Is.EqualTo(oldAdded));
+        Assert.That(newPressure, Is.EqualTo(oldPressure / 10d).Within(1e-12));
+    }
+
+    [Test]
+    public void InventoryScaleDoesNotChangeExactExchangeInventoryConservation()
+    {
+        atmosphere.Configure(100d, 0d, 1d, 0d, 0d, 0d, 0d); atmosphere.InitializeForWorld();
+        double oldBefore = atmosphere.GetInventory(GeodesicAtmosphericGas.CO2);
+        double oldTransfer = atmosphere.CommitExchange(GeodesicAtmosphericGas.CO2, 25d);
+        double oldAfter = atmosphere.GetInventory(GeodesicAtmosphericGas.CO2);
+        atmosphere.ClearField();
+        atmosphere.Configure(1000d, 0d, 0.1d, 0d, 0d, 0d, 0d); atmosphere.InitializeForWorld();
+        double newBefore = atmosphere.GetInventory(GeodesicAtmosphericGas.CO2);
+        double newTransfer = atmosphere.CommitExchange(GeodesicAtmosphericGas.CO2, 25d);
+        double newAfter = atmosphere.GetInventory(GeodesicAtmosphericGas.CO2);
+        Assert.That(oldBefore, Is.EqualTo(newBefore));
+        Assert.That(oldTransfer, Is.EqualTo(newTransfer));
+        Assert.That(oldAfter + oldTransfer, Is.EqualTo(oldBefore));
+        Assert.That(newAfter + newTransfer, Is.EqualTo(newBefore));
+    }
 }

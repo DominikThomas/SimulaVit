@@ -7,10 +7,10 @@ public enum GeodesicOceanTemperatureStartupMode { IsothermalFromSurface, DepthGr
 /// <summary>Allocation-free scalar rules for the approximate coarse ocean environment.</summary>
 public static class GeodesicOceanThermalModel
 {
-    public static float AbyssalTargetKelvin(float planetaryBaseKelvin, float abyssalBaselineC, float climateCoupling)
+    public static float AbyssalTargetKelvin(float climateBaseKelvin, float climateReferenceBaseKelvin, float greenhouseDeltaKelvin, float abyssalBaselineC, float climateCoupling)
     {
-        float earthRelativeClimate = planetaryBaseKelvin - 273.15f;
-        return Mathf.Clamp(abyssalBaselineC + 273.15f + earthRelativeClimate * Mathf.Clamp01(climateCoupling), 0f, 10000f);
+        float globalClimateAnomaly = climateBaseKelvin + Mathf.Max(0f, greenhouseDeltaKelvin) - climateReferenceBaseKelvin;
+        return Mathf.Clamp(abyssalBaselineC + 273.15f + globalClimateAnomaly * Mathf.Clamp01(climateCoupling), 0f, 10000f);
     }
 
     public static float ProfileTargetKelvin(float surfaceKelvin, float abyssalTargetKelvin, float normalizedDepth, float exponent, float ventInfluence, float sourceKelvin, float coarseBlend)
@@ -40,7 +40,8 @@ public sealed class GeodesicOceanTemperatureField : MonoBehaviour
     [Header("Geodesic Ocean Temperature")]
     [SerializeField, Tooltip("Enables persistent geodesic subsurface ocean temperatures. Legacy cube-sphere simulation is unaffected.")] private bool enableGeodesicOceanTemperature = true;
     [SerializeField, Tooltip("Earth-reference abyssal-water asymptote in Celsius. Deep approximate profiles approach this value instead of cooling without bound.")] private float abyssalBaselineTemperatureC = 1.5f;
-    [SerializeField, Range(0f, 1f), Tooltip("Fraction of planetary base-temperature departure from the Earth reference inherited by abyssal water.")] private float abyssalClimateCoupling = 0.25f;
+    [SerializeField, Tooltip("Explicit climate base reference in Kelvin. The abyssal anomaly is measured from this value, never from the Celsius offset.")] private float climateReferenceBaseKelvin = 273.15f;
+    [SerializeField, Range(0f, 1f), Tooltip("Fraction of the global base-temperature plus greenhouse anomaly inherited by abyssal water.")] private float abyssalClimateCoupling = 0.25f;
     [SerializeField, Min(0.01f), Tooltip("Approximate-profile relaxation time at the shallowest subsurface center.")] private float shallowResponseTimescaleSeconds = 80f;
     [SerializeField, Min(0.01f), Tooltip("Approximate-profile relaxation time at maximum depth.")] private float deepResponseTimescaleSeconds = 1200f;
     [SerializeField, Range(0.1f, 4f), Tooltip("Power controlling how quickly surface influence decreases with normalized center depth.")] private float depthProfileExponent = 1.4f;
@@ -334,6 +335,7 @@ public sealed class GeodesicOceanTemperatureField : MonoBehaviour
         verticalInterfacesProcessedLastTick = implicitColumnsSolvedLastTick = thermalSubstepsLastTick = 0;
         using (ApproximateMarker.Auto())
         {
+            approximateDeepTargetKelvin = CalculateAbyssalTargetKelvin();
             for (int i = 0; i < activeSubsurfaceNodeIndices.Length; i++)
             {
                 int node = activeSubsurfaceNodeIndices[i];
@@ -367,7 +369,7 @@ public sealed class GeodesicOceanTemperatureField : MonoBehaviour
         return resourceField != null ? resourceField.GetSubmarineThermalInfluence(cell) : 0f;
     }
 
-    private float CalculateAbyssalTargetKelvin() => GeodesicOceanThermalModel.AbyssalTargetKelvin(surfaceField.BaseTemperatureKelvin, abyssalBaselineTemperatureC, abyssalClimateCoupling);
+    private float CalculateAbyssalTargetKelvin() => GeodesicOceanThermalModel.AbyssalTargetKelvin(surfaceField.BaseTemperatureKelvin, climateReferenceBaseKelvin, surfaceField.TotalGreenhouseDeltaKelvin, abyssalBaselineTemperatureC, abyssalClimateCoupling);
     private float SourceTemperatureAnomalyKelvin() => Mathf.Max(0f, submarineVentSourceTemperatureC + 273.15f - CalculateAbyssalTargetKelvin());
 
     public float GetLayerTemperatureKelvin(int cellIndex, int layerIndex) => TryGetLayerTemperatureKelvin(cellIndex, layerIndex, out float value) ? value : float.NaN;

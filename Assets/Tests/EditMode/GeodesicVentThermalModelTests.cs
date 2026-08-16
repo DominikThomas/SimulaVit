@@ -4,8 +4,8 @@ public sealed class GeodesicVentThermalModelTests
 {
     [Test] public void AbyssalTargetDefaultsToColdLiquidWaterAndRetainsBoundedClimateVariation()
     {
-        Assert.AreEqual(274.65f, GeodesicOceanThermalModel.AbyssalTargetKelvin(273.15f, 1.5f, 0.25f), 0.001f);
-        Assert.AreEqual(277.15f, GeodesicOceanThermalModel.AbyssalTargetKelvin(283.15f, 1.5f, 0.25f), 0.001f);
+        Assert.AreEqual(274.65f, GeodesicOceanThermalModel.AbyssalTargetKelvin(273.15f, 273.15f, 0f, 1.5f, 0.25f), 0.001f);
+        Assert.AreEqual(277.15f, GeodesicOceanThermalModel.AbyssalTargetKelvin(283.15f, 273.15f, 0f, 1.5f, 0.25f), 0.001f);
         float twoKilometre = GeodesicOceanThermalModel.ProfileTargetKelvin(288.15f, 274.65f, 0.5f, 1.4f, 0f, 623.15f, 0f);
         float abyss = GeodesicOceanThermalModel.ProfileTargetKelvin(288.15f, 274.65f, 1f, 1.4f, 0f, 623.15f, 0f);
         Assert.Greater(twoKilometre, abyss);

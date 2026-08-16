@@ -10,6 +10,28 @@ public enum GeodesicThermalModel
     ConservativeImplicit = 1
 }
 
+/// <summary>Bounded, simulation-scale atmosphere forcing; not an Earth-calibrated climate model.</summary>
+public static class GeodesicAtmosphereClimateModel
+{
+    public static float PressureInertiaMultiplier(double totalPressureBar, float referencePressureBar, float minimumMultiplier, float maximumMultiplier)
+    {
+        double pressure = Math.Max(0d, double.IsFinite(totalPressureBar) ? totalPressureBar : double.MaxValue);
+        double reference = Math.Max(1e-6d, referencePressureBar);
+        return Mathf.Clamp((float)Math.Sqrt(Math.Max(pressure, 1e-6d) / reference), Mathf.Max(0.001f, minimumMultiplier), Mathf.Max(minimumMultiplier, maximumMultiplier));
+    }
+
+    public static float GasGreenhouseDeltaKelvin(double partialPressureBar, float referenceBar, float sensitivityKelvin, float maximumWarmingKelvin)
+    {
+        double pressure = Math.Max(0d, double.IsFinite(partialPressureBar) ? partialPressureBar : double.MaxValue);
+        double reference = Math.Max(1e-12d, referenceBar);
+        double warming = Math.Max(0f, sensitivityKelvin) * Math.Log(1d + pressure / reference);
+        return Mathf.Clamp((float)warming, 0f, Mathf.Max(0f, maximumWarmingKelvin));
+    }
+
+    public static float CombinedGreenhouseDeltaKelvin(float co2DeltaKelvin, float ch4DeltaKelvin, float maximumWarmingKelvin)
+        => Mathf.Clamp(Mathf.Max(0f, co2DeltaKelvin) + Mathf.Max(0f, ch4DeltaKelvin), 0f, Mathf.Max(0f, maximumWarmingKelvin));
+}
+
 /// <summary>Authoritative, surface-only Kelvin field for geodesic simulation cells.</summary>
 [DisallowMultipleComponent]
 public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
@@ -45,6 +67,18 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
     [SerializeField, Range(0f, 0.25f), Tooltip("Maximum coarse land-cell blend toward geothermal source temperature.")] private float terrestrialVentThermalInfluence = 0.06f;
     [SerializeField, Tooltip("Reserved opt-in diagnostic flag; authoritative terrain colours are never modified by this field.")] private bool debugTemperatureVisualization;
     [SerializeField, Tooltip("Logs temperature tick stage timings and sun/light agreement diagnostics.")] private bool enableProfilingDiagnostics;
+
+    [Header("Approximate Atmosphere Climate Coupling")]
+    [SerializeField, Min(1e-6f)] private float pressureReferenceBar = 1f;
+    [SerializeField, Min(0.001f)] private float minimumPressureInertiaMultiplier = 0.25f;
+    [SerializeField, Min(0.001f)] private float maximumPressureInertiaMultiplier = 4f;
+    [SerializeField, Min(1e-12f)] private float co2GreenhouseReferenceBar = 0.1f;
+    [SerializeField, Min(0f)] private float co2GreenhouseSensitivityKelvin = 2f;
+    [SerializeField, Min(0f)] private float co2MaximumWarmingKelvin = 30f;
+    [SerializeField, Min(1e-12f)] private float ch4GreenhouseReferenceBar = 0.01f;
+    [SerializeField, Min(0f)] private float ch4GreenhouseSensitivityKelvin = 0.75f;
+    [SerializeField, Min(0f)] private float ch4MaximumWarmingKelvin = 8f;
+    [SerializeField, Min(0f)] private float combinedMaximumGreenhouseWarmingKelvin = 30f;
 
     [Header("Runtime Diagnostics (Read Only)")]
     [SerializeField] private bool initialized;
@@ -84,6 +118,12 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
     [SerializeField, Tooltip("True only while Active Thermal Model is latched for an initialized geodesic planet.")] private bool hasActiveThermalModel;
     [SerializeField] private int surfaceCellsUpdatedLastTick;
     [SerializeField] private int horizontalEdgesProcessedLastTick;
+    [SerializeField] private float atmosphereTotalPressureBar;
+    [SerializeField] private float pressureInertiaMultiplier = 1f;
+    [SerializeField] private float co2GreenhouseDeltaKelvin;
+    [SerializeField] private float ch4GreenhouseDeltaKelvin;
+    [SerializeField] private float totalGreenhouseDeltaKelvin;
+    [SerializeField] private float effectiveClimateBaseTargetKelvin;
 
     private PlanetGenerator planetGenerator;
     private SunSkyRotator sunDirectionProvider;
@@ -91,6 +131,7 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
     private GeodesicGridTopology topology;
     private GeodesicTransportGraph transportGraph;
     private GeodesicOceanResourceField resourceField;
+    private GeodesicAtmosphereField atmosphereField;
     private float[] surfaceTemperatureKelvinByCell;
     private float[] targetTemperatureKelvinByCell;
     private float[] workingTemperatureKelvinByCell;
@@ -148,6 +189,12 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
     public bool HasActiveThermalModel => hasActiveThermalModel;
     public float ActiveUpdateIntervalSeconds => activeUpdateIntervalSeconds;
     public float BaseTemperatureKelvin => baseTemperatureKelvin;
+    public float AtmosphereTotalPressureBar => atmosphereTotalPressureBar;
+    public float PressureInertiaMultiplier => pressureInertiaMultiplier;
+    public float CO2GreenhouseDeltaKelvin => co2GreenhouseDeltaKelvin;
+    public float CH4GreenhouseDeltaKelvin => ch4GreenhouseDeltaKelvin;
+    public float TotalGreenhouseDeltaKelvin => totalGreenhouseDeltaKelvin;
+    public float EffectiveClimateBaseTargetKelvin => effectiveClimateBaseTargetKelvin;
     // Synchronous ocean ticks use this generation-owned storage directly. The array remains
     // authoritative here; callers must treat it as read-only.
     internal float[] AuthoritativeTemperatureStorage => initialized ? surfaceTemperatureKelvinByCell : null;
@@ -256,6 +303,7 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
         thermalTicksCurrentRenderedFrame = 0; thermalSimSecondsProcessedThisFrame = 0f;
         surfaceTemperatureTickSequence = 0;
         accumulatingSolarDayIndex = lastCompletedSolarDayIndex = -1; accumulatingDaySampleCount = 0;
+        atmosphereTotalPressureBar = co2GreenhouseDeltaKelvin = ch4GreenhouseDeltaKelvin = totalGreenhouseDeltaKelvin = 0f; pressureInertiaMultiplier = 1f; effectiveClimateBaseTargetKelvin = baseTemperatureKelvin;
         nextDiagnosticSnapshotUnscaledTime = 0d; nextDiffusionConservationAuditSimulationTime = simulationTime + Mathf.Max(0.1f, diffusionConservationAuditIntervalSeconds);
         warnedThermalBacklogGuard = false; ticksSinceLastExactDiffusionAudit = 0; lastTickUsedAlgebraicDiffusionConservationOnly = true;
         RebuildThermalCapacities();
@@ -291,6 +339,9 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
         thermalTicksCurrentRenderedFrame = 0; thermalSimSecondsProcessedThisFrame = 0f;
         surfaceTemperatureTickSequence = 0;
         accumulatingSolarDayIndex = lastCompletedSolarDayIndex = -1; accumulatingDaySampleCount = 0;
+        atmosphereTotalPressureBar = co2GreenhouseDeltaKelvin = ch4GreenhouseDeltaKelvin = totalGreenhouseDeltaKelvin = 0f;
+        pressureInertiaMultiplier = 1f;
+        effectiveClimateBaseTargetKelvin = baseTemperatureKelvin;
     }
 
     public float GetCellTemperatureKelvin(int cellIndex) => initialized && cellIndex >= 0 && cellIndex < runtimeCellCount ? surfaceTemperatureKelvinByCell[cellIndex] : float.NaN;
@@ -377,6 +428,7 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
 
     private void UpdateTemperatureTargets(Vector3 sunDirectionWorld)
     {
+        RefreshAtmosphereClimateForcing();
         Vector3 localSunDirection = transform.InverseTransformDirection(sunDirectionWorld);
         if (localSunDirection.sqrMagnitude > 1e-12f) localSunDirection.Normalize();
         bool linearInsolation = Mathf.Approximately(insolationExponent, 1f);
@@ -388,12 +440,13 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
             float environmentalTarget = baseTemperatureKelvin + insolationTemperatureGainKelvin * shapedInsolation;
             float geothermalStrength = resourceField != null ? resourceField.GetTerrestrialThermalInfluence(i) : 0f;
             float sourceKelvin = terrestrialVentSourceTemperatureC + 273.15f;
-            targetTemperatureKelvinByCell[i] = environmentalTarget + geothermalStrength * terrestrialVentThermalInfluence * Mathf.Max(0f, sourceKelvin - environmentalTarget);
+            targetTemperatureKelvinByCell[i] = environmentalTarget + geothermalStrength * terrestrialVentThermalInfluence * Mathf.Max(0f, sourceKelvin - environmentalTarget) + totalGreenhouseDeltaKelvin;
         }
     }
 
     private void UpdateTemperatureTargetsAndApplyResponse(Vector3 sunDirectionWorld, float dt)
     {
+        RefreshAtmosphereClimateForcing();
         Vector3 localSunDirection = transform.InverseTransformDirection(sunDirectionWorld);
         if (localSunDirection.sqrMagnitude > 1e-12f) localSunDirection.Normalize();
         bool linearInsolation = Mathf.Approximately(insolationExponent, 1f);
@@ -405,14 +458,33 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
             float shapedInsolation = linearInsolation ? insolation : squareInsolation ? insolation * insolation : Mathf.Pow(insolation, insolationExponent);
             float environmentalTarget = baseTemperatureKelvin + insolationTemperatureGainKelvin * shapedInsolation;
             float geothermalStrength = resourceField != null ? resourceField.GetTerrestrialThermalInfluence(i) : 0f;
-            float target = environmentalTarget + geothermalStrength * terrestrialVentThermalInfluence * Mathf.Max(0f, sourceKelvin - environmentalTarget);
+            float target = environmentalTarget + geothermalStrength * terrestrialVentThermalInfluence * Mathf.Max(0f, sourceKelvin - environmentalTarget) + totalGreenhouseDeltaKelvin;
             targetTemperatureKelvinByCell[i] = target;
 
             float current = surfaceTemperatureKelvinByCell[i];
-            float timescale = (target >= current ? heatingTimescaleSeconds : coolingTimescaleSeconds) * GetSurfaceMultiplier(i);
+            float timescale = (target >= current ? heatingTimescaleSeconds : coolingTimescaleSeconds) * GetSurfaceMultiplier(i) * pressureInertiaMultiplier;
             float response = 1f - Mathf.Exp(-dt / Mathf.Max(MinimumTimescale, timescale));
             workingTemperatureKelvinByCell[i] = current + (target - current) * response;
         }
+    }
+
+    private void RefreshAtmosphereClimateForcing()
+    {
+        // Coupling is intentionally limited to the production approximate model. Read live global
+        // authority every thermal tick so exchange and vent emissions affect climate without restart.
+        if (activeThermalModel != GeodesicThermalModel.ApproximateEcologicalProfiles || atmosphereField == null || !atmosphereField.IsInitialized)
+        {
+            atmosphereTotalPressureBar = co2GreenhouseDeltaKelvin = ch4GreenhouseDeltaKelvin = totalGreenhouseDeltaKelvin = 0f;
+            pressureInertiaMultiplier = 1f;
+            effectiveClimateBaseTargetKelvin = baseTemperatureKelvin;
+            return;
+        }
+        atmosphereTotalPressureBar = (float)Math.Min(float.MaxValue, atmosphereField.TotalPressureBar);
+        pressureInertiaMultiplier = GeodesicAtmosphereClimateModel.PressureInertiaMultiplier(atmosphereField.TotalPressureBar, pressureReferenceBar, minimumPressureInertiaMultiplier, maximumPressureInertiaMultiplier);
+        co2GreenhouseDeltaKelvin = GeodesicAtmosphereClimateModel.GasGreenhouseDeltaKelvin(atmosphereField.GetPartialPressureBar(GeodesicAtmosphericGas.CO2), co2GreenhouseReferenceBar, co2GreenhouseSensitivityKelvin, co2MaximumWarmingKelvin);
+        ch4GreenhouseDeltaKelvin = GeodesicAtmosphereClimateModel.GasGreenhouseDeltaKelvin(atmosphereField.GetPartialPressureBar(GeodesicAtmosphericGas.CH4), ch4GreenhouseReferenceBar, ch4GreenhouseSensitivityKelvin, ch4MaximumWarmingKelvin);
+        totalGreenhouseDeltaKelvin = GeodesicAtmosphereClimateModel.CombinedGreenhouseDeltaKelvin(co2GreenhouseDeltaKelvin, ch4GreenhouseDeltaKelvin, combinedMaximumGreenhouseWarmingKelvin);
+        effectiveClimateBaseTargetKelvin = baseTemperatureKelvin + totalGreenhouseDeltaKelvin;
     }
 
     private void UpdateSampledCycleDiagnostics(double representativeSimulationTime)
@@ -733,6 +805,7 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
     {
         planetGenerator = GetComponent<PlanetGenerator>();
         resourceField = GetComponent<GeodesicOceanResourceField>();
+        atmosphereField = GetComponent<GeodesicAtmosphereField>();
         if (sunDirectionProvider == null) sunDirectionProvider = FindFirstObjectByType<SunSkyRotator>();
         ResolveClockOnly();
         currentSunDirectionProvider = sunDirectionProvider != null ? sunDirectionProvider.name : "None";
