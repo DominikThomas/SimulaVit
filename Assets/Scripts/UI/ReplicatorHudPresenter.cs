@@ -347,7 +347,10 @@ public class ReplicatorHudPresenter
             $"O2 partial pressure: {geodesicAtmosphereField.GetPartialPressureBar(GeodesicAtmosphericGas.O2):G6}\n" +
             $"CH4 partial pressure: {geodesicAtmosphereField.GetPartialPressureBar(GeodesicAtmosphericGas.CH4):G6}\n" +
             $"H2 partial pressure: {geodesicAtmosphereField.GetPartialPressureBar(GeodesicAtmosphericGas.H2):G6}\n" +
-            $"H2S partial pressure: {geodesicAtmosphereField.GetPartialPressureBar(GeodesicAtmosphericGas.H2S):G6}";
+            $"H2S partial pressure: {geodesicAtmosphereField.GetPartialPressureBar(GeodesicAtmosphericGas.H2S):G6}\n" +
+            (geodesicTemperatureField != null && geodesicTemperatureField.IsInitialized
+                ? $"Climate greenhouse: {geodesicTemperatureField.TotalGreenhouseDeltaKelvin:G4} K (CO2 {geodesicTemperatureField.CO2GreenhouseDeltaKelvin:G4}, CH4 {geodesicTemperatureField.CH4GreenhouseDeltaKelvin:G4})\nPressure inertia: {geodesicTemperatureField.PressureInertiaMultiplier:G4}x"
+                : "Climate coupling: unavailable");
     }
 
     private void DrawGeodesicEnvironmentTabs(Rect panelRect, float padding, float lineHeight)
