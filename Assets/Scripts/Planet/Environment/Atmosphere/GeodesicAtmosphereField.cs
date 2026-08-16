@@ -9,7 +9,7 @@ public sealed class GeodesicAtmosphereField : MonoBehaviour
 {
     private const int GasCount = 6;
     [SerializeField, Min(1e-6f), Tooltip("Simulation inventory units represented by one bar. This is an explicit model capacity, not an Earth-derived constant.")]
-    private double atmosphereInventoryPerBar = 1d;
+    private double atmosphereInventoryPerBar = 100d;
     [SerializeField] private double[] initialPartialPressureBar = new double[GasCount];
     [SerializeField] private double[] inventory = new double[GasCount];
     [SerializeField] private double[] cumulativeNetTransferToOcean = new double[GasCount];
@@ -27,7 +27,7 @@ public sealed class GeodesicAtmosphereField : MonoBehaviour
 
     public void Configure(double inventoryPerBar, double n2, double co2, double o2, double ch4, double h2, double h2s)
     {
-        atmosphereInventoryPerBar = FinitePositive(inventoryPerBar) ? inventoryPerBar : 1d;
+        atmosphereInventoryPerBar = FinitePositive(inventoryPerBar) ? inventoryPerBar : 100d;
         SetInitial(0, n2); SetInitial(1, co2); SetInitial(2, o2); SetInitial(3, ch4); SetInitial(4, h2); SetInitial(5, h2s);
     }
 

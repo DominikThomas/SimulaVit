@@ -180,7 +180,7 @@ MonoBehaviour:
     approximateThermalIntervalSeconds: 2
     geodesicResourceTransportIntervalSeconds: 5
     chemistryTelemetryIntervalSimSeconds: 60
-    atmosphereInventoryPerBar: 1
+    atmosphereInventoryPerBar: 100
     airSeaExchangeHalfLifeSeconds: 0
   currentConfig:
     planetSeed: 12345
@@ -214,7 +214,7 @@ MonoBehaviour:
     approximateThermalIntervalSeconds: 2
     geodesicResourceTransportIntervalSeconds: 5
     chemistryTelemetryIntervalSimSeconds: 60
-    atmosphereInventoryPerBar: 1
+    atmosphereInventoryPerBar: 100
     airSeaExchangeHalfLifeSeconds: 0
   loadSavedStartupConfig: 1
   saveStartupConfigOnStart: 1

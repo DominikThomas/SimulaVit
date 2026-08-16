@@ -26,10 +26,12 @@ public class ReplicatorHudPresenter
     private float nextHudTempSampleTime;
     private GeodesicSurfaceTemperatureField geodesicTemperatureField;
     private GeodesicOceanResourceField geodesicOceanResourceField;
+    private GeodesicAtmosphereField geodesicAtmosphereField;
     private PlanetGenerator geodesicResourcePlanetGenerator;
 
     private bool showMenu;
     private bool portraitShowReplicators;
+    private bool showGeodesicAtmosphere;
     private bool initialized;
 
     private float guiScale = 1f;
@@ -138,10 +140,12 @@ public class ReplicatorHudPresenter
 
         string atmosphereText = geodesicWorld
             ? "Environment — Geodesic\n" +
-              dissolvedOceanText +
-              $"Surface Temperature Mean: {ReplicatorManager.FormatTemperature(hudMeanTempKelvin, temperatureDisplayUnit)}\n" +
-              $"Surface Temperature Min: {ReplicatorManager.FormatTemperature(hudMinTempKelvin, temperatureDisplayUnit)}\n" +
-              $"Surface Temperature Max: {ReplicatorManager.FormatTemperature(hudMaxTempKelvin, temperatureDisplayUnit)}"
+              (showGeodesicAtmosphere
+                  ? BuildGeodesicAtmosphereHudText(hudGenerator)
+                  : dissolvedOceanText +
+                    $"Surface Temperature Mean: {ReplicatorManager.FormatTemperature(hudMeanTempKelvin, temperatureDisplayUnit)}\n" +
+                    $"Surface Temperature Min: {ReplicatorManager.FormatTemperature(hudMinTempKelvin, temperatureDisplayUnit)}\n" +
+                    $"Surface Temperature Max: {ReplicatorManager.FormatTemperature(hudMaxTempKelvin, temperatureDisplayUnit)}")
             : GetAtmosphereHudHeader(planetResourceMap) + "\n" +
               $"CO2: {globalCo2:0.000} ({co2Pct:0.0}%)\n" +
               $"O2: {globalO2:0.000} ({o2Pct:0.0}%)\n" +
@@ -236,6 +240,7 @@ public class ReplicatorHudPresenter
                     atmosphereHeight - 2f * padding),
                 atmosphereText,
                 hudStyle);
+            if (geodesicWorld) DrawGeodesicEnvironmentTabs(atmosphereRect, padding, lineHeight);
 
             Rect tempUnitButtonRect = new Rect(rightX, atmosphereRect.yMax + 6f, panelWidth, lineHeight);
             if (GUI.Button(tempUnitButtonRect, $"Temp Unit: {GetTemperatureUnitLabel(temperatureDisplayUnit)}", buttonStyle))
@@ -326,6 +331,36 @@ public class ReplicatorHudPresenter
             $"H2S: {geodesicOceanResourceField.GetVolumeWeightedMeanConcentration(GeodesicOceanResource.H2S):0.###}\n" +
             $"Fe2: {geodesicOceanResourceField.GetVolumeWeightedMeanConcentration(GeodesicOceanResource.Fe2):0.###}\n" +
             $"OrganicC: {geodesicOceanResourceField.GetVolumeWeightedMeanConcentration(GeodesicOceanResource.OrganicC):0.###}\n";
+    }
+
+    private string BuildGeodesicAtmosphereHudText(PlanetGenerator generator)
+    {
+        if (geodesicAtmosphereField == null || !ReferenceEquals(geodesicAtmosphereField.gameObject, generator.gameObject))
+            geodesicAtmosphereField = generator.GetComponent<GeodesicAtmosphereField>();
+        if (geodesicAtmosphereField == null || !geodesicAtmosphereField.IsInitialized)
+            return "Global atmosphere: unavailable";
+
+        return
+            $"Total pressure (bar): {geodesicAtmosphereField.TotalPressureBar:G6}\n" +
+            $"N2 partial pressure: {geodesicAtmosphereField.GetPartialPressureBar(GeodesicAtmosphericGas.N2):G6}\n" +
+            $"CO2 partial pressure: {geodesicAtmosphereField.GetPartialPressureBar(GeodesicAtmosphericGas.CO2):G6}\n" +
+            $"O2 partial pressure: {geodesicAtmosphereField.GetPartialPressureBar(GeodesicAtmosphericGas.O2):G6}\n" +
+            $"CH4 partial pressure: {geodesicAtmosphereField.GetPartialPressureBar(GeodesicAtmosphericGas.CH4):G6}\n" +
+            $"H2 partial pressure: {geodesicAtmosphereField.GetPartialPressureBar(GeodesicAtmosphericGas.H2):G6}\n" +
+            $"H2S partial pressure: {geodesicAtmosphereField.GetPartialPressureBar(GeodesicAtmosphericGas.H2S):G6}";
+    }
+
+    private void DrawGeodesicEnvironmentTabs(Rect panelRect, float padding, float lineHeight)
+    {
+        const float gap = 4f;
+        const float oceanWidth = 58f;
+        const float atmosphereWidth = 86f;
+        float y = panelRect.y + padding;
+        float atmosphereX = panelRect.xMax - padding - atmosphereWidth;
+        if (GUI.Button(new Rect(atmosphereX - gap - oceanWidth, y, oceanWidth, lineHeight), "Ocean", buttonStyle))
+            showGeodesicAtmosphere = false;
+        if (GUI.Button(new Rect(atmosphereX, y, atmosphereWidth, lineHeight), "Atmosphere", buttonStyle))
+            showGeodesicAtmosphere = true;
     }
 
     private void SampleHudTemperatureStats(PlanetResourceMap planetResourceMap)
@@ -568,6 +603,9 @@ public class ReplicatorHudPresenter
                 panelHeight - 2f * padding),
             selectedText,
             hudStyle);
+        PlanetGenerator generator = ResolveHudPlanetGenerator(null);
+        if (!portraitShowReplicators && generator != null && generator.CurrentGridType == PlanetGridType.GeodesicIcosphere)
+            DrawGeodesicEnvironmentTabs(panelRect, padding, lineHeight);
 
         float controlsY = panelRect.yMax + 6f;
         float thirdWidth = (panelWidth - 12f) / 3f;

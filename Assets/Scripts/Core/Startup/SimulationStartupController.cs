@@ -1169,7 +1169,9 @@ public class SimulationStartupController : MonoBehaviour
             DrawFloat(new Rect(controlX, y, contentWidth, line), "Terrestrial Vent Fraction", ref currentConfig.terrestrialVentFraction, 0f, 1f);
             y += line + gap;
             DrawFloat(new Rect(controlX, y, contentWidth, line), "Atmosphere Inventory / bar", ref currentConfig.atmosphereInventoryPerBar, 0.000001f, 1000000f); y += line + gap;
-            DrawFloat(new Rect(controlX, y, contentWidth, line), "Air-Sea Half-Life (sim s; 0 off)", ref currentConfig.airSeaExchangeHalfLifeSeconds, 0f, 1000000f); y += line + gap;
+            DrawFloat(new Rect(controlX, y, contentWidth, line), "Air-Sea L0 Relaxation Half-Life (sim s; 0 off)", ref currentConfig.airSeaExchangeHalfLifeSeconds, 0f, 1000000f); y += line + gap;
+            GUI.Label(new Rect(controlX, y, contentWidth, 38f), "Relaxation of surface-ocean L0 concentration toward atmosphere-controlled equilibrium; not finite-atmosphere depletion half-life.", labelStyle);
+            y += 42f;
             GUI.Label(new Rect(controlX, y, contentWidth, 24f), "Environment Timing", labelStyle);
             y += 26f;
             DrawPreset(new Rect(controlX, y, contentWidth, line), "Temperature update interval", ref currentConfig.approximateThermalIntervalSeconds, ApproximateThermalIntervalPresets);

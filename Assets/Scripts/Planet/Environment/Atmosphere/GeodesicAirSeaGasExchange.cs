@@ -9,18 +9,20 @@ public sealed class GeodesicAirSeaGasExchange : MonoBehaviour
     private static readonly ProfilerMarker ExchangeMarker = new ProfilerMarker("GeodesicAtmosphere.AirSeaExchange");
     [SerializeField, Tooltip("CO2, O2, CH4, H2, H2S: equilibrium dissolved concentration per atmospheric bar; ecological model coefficients, not universal Henry constants.")]
     private double[] equilibriumConcentrationPerBar = { 1d, 1d, 1d, 1d, 1d };
-    [SerializeField, Tooltip("CO2, O2, CH4, H2, H2S exchange half-lives in simulated seconds. Non-positive disables that gas.")]
+    [SerializeField, Tooltip("CO2, O2, CH4, H2, H2S surface-ocean L0 relaxation half-lives in simulated seconds. This controls relaxation toward atmosphere-controlled equilibrium, not depletion of the finite atmosphere. Non-positive disables that gas.")]
     private double[] exchangeHalfLifeSeconds = new double[ExchangeGasCount];
     private GeodesicAtmosphereField atmosphere;
 
     public long StaticRuntimeMemoryBytes => ExchangeGasCount * sizeof(double) * 2L;
+    public double EffectiveCommonHalfLifeSeconds => exchangeHalfLifeSeconds != null && exchangeHalfLifeSeconds.Length == ExchangeGasCount ? exchangeHalfLifeSeconds[0] : 0d;
     public static double ExchangeFraction(double dt, double halfLifeSeconds) => dt > 0d && halfLifeSeconds > 0d && double.IsFinite(dt) && double.IsFinite(halfLifeSeconds) ? 1d - Math.Exp(-Math.Log(2d) * dt / halfLifeSeconds) : 0d;
     public void SetCommonHalfLife(double seconds) { EnsureArrays(); for (int i = 0; i < ExchangeGasCount; i++) exchangeHalfLifeSeconds[i] = double.IsFinite(seconds) ? Math.Max(0d, seconds) : 0d; }
     public void SetParameters(GeodesicAtmosphericGas gas, double concentrationPerBar, double halfLifeSeconds) { int i = ExchangeIndex(gas); if (i < 0) return; EnsureArrays(); equilibriumConcentrationPerBar[i] = Math.Max(0d, concentrationPerBar); exchangeHalfLifeSeconds[i] = Math.Max(0d, halfLifeSeconds); }
     internal void InitializeForWorld(GeodesicAtmosphereField field)
     {
         atmosphere = field; EnsureArrays();
-        Debug.Log($"[GeodesicAtmosphereExchange] gases=CO2/O2/CH4/H2/H2S, concentrationPerBar={Format(equilibriumConcentrationPerBar)}, halfLifeSeconds={Format(exchangeHalfLifeSeconds)}, exchange=surface-L0-only", this);
+        string state = EffectiveCommonHalfLifeSeconds > 0d ? $"{EffectiveCommonHalfLifeSeconds:G6}s" : "disabled";
+        Debug.Log($"[GeodesicAtmosphereExchange] exchange=surface-L0-relaxation-toward-atmosphere-equilibrium, effectiveHalfLife={state}, gasHalfLifeSeconds={Format(exchangeHalfLifeSeconds)}, concentrationPerBar={Format(equilibriumConcentrationPerBar)}, finite-atmosphere-depletion-half-life=false", this);
     }
     internal void ClearWorld() => atmosphere = null;
 

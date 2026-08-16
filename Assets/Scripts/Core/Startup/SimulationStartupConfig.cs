@@ -57,7 +57,7 @@ public class SimulationStartupConfig
     [Tooltip("Authoritative simulated seconds between Geodesic chemistry diagnostics. Zero or less disables them.")]
     public float chemistryTelemetryIntervalSimSeconds = 60f;
     [Tooltip("Simulation inventory units represented by one atmospheric bar; not a physical Earth constant.")]
-    public float atmosphereInventoryPerBar = 1f;
+    public float atmosphereInventoryPerBar = 100f;
     [Tooltip("Common v1 air-sea exchange half-life. Zero disables exchange; per-gas coefficients remain available on GeodesicAirSeaGasExchange.")]
     public float airSeaExchangeHalfLifeSeconds = 0f;
 
