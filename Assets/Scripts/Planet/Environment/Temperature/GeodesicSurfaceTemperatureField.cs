@@ -72,13 +72,13 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
     [SerializeField, Min(1e-6f)] private float pressureReferenceBar = 1f;
     [SerializeField, Min(0.001f)] private float minimumPressureInertiaMultiplier = 0.25f;
     [SerializeField, Min(0.001f)] private float maximumPressureInertiaMultiplier = 4f;
-    [SerializeField, Min(1e-12f)] private float co2GreenhouseReferenceBar = 0.01f;
-    [SerializeField, Min(0f)] private float co2GreenhouseSensitivityKelvin = 5f;
-    [SerializeField, Min(0f)] private float co2MaximumWarmingKelvin = 50f;
-    [SerializeField, Min(1e-12f)] private float ch4GreenhouseReferenceBar = 0.001f;
-    [SerializeField, Min(0f)] private float ch4GreenhouseSensitivityKelvin = 2f;
-    [SerializeField, Min(0f)] private float ch4MaximumWarmingKelvin = 15f;
-    [SerializeField, Min(0f)] private float combinedMaximumGreenhouseWarmingKelvin = 60f;
+    [SerializeField, Min(1e-12f)] private float co2GreenhouseReferenceBar = 0.1f;
+    [SerializeField, Min(0f)] private float co2GreenhouseSensitivityKelvin = 2f;
+    [SerializeField, Min(0f)] private float co2MaximumWarmingKelvin = 30f;
+    [SerializeField, Min(1e-12f)] private float ch4GreenhouseReferenceBar = 0.01f;
+    [SerializeField, Min(0f)] private float ch4GreenhouseSensitivityKelvin = 0.75f;
+    [SerializeField, Min(0f)] private float ch4MaximumWarmingKelvin = 8f;
+    [SerializeField, Min(0f)] private float combinedMaximumGreenhouseWarmingKelvin = 30f;
 
     [Header("Runtime Diagnostics (Read Only)")]
     [SerializeField] private bool initialized;

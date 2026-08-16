@@ -162,8 +162,15 @@ MonoBehaviour:
     initialCO2: 1
     initialO2: 0.01
     initialCH4: 0
-    atmosphericN2Bar: 0
-    atmosphericCO2Bar: 0
+    initialAtmospherePressureBar: 0.85
+    atmosphericCO2Fraction: 0.05882353
+    atmosphericO2Fraction: 0
+    atmosphericCH4Fraction: 0
+    atmosphericH2Fraction: 0
+    atmosphericH2SFraction: 0
+    allowDenseAtmosphere: 0
+    atmosphericN2Bar: 0.8
+    atmosphericCO2Bar: 0.05
     atmosphericO2Bar: 0
     atmosphericCH4Bar: 0
     atmosphericH2Bar: 0
@@ -180,7 +187,7 @@ MonoBehaviour:
     approximateThermalIntervalSeconds: 2
     geodesicResourceTransportIntervalSeconds: 5
     chemistryTelemetryIntervalSimSeconds: 60
-    atmosphereInventoryPerBar: 100
+    atmosphereInventoryPerBar: 1000
     airSeaExchangeHalfLifeSeconds: 0
   currentConfig:
     planetSeed: 12345
@@ -196,8 +203,15 @@ MonoBehaviour:
     initialCO2: 1
     initialO2: 0.01
     initialCH4: 0
-    atmosphericN2Bar: 0
-    atmosphericCO2Bar: 0
+    initialAtmospherePressureBar: 0.85
+    atmosphericCO2Fraction: 0.05882353
+    atmosphericO2Fraction: 0
+    atmosphericCH4Fraction: 0
+    atmosphericH2Fraction: 0
+    atmosphericH2SFraction: 0
+    allowDenseAtmosphere: 0
+    atmosphericN2Bar: 0.8
+    atmosphericCO2Bar: 0.05
     atmosphericO2Bar: 0
     atmosphericCH4Bar: 0
     atmosphericH2Bar: 0
@@ -214,7 +228,7 @@ MonoBehaviour:
     approximateThermalIntervalSeconds: 2
     geodesicResourceTransportIntervalSeconds: 5
     chemistryTelemetryIntervalSimSeconds: 60
-    atmosphereInventoryPerBar: 100
+    atmosphereInventoryPerBar: 1000
     airSeaExchangeHalfLifeSeconds: 0
   loadSavedStartupConfig: 1
   saveStartupConfigOnStart: 1

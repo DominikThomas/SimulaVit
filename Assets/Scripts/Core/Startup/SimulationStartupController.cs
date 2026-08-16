@@ -33,7 +33,9 @@ public class SimulationStartupController : MonoBehaviour
     private const float VentCO2MaxPerTick = 1f;
     private const int InitialSpawnMin = 0;
     private const int InitialSpawnMax = 10000;
-    private const int SavedStartupConfigVersion = 6;
+    private const int SavedStartupConfigVersion = 7;
+    public const float NormalAtmospherePressureMaxBar = 5f;
+    public const float DenseAtmospherePressureMaxBar = 600f;
     public const float DefaultApproximateThermalIntervalSeconds = 2f;
     public const float DefaultResourceTransportIntervalSeconds = 5f;
     public const float DefaultChemistryTelemetryIntervalSimSeconds = 60f;
@@ -395,6 +397,8 @@ public class SimulationStartupController : MonoBehaviour
         currentConfig.approximateThermalIntervalSeconds = DefaultApproximateThermalIntervalSeconds;
         currentConfig.geodesicResourceTransportIntervalSeconds = DefaultResourceTransportIntervalSeconds;
         currentConfig.chemistryTelemetryIntervalSimSeconds = DefaultChemistryTelemetryIntervalSimSeconds;
+        currentConfig.atmosphereInventoryPerBar = 1000f;
+        currentConfig.allowDenseAtmosphere = false;
         RefreshStartupPanels();
     }
 
@@ -670,12 +674,7 @@ public class SimulationStartupController : MonoBehaviour
         config.initialCO2 = Mathf.Clamp(config.initialCO2, InitialAtmosphereMin, InitialCO2Max);
         config.initialO2 = Mathf.Clamp(config.initialO2, InitialAtmosphereMin, InitialO2Max);
         config.initialCH4 = Mathf.Clamp(config.initialCH4, InitialAtmosphereMin, InitialCH4Max);
-        config.atmosphericN2Bar = Mathf.Max(0f, config.atmosphericN2Bar);
-        config.atmosphericCO2Bar = Mathf.Max(0f, config.atmosphericCO2Bar);
-        config.atmosphericO2Bar = Mathf.Max(0f, config.atmosphericO2Bar);
-        config.atmosphericCH4Bar = Mathf.Max(0f, config.atmosphericCH4Bar);
-        config.atmosphericH2Bar = Mathf.Max(0f, config.atmosphericH2Bar);
-        config.atmosphericH2SBar = Mathf.Max(0f, config.atmosphericH2SBar);
+        NormalizeAtmosphereComposition(config);
         config.atmosphereInventoryPerBar = Mathf.Max(1e-6f, config.atmosphereInventoryPerBar);
         config.airSeaExchangeHalfLifeSeconds = Mathf.Max(0f, config.airSeaExchangeHalfLifeSeconds);
         config.initialDissolvedFe2Plus = Mathf.Clamp(config.initialDissolvedFe2Plus, InitialFe2Min, InitialFe2Max);
@@ -704,6 +703,53 @@ public class SimulationStartupController : MonoBehaviour
             if (distance < nearestDistance) { nearest = presets[i]; nearestDistance = distance; }
         }
         return nearest;
+    }
+
+    /// <summary>Normalizes trace-gas fractions, assigns N2 the remainder, and derives partial pressures.</summary>
+    public static void NormalizeAtmosphereComposition(SimulationStartupConfig config)
+    {
+        if (config == null) return;
+        float pressureMax = config.allowDenseAtmosphere ? DenseAtmospherePressureMaxBar : NormalAtmospherePressureMaxBar;
+        config.initialAtmospherePressureBar = Mathf.Clamp(FiniteOrZero(config.initialAtmospherePressureBar), 0f, pressureMax);
+        config.atmosphericCO2Fraction = Mathf.Clamp01(FiniteOrZero(config.atmosphericCO2Fraction));
+        config.atmosphericO2Fraction = Mathf.Clamp01(FiniteOrZero(config.atmosphericO2Fraction));
+        config.atmosphericCH4Fraction = Mathf.Clamp01(FiniteOrZero(config.atmosphericCH4Fraction));
+        config.atmosphericH2Fraction = Mathf.Clamp01(FiniteOrZero(config.atmosphericH2Fraction));
+        config.atmosphericH2SFraction = Mathf.Clamp01(FiniteOrZero(config.atmosphericH2SFraction));
+        float traceSum = config.atmosphericCO2Fraction + config.atmosphericO2Fraction + config.atmosphericCH4Fraction + config.atmosphericH2Fraction + config.atmosphericH2SFraction;
+        if (traceSum > 1f)
+        {
+            float scale = 1f / traceSum;
+            config.atmosphericCO2Fraction *= scale; config.atmosphericO2Fraction *= scale; config.atmosphericCH4Fraction *= scale;
+            config.atmosphericH2Fraction *= scale; config.atmosphericH2SFraction *= scale;
+            traceSum = 1f;
+        }
+        float pressure = config.initialAtmospherePressureBar;
+        config.atmosphericCO2Bar = pressure * config.atmosphericCO2Fraction;
+        config.atmosphericO2Bar = pressure * config.atmosphericO2Fraction;
+        config.atmosphericCH4Bar = pressure * config.atmosphericCH4Fraction;
+        config.atmosphericH2Bar = pressure * config.atmosphericH2Fraction;
+        config.atmosphericH2SBar = pressure * config.atmosphericH2SFraction;
+        config.atmosphericN2Bar = pressure * Mathf.Max(0f, 1f - traceSum);
+    }
+
+    private static float FiniteOrZero(float value) => float.IsNaN(value) || float.IsInfinity(value) ? 0f : value;
+
+    public static void MigrateLegacyAtmospherePartials(SimulationStartupConfig config, float n2Bar, float co2Bar, float o2Bar, float ch4Bar, float h2Bar, float h2sBar)
+    {
+        if (config == null) return;
+        n2Bar = Mathf.Max(0f, FiniteOrZero(n2Bar)); co2Bar = Mathf.Max(0f, FiniteOrZero(co2Bar));
+        o2Bar = Mathf.Max(0f, FiniteOrZero(o2Bar)); ch4Bar = Mathf.Max(0f, FiniteOrZero(ch4Bar));
+        h2Bar = Mathf.Max(0f, FiniteOrZero(h2Bar)); h2sBar = Mathf.Max(0f, FiniteOrZero(h2sBar));
+        float total = n2Bar + co2Bar + o2Bar + ch4Bar + h2Bar + h2sBar;
+        config.initialAtmospherePressureBar = total;
+        config.atmosphericCO2Fraction = total > 0f ? co2Bar / total : 0f;
+        config.atmosphericO2Fraction = total > 0f ? o2Bar / total : 0f;
+        config.atmosphericCH4Fraction = total > 0f ? ch4Bar / total : 0f;
+        config.atmosphericH2Fraction = total > 0f ? h2Bar / total : 0f;
+        config.atmosphericH2SFraction = total > 0f ? h2sBar / total : 0f;
+        config.allowDenseAtmosphere = total > NormalAtmospherePressureMaxBar;
+        NormalizeAtmosphereComposition(config);
     }
 
     private void RefreshStartupPanels()
@@ -739,6 +785,11 @@ public class SimulationStartupController : MonoBehaviour
         builder.AppendLine($"Initial CO2: {config.initialCO2:0.###}");
         builder.AppendLine($"Initial O2: {config.initialO2:0.###}");
         builder.AppendLine($"Initial CH4: {config.initialCH4:0.###}");
+        float n2Fraction = config.initialAtmospherePressureBar > 0f ? config.atmosphericN2Bar / config.initialAtmospherePressureBar : 1f;
+        builder.AppendLine($"Initial Atmosphere: {config.initialAtmospherePressureBar:0.###} bar total; composition N2/CO2/O2/CH4/H2/H2S={n2Fraction:P2}/{config.atmosphericCO2Fraction:P2}/{config.atmosphericO2Fraction:P2}/{config.atmosphericCH4Fraction:P2}/{config.atmosphericH2Fraction:P2}/{config.atmosphericH2SFraction:P2}");
+        builder.AppendLine($"Atmosphere Partials (bar) N2/CO2/O2/CH4/H2/H2S={config.atmosphericN2Bar:0.######}/{config.atmosphericCO2Bar:0.######}/{config.atmosphericO2Bar:0.######}/{config.atmosphericCH4Bar:0.######}/{config.atmosphericH2Bar:0.######}/{config.atmosphericH2SBar:0.######}");
+        builder.AppendLine($"Atmosphere Inventory / bar: {config.atmosphereInventoryPerBar:0.###} inventory units/bar");
+        builder.AppendLine($"Air-Sea Exchange Half-Life: {config.airSeaExchangeHalfLifeSeconds:0.###} simulated s (0 disabled)");
         builder.AppendLine($"Initial Dissolved Fe2+: {config.initialDissolvedFe2Plus:0.###}");
         builder.AppendLine($"Vent Clustering: {config.ventClustering:0.###}");
         builder.AppendLine($"Global Vent H2 / sim s: {config.ventH2PerTick:0.####}");
@@ -770,6 +821,8 @@ public class SimulationStartupController : MonoBehaviour
         public float initialO2;
         public float initialCH4;
         public float atmosphericN2Bar, atmosphericCO2Bar, atmosphericO2Bar, atmosphericCH4Bar, atmosphericH2Bar, atmosphericH2SBar;
+        public float initialAtmospherePressureBar, atmosphericCO2Fraction, atmosphericO2Fraction, atmosphericCH4Fraction, atmosphericH2Fraction, atmosphericH2SFraction;
+        public bool allowDenseAtmosphere;
         public float atmosphereInventoryPerBar, airSeaExchangeHalfLifeSeconds;
         public float initialDissolvedFe2Plus;
         public float ventH2PerTick;
@@ -810,6 +863,10 @@ public class SimulationStartupController : MonoBehaviour
                 initialCH4 = config.initialCH4,
                 atmosphericN2Bar = config.atmosphericN2Bar, atmosphericCO2Bar = config.atmosphericCO2Bar, atmosphericO2Bar = config.atmosphericO2Bar,
                 atmosphericCH4Bar = config.atmosphericCH4Bar, atmosphericH2Bar = config.atmosphericH2Bar, atmosphericH2SBar = config.atmosphericH2SBar,
+                initialAtmospherePressureBar = config.initialAtmospherePressureBar, atmosphericCO2Fraction = config.atmosphericCO2Fraction,
+                atmosphericO2Fraction = config.atmosphericO2Fraction, atmosphericCH4Fraction = config.atmosphericCH4Fraction,
+                atmosphericH2Fraction = config.atmosphericH2Fraction, atmosphericH2SFraction = config.atmosphericH2SFraction,
+                allowDenseAtmosphere = config.allowDenseAtmosphere,
                 atmosphereInventoryPerBar = config.atmosphereInventoryPerBar, airSeaExchangeHalfLifeSeconds = config.airSeaExchangeHalfLifeSeconds,
                 initialDissolvedFe2Plus = config.initialDissolvedFe2Plus,
                 ventH2PerTick = config.ventH2PerTick,
@@ -842,7 +899,21 @@ public class SimulationStartupController : MonoBehaviour
             config.initialCO2 = initialCO2;
             config.initialO2 = initialO2;
             config.initialCH4 = initialCH4;
-            if (version >= 6) { config.atmosphericN2Bar = atmosphericN2Bar; config.atmosphericCO2Bar = atmosphericCO2Bar; config.atmosphericO2Bar = atmosphericO2Bar; config.atmosphericCH4Bar = atmosphericCH4Bar; config.atmosphericH2Bar = atmosphericH2Bar; config.atmosphericH2SBar = atmosphericH2SBar; config.atmosphereInventoryPerBar = atmosphereInventoryPerBar; config.airSeaExchangeHalfLifeSeconds = airSeaExchangeHalfLifeSeconds; }
+            if (version >= 7)
+            {
+                config.initialAtmospherePressureBar = initialAtmospherePressureBar;
+                config.atmosphericCO2Fraction = atmosphericCO2Fraction; config.atmosphericO2Fraction = atmosphericO2Fraction;
+                config.atmosphericCH4Fraction = atmosphericCH4Fraction; config.atmosphericH2Fraction = atmosphericH2Fraction;
+                config.atmosphericH2SFraction = atmosphericH2SFraction; config.allowDenseAtmosphere = allowDenseAtmosphere;
+                config.atmosphereInventoryPerBar = atmosphereInventoryPerBar; config.airSeaExchangeHalfLifeSeconds = airSeaExchangeHalfLifeSeconds;
+            }
+            else if (version >= 6)
+            {
+                // Explicit schema migration: legacy values remain partial pressures and are converted,
+                // never reinterpreted as composition fractions.
+                MigrateLegacyAtmospherePartials(config, atmosphericN2Bar, atmosphericCO2Bar, atmosphericO2Bar, atmosphericCH4Bar, atmosphericH2Bar, atmosphericH2SBar);
+                config.atmosphereInventoryPerBar = atmosphereInventoryPerBar; config.airSeaExchangeHalfLifeSeconds = airSeaExchangeHalfLifeSeconds;
+            }
             config.initialDissolvedFe2Plus = initialDissolvedFe2Plus;
             config.ventH2PerTick = ventH2PerTick;
             config.ventH2SPerTick = ventH2SPerTick;
@@ -1097,8 +1168,8 @@ public class SimulationStartupController : MonoBehaviour
         setupGuiScrollPosition = GUILayout.BeginScrollView(setupGuiScrollPosition, GUILayout.Width(width), GUILayout.Height(scrollHeight));
 
         float contentWidth = Mathf.Max(1f, width - 20f);
-        float advancedHeight = advancedSettingsExpanded ? 360f : 0f;
-        float contentHeight = 44f + ((line + gap) * 24f) + advancedHeight + (gap * 2f) + 42f + 30f + 82f;
+        float advancedHeight = advancedSettingsExpanded ? 400f : 0f;
+        float contentHeight = 44f + ((line + gap) * 25f) + advancedHeight + (gap * 2f) + 42f + 30f + 82f;
         Rect contentRect = GUILayoutUtility.GetRect(contentWidth, contentHeight, GUILayout.Width(contentWidth), GUILayout.Height(contentHeight));
         float controlX = contentRect.x;
         float y = contentRect.y;
@@ -1133,12 +1204,16 @@ public class SimulationStartupController : MonoBehaviour
         y += line + gap;
         DrawFloat(new Rect(controlX, y, contentWidth, line), "Initial Ocean Fe2+", ref currentConfig.initialDissolvedFe2Plus, InitialFe2Min, InitialFe2Max);
         y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Atmospheric N2 (bar)", ref currentConfig.atmosphericN2Bar, 0f, 100f); y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Atmospheric CO2 (bar)", ref currentConfig.atmosphericCO2Bar, 0f, 100f); y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Atmospheric O2 (bar)", ref currentConfig.atmosphericO2Bar, 0f, 100f); y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Atmospheric CH4 (bar)", ref currentConfig.atmosphericCH4Bar, 0f, 100f); y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Atmospheric H2 (bar)", ref currentConfig.atmosphericH2Bar, 0f, 100f); y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Atmospheric H2S (bar)", ref currentConfig.atmosphericH2SBar, 0f, 100f); y += line + gap;
+        float atmospherePressureMax = currentConfig.allowDenseAtmosphere ? DenseAtmospherePressureMaxBar : NormalAtmospherePressureMaxBar;
+        DrawFloat(new Rect(controlX, y, contentWidth, line), "Initial Atmosphere Pressure (bar)", ref currentConfig.initialAtmospherePressureBar, 0f, atmospherePressureMax); y += line + gap;
+        NormalizeAtmosphereComposition(currentConfig);
+        DrawFloat(new Rect(controlX, y, contentWidth, line), $"CO2 fraction ({currentConfig.atmosphericCO2Bar:0.###} bar)", ref currentConfig.atmosphericCO2Fraction, 0f, 1f); y += line + gap;
+        DrawFloat(new Rect(controlX, y, contentWidth, line), $"O2 fraction ({currentConfig.atmosphericO2Bar:0.###} bar)", ref currentConfig.atmosphericO2Fraction, 0f, 1f); y += line + gap;
+        DrawFloat(new Rect(controlX, y, contentWidth, line), $"CH4 fraction ({currentConfig.atmosphericCH4Bar:0.###} bar)", ref currentConfig.atmosphericCH4Fraction, 0f, 1f); y += line + gap;
+        DrawFloat(new Rect(controlX, y, contentWidth, line), $"H2 fraction ({currentConfig.atmosphericH2Bar:0.###} bar)", ref currentConfig.atmosphericH2Fraction, 0f, 1f); y += line + gap;
+        DrawFloat(new Rect(controlX, y, contentWidth, line), $"H2S fraction ({currentConfig.atmosphericH2SBar:0.###} bar)", ref currentConfig.atmosphericH2SFraction, 0f, 1f); y += line + gap;
+        NormalizeAtmosphereComposition(currentConfig);
+        GUI.Label(new Rect(controlX, y, contentWidth, line), $"N2 remainder: {(currentConfig.initialAtmospherePressureBar > 0f ? currentConfig.atmosphericN2Bar / currentConfig.initialAtmospherePressureBar : 1f):P2} ({currentConfig.atmosphericN2Bar:0.###} bar)", labelStyle); y += line + gap;
         DrawFloat(new Rect(controlX, y, contentWidth, line), "Vent Clustering", ref currentConfig.ventClustering, 0f, 1f);
         y += line + gap;
         DrawFloat(new Rect(controlX, y, contentWidth, line), "Global Vent H2 / sim s", ref currentConfig.ventH2PerTick, VentPerTickMin, VentH2MaxPerTick);
@@ -1167,6 +1242,8 @@ public class SimulationStartupController : MonoBehaviour
             DrawFloat(new Rect(controlX, y, contentWidth, line), "Base Temperature (K)", ref currentConfig.baseTempKelvin, BaseTempMinKelvin, BaseTempMaxKelvin);
             y += line + gap;
             DrawFloat(new Rect(controlX, y, contentWidth, line), "Terrestrial Vent Fraction", ref currentConfig.terrestrialVentFraction, 0f, 1f);
+            y += line + gap;
+            DrawBool(new Rect(controlX, y, contentWidth, line), "Allow Dense Atmosphere (up to 600 bar)", ref currentConfig.allowDenseAtmosphere);
             y += line + gap;
             DrawFloat(new Rect(controlX, y, contentWidth, line), "Atmosphere Inventory / bar", ref currentConfig.atmosphereInventoryPerBar, 0.000001f, 1000000f); y += line + gap;
             DrawFloat(new Rect(controlX, y, contentWidth, line), "Air-Sea L0 Relaxation Half-Life (sim s; 0 off)", ref currentConfig.airSeaExchangeHalfLifeSeconds, 0f, 1000000f); y += line + gap;
