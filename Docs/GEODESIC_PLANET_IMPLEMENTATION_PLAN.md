@@ -177,6 +177,14 @@ Atmosphere lifecycle state and exchange diagnostics are reset on teardown and re
 
 Atmosphere v1 diagnostics expose the global pressure and partial pressures, inventory-per-bar scale, configured effective surface-L0 relaxation half-life, completed exchange ticks, and cumulative net transfer to the ocean for all five exchangeable gases in Detailed Debug only. The existing throttled chemistry telemetry appends the same O(1) global atmosphere state without adding a logger or ocean traversal. The air-sea half-life is explicitly presented as the relaxation timescale of surface-ocean L0 concentration toward atmosphere-controlled equilibrium, not as depletion half-life of the finite reservoir; zero remains exchange-disabled.
 
+### Deferred Final Performance Pass
+
+Final profiling after Atmosphere v1 found that requested 100x simulation speed currently achieves roughly 67x in the tested configuration. `GeodesicAtmosphere.AirSeaExchange` can cost roughly 6–9 ms on resource-tick frames. This cost remains in a deliberately empty test with atmospheric exchangeable gases, ocean CO2/O2/CH4/H2/H2S, Fe2, and vent gas/resource production all set to zero, demonstrating that avoidable baseline work remains in the environment / air-sea exchange path. This is not a correctness blocker and must not delay further Geodesic feature migration.
+
+A future optimization pass should investigate making completely inactive air-sea exchange gas channels cheap or O(1) where authoritative activity state makes that safe, while preserving ocean-to-atmosphere outgassing from an initially empty atmosphere. It should consider caching or precomputing the active L0 exchange domain and retain gas-major/channel-major access patterns; exchange must not be fused into a cache-hostile node-major multi-resource loop. The complete resource tick must be profiled before attributing all remaining cost to `AirSeaExchange`. Any optimization must preserve exact atmosphere/ocean inventory conservation and the current exchange equations.
+
+Revisit this optimization near the end of the Geodesic migration, after the higher-priority simulation systems and replicators are restored. Profiling and optimization decisions should use representative populated worlds rather than only the empty-world edge case.
+
 This section is based on reported branch summaries and local runtime fixes. Unity play mode remains the final source of truth.
 
 ## 2.1 Reported completed foundation
