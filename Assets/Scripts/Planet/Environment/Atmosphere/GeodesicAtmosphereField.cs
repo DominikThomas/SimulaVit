@@ -49,6 +49,18 @@ public sealed class GeodesicAtmosphereField : MonoBehaviour
         cumulativeNetTransferToOcean[index] += actual;
         return actual;
     }
+    internal double AddGeologicalSource(GeodesicAtmosphericGas gas, double requestedInventory)
+    {
+        if (!initialized || !IsTerrestrialVentGas(gas) || !double.IsFinite(requestedInventory) || requestedInventory <= 0d) return 0d;
+        int index = (int)gas;
+        double before = inventory[index];
+        double after = before + requestedInventory;
+        if (!double.IsFinite(after)) after = double.MaxValue;
+        inventory[index] = after;
+        return after - before;
+    }
+    internal static bool IsTerrestrialVentGas(GeodesicAtmosphericGas gas)
+        => gas == GeodesicAtmosphericGas.CO2 || gas == GeodesicAtmosphericGas.H2 || gas == GeodesicAtmosphericGas.H2S;
     internal void CompleteExchangeTick() => completedExchangeTicks++;
     internal void SetInventoryForTests(GeodesicAtmosphericGas gas, double value) { EnsureArrays(); inventory[(int)gas] = Math.Max(0d, value); initialized = true; }
     private void OnDestroy() => ClearField();

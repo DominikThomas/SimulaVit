@@ -75,6 +75,34 @@ public class GeodesicAtmosphereTests
     }
 
     [Test]
+    public void TerrestrialGeologicalSourceAcceptsOnlyVentGasesAndResets()
+    {
+        atmosphere.Configure(10d, 0d, 0d, 0d, 0d, 0d, 0d); atmosphere.InitializeForWorld();
+        Assert.That(atmosphere.AddGeologicalSource(GeodesicAtmosphericGas.CO2, 2d), Is.EqualTo(2d));
+        Assert.That(atmosphere.AddGeologicalSource(GeodesicAtmosphericGas.H2, 3d), Is.EqualTo(3d));
+        Assert.That(atmosphere.AddGeologicalSource(GeodesicAtmosphericGas.H2S, 4d), Is.EqualTo(4d));
+        Assert.That(atmosphere.AddGeologicalSource(GeodesicAtmosphericGas.O2, 5d), Is.Zero);
+        Assert.That(atmosphere.GetInventory(GeodesicAtmosphericGas.CO2), Is.EqualTo(2d));
+        Assert.That(atmosphere.GetInventory(GeodesicAtmosphericGas.H2), Is.EqualTo(3d));
+        Assert.That(atmosphere.GetInventory(GeodesicAtmosphericGas.H2S), Is.EqualTo(4d));
+        atmosphere.ClearField(); atmosphere.InitializeForWorld();
+        Assert.That(atmosphere.GetInventory(GeodesicAtmosphericGas.CO2), Is.Zero);
+        Assert.That(atmosphere.GetInventory(GeodesicAtmosphericGas.H2), Is.Zero);
+        Assert.That(atmosphere.GetInventory(GeodesicAtmosphericGas.H2S), Is.Zero);
+    }
+
+    [TestCase(5d, 0d, 1d, 0d)]
+    [TestCase(0d, 7d, 0d, 1d)]
+    [TestCase(3d, 1d, 0.75d, 0.25d)]
+    public void VentGasBudgetSplitUsesCrossHabitatRawStrength(double submarineWeight, double terrestrialWeight, double expectedSubmarine, double expectedTerrestrial)
+    {
+        GeodesicOceanResourceField.CalculateHabitatProductionSplit(submarineWeight, terrestrialWeight, out double submarine, out double terrestrial);
+        Assert.That(submarine, Is.EqualTo(expectedSubmarine).Within(1e-12));
+        Assert.That(terrestrial, Is.EqualTo(expectedTerrestrial).Within(1e-12));
+        Assert.That(submarine + terrestrial, Is.EqualTo(1d).Within(1e-12));
+    }
+
+    [Test]
     public void ExtremeValidConfigurationRemainsFiniteAndNonNegative()
     {
         atmosphere.Configure(double.MaxValue / 1e100, 1e50, 0d, 0d, 0d, 0d, 0d); atmosphere.InitializeForWorld();
