@@ -40,6 +40,10 @@ public class SimulationStartupConfigTests
         Assert.That(config.initialAtmospherePressureBar, Is.EqualTo(0.85f));
         Assert.That(config.atmosphericN2Bar, Is.EqualTo(0.8f).Within(1e-5f));
         Assert.That(config.atmosphericCO2Bar, Is.EqualTo(0.05f).Within(1e-5f));
+        Assert.That(config.ventCO2PerTick, Is.EqualTo(0.02f));
+        Assert.That(config.ventH2PerTick, Is.EqualTo(0.006f));
+        Assert.That(config.ventH2SPerTick, Is.EqualTo(0.004f));
+        Assert.That(config.ventFe2PerTick, Is.EqualTo(0.002f));
     }
 
     [Test]

@@ -59,8 +59,8 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     [SerializeField, Range(0f, 1f), Tooltip("Low-frequency deterministic geothermal province contrast. Zero is uniform; one creates broad inactive regions and concentrated provinces.")] private float geothermalPatchiness = 0.8f;
     [SerializeField, Range(0f, 1f), Tooltip("Fraction of otherwise eligible land candidates retained as terrestrial geothermal systems.")] private float terrestrialVentFraction = 0.25f;
     [SerializeField, Min(0f), Tooltip("Global submarine H2 inventory injected per authoritative simulated second.") ] private float ventH2PerTick = 0.006f;
-    [SerializeField, Min(0f)] private float ventH2SPerTick = 0.01f;
-    [SerializeField, Min(0f)] private float ventCO2PerTick = 0f;
+    [SerializeField, Min(0f)] private float ventH2SPerTick = 0.004f;
+    [SerializeField, Min(0f)] private float ventCO2PerTick = 0.02f;
     [SerializeField, Min(0f), Tooltip("Global submarine Fe2 inventory injected per authoritative simulated second.")] private float ventFe2PerTick = 0.002f;
     [SerializeField, Range(1, 8), Tooltip("Maximum compact physical vent mouths retained per clustered system.")] private int maximumOutletsPerSystem = 5;
     [SerializeField, Range(0.1f, 20f), Tooltip("Maximum angular distance from a system representative for compact physical outlets.")] private float outletSelectionRadiusDegrees = 3.5f;

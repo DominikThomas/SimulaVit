@@ -178,8 +178,8 @@ MonoBehaviour:
     initialDissolvedFe2Plus: 8
     ventClustering: 0.65
     ventH2PerTick: 0.006
-    ventH2SPerTick: 0.01
-    ventCO2PerTick: 0
+    ventH2SPerTick: 0.004
+    ventCO2PerTick: 0.02
     ventFe2PerTick: 0.002
     terrestrialVentFraction: 0.25
     initialSpawnCount: 100
@@ -219,8 +219,8 @@ MonoBehaviour:
     initialDissolvedFe2Plus: 8
     ventClustering: 0.65
     ventH2PerTick: 0.006
-    ventH2SPerTick: 0.01
-    ventCO2PerTick: 0
+    ventH2SPerTick: 0.004
+    ventCO2PerTick: 0.02
     ventFe2PerTick: 0.002
     terrestrialVentFraction: 0.25
     initialSpawnCount: 100
@@ -1431,8 +1431,8 @@ MonoBehaviour:
   geothermalPatchiness: 0.8
   terrestrialVentFraction: 0.25
   ventH2PerTick: 0.006
-  ventH2SPerTick: 0.01
-  ventCO2PerTick: 0
+  ventH2SPerTick: 0.004
+  ventCO2PerTick: 0.02
   ventFe2PerTick: 0.002
   maximumOutletsPerSystem: 5
   outletSelectionRadiusDegrees: 3.5
@@ -2292,9 +2292,9 @@ MonoBehaviour:
   enableVentReplenishment: 1
   ventTickSeconds: 0.5
   ventsOnlyBelowSeaLevel: 0
-  ventH2SPerTick: 0.04
-  ventH2PerTick: 0.06
-  ventCO2PerTick: 0.25
+  ventH2SPerTick: 0.004
+  ventH2PerTick: 0.006
+  ventCO2PerTick: 0.02
   ventH2SMax: 1
   ventH2Max: 1.5
   h2sDiffuseStrength: 0.08

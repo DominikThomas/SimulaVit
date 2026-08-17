@@ -786,6 +786,8 @@ public class SimulationStartupController : MonoBehaviour
         builder.AppendLine($"Initial O2: {config.initialO2:0.###}");
         builder.AppendLine($"Initial CH4: {config.initialCH4:0.###}");
         float n2Fraction = config.initialAtmospherePressureBar > 0f ? config.atmosphericN2Bar / config.initialAtmospherePressureBar : 1f;
+        string atmosphereAuthoringMode = config.allowDenseAtmosphere ? "Advanced dense (0-600 bar)" : "Normal (0-5 bar)";
+        builder.AppendLine($"Atmosphere Authoring Mode: {atmosphereAuthoringMode}");
         builder.AppendLine($"Initial Atmosphere: {config.initialAtmospherePressureBar:0.###} bar total; composition N2/CO2/O2/CH4/H2/H2S={n2Fraction:P2}/{config.atmosphericCO2Fraction:P2}/{config.atmosphericO2Fraction:P2}/{config.atmosphericCH4Fraction:P2}/{config.atmosphericH2Fraction:P2}/{config.atmosphericH2SFraction:P2}");
         builder.AppendLine($"Atmosphere Partials (bar) N2/CO2/O2/CH4/H2/H2S={config.atmosphericN2Bar:0.######}/{config.atmosphericCO2Bar:0.######}/{config.atmosphericO2Bar:0.######}/{config.atmosphericCH4Bar:0.######}/{config.atmosphericH2Bar:0.######}/{config.atmosphericH2SBar:0.######}");
         builder.AppendLine($"Atmosphere Inventory / bar: {config.atmosphereInventoryPerBar:0.###} inventory units/bar");
@@ -1205,7 +1207,10 @@ public class SimulationStartupController : MonoBehaviour
         DrawFloat(new Rect(controlX, y, contentWidth, line), "Initial Ocean Fe2+", ref currentConfig.initialDissolvedFe2Plus, InitialFe2Min, InitialFe2Max);
         y += line + gap;
         float atmospherePressureMax = currentConfig.allowDenseAtmosphere ? DenseAtmospherePressureMaxBar : NormalAtmospherePressureMaxBar;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Initial Atmosphere Pressure (bar)", ref currentConfig.initialAtmospherePressureBar, 0f, atmospherePressureMax); y += line + gap;
+        string atmospherePressureLabel = currentConfig.allowDenseAtmosphere
+            ? "Initial Atmosphere Pressure (bar; Advanced Dense 0-600)"
+            : "Initial Atmosphere Pressure (bar; Normal 0-5)";
+        DrawFloat(new Rect(controlX, y, contentWidth, line), atmospherePressureLabel, ref currentConfig.initialAtmospherePressureBar, 0f, atmospherePressureMax); y += line + gap;
         NormalizeAtmosphereComposition(currentConfig);
         DrawFloat(new Rect(controlX, y, contentWidth, line), $"CO2 fraction ({currentConfig.atmosphericCO2Bar:0.###} bar)", ref currentConfig.atmosphericCO2Fraction, 0f, 1f); y += line + gap;
         DrawFloat(new Rect(controlX, y, contentWidth, line), $"O2 fraction ({currentConfig.atmosphericO2Bar:0.###} bar)", ref currentConfig.atmosphericO2Fraction, 0f, 1f); y += line + gap;
