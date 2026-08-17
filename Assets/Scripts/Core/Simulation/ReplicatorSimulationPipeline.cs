@@ -303,6 +303,11 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
         simulationTimeSeconds += stepDeltaTime;
         replicatorManager.AdvanceSimulationStep(stepDeltaTime, simulationTimeSeconds);
 
+        if (replicatorManager.RunGeodesicBiologyStep(stepDeltaTime))
+        {
+            return;
+        }
+
         if (replicatorManager.ShouldProcessPredatorScent())
         {
             replicatorManager.UpdateScentFields(simulationTimeSeconds);

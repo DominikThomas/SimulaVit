@@ -209,6 +209,36 @@ This section is based on reported branch summaries and local runtime fixes. Unit
 
 ## 2.1 Reported completed foundation
 
+### First Geodesic biology foundation
+
+Geodesic startup now owns biology initialization after the layered ocean, dissolved-resource,
+surface/ocean-temperature, vent-outlet, and experienced-temperature authorities are valid. Each
+organism owns an authoritative simulation-cell index and active ocean-layer index; transforms are
+visual only. Startup deterministically selects sulfur chemosynthesis or methanogenesis founders
+over compact submarine vent outlets, using the Biology-derived seed and each column's actual bottom
+layer. No valid submarine outlet means no founders and one warning; zero requested founders remains
+a valid, near-zero-cost initialized runtime.
+
+Only sulfur chemosynthesis, methanogenesis, oxygenic photosynthesis, and methanotrophy execute in
+this foundation. Legacy per-tick resource needs and energy yields are the Geodesic balance authority;
+the reaction scaffolding continues to describe identities but its provisional coefficients do not
+silently replace gameplay balance. Reactions request inventory (`concentration * node volume`),
+same-node demand is proportionally limited from one pre-commit state, and sparse touched-node arrays
+stage deterministic withdrawals/products before commit. Biomass remains the organism's internal
+OrganicC store; methane, oxygen, and carbon dioxide products return to the current dissolved node,
+while sulfur is deposited through the same-column sediment authority. Biology never writes gases
+directly to atmosphere.
+
+Ocean temperature is the local coarse authority, with the experienced-temperature field retained as
+the positional vent-microhabitat boundary. Photosynthesis reads the existing instantaneous Geodesic
+insolation and uses layer factors L0=1, L1=0.55, L2+=0. Maintenance, energy starvation, lifespan, and
+asexual division remain on the fixed simulation pipeline; offspring inherit metabolism and the exact
+authoritative habitat, with metabolism mutation disabled. Movement, general mutation/evolution,
+marine snow, and Geodesic save/load remain deferred. The hot path is O(population + touched
+habitats/resources), uses generation-stamped sparse reset, and performs no whole-ocean clear or
+per-agent environmental lookup/allocation during reaction evaluation after capacity initialization.
+This is a foundation, not biology parity.
+
 - startup selection between legacy cube-sphere and geodesic icosphere;
 - persisted startup configuration;
 - save schema version 3 with grid metadata;
