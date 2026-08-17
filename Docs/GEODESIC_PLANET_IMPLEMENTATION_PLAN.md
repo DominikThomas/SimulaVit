@@ -239,6 +239,28 @@ habitats/resources), uses generation-stamped sparse reset, and performs no whole
 per-agent environmental lookup/allocation during reaction evaluation after capacity initialization.
 This is a foundation, not biology parity.
 
+The founder-survival audit found that the first Geodesic founder constructor path omitted the
+metabolism-specific optimal-temperature band and lethal margin assigned by Legacy founder creation.
+Those zero-valued traits made every vent founder's temperature-performance scalar zero at any real
+ocean temperature, so reactions achieved no energy while maintenance continued until energy
+depletion. Geodesic founders now receive the same sulfur-chemosynthesis or methanogenesis temperature
+ranges, lethal margin, randomized half-lifespan age convention, energy range, and biomass target as
+ordinary founders. Offspring inherit the parent's thermal traits. Biology currently uses the
+authoritative ocean-layer temperature because it owns only cell/layer habitat: the visual-only
+replicator position must not be passed to the experienced vent-core query as though it were an
+authoritative sub-cell coordinate. A later spatial-biology phase may use experienced temperature
+after it introduces such a coordinate. Neither coarse nor experienced Geodesic temperatures were
+clamped or retuned.
+
+The same audit aligned methanogenesis with its existing runtime carbon split: 15% of consumed CO2 is
+internal OrganicC and the remaining 85% becomes CH4 and determines energy yield. Sulfur output now
+matches the existing runtime's one unit of sedimentary S0 per unit H2S consumed rather than the
+provisional scaffold's 0.5 coefficient. No startup environment, vent, maintenance, lifespan, or
+energy-balance value changed. Throttled Geodesic telemetry now accumulates reaction, energy,
+maintenance, temperature-performance, habitat-validity, birth, and authoritative death-cause data
+from the biology pass without an ocean scan. Major habitat-level performance optimization remains a
+separate follow-up.
+
 - startup selection between legacy cube-sphere and geodesic icosphere;
 - persisted startup configuration;
 - save schema version 3 with grid metadata;

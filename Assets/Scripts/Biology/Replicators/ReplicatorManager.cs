@@ -807,7 +807,8 @@ public class ReplicatorManager : MonoBehaviour
             ClearPopulation();
             geodesicBiology = new GeodesicBiologyRuntime();
             if (!geodesicBiology.Initialize(planetGenerator, agents, populationState, spawnInitialPopulation ? initialSpawnCount : 0,
-                minLifespan, maxLifespan, baseAgentColor, defaultBiomassTarget))
+                minLifespan, maxLifespan, baseAgentColor, defaultBiomassTarget,
+                sulfurChemoTempRange, methanogenesisTempRange, defaultLethalMargin))
             {
                 geodesicBiology = null;
                 isInitialized = false;
@@ -902,7 +903,7 @@ public class ReplicatorManager : MonoBehaviour
             methanotrophyCH4PerTick, methanotrophyO2PerTick, methanotrophyEnergyPerTick,
             photosynthesisCo2PerTickAtFullInsolation, photosynthesisEnergyPerCo2, maxOrganicCStore,
             reproductionRate, enableCarbonLimitedDivision, divisionEnergyCost, replicationEnergyCost,
-            divisionBiomassMultiple, divisionCarbonSplitToChild, maxPopulation);
+            divisionBiomassMultiple, divisionCarbonSplitToChild, maxPopulation, RegisterDeathCause);
         return true;
     }
 
