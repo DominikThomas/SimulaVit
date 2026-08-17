@@ -50,9 +50,11 @@ public class SimulationStartupConfig
 
     [Header("Vents")]
     [Range(0f, 1f)] public float ventClustering = 0.65f;
+    // Conservative normal-world global rates. These are intentionally startup tuning;
+    // the authoritative vent equations and terrestrial/submarine split are unchanged.
     public float ventH2PerTick = 0.006f;
-    public float ventH2SPerTick = 0.01f;
-    public float ventCO2PerTick = 0f;
+    public float ventH2SPerTick = 0.004f;
+    public float ventCO2PerTick = 0.02f;
     [Tooltip("Fe2 inventory injected by each Geodesic logical vent per fixed resource tick. Legacy resource behavior is unchanged.")]
     public float ventFe2PerTick = 0.002f;
     [Range(0f, 1f)] public float terrestrialVentFraction = 0.25f;

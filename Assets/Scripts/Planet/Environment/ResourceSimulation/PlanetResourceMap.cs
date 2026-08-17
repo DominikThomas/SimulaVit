@@ -168,9 +168,9 @@ public class PlanetResourceMap : MonoBehaviour
     public bool ventsOnlyBelowSeaLevel = false;
 
     [Header("Vent Chemistry Balancing")]
-    public float ventH2SPerTick = 0.01f;
+    public float ventH2SPerTick = 0.004f;
     public float ventH2PerTick = 0.006f;
-    public float ventCO2PerTick = 0f;
+    public float ventCO2PerTick = 0.02f;
 
     [Header("Vent Resource Caps")]
     public float ventH2SMax = 1.0f;
