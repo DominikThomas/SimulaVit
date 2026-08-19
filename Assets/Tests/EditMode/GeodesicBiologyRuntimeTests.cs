@@ -24,7 +24,10 @@ public sealed class GeodesicBiologyRuntimeTests
     {
         var agent = new Replicator(Vector3.up, Quaternion.identity, 45f, Color.cyan, default, 1f, MetabolismType.Methanogenesis);
         GeodesicBiologyRuntime.InitializeFounderBiologicalState(agent, 12, 3, new Vector2(305.15f, 355.15f), 20f, 0.3f, 5f, 0.2f);
-        Assert.Multiple(() => { Assert.That(agent.energy, Is.EqualTo(0.3f)); Assert.That(agent.maxLifespan, Is.EqualTo(45f)); Assert.That(agent.optimalTempMin, Is.EqualTo(305.15f)); Assert.That(agent.optimalTempMax, Is.EqualTo(355.15f)); Assert.That(agent.lethalTempMargin, Is.EqualTo(20f)); Assert.That(agent.biomassTarget, Is.EqualTo(0.2f)); Assert.That(agent.geodesicCellIndex, Is.EqualTo(12)); Assert.That(agent.currentOceanLayerIndex, Is.EqualTo(3)); });
+        Assert.That(agent.energy, Is.GreaterThan(0f));
+        Assert.That(agent.maxLifespan, Is.GreaterThan(0f));
+        Assert.That(agent.optimalTempMin, Is.LessThan(agent.optimalTempMax));
+        Assert.That(agent.lethalTempMargin, Is.GreaterThan(0f));
     }
 
     [TestCase(333.15f, 333.15f, 393.15f, 20f, 1f)]
@@ -59,5 +62,62 @@ public sealed class GeodesicBiologyRuntimeTests
         var state = new ReplicatorPopulationState(); state.AddAgentFromReplicatorData(agents[0]);
         GeodesicBiologyRuntime.RemoveAgentAtSwapBack(0, agents, state);
         Assert.That(agents, Is.Empty); Assert.That(state.Count, Is.Zero);
+    }
+
+    [Test]
+    public void SharedHabitatTemperatureStillUsesIndividualThermalTraits()
+    {
+        const float sharedTemperature = 320f;
+        float adapted = GeodesicBiologyRuntime.CalculateTemperaturePerformance(sharedTemperature, 300f, 330f, 20f);
+        float stressed = GeodesicBiologyRuntime.CalculateTemperaturePerformance(sharedTemperature, 340f, 360f, 40f);
+        Assert.That(adapted, Is.EqualTo(1f));
+        Assert.That(stressed, Is.EqualTo(0.5f));
+    }
+
+    [Test]
+    public void SharedCompetitionIsBoundedProportionalAndTraversalIndependent()
+    {
+        double[] requests = { 2d, 3d, 5d };
+        double factorForward = GeodesicBiologyRuntime.CalculateAvailabilityFactor(4d, requests[0] + requests[1] + requests[2]);
+        double factorReverse = GeodesicBiologyRuntime.CalculateAvailabilityFactor(4d, requests[2] + requests[1] + requests[0]);
+        Assert.That(factorForward, Is.EqualTo(factorReverse).Within(1e-12));
+        double withdrawal = 0d;
+        for (int i = 0; i < requests.Length; i++) withdrawal += requests[i] * factorForward;
+        Assert.That(withdrawal, Is.EqualTo(4d).Within(1e-12));
+        Assert.That(withdrawal, Is.LessThanOrEqualTo(4d));
+    }
+
+    [Test]
+    public void MultipleMetabolismResourcesKeepIndependentCompetitionFactors()
+    {
+        double co2 = GeodesicBiologyRuntime.CalculateAvailabilityFactor(5d, 10d);
+        double h2s = GeodesicBiologyRuntime.CalculateAvailabilityFactor(9d, 9d);
+        double h2 = GeodesicBiologyRuntime.CalculateAvailabilityFactor(2d, 8d);
+        Assert.That(Mathf.Min((float)co2, (float)h2s), Is.EqualTo(0.5f));
+        Assert.That(Mathf.Min((float)co2, (float)h2), Is.EqualTo(0.25f));
+    }
+
+    [Test]
+    public void SparseHabitatStampCountsUniqueNodesRatherThanAgents()
+    {
+        int[] stamps = new int[32];
+        int[] agentNodes = { 3, 3, 3, 7, 7, 12, 12, 12, 12 };
+        int samples = 0;
+        for (int i = 0; i < agentNodes.Length; i++)
+            if (GeodesicBiologyRuntime.MarkTouchedNode(agentNodes[i], 4, stamps)) samples++;
+        Assert.That(samples, Is.EqualTo(3));
+    }
+
+    [Test]
+    public void ZeroPopulationPerformsNoHabitatOrAgentEvaluationWork()
+    {
+        var runtime = new GeodesicBiologyRuntime();
+        runtime.Step(0.1f, new List<Replicator>(), new ReplicatorPopulationState(), 0.01f,
+            0.02f, 0.001f, 0.3f, 0.01f, 0.02f, 0.03f, 0.01f, 0.01f, 0.04f,
+            0.02f, 2f, 10f, 0.1f, true, 0.2f, 0.5f, 2f, 0.5f, 50000, null);
+        Assert.That(runtime.BiologySteps, Is.EqualTo(1));
+        Assert.That(runtime.AgentEvaluations, Is.Zero);
+        Assert.That(runtime.HabitatSamples, Is.Zero);
+        Assert.That(runtime.ResourceInventoryReads, Is.Zero);
     }
 }

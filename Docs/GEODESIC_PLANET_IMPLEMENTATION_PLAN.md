@@ -258,8 +258,24 @@ matches the existing runtime's one unit of sedimentary S0 per unit H2S consumed 
 provisional scaffold's 0.5 coefficient. No startup environment, vent, maintenance, lifespan, or
 energy-balance value changed. Throttled Geodesic telemetry now accumulates reaction, energy,
 maintenance, temperature-performance, habitat-validity, birth, and authoritative death-cause data
-from the biology pass without an ocean scan. Major habitat-level performance optimization remains a
-separate follow-up.
+from the biology pass without an ocean scan. Further optimization remains profiling-driven and
+separate from biological balance changes.
+
+The managed single-threaded biology hot path now uses a sparse generation-stamped habitat sample
+cache keyed by authoritative ocean node. The first organism to touch a node in a biology step reads
+and stores that node's authoritative ocean-layer temperature; photosynthetic light is populated
+lazily once for that node only when a photosynthetic occupant requires it. Individual thermal traits
+remain per organism, so shared environmental temperature does not collapse future biological
+variation into one node-level performance value.
+
+After request accumulation, biology traverses only touched nodes and the seven fixed dissolved
+channels. Each node/resource pair with positive demand reads authoritative pre-commit inventory once
+and stores one shared availability factor. All organism requests then use those cached factors before
+the existing deterministic staged commit. Competition therefore remains proportional and
+order-independent while authoritative inventory reads scale with touched node/resource demand pairs,
+not organisms times reaction inputs. Sparse reset, zero-population behavior, and the
+O(population + touched habitats/resources) contract remain unchanged; no biology timestep, balance,
+lifecycle, mutation, movement, or execution-model decision changed.
 
 - startup selection between legacy cube-sphere and geodesic icosphere;
 - persisted startup configuration;
