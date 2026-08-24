@@ -54,6 +54,64 @@ public sealed class GeodesicBiologyRuntimeTests
     }
 
     [Test]
+    public void HydrogenotrophyUsesLegacyReactionBalance()
+    {
+        const double co2Need = 0.01d;
+        const double h2Need = 0.02d;
+        const double energyPerExtent = 8d;
+        const double storePerExtent = co2Need * 0.8d;
+        double achieved = GeodesicBiologyRuntime.CalculateAchievedExtent(1d, co2Need, co2Need, h2Need, h2Need);
+        Assert.That(achieved, Is.EqualTo(1d));
+        Assert.That(achieved * energyPerExtent, Is.EqualTo(8d));
+        Assert.That(achieved * storePerExtent, Is.EqualTo(0.008d).Within(1e-12));
+    }
+
+    [Test]
+    public void HydrogenotrophyCompetitionIsBoundedAndOrderIndependent()
+    {
+        const int organismCount = 10;
+        const double needPerOrganism = 0.02d;
+        const double available = 0.05d;
+        double factorForward = GeodesicBiologyRuntime.CalculateAvailabilityFactor(available, organismCount * needPerOrganism);
+        double factorReverse = GeodesicBiologyRuntime.CalculateAvailabilityFactor(available, needPerOrganism * organismCount);
+        Assert.That(factorForward, Is.EqualTo(factorReverse).Within(1e-12));
+        Assert.That(organismCount * needPerOrganism * factorForward, Is.EqualTo(available).Within(1e-12));
+    }
+
+    [Test]
+    public void HydrogenotrophyTemperatureAndOxygenModifierMatchLegacySemantics()
+    {
+        Assert.That(GeodesicBiologyRuntime.CalculateTemperaturePerformance(320f, 293.15f, 343.15f, 20f), Is.EqualTo(1f));
+        Assert.That(GeodesicBiologyRuntime.CalculateAnaerobeO2Efficiency(0.02f, 0.02f, 0.12f, 0.25f), Is.EqualTo(1f));
+        Assert.That(GeodesicBiologyRuntime.CalculateAnaerobeO2Efficiency(0.12f, 0.02f, 0.12f, 0.25f), Is.EqualTo(0.25f));
+    }
+
+    [Test]
+    public void NormalFounderMetabolismIsOnlyHydrogenotrophy()
+    {
+        Assert.That(GeodesicBiologyRuntime.NormalFounderMetabolism, Is.EqualTo(MetabolismType.Hydrogenotrophy));
+        Assert.That(GeodesicBiologyRuntime.NormalFounderMetabolism, Is.Not.EqualTo(MetabolismType.SulfurChemosynthesis));
+        Assert.That(GeodesicBiologyRuntime.NormalFounderMetabolism, Is.Not.EqualTo(MetabolismType.Methanogenesis));
+    }
+
+    [Test]
+    public void VisualFounderScatterIsDeterministicAndPreservesRadius()
+    {
+        Vector3 first = GeodesicBiologyRuntime.CalculateVisualFounderPosition(Vector3.up, 9f, 0.1f, 0.5f, 0.25f);
+        Vector3 second = GeodesicBiologyRuntime.CalculateVisualFounderPosition(Vector3.up, 9f, 0.1f, 0.5f, 0.25f);
+        Vector3 different = GeodesicBiologyRuntime.CalculateVisualFounderPosition(Vector3.up, 9f, 0.1f, 0.8f, 0.75f);
+        Assert.That(first, Is.EqualTo(second));
+        Assert.That(first, Is.Not.EqualTo(different));
+        Assert.That(first.magnitude, Is.EqualTo(9f).Within(1e-5f));
+        Assert.That(Vector3.Distance(first, Vector3.up * 9f), Is.GreaterThan(0f));
+        var agent = new Replicator(first, Quaternion.identity, 10f, Color.white, default, 0f, MetabolismType.Hydrogenotrophy);
+        GeodesicBiologyRuntime.InitializeFounderBiologicalState(agent, 6, 2, new Vector2(293.15f, 343.15f), 20f, 0.3f, 0f, 0.2f);
+        agent.position = different;
+        Assert.That(agent.geodesicCellIndex, Is.EqualTo(6));
+        Assert.That(agent.currentOceanLayerIndex, Is.EqualTo(2));
+    }
+
+    [Test]
     public void StarvationAndLifespanRemainDistinctAndRemovalStaysSynchronized()
     {
         Assert.That(GeodesicBiologyRuntime.ClassifyLifecycleDeath(0f, 2f, 10f), Is.EqualTo(DeathCause.EnergyDepletion));
@@ -113,6 +171,7 @@ public sealed class GeodesicBiologyRuntimeTests
     {
         var runtime = new GeodesicBiologyRuntime();
         runtime.Step(0.1f, new List<Replicator>(), new ReplicatorPopulationState(), 0.01f,
+            0.01f, 0.02f, 8f, 0.8f, true, 0.02f, 0.12f, 0.25f,
             0.02f, 0.001f, 0.3f, 0.01f, 0.02f, 0.03f, 0.01f, 0.01f, 0.04f,
             0.02f, 2f, 10f, 0.1f, true, 0.2f, 0.5f, 2f, 0.5f, 50000, null);
         Assert.That(runtime.BiologySteps, Is.EqualTo(1));

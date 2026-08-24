@@ -808,7 +808,7 @@ public class ReplicatorManager : MonoBehaviour
             geodesicBiology = new GeodesicBiologyRuntime();
             if (!geodesicBiology.Initialize(planetGenerator, agents, populationState, spawnInitialPopulation ? initialSpawnCount : 0,
                 minLifespan, maxLifespan, baseAgentColor, defaultBiomassTarget,
-                sulfurChemoTempRange, methanogenesisTempRange, defaultLethalMargin))
+                hydrogenTempRange, defaultLethalMargin))
             {
                 geodesicBiology = null;
                 isInitialized = false;
@@ -898,6 +898,9 @@ public class ReplicatorManager : MonoBehaviour
     {
         if (geodesicBiology == null) return false;
         geodesicBiology.Step(stepDeltaTime, agents, populationState, basalEnergyCostPerSecond,
+            hydrogenotrophyCO2PerTick, hydrogenotrophyH2PerTick, hydrogenotrophyEnergyPerTick, hydrogenotrophyStoreFraction,
+            anaerobeO2InhibitionEnabled && anaerobeO2InhibitionAffectsHydrogenotrophy,
+            anaerobeO2ComfortMax, anaerobeO2StressMax, anaerobeO2MinEfficiencyHydrogenotrophy,
             chemosynthesisCo2NeedPerTick, chemosynthesisH2sNeedPerTick, chemosynthesisEnergyPerTick,
             methanogenesisCO2PerTick, methanogenesisH2PerTick, methanogenesisEnergyPerTick,
             methanotrophyCH4PerTick, methanotrophyO2PerTick, methanotrophyEnergyPerTick,

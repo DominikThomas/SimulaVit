@@ -214,13 +214,15 @@ This section is based on reported branch summaries and local runtime fixes. Unit
 Geodesic startup now owns biology initialization after the layered ocean, dissolved-resource,
 surface/ocean-temperature, vent-outlet, and experienced-temperature authorities are valid. Each
 organism owns an authoritative simulation-cell index and active ocean-layer index; transforms are
-visual only. Startup deterministically selects sulfur chemosynthesis or methanogenesis founders
-over compact submarine vent outlets, using the Biology-derived seed and each column's actual bottom
+visual only. Startup creates Hydrogenotrophy-only founders over compact submarine vent outlets,
+using the Biology-derived seed and each column's actual bottom
 layer. No valid submarine outlet means no founders and one warning; zero requested founders remains
 a valid, near-zero-cost initialized runtime.
 
-Only sulfur chemosynthesis, methanogenesis, oxygenic photosynthesis, and methanotrophy execute in
-this foundation. Legacy per-tick resource needs and energy yields are the Geodesic balance authority;
+Hydrogenotrophy, sulfur chemosynthesis, methanogenesis, oxygenic photosynthesis, and methanotrophy
+execute in this foundation. Only Hydrogenotrophy is a normal founder; the other four remain
+executable for later mutation/evolution work, while mutation itself remains deferred. Legacy
+per-tick resource needs and energy yields are the Geodesic balance authority;
 the reaction scaffolding continues to describe identities but its provisional coefficients do not
 silently replace gameplay balance. Reactions request inventory (`concentration * node volume`),
 same-node demand is proportionally limited from one pre-commit state, and sparse touched-node arrays
@@ -243,8 +245,8 @@ The founder-survival audit found that the first Geodesic founder constructor pat
 metabolism-specific optimal-temperature band and lethal margin assigned by Legacy founder creation.
 Those zero-valued traits made every vent founder's temperature-performance scalar zero at any real
 ocean temperature, so reactions achieved no energy while maintenance continued until energy
-depletion. Geodesic founders now receive the same sulfur-chemosynthesis or methanogenesis temperature
-ranges, lethal margin, randomized half-lifespan age convention, energy range, and biomass target as
+depletion. Geodesic founders now receive the existing Hydrogenotrophy temperature range, lethal
+margin, randomized half-lifespan age convention, energy range, and biomass target as
 ordinary founders. Offspring inherit the parent's thermal traits. Biology currently uses the
 authoritative ocean-layer temperature because it owns only cell/layer habitat: the visual-only
 replicator position must not be passed to the experienced vent-core query as though it were an
@@ -276,6 +278,21 @@ order-independent while authoritative inventory reads scale with touched node/re
 not organisms times reaction inputs. Sparse reset, zero-population behavior, and the
 O(population + touched habitats/resources) contract remain unchanged; no biology timestep, balance,
 lifecycle, mutation, movement, or execution-model decision changed.
+
+Canonical founders are Hydrogenotrophs. Geodesic Hydrogenotrophy preserves the active Legacy
+runtime balance: each reference tick requests CO2 0.01 and H2 0.02, grants energy 8 at full achieved
+extent and temperature performance, stores 80% of consumed CO2 as internal OrganicC, and emits no
+tracked environmental product. Its existing 293.15–343.15 K configured optimum, ordinary lethal
+margin, and optional local-layer O2 inhibition curve are reused; no scaffold coefficient replaces
+those runtime settings. Sulfur chemosynthesis, methanogenesis, oxygenic photosynthesis, and
+methanotrophy remain executable but are not normal founders.
+
+Founder rendering uses two samples from a separate Biology-derived visual RNG stream to place each
+visual on an area-uniform tangent disk whose radius is a small fraction of that cell's mean neighbor
+spacing, projected back to the selected ocean-layer radius. Visual RNG consumption therefore cannot
+change authoritative vent selection. This scatter changes only `Replicator.position`: authoritative founder
+cell and actual bottom layer remain the compact submarine outlet habitat, and neither resource nor
+temperature sampling reads the visual position.
 
 - startup selection between legacy cube-sphere and geodesic icosphere;
 - persisted startup configuration;
