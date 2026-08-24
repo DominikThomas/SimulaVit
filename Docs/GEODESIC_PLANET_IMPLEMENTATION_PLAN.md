@@ -209,6 +209,91 @@ This section is based on reported branch summaries and local runtime fixes. Unit
 
 ## 2.1 Reported completed foundation
 
+### First Geodesic biology foundation
+
+Geodesic startup now owns biology initialization after the layered ocean, dissolved-resource,
+surface/ocean-temperature, vent-outlet, and experienced-temperature authorities are valid. Each
+organism owns an authoritative simulation-cell index and active ocean-layer index; transforms are
+visual only. Startup creates Hydrogenotrophy-only founders over compact submarine vent outlets,
+using the Biology-derived seed and each column's actual bottom
+layer. No valid submarine outlet means no founders and one warning; zero requested founders remains
+a valid, near-zero-cost initialized runtime.
+
+Hydrogenotrophy, sulfur chemosynthesis, methanogenesis, oxygenic photosynthesis, and methanotrophy
+execute in this foundation. Only Hydrogenotrophy is a normal founder; the other four remain
+executable for later mutation/evolution work, while mutation itself remains deferred. Legacy
+per-tick resource needs and energy yields are the Geodesic balance authority;
+the reaction scaffolding continues to describe identities but its provisional coefficients do not
+silently replace gameplay balance. Reactions request inventory (`concentration * node volume`),
+same-node demand is proportionally limited from one pre-commit state, and sparse touched-node arrays
+stage deterministic withdrawals/products before commit. Biomass remains the organism's internal
+OrganicC store; methane, oxygen, and carbon dioxide products return to the current dissolved node,
+while sulfur is deposited through the same-column sediment authority. Biology never writes gases
+directly to atmosphere.
+
+Ocean temperature is the local coarse authority, with the experienced-temperature field retained as
+the positional vent-microhabitat boundary. Photosynthesis reads the existing instantaneous Geodesic
+insolation and uses layer factors L0=1, L1=0.55, L2+=0. Maintenance, energy starvation, lifespan, and
+asexual division remain on the fixed simulation pipeline; offspring inherit metabolism and the exact
+authoritative habitat, with metabolism mutation disabled. Movement, general mutation/evolution,
+marine snow, and Geodesic save/load remain deferred. The hot path is O(population + touched
+habitats/resources), uses generation-stamped sparse reset, and performs no whole-ocean clear or
+per-agent environmental lookup/allocation during reaction evaluation after capacity initialization.
+This is a foundation, not biology parity.
+
+The founder-survival audit found that the first Geodesic founder constructor path omitted the
+metabolism-specific optimal-temperature band and lethal margin assigned by Legacy founder creation.
+Those zero-valued traits made every vent founder's temperature-performance scalar zero at any real
+ocean temperature, so reactions achieved no energy while maintenance continued until energy
+depletion. Geodesic founders now receive the existing Hydrogenotrophy temperature range, lethal
+margin, randomized half-lifespan age convention, energy range, and biomass target as
+ordinary founders. Offspring inherit the parent's thermal traits. Biology currently uses the
+authoritative ocean-layer temperature because it owns only cell/layer habitat: the visual-only
+replicator position must not be passed to the experienced vent-core query as though it were an
+authoritative sub-cell coordinate. A later spatial-biology phase may use experienced temperature
+after it introduces such a coordinate. Neither coarse nor experienced Geodesic temperatures were
+clamped or retuned.
+
+The same audit aligned methanogenesis with its existing runtime carbon split: 15% of consumed CO2 is
+internal OrganicC and the remaining 85% becomes CH4 and determines energy yield. Sulfur output now
+matches the existing runtime's one unit of sedimentary S0 per unit H2S consumed rather than the
+provisional scaffold's 0.5 coefficient. No startup environment, vent, maintenance, lifespan, or
+energy-balance value changed. Throttled Geodesic telemetry now accumulates reaction, energy,
+maintenance, temperature-performance, habitat-validity, birth, and authoritative death-cause data
+from the biology pass without an ocean scan. Further optimization remains profiling-driven and
+separate from biological balance changes.
+
+The managed single-threaded biology hot path now uses a sparse generation-stamped habitat sample
+cache keyed by authoritative ocean node. The first organism to touch a node in a biology step reads
+and stores that node's authoritative ocean-layer temperature; photosynthetic light is populated
+lazily once for that node only when a photosynthetic occupant requires it. Individual thermal traits
+remain per organism, so shared environmental temperature does not collapse future biological
+variation into one node-level performance value.
+
+After request accumulation, biology traverses only touched nodes and the seven fixed dissolved
+channels. Each node/resource pair with positive demand reads authoritative pre-commit inventory once
+and stores one shared availability factor. All organism requests then use those cached factors before
+the existing deterministic staged commit. Competition therefore remains proportional and
+order-independent while authoritative inventory reads scale with touched node/resource demand pairs,
+not organisms times reaction inputs. Sparse reset, zero-population behavior, and the
+O(population + touched habitats/resources) contract remain unchanged; no biology timestep, balance,
+lifecycle, mutation, movement, or execution-model decision changed.
+
+Canonical founders are Hydrogenotrophs. Geodesic Hydrogenotrophy preserves the active Legacy
+runtime balance: each reference tick requests CO2 0.01 and H2 0.02, grants energy 8 at full achieved
+extent and temperature performance, stores 80% of consumed CO2 as internal OrganicC, and emits no
+tracked environmental product. Its existing 293.15–343.15 K configured optimum, ordinary lethal
+margin, and optional local-layer O2 inhibition curve are reused; no scaffold coefficient replaces
+those runtime settings. Sulfur chemosynthesis, methanogenesis, oxygenic photosynthesis, and
+methanotrophy remain executable but are not normal founders.
+
+Founder rendering uses two samples from a separate Biology-derived visual RNG stream to place each
+visual on an area-uniform tangent disk whose radius is a small fraction of that cell's mean neighbor
+spacing, projected back to the selected ocean-layer radius. Visual RNG consumption therefore cannot
+change authoritative vent selection. This scatter changes only `Replicator.position`: authoritative founder
+cell and actual bottom layer remain the compact submarine outlet habitat, and neither resource nor
+temperature sampling reads the visual position.
+
 - startup selection between legacy cube-sphere and geodesic icosphere;
 - persisted startup configuration;
 - save schema version 3 with grid metadata;

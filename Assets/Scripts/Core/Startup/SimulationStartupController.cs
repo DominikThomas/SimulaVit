@@ -447,11 +447,13 @@ public class SimulationStartupController : MonoBehaviour
         }
         else if (currentConfig.gridType == PlanetGridType.GeodesicIcosphere)
         {
-            Debug.Log("[StartupLifecycle] Geodesic prototype mode: skipping replicator initialization/spawn once.", this);
+            if (replicatorManager != null && !replicatorManager.InitializeForSimulation(true))
+            {
+                Debug.LogError("[StartupLifecycle] Geodesic biology initialization failed.", this);
+            }
         }
 
-        // Simulation timing is the shared world clock. Geodesic prototype mode skips
-        // biology initialization, not world-time advancement.
+        // Simulation timing remains the shared authoritative clock for either biology mode.
         int targetSteps = keepPaused ? 0 : Mathf.Max(1, resumeStepsPerFrame);
         replicatorManager?.SetSimulationTiming(targetSteps);
         simulationPipeline?.SetSimulationStepsPerFrame(targetSteps);

@@ -123,6 +123,8 @@ public class Replicator
     public int currentOceanLayerIndex;
     [Tooltip("Temporary exploratory ocean-layer intent/bias used for local up/down probing. Not a global target depth.")]
     public int preferredOceanLayerIndex;
+    [Tooltip("Authoritative simulation-cell habitat in Geodesic mode; -1 in Legacy mode.")]
+    public int geodesicCellIndex;
 
     // Constructor
     public Replicator(Vector3 pos, Quaternion rot, float lifespan, Color col, Traits traits, float movementSeed, MetabolismType metabolism, LocomotionType locomotion = LocomotionType.PassiveDrift, float locomotionSkill = 0f)
@@ -152,6 +154,7 @@ public class Replicator
         nextSenseTime = 0f;
         preferredOceanLayerIndex = GetDefaultPreferredOceanLayerIndex(metabolism, locomotion);
         currentOceanLayerIndex = preferredOceanLayerIndex;
+        geodesicCellIndex = -1;
         starveCo2Seconds = 0f;
         starveH2sSeconds = 0f;
         starveH2Seconds = 0f;

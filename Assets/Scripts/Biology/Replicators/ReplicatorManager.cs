@@ -634,6 +634,7 @@ public class ReplicatorManager : MonoBehaviour
     private readonly ReplicatorHudPresenter hudPresenter = new ReplicatorHudPresenter();
     private readonly ReplicatorDebugTelemetry debugTelemetry = new ReplicatorDebugTelemetry();
     private bool isInitialized;
+    private GeodesicBiologyRuntime geodesicBiology;
     private readonly ReplicatorSpawnSystem spawnSystem = new ReplicatorSpawnSystem();
     private readonly ReplicatorLifecycleSystem lifecycleSystem = new ReplicatorLifecycleSystem();
     private readonly ReplicatorMetabolismSystem metabolismSystem = new ReplicatorMetabolismSystem();
@@ -800,6 +801,24 @@ public class ReplicatorManager : MonoBehaviour
     {
         ResolvePlanetResourceMapReference();
 
+        if (planetGenerator != null && planetGenerator.CurrentGridType == PlanetGridType.GeodesicIcosphere)
+        {
+            enabled = true;
+            ClearPopulation();
+            geodesicBiology = new GeodesicBiologyRuntime();
+            if (!geodesicBiology.Initialize(planetGenerator, agents, populationState, spawnInitialPopulation ? initialSpawnCount : 0,
+                minLifespan, maxLifespan, baseAgentColor, defaultBiomassTarget,
+                hydrogenTempRange, defaultLethalMargin))
+            {
+                geodesicBiology = null;
+                isInitialized = false;
+                return false;
+            }
+            isInitialized = true;
+            EnsureDeathCauseCounters();
+            return true;
+        }
+
         if (replicatorMesh == null || replicatorMaterial == null || planetGenerator == null || planetResourceMap == null)
         {
             Debug.LogError("ReplicatorManager is missing required references (mesh/material/planetGenerator/planetResourceMap). Assign PlanetResourceMap in Inspector. It can also be auto-added to the PlanetGenerator object if one exists in scene.", this);
@@ -849,6 +868,8 @@ public class ReplicatorManager : MonoBehaviour
     public void DeinitializeForStartupMenu()
     {
         isInitialized = false;
+        geodesicBiology?.Clear();
+        geodesicBiology = null;
         ClearPopulation();
         UpdateMetabolismCounts();
         ResetDeathCauseCounters();
@@ -871,6 +892,22 @@ public class ReplicatorManager : MonoBehaviour
         currentStepDeltaTime = stepDeltaTime;
         simulationTimeSeconds = currentSimulationTimeSeconds;
         simulationStepCount++;
+    }
+
+    internal bool RunGeodesicBiologyStep(float stepDeltaTime)
+    {
+        if (geodesicBiology == null) return false;
+        geodesicBiology.Step(stepDeltaTime, agents, populationState, basalEnergyCostPerSecond,
+            hydrogenotrophyCO2PerTick, hydrogenotrophyH2PerTick, hydrogenotrophyEnergyPerTick, hydrogenotrophyStoreFraction,
+            anaerobeO2InhibitionEnabled && anaerobeO2InhibitionAffectsHydrogenotrophy,
+            anaerobeO2ComfortMax, anaerobeO2StressMax, anaerobeO2MinEfficiencyHydrogenotrophy,
+            chemosynthesisCo2NeedPerTick, chemosynthesisH2sNeedPerTick, chemosynthesisEnergyPerTick,
+            methanogenesisCO2PerTick, methanogenesisH2PerTick, methanogenesisEnergyPerTick,
+            methanotrophyCH4PerTick, methanotrophyO2PerTick, methanotrophyEnergyPerTick,
+            photosynthesisCo2PerTickAtFullInsolation, photosynthesisEnergyPerCo2, maxOrganicCStore,
+            reproductionRate, enableCarbonLimitedDivision, divisionEnergyCost, replicationEnergyCost,
+            divisionBiomassMultiple, divisionCarbonSplitToChild, maxPopulation, RegisterDeathCause);
+        return true;
     }
 
     internal bool ShouldProcessPredatorScent()
