@@ -10,7 +10,10 @@ public sealed class GeodesicBiologyRuntime
     private static readonly ProfilerMarker Competition = new ProfilerMarker("GeodesicBiology.CompetitionResolution");
     private static readonly ProfilerMarker Commit = new ProfilerMarker("GeodesicBiology.EnvironmentCommit");
     private static readonly ProfilerMarker Lifecycle = new ProfilerMarker("GeodesicBiology.LifecycleReproduction");
+    private static readonly ProfilerMarker Movement = new ProfilerMarker("GeodesicBiology.PassiveMovement");
     private const int ResourceCount = 7;
+    public const float PassiveHorizontalOpportunitiesPerSecond = 0.8f;
+    public const float PassiveVerticalOpportunitiesPerSecond = 0.08f;
 
     private PlanetGenerator planet;
     private GeodesicOceanResourceField resources;
@@ -62,6 +65,7 @@ public sealed class GeodesicBiologyRuntime
     private long resourceInventoryReads;
     private long competitionPairs;
     private float lastBiologyStepSeconds;
+    private long movementUpdates, horizontalTransitions, verticalTransitions, rejectedTransitions;
 
     public long BiologySteps => biologySteps;
     public long AgentEvaluations => agentEvaluations;
@@ -72,6 +76,7 @@ public sealed class GeodesicBiologyRuntime
     public long CompetitionPairs => competitionPairs;
     public float LastBiologyStepSeconds => lastBiologyStepSeconds;
     public static MetabolismType NormalFounderMetabolism => MetabolismType.Hydrogenotrophy;
+    public static LocomotionType NormalFounderLocomotion => LocomotionType.PassiveDrift;
 
     private struct Request
     {
@@ -128,7 +133,7 @@ public sealed class GeodesicBiologyRuntime
         int occupiedCells = 0, occupiedLayers = 0;
         var cellSeen = new bool[grid.CellCount]; var layerSeen = new bool[grid.MaximumLayerCount];
         for (int i = 0; i < spawned; i++) { if (!cellSeen[agents[i].geodesicCellIndex]) { cellSeen[agents[i].geodesicCellIndex] = true; occupiedCells++; } int layer=agents[i].currentOceanLayerIndex; if(!layerSeen[layer]){layerSeen[layer]=true;occupiedLayers++;} }
-        Debug.Log($"[GeodesicBiology] mode=Geodesic biologySeed={seed} requested={requestedFounders} spawned={spawned} hydrogenotrophy={spawned} occupiedCells={occupiedCells} occupiedLayers={occupiedLayers} ventFounders={spawned} founders=hydrogenotrophy-compact-submarine-vent-bottom");
+        Debug.Log($"[GeodesicBiology] mode=Geodesic biologySeed={seed} requested={requestedFounders} spawned={spawned} hydrogenotrophy={spawned} passiveDrift={spawned} occupiedCells={occupiedCells} occupiedLayers={occupiedLayers} ventFounders={spawned} founders=hydrogenotrophy-passive-drift-compact-submarine-vent-bottom");
         return true;
     }
 
@@ -155,7 +160,7 @@ public sealed class GeodesicBiologyRuntime
             Vector3 position = planet.transform.TransformPoint(visualLocalPosition);
             float life = Mathf.Lerp(minLife, maxLife, (float)random.NextDouble());
             var agent = new Replicator(position, Quaternion.FromToRotation(Vector3.up, visualLocalPosition.normalized), life, color,
-                new Replicator.Traits(true, true, true, 0f), (float)random.NextDouble(), metabolism, LocomotionType.Anchored);
+                new Replicator.Traits(true, true, true, 0f), (float)random.NextDouble(), metabolism, NormalFounderLocomotion);
             InitializeFounderBiologicalState(agent, selected.CellIndex, bottomLayer, hydrogenTemperatureRange,
                 lethalTemperatureMargin, Mathf.Lerp(0.1f, 0.5f, (float)random.NextDouble()),
                 Mathf.Lerp(0f, life * 0.5f, (float)random.NextDouble()), biomassTarget);
@@ -192,6 +197,7 @@ public sealed class GeodesicBiologyRuntime
             return;
         }
         state.EnsureMatchesAgentCount(agents); EnsureRequestCapacity(agents.Count); BeginSparseStep();
+        using (Movement.Auto()) RunPassiveMovement(dt, agents, state);
         using (Evaluation.Auto()) for (int i = 0; i < state.Count; i++) BuildRequest(i, agents[i], state, dt,
             hydrogenCo2, hydrogenH2, hydrogenEnergy, hydrogenStoreFraction, hydrogenO2InhibitionEnabled,
             o2ComfortMax, o2StressMax, hydrogenMinimumO2Efficiency, sulfurCo2, sulfurH2s, sulfurEnergy,
@@ -326,8 +332,9 @@ public sealed class GeodesicBiologyRuntime
                 && (!carbon || state.OrganicCStore[i] >= Mathf.Max(1, multiple) * agents[i].biomassTarget);
             if (!eligible || agents.Count >= maxPopulation || reproductionRandom.NextDouble() >= rate * dt) continue;
             Replicator parent = agents[i];
-            var child = new Replicator(parent.position, parent.rotation, parent.maxLifespan, parent.color, parent.traits,
-                parent.movementSeed, state.Metabolism[i], parent.locomotion, parent.locomotionSkill);
+            float childMovementSeed = (float)reproductionRandom.NextDouble();
+            var child = new Replicator(state.Position[i], state.Rotation[i], parent.maxLifespan, parent.color, parent.traits,
+                childMovementSeed, state.Metabolism[i], state.Locomotion[i], parent.locomotionSkill);
             child.geodesicCellIndex = parent.geodesicCellIndex;
             child.currentOceanLayerIndex = state.CurrentOceanLayerIndex[i];
             child.preferredOceanLayerIndex = state.CurrentOceanLayerIndex[i];
@@ -344,6 +351,90 @@ public sealed class GeodesicBiologyRuntime
         }
     }
     public static void RemoveAgentAtSwapBack(int i,List<Replicator>a,ReplicatorPopulationState s){int last=a.Count-1;if(i<0||i>last)return;if(i!=last)a[i]=a[last];a.RemoveAt(last);s.RemoveAgentAtSwapBack(i);}
+    private void RunPassiveMovement(float dt, List<Replicator> agents, ReplicatorPopulationState state)
+    {
+        if (!(dt > 0f) || state.Count == 0) return;
+        GeodesicGridTopology topology = grid.SourceTopology;
+        for (int i = 0; i < state.Count; i++)
+        {
+            if (state.Locomotion[i] != LocomotionType.PassiveDrift) continue;
+            movementUpdates++;
+            uint sequence = state.PassiveMovementSequence[i];
+            uint seed = MovementSeedBits(state.MovementSeed[i]);
+            int cell = agents[i].geodesicCellIndex;
+            int layer = state.CurrentOceanLayerIndex[i];
+
+            if (IsOpportunity(seed, sequence++, dt, PassiveHorizontalOpportunitiesPerSecond))
+            {
+                int neighborCount = topology.NeighborCounts[cell];
+                int slot = DeterministicIndex(seed, sequence++, neighborCount);
+                int targetCell = neighborCount > 0 ? topology.Neighbors6[cell * 6 + slot] : -1;
+                int targetLayer = ResolveHorizontalTargetLayer(layer, targetCell >= 0 && targetCell < grid.CellCount
+                    ? grid.ActiveLayerCountByCell[targetCell] : 0);
+                if (targetCell >= 0 && targetLayer >= 0 && grid.IsNodeActive(targetCell, targetLayer))
+                {
+                    cell = targetCell;
+                    layer = targetLayer;
+                    agents[i].geodesicCellIndex = cell;
+                    horizontalTransitions++;
+                }
+                else rejectedTransitions++;
+            }
+
+            if (IsOpportunity(seed, sequence++, dt, PassiveVerticalOpportunitiesPerSecond))
+            {
+                int direction = (Hash(seed, sequence++) & 1u) == 0u ? -1 : 1;
+                int targetLayer = ResolveAdjacentVerticalLayer(layer, direction, grid.ActiveLayerCountByCell[cell]);
+                if (targetLayer != layer && grid.IsNodeActive(cell, targetLayer)) { layer = targetLayer; verticalTransitions++; }
+                else rejectedTransitions++;
+            }
+            state.PassiveMovementSequence[i] = sequence;
+            state.CurrentOceanLayerIndex[i] = layer;
+            state.PreferredOceanLayerIndex[i] = layer;
+            agents[i].currentOceanLayerIndex = layer;
+            agents[i].preferredOceanLayerIndex = layer;
+
+            int node = grid.GetNodeIndex(cell, layer);
+            Vector3 directionToCell = planet.GeodesicTopology.CellDirections[cell];
+            float scatterA = ToUnitFloat(Hash(seed, 0xA511E9B3u));
+            float scatterB = ToUnitFloat(Hash(seed, 0x63D83595u));
+            Vector3 localTarget = CalculateVisualFounderPosition(directionToCell, grid.LayerCenterRadius[node],
+                GetMeanNeighborSpacingRadians(cell), scatterA, scatterB);
+            Vector3 worldTarget = planet.transform.TransformPoint(localTarget);
+            state.Position[i] = Vector3.Lerp(state.Position[i], worldTarget, Mathf.Clamp01(dt * 3f));
+            state.CurrentDirection[i] = planet.transform.TransformDirection(localTarget.normalized);
+            state.Rotation[i] = planet.transform.rotation * Quaternion.FromToRotation(Vector3.up, localTarget.normalized);
+        }
+    }
+
+    public static int ResolveHorizontalTargetLayer(int sourceLayer, int targetActiveLayerCount)
+        => targetActiveLayerCount <= 0 ? -1 : Mathf.Clamp(sourceLayer, 0, targetActiveLayerCount - 1);
+
+    public static int ResolveAdjacentVerticalLayer(int sourceLayer, int direction, int activeLayerCount)
+    {
+        if (activeLayerCount <= 0) return -1;
+        int current = Mathf.Clamp(sourceLayer, 0, activeLayerCount - 1);
+        return Mathf.Clamp(current + (direction < 0 ? -1 : 1), 0, activeLayerCount - 1);
+    }
+
+    public static bool IsOpportunity(uint seed, uint sequence, float dt, float opportunitiesPerSecond)
+    {
+        if (!(dt > 0f) || !(opportunitiesPerSecond > 0f)) return false;
+        float probability = 1f - Mathf.Exp(-opportunitiesPerSecond * dt);
+        return ToUnitFloat(Hash(seed, sequence)) < probability;
+    }
+
+    public static int DeterministicIndex(uint seed, uint sequence, int count)
+        => count <= 0 ? -1 : (int)(Hash(seed, sequence) % (uint)count);
+
+    private static uint MovementSeedBits(float seed) => unchecked((uint)Mathf.RoundToInt(seed * 16777213f)) ^ 0x9E3779B9u;
+    private static float ToUnitFloat(uint value) => (value >> 8) * (1f / 16777216f);
+    private static uint Hash(uint seed, uint sequence)
+    {
+        uint x = seed ^ (sequence * 0x9E3779B9u);
+        x ^= x >> 16; x *= 0x7FEB352Du; x ^= x >> 15; x *= 0x846CA68Bu; x ^= x >> 16;
+        return x;
+    }
     private void EnsureHabitatSample(int node, int cell, int layer)
     {
         if (!MarkTouchedNode(node, generation, stamps)) return;
@@ -446,15 +537,15 @@ public sealed class GeodesicBiologyRuntime
     }
     private void LogDiagnostics(ReplicatorPopulationState state)
     {
-        int hydrogen=0,sulfur=0,methanogenesis=0,photosynthesis=0,methanotrophy=0;
-        for(int i=0;i<state.Count;i++){switch(state.Metabolism[i]){case MetabolismType.Hydrogenotrophy:hydrogen++;break;case MetabolismType.SulfurChemosynthesis:sulfur++;break;case MetabolismType.Methanogenesis:methanogenesis++;break;case MetabolismType.Photosynthesis:photosynthesis++;break;case MetabolismType.Methanotrophy:methanotrophy++;break;}}
+        int hydrogen=0,sulfur=0,methanogenesis=0,photosynthesis=0,methanotrophy=0,passive=0,amoeboid=0,flagellum=0,anchored=0;
+        for(int i=0;i<state.Count;i++){switch(state.Metabolism[i]){case MetabolismType.Hydrogenotrophy:hydrogen++;break;case MetabolismType.SulfurChemosynthesis:sulfur++;break;case MetabolismType.Methanogenesis:methanogenesis++;break;case MetabolismType.Photosynthesis:photosynthesis++;break;case MetabolismType.Methanotrophy:methanotrophy++;break;}switch(state.Locomotion[i]){case LocomotionType.PassiveDrift:passive++;break;case LocomotionType.Amoeboid:amoeboid++;break;case LocomotionType.Flagellum:flagellum++;break;case LocomotionType.Anchored:anchored++;break;}}
         double samples=Math.Max(1,temperatureSamples);
         int h=(int)MetabolismType.Hydrogenotrophy,s=(int)MetabolismType.SulfurChemosynthesis,m=(int)MetabolismType.Methanogenesis,p=(int)MetabolismType.Photosynthesis,mt=(int)MetabolismType.Methanotrophy;
         double evaluationsPerHabitat=agentEvaluations/(double)Math.Max(1L,habitatSamples);
         double evaluationsPerTemperatureRead=agentEvaluations/(double)Math.Max(1L,oceanTemperatureReads);
-        Debug.Log($"[GeodesicBiologyTelemetry] population={state.Count} biologySteps={biologySteps} lastStepSeconds={lastBiologyStepSeconds:G6} agentEvaluations={agentEvaluations} habitatSamples={habitatSamples} oceanTemperatureReads={oceanTemperatureReads} photosyntheticLightReads={photosyntheticLightReads} resourceInventoryReads={resourceInventoryReads} competitionPairs={competitionPairs} evaluationsPerHabitat={evaluationsPerHabitat:G6} evaluationsPerTemperatureRead={evaluationsPerTemperatureRead:G6} metabolismOrder=h/s/m/p/mt populationByMetabolism={hydrogen}/{sulfur}/{methanogenesis}/{photosynthesis}/{methanotrophy} births={births} deaths={deaths} starvation={starvationDeaths} lifespan={lifespanDeaths} requests={requestedByMetabolism[h]}/{requestedByMetabolism[s]}/{requestedByMetabolism[m]}/{requestedByMetabolism[p]}/{requestedByMetabolism[mt]} achieved={achievedByMetabolism[h]}/{achievedByMetabolism[s]}/{achievedByMetabolism[m]}/{achievedByMetabolism[p]}/{achievedByMetabolism[mt]} zeroAchieved={zeroAchieved} resourceLimited={resourceLimited} extent={extentByMetabolism[h]:G6}/{extentByMetabolism[s]:G6}/{extentByMetabolism[m]:G6}/{extentByMetabolism[p]:G6}/{extentByMetabolism[mt]:G6} energy={energyByMetabolism[h]:G6}/{energyByMetabolism[s]:G6}/{energyByMetabolism[m]:G6}/{energyByMetabolism[p]:G6}/{energyByMetabolism[mt]:G6} maintenance={maintenancePaid:G6} biologyTemperatureAuthority=coarseOceanLayer temperatureK(min/avg/max)={temperatureMin:G6}/{temperatureSum/samples:G6}/{temperatureMax:G6} performance(min/avg/max)={performanceMin:G6}/{performanceSum/samples:G6}/{performanceMax:G6} zeroPerformance={zeroTemperaturePerformance} invalidHabitat={invalidHabitats} invalidState={invalidBiologicalStates}");
-        biologySteps=agentEvaluations=habitatSamples=oceanTemperatureReads=photosyntheticLightReads=resourceInventoryReads=competitionPairs=0;
+        Debug.Log($"[GeodesicBiologyTelemetry] population={state.Count} biologySteps={biologySteps} lastStepSeconds={lastBiologyStepSeconds:G6} agentEvaluations={agentEvaluations} habitatSamples={habitatSamples} oceanTemperatureReads={oceanTemperatureReads} photosyntheticLightReads={photosyntheticLightReads} resourceInventoryReads={resourceInventoryReads} competitionPairs={competitionPairs} evaluationsPerHabitat={evaluationsPerHabitat:G6} evaluationsPerTemperatureRead={evaluationsPerTemperatureRead:G6} metabolismOrder=h/s/m/p/mt populationByMetabolism={hydrogen}/{sulfur}/{methanogenesis}/{photosynthesis}/{methanotrophy} locomotionOrder=passive/amoeboid/flagellum/anchored populationByLocomotion={passive}/{amoeboid}/{flagellum}/{anchored} movementUpdates={movementUpdates} horizontalTransitions={horizontalTransitions} verticalTransitions={verticalTransitions} rejectedMovement={rejectedTransitions} births={births} deaths={deaths} starvation={starvationDeaths} lifespan={lifespanDeaths} requests={requestedByMetabolism[h]}/{requestedByMetabolism[s]}/{requestedByMetabolism[m]}/{requestedByMetabolism[p]}/{requestedByMetabolism[mt]} achieved={achievedByMetabolism[h]}/{achievedByMetabolism[s]}/{achievedByMetabolism[m]}/{achievedByMetabolism[p]}/{achievedByMetabolism[mt]} zeroAchieved={zeroAchieved} resourceLimited={resourceLimited} extent={extentByMetabolism[h]:G6}/{extentByMetabolism[s]:G6}/{extentByMetabolism[m]:G6}/{extentByMetabolism[p]:G6}/{extentByMetabolism[mt]:G6} energy={energyByMetabolism[h]:G6}/{energyByMetabolism[s]:G6}/{energyByMetabolism[m]:G6}/{energyByMetabolism[p]:G6}/{energyByMetabolism[mt]:G6} maintenance={maintenancePaid:G6} biologyTemperatureAuthority=coarseOceanLayer temperatureK(min/avg/max)={temperatureMin:G6}/{temperatureSum/samples:G6}/{temperatureMax:G6} performance(min/avg/max)={performanceMin:G6}/{performanceSum/samples:G6}/{performanceMax:G6} zeroPerformance={zeroTemperaturePerformance} invalidHabitat={invalidHabitats} invalidState={invalidBiologicalStates}");
+        biologySteps=agentEvaluations=habitatSamples=oceanTemperatureReads=photosyntheticLightReads=resourceInventoryReads=competitionPairs=movementUpdates=horizontalTransitions=verticalTransitions=rejectedTransitions=0;
     }
     public static float ResolvePhotosyntheticLight(float daylight, int layer) => Mathf.Clamp01(daylight) * (layer == 0 ? 1f : layer == 1 ? 0.55f : 0f);
-    public void Clear(){planet=null;resources=null;sediment=null;oceanTemperature=null;experiencedTemperature=null;surfaceTemperature=null;grid=null;requests=Array.Empty<Request>();demand=availabilityFactor=delta=Array.Empty<double>();touched=stamps=lightStamps=Array.Empty<int>();temperatureByNode=lightByNode=oxygenByNode=Array.Empty<float>();touchedCount=0;Array.Clear(requestedByMetabolism,0,requestedByMetabolism.Length);Array.Clear(achievedByMetabolism,0,achievedByMetabolism.Length);Array.Clear(extentByMetabolism,0,extentByMetabolism.Length);Array.Clear(energyByMetabolism,0,energyByMetabolism.Length);births=deaths=starvationDeaths=lifespanDeaths=zeroAchieved=resourceLimited=invalidHabitats=invalidBiologicalStates=zeroTemperaturePerformance=temperatureSamples=biologySteps=agentEvaluations=habitatSamples=oceanTemperatureReads=photosyntheticLightReads=resourceInventoryReads=competitionPairs=0;maintenancePaid=diagnosticElapsed=temperatureSum=performanceSum=0d;lastBiologyStepSeconds=0f;temperatureMin=performanceMin=float.PositiveInfinity;temperatureMax=performanceMax=float.NegativeInfinity;}
+    public void Clear(){planet=null;resources=null;sediment=null;oceanTemperature=null;experiencedTemperature=null;surfaceTemperature=null;grid=null;requests=Array.Empty<Request>();demand=availabilityFactor=delta=Array.Empty<double>();touched=stamps=lightStamps=Array.Empty<int>();temperatureByNode=lightByNode=oxygenByNode=Array.Empty<float>();touchedCount=0;Array.Clear(requestedByMetabolism,0,requestedByMetabolism.Length);Array.Clear(achievedByMetabolism,0,achievedByMetabolism.Length);Array.Clear(extentByMetabolism,0,extentByMetabolism.Length);Array.Clear(energyByMetabolism,0,energyByMetabolism.Length);births=deaths=starvationDeaths=lifespanDeaths=zeroAchieved=resourceLimited=invalidHabitats=invalidBiologicalStates=zeroTemperaturePerformance=temperatureSamples=biologySteps=agentEvaluations=habitatSamples=oceanTemperatureReads=photosyntheticLightReads=resourceInventoryReads=competitionPairs=movementUpdates=horizontalTransitions=verticalTransitions=rejectedTransitions=0;maintenancePaid=diagnosticElapsed=temperatureSum=performanceSum=0d;lastBiologyStepSeconds=0f;temperatureMin=performanceMin=float.PositiveInfinity;temperatureMax=performanceMax=float.NegativeInfinity;}
 }

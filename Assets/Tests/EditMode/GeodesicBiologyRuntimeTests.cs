@@ -95,6 +95,76 @@ public sealed class GeodesicBiologyRuntimeTests
     }
 
     [Test]
+    public void NormalFounderLocomotionIsPassiveDrift()
+    {
+        Assert.That(GeodesicBiologyRuntime.NormalFounderLocomotion, Is.EqualTo(LocomotionType.PassiveDrift));
+        Assert.That(GeodesicBiologyRuntime.NormalFounderLocomotion, Is.Not.EqualTo(LocomotionType.Anchored));
+    }
+
+    [TestCase(4, 5, 4)]
+    [TestCase(4, 3, 2)]
+    [TestCase(1, 5, 1)]
+    [TestCase(2, 0, -1)]
+    public void HorizontalDriftMapsDepthToAnActiveTargetLayer(int sourceLayer, int activeLayers, int expected)
+    {
+        Assert.That(GeodesicBiologyRuntime.ResolveHorizontalTargetLayer(sourceLayer, activeLayers), Is.EqualTo(expected));
+    }
+
+    [TestCase(2, -1, 5, 1)]
+    [TestCase(2, 1, 5, 3)]
+    [TestCase(0, -1, 5, 0)]
+    [TestCase(4, 1, 5, 4)]
+    public void VerticalDriftIsAdjacentAndCannotCrossColumnBounds(int layer, int direction, int activeLayers, int expected)
+    {
+        int target = GeodesicBiologyRuntime.ResolveAdjacentVerticalLayer(layer, direction, activeLayers);
+        Assert.That(target, Is.EqualTo(expected));
+        Assert.That(Mathf.Abs(target - layer), Is.LessThanOrEqualTo(1));
+    }
+
+    [Test]
+    public void PassiveOpportunitySequenceIsDeterministicAndVerticalIsSubstantiallyRarer()
+    {
+        const uint seed = 1234567u;
+        const float dt = 0.5f;
+        int horizontal = 0, vertical = 0;
+        for (uint sequence = 0; sequence < 20000; sequence++)
+        {
+            if (GeodesicBiologyRuntime.IsOpportunity(seed, sequence, dt, GeodesicBiologyRuntime.PassiveHorizontalOpportunitiesPerSecond)) horizontal++;
+            if (GeodesicBiologyRuntime.IsOpportunity(seed, sequence, dt, GeodesicBiologyRuntime.PassiveVerticalOpportunitiesPerSecond)) vertical++;
+            Assert.That(GeodesicBiologyRuntime.IsOpportunity(seed, sequence, dt, GeodesicBiologyRuntime.PassiveHorizontalOpportunitiesPerSecond),
+                Is.EqualTo(GeodesicBiologyRuntime.IsOpportunity(seed, sequence, dt, GeodesicBiologyRuntime.PassiveHorizontalOpportunitiesPerSecond)));
+        }
+        Assert.That(horizontal, Is.GreaterThan(vertical * 5));
+        Assert.That(vertical, Is.GreaterThan(0));
+    }
+
+    [Test]
+    public void PassiveNeighborChoiceDoesNotAcceptOrInspectHabitatScores()
+    {
+        int first = GeodesicBiologyRuntime.DeterministicIndex(42u, 7u, 6);
+        int repeated = GeodesicBiologyRuntime.DeterministicIndex(42u, 7u, 6);
+        Assert.That(first, Is.InRange(0, 5));
+        Assert.That(repeated, Is.EqualTo(first));
+    }
+
+    [Test]
+    public void SwapBackPreservesPassiveMovementStreamState()
+    {
+        var agents = new List<Replicator>
+        {
+            new Replicator(Vector3.up, Quaternion.identity, 10f, Color.white, default, 0.1f, MetabolismType.Hydrogenotrophy),
+            new Replicator(Vector3.down, Quaternion.identity, 10f, Color.white, default, 0.2f, MetabolismType.Hydrogenotrophy)
+        };
+        var state = new ReplicatorPopulationState();
+        state.AddAgentFromReplicatorData(agents[0]); state.AddAgentFromReplicatorData(agents[1]);
+        state.PassiveMovementSequence[1] = 91u;
+        GeodesicBiologyRuntime.RemoveAgentAtSwapBack(0, agents, state);
+        Assert.That(state.Count, Is.EqualTo(1));
+        Assert.That(state.PassiveMovementSequence[0], Is.EqualTo(91u));
+        Assert.That(state.Locomotion[0], Is.EqualTo(LocomotionType.PassiveDrift));
+    }
+
+    [Test]
     public void VisualFounderScatterIsDeterministicAndPreservesRadius()
     {
         Vector3 first = GeodesicBiologyRuntime.CalculateVisualFounderPosition(Vector3.up, 9f, 0.1f, 0.5f, 0.25f);

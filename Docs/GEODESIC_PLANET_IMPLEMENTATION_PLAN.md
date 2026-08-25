@@ -294,6 +294,52 @@ change authoritative vent selection. This scatter changes only `Replicator.posit
 cell and actual bottom layer remain the compact submarine outlet habitat, and neither resource nor
 temperature sampling reads the visual position.
 
+### First Geodesic locomotion: passive drift (2026-08)
+
+Normal Geodesic founders are now `Hydrogenotrophy + PassiveDrift`. They still originate in the
+actual bottom node of a compact submarine vent outlet, but they are not pinned there after startup.
+`PassiveDrift` means a non-motile organism transported by surrounding water; it is neither sessile
+nor active locomotion and it does not inspect resources, temperature, or habitat fitness.
+
+The Geodesic biology interval gives passive organisms deterministic horizontal dispersal along one
+edge in the precomputed topology. The selected slot is uniformly seed-derived from the organism's
+movement stream. Land/zero-layer targets are rejected. On entering a variable-depth ocean column,
+the numeric layer is preserved when possible and otherwise clamped to the target's deepest active
+layer. This approximate-depth mapping cannot select an inactive node or make a non-neighbour jump.
+
+Independent passive vertical drift crosses at most one adjacent active layer. Its opportunity rate
+is 0.08 per simulated second versus 0.8 per simulated second horizontally, so full layer changes
+are intentionally about ten times rarer before boundary/land rejection. Legacy used a sinusoidal
+age/seed phase gate with a `0.32` PassiveDrift probe-cycle parameter, then scored current and adjacent
+layers and required improvement. Geodesic instead uses a timestep-aware Poisson opportunity,
+`1-exp(-rate*dt)`, deliberately removing Legacy's metabolism-aware suitability seeking and repeated
+true phase windows.
+
+Authoritative migration updates `(geodesic simulation cell, ocean layer)` before metabolism samples
+the environment. Rendering then eases the visual-only position toward the new layer-centre radius
+with stable per-agent tangent scatter. Transform position never selects biology habitat. Movement
+uses an allocation-free deterministic hash stream stored with population state; birth initializes an
+independent seed, swap-back copies its cursor, and reset clears it. Passive drift has no active
+locomotion energy charge; only existing maintenance applies.
+
+There is no hard-coded bottom affinity for Hydrogenotrophy or SulfurChemosynthesis in Geodesic mode.
+Vent association must emerge from resources, oxygen inhibition, temperature, maintenance,
+reproduction, and death. Locomotion mutation, Amoeboid, Flagellum, Anchored, metabolism mutation,
+and active temporal taxis remain deferred.
+
+#### Manual Unity validation (about 50 founders)
+
+1. Confirm startup reports all founders as Hydrogenotrophy + PassiveDrift at vent-bottom habitats.
+2. Confirm some organisms spread horizontally away from their founder vent.
+3. Confirm horizontal transitions are visibly much more frequent than layer changes.
+4. Confirm occasional layer changes are adjacent only, with no multi-layer jumps.
+5. Confirm no organism enters land or an inactive layer across variable-depth columns.
+6. Confirm hydrogenotrophs are not returned to bottom after drifting vertically.
+7. Confirm poor/cold/H2-poor habitats reduce metabolism naturally while favourable vent organisms fare better.
+8. Confirm no Amoeboid, Flagellum, or Anchored organism appears.
+9. Confirm pause stops movement and menu -> new game clears all movement state.
+10. Compare `GeodesicBiology.PassiveMovement` and aggregate movement telemetry at 0, 50, and 1000 organisms.
+
 - startup selection between legacy cube-sphere and geodesic icosphere;
 - persisted startup configuration;
 - save schema version 3 with grid metadata;
