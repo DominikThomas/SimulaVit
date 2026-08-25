@@ -301,25 +301,33 @@ actual bottom node of a compact submarine vent outlet, but they are not pinned t
 `PassiveDrift` means a non-motile organism transported by surrounding water; it is neither sessile
 nor active locomotion and it does not inspect resources, temperature, or habitat fitness.
 
-The Geodesic biology interval gives passive organisms deterministic horizontal dispersal along one
-edge in the precomputed topology. The selected slot is uniformly seed-derived from the organism's
-movement stream. Land/zero-layer targets are rejected. On entering a variable-depth ocean column,
-the numeric layer is preserved when possible and otherwise clamped to the target's deepest active
-layer. This approximate-depth mapping cannot select an inactive node or make a non-neighbour jump.
+The Geodesic biology interval advances a continuous, Geodesic-local unit direction and tangent for
+each passive organism at a fixed angular speed. These contiguous population arrays are kinematic
+state only. They let organisms drift through cell interiors smoothly; neither resource nor
+temperature code reads them. The former 0.8-per-second discrete horizontal transition model and its
+cell-centre visual targets were removed after profiling 10,000 founders showed movement at about
+11.8 ms/frame and exposed visibly choppy centre-to-centre paths.
 
-Independent passive vertical drift crosses at most one adjacent active layer. Its opportunity rate
-is 0.08 per simulated second versus 0.8 per simulated second horizontally, so full layer changes
-are intentionally about ten times rarer before boundary/land rejection. Legacy used a sinusoidal
-age/seed phase gate with a `0.32` PassiveDrift probe-cycle parameter, then scored current and adjacent
-layers and required improvement. Geodesic instead uses a timestep-aware Poisson opportunity,
-`1-exp(-rate*dt)`, deliberately removing Legacy's metabolism-aware suitability seeking and repeated
-true phase windows.
+After each continuous advance, containment is updated locally. Starting with the authoritative cell,
+the algorithm compares the continuous direction's dot product with that cell centre and its five or
+six real precomputed neighbours. A more-aligned neighbour becomes authoritative, and the check may
+repeat up to three times for unusually large timesteps. No global direction-to-cell scan occurs. A
+land neighbour is rejected and the tangent is reflected at the local cell-centre bisector. For an
+ocean neighbour, the numeric layer is preserved or clamped only to the shallower column's deepest
+active layer.
+
+Independent passive vertical drift remains discrete and adjacent-only at a provisional mean rate of
+0.08 events per simulated second. Each organism stores its next deterministic exponentially
+distributed event time, so ordinary updates only compare the simulation clock against that schedule.
+The event chooses up/down without habitat scoring, rejects a column boundary, and schedules the next
+event. Legacy's `0.32` sinusoidal probe gate and resource-scored layer choice are intentionally not
+used.
 
 Authoritative migration updates `(geodesic simulation cell, ocean layer)` before metabolism samples
-the environment. Rendering then eases the visual-only position toward the new layer-centre radius
-with stable per-agent tangent scatter. Transform position never selects biology habitat. Movement
-uses an allocation-free deterministic hash stream stored with population state; birth initializes an
-independent seed, swap-back copies its cursor, and reset clears it. Passive drift has no active
+the environment. Rendering uses `continuousDirection * interpolatedLayerRadius`, so horizontal cell
+crossings do not snap. Only radial position eases after a layer change. Transform position never
+selects biology habitat. Birth initializes an independent deterministic stream; swap-back, resize,
+and teardown preserve or clear all continuous and scheduled state. Passive drift has no active
 locomotion energy charge; only existing maintenance applies.
 
 There is no hard-coded bottom affinity for Hydrogenotrophy or SulfurChemosynthesis in Geodesic mode.
@@ -327,18 +335,19 @@ Vent association must emerge from resources, oxygen inhibition, temperature, mai
 reproduction, and death. Locomotion mutation, Amoeboid, Flagellum, Anchored, metabolism mutation,
 and active temporal taxis remain deferred.
 
-#### Manual Unity validation (about 50 founders)
+#### Manual Unity validation
 
-1. Confirm startup reports all founders as Hydrogenotrophy + PassiveDrift at vent-bottom habitats.
-2. Confirm some organisms spread horizontally away from their founder vent.
-3. Confirm horizontal transitions are visibly much more frequent than layer changes.
-4. Confirm occasional layer changes are adjacent only, with no multi-layer jumps.
-5. Confirm no organism enters land or an inactive layer across variable-depth columns.
-6. Confirm hydrogenotrophs are not returned to bottom after drifting vertically.
-7. Confirm poor/cold/H2-poor habitats reduce metabolism naturally while favourable vent organisms fare better.
-8. Confirm no Amoeboid, Flagellum, or Anchored organism appears.
-9. Confirm pause stops movement and menu -> new game clears all movement state.
-10. Compare `GeodesicBiology.PassiveMovement` and aggregate movement telemetry at 0, 50, and 1000 organisms.
+With about 50 founders, confirm smooth drift through cell interiors, no centre-to-centre paths or
+horizontal snaps, occasional local cell-boundary crossings, much rarer adjacent-only layer changes,
+coastline rejection, variable-depth validity, pause behaviour, and clean menu -> new game state.
+Confirm founders remain Hydrogenotrophy + PassiveDrift and that no Amoeboid, Flagellum, or Anchored
+organism appears.
+
+With 0, 50, 1,000, and 10,000 organisms, profile with Deep Profile off. Compare
+`GeodesicBiology.PassiveMovement` and its KinematicsAndBoundary, VerticalEvents, and VisualTarget
+children against ReactionEvaluation and ReplicatorManager.VisualSync; movement should no longer
+dominate. Repeat at 100x speed and confirm continuous containment remains local, layer events remain
+adjacent, and simulation-time motion is stable.
 
 - startup selection between legacy cube-sphere and geodesic icosphere;
 - persisted startup configuration;

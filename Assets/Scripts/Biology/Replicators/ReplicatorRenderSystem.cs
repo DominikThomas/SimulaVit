@@ -98,6 +98,15 @@ public class ReplicatorRenderSystem
         Material replicatorMaterial)
     {
         float baseScale = 0.1f * Mathf.Max(0.1f, size);
+        // Passive bodies are isotropic. Avoid normal/tangent reconstruction for the dominant
+        // founder population; their authoritative continuous position is already render-ready.
+        if (locomotion == LocomotionType.PassiveDrift)
+        {
+            AddInstance(Matrix4x4.TRS(position, fallbackRotation, Vector3.one * baseScale * 0.50f),
+                color, ref batchCount, replicatorMesh, replicatorMaterial);
+            return;
+        }
+
         Vector3 up = currentDirection.sqrMagnitude > 0.0001f ? currentDirection.normalized : position.normalized;
         if (up.sqrMagnitude <= 0.0001f)
         {

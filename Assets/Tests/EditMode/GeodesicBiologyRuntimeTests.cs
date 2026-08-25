@@ -122,29 +122,69 @@ public sealed class GeodesicBiologyRuntimeTests
     }
 
     [Test]
-    public void PassiveOpportunitySequenceIsDeterministicAndVerticalIsSubstantiallyRarer()
+    public void PassiveKinematicsMovesContinuouslyWithinCurrentCell()
     {
-        const uint seed = 1234567u;
-        const float dt = 0.5f;
-        int horizontal = 0, vertical = 0;
-        for (uint sequence = 0; sequence < 20000; sequence++)
-        {
-            if (GeodesicBiologyRuntime.IsOpportunity(seed, sequence, dt, GeodesicBiologyRuntime.PassiveHorizontalOpportunitiesPerSecond)) horizontal++;
-            if (GeodesicBiologyRuntime.IsOpportunity(seed, sequence, dt, GeodesicBiologyRuntime.PassiveVerticalOpportunitiesPerSecond)) vertical++;
-            Assert.That(GeodesicBiologyRuntime.IsOpportunity(seed, sequence, dt, GeodesicBiologyRuntime.PassiveHorizontalOpportunitiesPerSecond),
-                Is.EqualTo(GeodesicBiologyRuntime.IsOpportunity(seed, sequence, dt, GeodesicBiologyRuntime.PassiveHorizontalOpportunitiesPerSecond)));
-        }
-        Assert.That(horizontal, Is.GreaterThan(vertical * 5));
-        Assert.That(vertical, Is.GreaterThan(0));
+        Vector3 direction = Vector3.up;
+        Vector3 tangent = Vector3.right;
+        Vector3 before = direction;
+        GeodesicBiologyRuntime.AdvancePassiveKinematics(ref direction, ref tangent, 1234567u, 0.5f);
+        Assert.That(Vector3.Angle(before, direction), Is.GreaterThan(0f));
+        Assert.That(Vector3.Angle(before, direction), Is.LessThan(1f));
+        Assert.That(direction.magnitude, Is.EqualTo(1f).Within(1e-5f));
     }
 
     [Test]
-    public void PassiveNeighborChoiceDoesNotAcceptOrInspectHabitatScores()
+    public void PassiveKinematicsIsDeterministicAndHasNoHabitatInputs()
     {
-        int first = GeodesicBiologyRuntime.DeterministicIndex(42u, 7u, 6);
-        int repeated = GeodesicBiologyRuntime.DeterministicIndex(42u, 7u, 6);
-        Assert.That(first, Is.InRange(0, 5));
-        Assert.That(repeated, Is.EqualTo(first));
+        Vector3 directionA = Vector3.up, directionB = Vector3.up;
+        Vector3 tangentA = Vector3.forward, tangentB = Vector3.forward;
+        GeodesicBiologyRuntime.AdvancePassiveKinematics(ref directionA, ref tangentA, 99u, 2f);
+        GeodesicBiologyRuntime.AdvancePassiveKinematics(ref directionB, ref tangentB, 99u, 2f);
+        Assert.That(directionA, Is.EqualTo(directionB));
+        Assert.That(tangentA, Is.EqualTo(tangentB));
+    }
+
+    [Test]
+    public void BoundaryAuthorityChangesOnlyToARealCloserNeighbor()
+    {
+        Vector3[] centres = { Vector3.up, new Vector3(0.2f, 0.98f, 0f).normalized, Vector3.right };
+        int[] neighbors = { 1, -1, -1, -1, -1, -1, 0, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 };
+        byte[] counts = { 1, 1, 0 };
+        Assert.That(GeodesicBiologyRuntime.FindCloserRealNeighbor(0, centres[0], centres, neighbors, counts), Is.EqualTo(-1));
+        Assert.That(GeodesicBiologyRuntime.FindCloserRealNeighbor(0, centres[1], centres, neighbors, counts), Is.EqualTo(1));
+        Assert.That(GeodesicBiologyRuntime.FindCloserRealNeighbor(0, centres[2], centres, neighbors, counts), Is.EqualTo(1));
+    }
+
+    [Test]
+    public void ContinuousVisualDirectionDoesNotSnapToDestinationCellCentre()
+    {
+        Vector3[] centres = { Vector3.up, new Vector3(0.2f, 0.98f, 0f).normalized };
+        int[] neighbors = { 1, -1, -1, -1, -1, -1, 0, -1, -1, -1, -1, -1 };
+        byte[] counts = { 1, 1 };
+        Vector3 boundaryDirection = (centres[0] + centres[1] * 1.01f).normalized;
+        Assert.That(GeodesicBiologyRuntime.FindCloserRealNeighbor(0, boundaryDirection, centres, neighbors, counts), Is.EqualTo(1));
+        Assert.That(boundaryDirection, Is.Not.EqualTo(centres[1]));
+    }
+
+    [Test]
+    public void LandBoundaryIsLocallyRejected()
+    {
+        Vector3 ocean = Vector3.up;
+        Vector3 land = new Vector3(0.2f, 0.98f, 0f).normalized;
+        Vector3 direction = land;
+        Vector3 tangent = Vector3.right;
+        GeodesicBiologyRuntime.ReflectFromLandBoundary(ref direction, ref tangent, ocean, land);
+        Assert.That(Vector3.Dot(direction, ocean), Is.GreaterThanOrEqualTo(Vector3.Dot(direction, land)));
+        Assert.That(Mathf.Abs(Vector3.Dot(direction, tangent)), Is.LessThan(1e-5f));
+    }
+
+    [Test]
+    public void VerticalScheduleIsDeterministicAndFinite()
+    {
+        float first = GeodesicBiologyRuntime.SampleVerticalInterval(42u, 7u);
+        Assert.That(first, Is.EqualTo(GeodesicBiologyRuntime.SampleVerticalInterval(42u, 7u)));
+        Assert.That(first, Is.GreaterThan(0f));
+        Assert.That(float.IsFinite(first), Is.True);
     }
 
     [Test]
@@ -158,9 +198,17 @@ public sealed class GeodesicBiologyRuntimeTests
         var state = new ReplicatorPopulationState();
         state.AddAgentFromReplicatorData(agents[0]); state.AddAgentFromReplicatorData(agents[1]);
         state.PassiveMovementSequence[1] = 91u;
+        state.PassiveDriftDirection[1] = Vector3.forward;
+        state.PassiveDriftTangent[1] = Vector3.right;
+        state.NextPassiveVerticalDriftTime[1] = 12.5f;
+        state.PassiveVisualRadius[1] = 8f;
         GeodesicBiologyRuntime.RemoveAgentAtSwapBack(0, agents, state);
         Assert.That(state.Count, Is.EqualTo(1));
         Assert.That(state.PassiveMovementSequence[0], Is.EqualTo(91u));
+        Assert.That(state.PassiveDriftDirection[0], Is.EqualTo(Vector3.forward));
+        Assert.That(state.PassiveDriftTangent[0], Is.EqualTo(Vector3.right));
+        Assert.That(state.NextPassiveVerticalDriftTime[0], Is.EqualTo(12.5f));
+        Assert.That(state.PassiveVisualRadius[0], Is.EqualTo(8f));
         Assert.That(state.Locomotion[0], Is.EqualTo(LocomotionType.PassiveDrift));
     }
 

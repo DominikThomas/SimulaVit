@@ -52,6 +52,11 @@ public class ReplicatorPopulationState
     // Geodesic passive dispersal owns this deterministic per-agent stream cursor.
     // It is population state so births and swap-back removals cannot desynchronise it.
     public uint[] PassiveMovementSequence = new uint[0];
+    // Geodesic-local kinematic state. These are visual/transport coordinates, never habitat authority.
+    public Vector3[] PassiveDriftDirection = new Vector3[0];
+    public Vector3[] PassiveDriftTangent = new Vector3[0];
+    public float[] NextPassiveVerticalDriftTime = new float[0];
+    public float[] PassiveVisualRadius = new float[0];
     public float[] Size = new float[0];
     public Color[] Color = new Color[0];
     public int[] CurrentOceanLayerIndex = new int[0];
@@ -72,6 +77,7 @@ public class ReplicatorPopulationState
         {
             for (int i = Count; i < required; i++)
             {
+                ResetPassiveMovementEntry(i);
                 CopyFromReplicatorData(i, agents[i]);
             }
         }
@@ -82,6 +88,7 @@ public class ReplicatorPopulationState
     public void AddAgentFromReplicatorData(Replicator agent)
     {
         EnsureCapacity(Count + 1);
+        ResetPassiveMovementEntry(Count);
         CopyFromReplicatorData(Count, agent);
         Count++;
     }
@@ -314,6 +321,10 @@ public class ReplicatorPopulationState
         NextSenseTime[dstIndex] = NextSenseTime[srcIndex];
         MovementSeed[dstIndex] = MovementSeed[srcIndex];
         PassiveMovementSequence[dstIndex] = PassiveMovementSequence[srcIndex];
+        PassiveDriftDirection[dstIndex] = PassiveDriftDirection[srcIndex];
+        PassiveDriftTangent[dstIndex] = PassiveDriftTangent[srcIndex];
+        NextPassiveVerticalDriftTime[dstIndex] = NextPassiveVerticalDriftTime[srcIndex];
+        PassiveVisualRadius[dstIndex] = PassiveVisualRadius[srcIndex];
         Size[dstIndex] = Size[srcIndex];
         Color[dstIndex] = Color[srcIndex];
         CurrentOceanLayerIndex[dstIndex] = CurrentOceanLayerIndex[srcIndex];
@@ -337,7 +348,16 @@ public class ReplicatorPopulationState
         Alive[index] = false;
         Metabolism[index] = default;
         Locomotion[index] = default;
+        ResetPassiveMovementEntry(index);
+    }
+
+    private void ResetPassiveMovementEntry(int index)
+    {
         PassiveMovementSequence[index] = 0;
+        PassiveDriftDirection[index] = default;
+        PassiveDriftTangent[index] = default;
+        NextPassiveVerticalDriftTime[index] = 0f;
+        PassiveVisualRadius[index] = 0f;
     }
 
     void EnsureCapacity(int required)
@@ -383,6 +403,10 @@ public class ReplicatorPopulationState
         Array.Resize(ref NextSenseTime, newCapacity);
         Array.Resize(ref MovementSeed, newCapacity);
         Array.Resize(ref PassiveMovementSequence, newCapacity);
+        Array.Resize(ref PassiveDriftDirection, newCapacity);
+        Array.Resize(ref PassiveDriftTangent, newCapacity);
+        Array.Resize(ref NextPassiveVerticalDriftTime, newCapacity);
+        Array.Resize(ref PassiveVisualRadius, newCapacity);
         Array.Resize(ref Size, newCapacity);
         Array.Resize(ref Color, newCapacity);
         Array.Resize(ref CurrentOceanLayerIndex, newCapacity);
