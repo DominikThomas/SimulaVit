@@ -308,6 +308,16 @@ temperature code reads them. The former 0.8-per-second discrete horizontal trans
 cell-centre visual targets were removed after profiling 10,000 founders showed movement at about
 11.8 ms/frame and exposed visibly choppy centre-to-centre paths.
 
+The initial continuous correction still retained almost one heading for an organism's lifetime,
+producing ballistic radial rings and evacuating vent habitats too efficiently. Passive drift is now
+a deterministic correlated random walk at the unchanged 0.006 radians/second translation speed.
+Each independently seeded founder receives an isotropic local tangent. Every deterministic 2-5
+simulated seconds, an allocation-free scheduled refresh selects a target turning tendency in
+[-0.18, +0.18] radians/second; the live turning rate approaches it over a two-second response
+timescale. Ordinary steps use only stored rates and cheap vector arithmetic, preserving short-term
+persistence while trajectories lose their original heading over longer periods. No environmental
+field participates in heading selection.
+
 After each continuous advance, containment is updated locally. Starting with the authoritative cell,
 the algorithm compares the continuous direction's dot product with that cell centre and its five or
 six real precomputed neighbours. A more-aligned neighbour becomes authoritative, and the check may
@@ -317,7 +327,8 @@ ocean neighbour, the numeric layer is preserved or clamped only to the shallower
 active layer.
 
 Independent passive vertical drift remains discrete and adjacent-only at a provisional mean rate of
-0.08 events per simulated second. Each organism stores its next deterministic exponentially
+0.015 events per simulated second (mean interval about 66.7 simulated seconds before boundary
+rejection). Each organism stores its next deterministic exponentially
 distributed event time, so ordinary updates only compare the simulation clock against that schedule.
 The event chooses up/down without habitat scoring, rejects a column boundary, and schedules the next
 event. Legacy's `0.32` sinusoidal probe gate and resource-scored layer choice are intentionally not
@@ -337,17 +348,20 @@ and active temporal taxis remain deferred.
 
 #### Manual Unity validation
 
-With about 50 founders, confirm smooth drift through cell interiors, no centre-to-centre paths or
-horizontal snaps, occasional local cell-boundary crossings, much rarer adjacent-only layer changes,
-coastline rejection, variable-depth validity, pause behaviour, and clean menu -> new game state.
+With about 50 founders, confirm smooth meandering drift through cell interiors, short-term heading
+persistence without expanding radial rings, no centre-to-centre paths or horizontal snaps,
+occasional local cell-boundary crossings, much rarer adjacent-only layer changes, some chance
+retention near vents, coastline rejection, variable-depth validity, pause behaviour, and clean menu -> new game state.
 Confirm founders remain Hydrogenotrophy + PassiveDrift and that no Amoeboid, Flagellum, or Anchored
 organism appears.
 
 With 0, 50, 1,000, and 10,000 organisms, profile with Deep Profile off. Compare
-`GeodesicBiology.PassiveMovement` and its KinematicsAndBoundary, VerticalEvents, and VisualTarget
-children against ReactionEvaluation and ReplicatorManager.VisualSync; movement should no longer
-dominate. Repeat at 100x speed and confirm continuous containment remains local, layer events remain
-adjacent, and simulation-time motion is stable.
+`GeodesicBiology.PassiveMovement` and its WanderRefresh, KinematicsAndBoundary, VerticalEvents, and
+VisualTarget children against ReactionEvaluation and ReplicatorManager.VisualSync. Reference values
+after the continuous correction were about 18.38 ms CPU active, 3.76 ms KinematicsAndBoundary,
+3.65 ms ReactionEvaluation, and 2.38 ms VisualSync, versus about 29 ms CPU active and 11.8 ms total
+movement before correction. Wandering must preserve that improvement. Repeat at 100x speed and
+confirm continuous containment remains local, layer events remain adjacent, and simulation-time motion is stable.
 
 - startup selection between legacy cube-sphere and geodesic icosphere;
 - persisted startup configuration;

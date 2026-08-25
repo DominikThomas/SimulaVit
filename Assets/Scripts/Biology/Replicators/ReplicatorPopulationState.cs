@@ -55,6 +55,10 @@ public class ReplicatorPopulationState
     // Geodesic-local kinematic state. These are visual/transport coordinates, never habitat authority.
     public Vector3[] PassiveDriftDirection = new Vector3[0];
     public Vector3[] PassiveDriftTangent = new Vector3[0];
+    public float[] PassiveWanderRate = new float[0];
+    public float[] PassiveTargetWanderRate = new float[0];
+    public float[] NextPassiveWanderUpdateTime = new float[0];
+    public uint[] PassiveWanderSequence = new uint[0];
     public float[] NextPassiveVerticalDriftTime = new float[0];
     public float[] PassiveVisualRadius = new float[0];
     public float[] Size = new float[0];
@@ -323,6 +327,10 @@ public class ReplicatorPopulationState
         PassiveMovementSequence[dstIndex] = PassiveMovementSequence[srcIndex];
         PassiveDriftDirection[dstIndex] = PassiveDriftDirection[srcIndex];
         PassiveDriftTangent[dstIndex] = PassiveDriftTangent[srcIndex];
+        PassiveWanderRate[dstIndex] = PassiveWanderRate[srcIndex];
+        PassiveTargetWanderRate[dstIndex] = PassiveTargetWanderRate[srcIndex];
+        NextPassiveWanderUpdateTime[dstIndex] = NextPassiveWanderUpdateTime[srcIndex];
+        PassiveWanderSequence[dstIndex] = PassiveWanderSequence[srcIndex];
         NextPassiveVerticalDriftTime[dstIndex] = NextPassiveVerticalDriftTime[srcIndex];
         PassiveVisualRadius[dstIndex] = PassiveVisualRadius[srcIndex];
         Size[dstIndex] = Size[srcIndex];
@@ -356,6 +364,10 @@ public class ReplicatorPopulationState
         PassiveMovementSequence[index] = 0;
         PassiveDriftDirection[index] = default;
         PassiveDriftTangent[index] = default;
+        PassiveWanderRate[index] = 0f;
+        PassiveTargetWanderRate[index] = 0f;
+        NextPassiveWanderUpdateTime[index] = 0f;
+        PassiveWanderSequence[index] = 0;
         NextPassiveVerticalDriftTime[index] = 0f;
         PassiveVisualRadius[index] = 0f;
     }
@@ -405,6 +417,10 @@ public class ReplicatorPopulationState
         Array.Resize(ref PassiveMovementSequence, newCapacity);
         Array.Resize(ref PassiveDriftDirection, newCapacity);
         Array.Resize(ref PassiveDriftTangent, newCapacity);
+        Array.Resize(ref PassiveWanderRate, newCapacity);
+        Array.Resize(ref PassiveTargetWanderRate, newCapacity);
+        Array.Resize(ref NextPassiveWanderUpdateTime, newCapacity);
+        Array.Resize(ref PassiveWanderSequence, newCapacity);
         Array.Resize(ref NextPassiveVerticalDriftTime, newCapacity);
         Array.Resize(ref PassiveVisualRadius, newCapacity);
         Array.Resize(ref Size, newCapacity);

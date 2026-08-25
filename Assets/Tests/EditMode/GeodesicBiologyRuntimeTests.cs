@@ -127,7 +127,7 @@ public sealed class GeodesicBiologyRuntimeTests
         Vector3 direction = Vector3.up;
         Vector3 tangent = Vector3.right;
         Vector3 before = direction;
-        GeodesicBiologyRuntime.AdvancePassiveKinematics(ref direction, ref tangent, 1234567u, 0.5f);
+        GeodesicBiologyRuntime.AdvancePassiveKinematics(ref direction, ref tangent, 0.05f, 0.5f);
         Assert.That(Vector3.Angle(before, direction), Is.GreaterThan(0f));
         Assert.That(Vector3.Angle(before, direction), Is.LessThan(1f));
         Assert.That(direction.magnitude, Is.EqualTo(1f).Within(1e-5f));
@@ -138,10 +138,54 @@ public sealed class GeodesicBiologyRuntimeTests
     {
         Vector3 directionA = Vector3.up, directionB = Vector3.up;
         Vector3 tangentA = Vector3.forward, tangentB = Vector3.forward;
-        GeodesicBiologyRuntime.AdvancePassiveKinematics(ref directionA, ref tangentA, 99u, 2f);
-        GeodesicBiologyRuntime.AdvancePassiveKinematics(ref directionB, ref tangentB, 99u, 2f);
+        GeodesicBiologyRuntime.AdvancePassiveKinematics(ref directionA, ref tangentA, 0.05f, 2f);
+        GeodesicBiologyRuntime.AdvancePassiveKinematics(ref directionB, ref tangentB, 0.05f, 2f);
         Assert.That(directionA, Is.EqualTo(directionB));
         Assert.That(tangentA, Is.EqualTo(tangentB));
+    }
+
+    [Test]
+    public void InitialPassiveTangentsAreIndependentAndIsotropicWithinOneHabitat()
+    {
+        Vector3 direction = new Vector3(0.31f, 0.87f, -0.38f).normalized;
+        Vector3 sum = Vector3.zero;
+        Vector3 first = GeodesicBiologyRuntime.CreateInitialPassiveTangent(direction, 1u);
+        int different = 0;
+        for (uint seed = 1; seed <= 256; seed++)
+        {
+            Vector3 tangent = GeodesicBiologyRuntime.CreateInitialPassiveTangent(direction, seed);
+            sum += tangent;
+            if (Vector3.Dot(first, tangent) < 0.95f) different++;
+            Assert.That(Mathf.Abs(Vector3.Dot(direction, tangent)), Is.LessThan(1e-5f));
+        }
+        Assert.That(different, Is.GreaterThan(200));
+        Assert.That((sum / 256f).magnitude, Is.LessThan(0.15f));
+    }
+
+    [Test]
+    public void WanderIsShortTermCorrelatedSmoothAndLongTermDecorrelating()
+    {
+        Vector3 direction = Vector3.up;
+        Vector3 tangent = GeodesicBiologyRuntime.CreateInitialPassiveTangent(direction, 741u);
+        Vector3 initialTangent = tangent;
+        float rate = 0f, target = 0f, next = 0f, time = 0f;
+        uint sequence = 0;
+        float minimumConsecutiveDot = 1f;
+        for (int step = 0; step < 1200; step++)
+        {
+            time += 0.1f;
+            if (!(next > 0f) || time >= next)
+                GeodesicBiologyRuntime.RefreshPassiveWanderTarget(ref target, ref next, 741u, ref sequence, time);
+            rate = GeodesicBiologyRuntime.EvolvePassiveWanderRate(rate, target, 0.1f);
+            Vector3 previousTangent = tangent;
+            GeodesicBiologyRuntime.AdvancePassiveKinematics(ref direction, ref tangent, rate, 0.1f);
+            minimumConsecutiveDot = Mathf.Min(minimumConsecutiveDot, Vector3.Dot(previousTangent, tangent));
+        }
+        Assert.That(minimumConsecutiveDot, Is.GreaterThan(0.995f));
+        Assert.That(Vector3.Dot(initialTangent, tangent), Is.LessThan(0.85f));
+        Assert.That(direction.magnitude, Is.EqualTo(1f).Within(1e-4f));
+        Assert.That(tangent.magnitude, Is.EqualTo(1f).Within(1e-4f));
+        Assert.That(Mathf.Abs(Vector3.Dot(direction, tangent)), Is.LessThan(1e-4f));
     }
 
     [Test]
@@ -185,6 +229,11 @@ public sealed class GeodesicBiologyRuntimeTests
         Assert.That(first, Is.EqualTo(GeodesicBiologyRuntime.SampleVerticalInterval(42u, 7u)));
         Assert.That(first, Is.GreaterThan(0f));
         Assert.That(float.IsFinite(first), Is.True);
+        Assert.That(GeodesicBiologyRuntime.PassiveVerticalOpportunitiesPerSecond, Is.EqualTo(0.015f));
+        double sum = 0d;
+        for (uint sequence = 0; sequence < 4096; sequence++)
+            sum += GeodesicBiologyRuntime.SampleVerticalInterval(42u, sequence);
+        Assert.That(sum / 4096d, Is.InRange(55d, 80d));
     }
 
     [Test]
@@ -200,6 +249,10 @@ public sealed class GeodesicBiologyRuntimeTests
         state.PassiveMovementSequence[1] = 91u;
         state.PassiveDriftDirection[1] = Vector3.forward;
         state.PassiveDriftTangent[1] = Vector3.right;
+        state.PassiveWanderRate[1] = 0.04f;
+        state.PassiveTargetWanderRate[1] = -0.08f;
+        state.NextPassiveWanderUpdateTime[1] = 4.5f;
+        state.PassiveWanderSequence[1] = 17u;
         state.NextPassiveVerticalDriftTime[1] = 12.5f;
         state.PassiveVisualRadius[1] = 8f;
         GeodesicBiologyRuntime.RemoveAgentAtSwapBack(0, agents, state);
@@ -207,9 +260,31 @@ public sealed class GeodesicBiologyRuntimeTests
         Assert.That(state.PassiveMovementSequence[0], Is.EqualTo(91u));
         Assert.That(state.PassiveDriftDirection[0], Is.EqualTo(Vector3.forward));
         Assert.That(state.PassiveDriftTangent[0], Is.EqualTo(Vector3.right));
+        Assert.That(state.PassiveWanderRate[0], Is.EqualTo(0.04f));
+        Assert.That(state.PassiveTargetWanderRate[0], Is.EqualTo(-0.08f));
+        Assert.That(state.NextPassiveWanderUpdateTime[0], Is.EqualTo(4.5f));
+        Assert.That(state.PassiveWanderSequence[0], Is.EqualTo(17u));
         Assert.That(state.NextPassiveVerticalDriftTime[0], Is.EqualTo(12.5f));
         Assert.That(state.PassiveVisualRadius[0], Is.EqualTo(8f));
         Assert.That(state.Locomotion[0], Is.EqualTo(LocomotionType.PassiveDrift));
+    }
+
+    [Test]
+    public void NewChildPopulationEntryInitializesIndependentWanderState()
+    {
+        var state = new ReplicatorPopulationState();
+        var parent = new Replicator(Vector3.up, Quaternion.identity, 10f, Color.white, default, 0.1f,
+            MetabolismType.Hydrogenotrophy, LocomotionType.PassiveDrift);
+        var child = new Replicator(Vector3.up, Quaternion.identity, 10f, Color.white, default, 0.9f,
+            MetabolismType.Hydrogenotrophy, LocomotionType.PassiveDrift);
+        state.AddAgentFromReplicatorData(parent);
+        state.PassiveWanderRate[0] = 0.1f;
+        state.PassiveWanderSequence[0] = 12u;
+        state.AddAgentFromReplicatorData(child);
+        Assert.That(state.MovementSeed[1], Is.Not.EqualTo(state.MovementSeed[0]));
+        Assert.That(state.PassiveWanderRate[1], Is.Zero);
+        Assert.That(state.PassiveWanderSequence[1], Is.Zero);
+        Assert.That(state.NextPassiveWanderUpdateTime[1], Is.Zero);
     }
 
     [Test]
