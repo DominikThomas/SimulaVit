@@ -287,12 +287,21 @@ margin, and optional local-layer O2 inhibition curve are reused; no scaffold coe
 those runtime settings. Sulfur chemosynthesis, methanogenesis, oxygenic photosynthesis, and
 methanotrophy remain executable but are not normal founders.
 
-Founder rendering uses two samples from a separate Biology-derived visual RNG stream to place each
-visual on an area-uniform tangent disk whose radius is a small fraction of that cell's mean neighbor
-spacing, projected back to the selected ocean-layer radius. Visual RNG consumption therefore cannot
-change authoritative vent selection. This scatter changes only `Replicator.position`: authoritative founder
-cell and actual bottom layer remain the compact submarine outlet habitat, and neither resource nor
-temperature sampling reads the visual position.
+Founder initialization uses two samples from a separate Biology-derived visual RNG stream for
+initial sub-cell position dispersion on an area-uniform tangent disk whose radius is a small fraction
+of that cell's mean neighbor spacing, projected back to the selected ocean-layer radius. This occurs
+only at initial placement/child initialization and is never reapplied as a horizontal cell-transition
+destination. Visual RNG consumption cannot change authoritative vent selection. The initial
+dispersion changes only `Replicator.position`: authoritative founder cell and actual bottom layer
+remain the compact submarine outlet habitat, and neither resource nor temperature sampling reads the
+visual position.
+
+The first Hydrogenotrophy scene-wiring audit found that `PlanetScene.unity` still serialized stale
+values of energy 0.05 per full extent and store fraction 0.2, overriding the manager's code defaults
+of 8 and 0.8. This exactly explained telemetry energy = extent * 0.05 even though the runtime request,
+competition, commit, and telemetry equations were correct. The scene now serializes H2 0.02, CO2
+0.01, energy 8, store fraction 0.8, and basal maintenance remains 0.01 per simulated second. A compact
+`GeodesicHydrogenotrophyConfig` startup diagnostic reports the actual values passed into the runtime.
 
 ### First Geodesic locomotion: passive drift (2026-08)
 
@@ -311,9 +320,9 @@ cell-centre visual targets were removed after profiling 10,000 founders showed m
 The initial continuous correction still retained almost one heading for an organism's lifetime,
 producing ballistic radial rings and evacuating vent habitats too efficiently. Passive drift is now
 a deterministic correlated random walk at the unchanged 0.006 radians/second translation speed.
-Each independently seeded founder receives an isotropic local tangent. Every deterministic 2-5
+Each independently seeded founder receives an isotropic local tangent. Every deterministic 1-5
 simulated seconds, an allocation-free scheduled refresh selects a target turning tendency in
-[-0.18, +0.18] radians/second; the live turning rate approaches it over a two-second response
+[-2.0, +2.0] radians/second; the live turning rate approaches it over a two-second response
 timescale. Ordinary steps use only stored rates and cheap vector arithmetic, preserving short-term
 persistence while trajectories lose their original heading over longer periods. No environmental
 field participates in heading selection.

@@ -1,9 +1,50 @@
 using NUnit.Framework;
 using System.Collections.Generic;
+using System.IO;
 using UnityEngine;
 
 public sealed class GeodesicBiologyRuntimeTests
 {
+    [Test]
+    public void HydrogenotrophyFullReferenceTickPreservesLegacyBalance()
+    {
+        var result = GeodesicBiologyRuntime.CalculateHydrogenotrophyTick(0.5f, 0.01f, 0.02f, 8f,
+            0.8f, 1f, 1f, 1f);
+        Assert.That(result.AchievedExtent, Is.EqualTo(1d).Within(1e-6));
+        Assert.That(result.Co2Withdrawal, Is.EqualTo(0.01d).Within(1e-6));
+        Assert.That(result.H2Withdrawal, Is.EqualTo(0.02d).Within(1e-6));
+        Assert.That(result.EnergyGain, Is.EqualTo(8f).Within(1e-6f));
+        Assert.That(result.OrganicCIncrease, Is.EqualTo(0.008f).Within(1e-6f));
+        Assert.That(result.EnergyGain, Is.Not.EqualTo(0.05f).Within(1e-6f));
+    }
+
+    [TestCase(0.5f, 1f, 1f, 4f, 0.005f, 0.01f, TestName = "HalfSubstrateScalesEverything")]
+    [TestCase(1f, 0.5f, 1f, 4f, 0.005f, 0.01f, TestName = "HalfTemperatureScalesEverything")]
+    [TestCase(0.5f, 0.5f, 1f, 2f, 0.0025f, 0.005f, TestName = "SubstrateAndTemperatureMultiply")]
+    [TestCase(1f, 1f, 0.5f, 4f, 0.005f, 0.01f, TestName = "O2InhibitionScalesWithoutO2Consumption")]
+    public void HydrogenotrophyModifiersScaleLegacyExtent(float substrate, float temperature, float oxygen,
+        float expectedEnergy, float expectedCo2, float expectedH2)
+    {
+        var result = GeodesicBiologyRuntime.CalculateHydrogenotrophyTick(0.5f, 0.01f, 0.02f, 8f,
+            0.8f, temperature, oxygen, substrate);
+        Assert.That(result.EnergyGain, Is.EqualTo(expectedEnergy).Within(1e-6f));
+        Assert.That(result.Co2Withdrawal, Is.EqualTo(expectedCo2).Within(1e-6));
+        Assert.That(result.H2Withdrawal, Is.EqualTo(expectedH2).Within(1e-6));
+        // Hydrogenotrophy has no O2 stoichiometric input; oxygen only changes achieved extent.
+        Assert.That(result.OrganicCIncrease, Is.EqualTo(expectedCo2 * 0.8f).Within(1e-6f));
+    }
+
+    [Test]
+    public void PlanetSceneSerializesAuthoritativeHydrogenotrophySettings()
+    {
+        string scene = File.ReadAllText("Assets/PlanetScene.unity");
+        StringAssert.Contains("hydrogenotrophyH2PerTick: 0.02", scene);
+        StringAssert.Contains("hydrogenotrophyCO2PerTick: 0.01", scene);
+        StringAssert.Contains("hydrogenotrophyEnergyPerTick: 8", scene);
+        StringAssert.Contains("hydrogenotrophyStoreFraction: 0.8", scene);
+        StringAssert.DoesNotContain("hydrogenotrophyEnergyPerTick: 0.05", scene);
+    }
+
     [TestCase(0, 1f)]
     [TestCase(1, 0.55f)]
     [TestCase(2, 0f)]
@@ -181,7 +222,7 @@ public sealed class GeodesicBiologyRuntimeTests
             GeodesicBiologyRuntime.AdvancePassiveKinematics(ref direction, ref tangent, rate, 0.1f);
             minimumConsecutiveDot = Mathf.Min(minimumConsecutiveDot, Vector3.Dot(previousTangent, tangent));
         }
-        Assert.That(minimumConsecutiveDot, Is.GreaterThan(0.995f));
+        Assert.That(minimumConsecutiveDot, Is.GreaterThan(0.95f));
         Assert.That(Vector3.Dot(initialTangent, tangent), Is.LessThan(0.85f));
         Assert.That(direction.magnitude, Is.EqualTo(1f).Within(1e-4f));
         Assert.That(tangent.magnitude, Is.EqualTo(1f).Within(1e-4f));

@@ -1977,8 +1977,8 @@ MonoBehaviour:
   metabolismMutationChance: 0.2
   hydrogenotrophyH2PerTick: 0.02
   hydrogenotrophyCO2PerTick: 0.01
-  hydrogenotrophyEnergyPerTick: 0.05
-  hydrogenotrophyStoreFraction: 0.2
+  hydrogenotrophyEnergyPerTick: 8
+  hydrogenotrophyStoreFraction: 0.8
   fermentationOrganicCPerTick: 0.02
   fermentationEnergyPerTick: 0.7
   fermentationAssimilationFraction: 0.4

@@ -16,11 +16,12 @@ public sealed class GeodesicBiologyRuntime
     private static readonly ProfilerMarker MovementVertical = new ProfilerMarker("GeodesicBiology.PassiveMovement.VerticalEvents");
     private static readonly ProfilerMarker MovementVisual = new ProfilerMarker("GeodesicBiology.PassiveMovement.VisualTarget");
     private const int ResourceCount = 7;
+    public const float ReferenceTickSeconds = 0.5f;
     public const float PassiveAngularSpeedRadiansPerSecond = 0.006f;
     public const float PassiveVerticalOpportunitiesPerSecond = 0.015f;
-    public const float PassiveWanderMinimumIntervalSeconds = 2f;
+    public const float PassiveWanderMinimumIntervalSeconds = 1f;
     public const float PassiveWanderMaximumIntervalSeconds = 5f;
-    public const float PassiveMaximumWanderRateRadiansPerSecond = 0.18f;
+    public const float PassiveMaximumWanderRateRadiansPerSecond = 2.0f;
     public const float PassiveWanderResponseSeconds = 2f;
     private const int MaximumBoundaryCrossingsPerStep = 3;
 
@@ -78,6 +79,7 @@ public sealed class GeodesicBiologyRuntime
     private long movementUpdates, continuousKinematicUpdates, horizontalBoundaryCrossings;
     private long verticalTransitions, landBoundaryRejections, invalidLayerCorrections;
     private long wanderStateRefreshes;
+    private bool hydrogenotrophyConfigLogged;
 
     public long BiologySteps => biologySteps;
     public long AgentEvaluations => agentEvaluations;
@@ -104,6 +106,24 @@ public sealed class GeodesicBiologyRuntime
         public float Temperature;
         public float TemperaturePerformance;
         public double AvailabilityFactor;
+    }
+
+    public readonly struct HydrogenotrophyTickResult
+    {
+        public readonly double AchievedExtent;
+        public readonly double Co2Withdrawal;
+        public readonly double H2Withdrawal;
+        public readonly float EnergyGain;
+        public readonly float OrganicCIncrease;
+
+        public HydrogenotrophyTickResult(double extent, double co2, double h2, float energy, float organicC)
+        {
+            AchievedExtent = extent;
+            Co2Withdrawal = co2;
+            H2Withdrawal = h2;
+            EnergyGain = energy;
+            OrganicCIncrease = organicC;
+        }
     }
 
     public bool Initialize(PlanetGenerator generator, List<Replicator> agents, ReplicatorPopulationState state,
@@ -200,6 +220,11 @@ public sealed class GeodesicBiologyRuntime
         float maxStore, float reproductionRate, bool carbonDivision, float divisionCost, float replicationCost,
         float divisionMultiple, float childSplit, int maxPopulation, Action<MetabolismType, DeathCause> registerDeathCause)
     {
+        if (!hydrogenotrophyConfigLogged)
+        {
+            Debug.Log($"[GeodesicHydrogenotrophyConfig] H2PerTick={hydrogenH2:G6} CO2PerTick={hydrogenCo2:G6} EnergyPerTick={hydrogenEnergy:G6} StoreFraction={hydrogenStoreFraction:G6} BasalEnergyCostPerSecond={maintenance:G6} ReferenceTickSeconds={ReferenceTickSeconds:G6}");
+            hydrogenotrophyConfigLogged = true;
+        }
         biologySteps++;
         lastBiologyStepSeconds = dt;
         if (agents.Count == 0)
@@ -238,7 +263,7 @@ public sealed class GeodesicBiologyRuntime
         agentEvaluations++;
         int cell = agent.geodesicCellIndex, layer = state.CurrentOceanLayerIndex[i]; Request r = default; r.Cell = cell; r.Layer = layer; r.Metabolism = state.Metabolism[i];
         if (!grid.IsNodeActive(cell, layer)) { invalidHabitats++; requests[i] = r; return; }
-        r.Node = grid.GetNodeIndex(cell, layer); float scale = dt / 0.5f;
+        r.Node = grid.GetNodeIndex(cell, layer); float scale = dt / ReferenceTickSeconds;
         switch (state.Metabolism[i])
         {
             case MetabolismType.Hydrogenotrophy: r.A=GeodesicOceanResource.CO2; r.B=GeodesicOceanResource.H2; r.NeedA=hCo2; r.NeedB=hH2; r.EnergyPerExtent=hEnergy; r.StorePerExtent=hCo2*Mathf.Clamp01(hStoreFraction); break;
@@ -665,6 +690,21 @@ public sealed class GeodesicBiologyRuntime
         if (needB > 0d) factor = Math.Min(factor, Math.Max(0d, availableB) / (needB * requestedExtent));
         return requestedExtent * factor;
     }
+    public static HydrogenotrophyTickResult CalculateHydrogenotrophyTick(float dt, float co2PerTick,
+        float h2PerTick, float energyPerTick, float storeFraction, float temperaturePerformance,
+        float oxygenEfficiency, float substrateAvailabilityFactor)
+    {
+        double extent = Math.Max(0d, dt / ReferenceTickSeconds)
+            * Mathf.Clamp01(temperaturePerformance)
+            * Mathf.Clamp01(oxygenEfficiency)
+            * Mathf.Clamp01(substrateAvailabilityFactor);
+        return new HydrogenotrophyTickResult(
+            extent,
+            Math.Max(0f, co2PerTick) * extent,
+            Math.Max(0f, h2PerTick) * extent,
+            Math.Max(0f, energyPerTick) * (float)extent,
+            Math.Max(0f, co2PerTick) * Mathf.Clamp01(storeFraction) * (float)extent);
+    }
     public static double CalculateAvailabilityFactor(double availableInventory, double totalDemand)
     {
         if (!(totalDemand > 0d)) return 0d;
@@ -717,5 +757,5 @@ public sealed class GeodesicBiologyRuntime
         biologySteps=agentEvaluations=habitatSamples=oceanTemperatureReads=photosyntheticLightReads=resourceInventoryReads=competitionPairs=movementUpdates=wanderStateRefreshes=continuousKinematicUpdates=horizontalBoundaryCrossings=verticalTransitions=landBoundaryRejections=invalidLayerCorrections=0;
     }
     public static float ResolvePhotosyntheticLight(float daylight, int layer) => Mathf.Clamp01(daylight) * (layer == 0 ? 1f : layer == 1 ? 0.55f : 0f);
-    public void Clear(){planet=null;resources=null;sediment=null;oceanTemperature=null;experiencedTemperature=null;surfaceTemperature=null;grid=null;requests=Array.Empty<Request>();demand=availabilityFactor=delta=Array.Empty<double>();touched=stamps=lightStamps=Array.Empty<int>();temperatureByNode=lightByNode=oxygenByNode=Array.Empty<float>();touchedCount=0;Array.Clear(requestedByMetabolism,0,requestedByMetabolism.Length);Array.Clear(achievedByMetabolism,0,achievedByMetabolism.Length);Array.Clear(extentByMetabolism,0,extentByMetabolism.Length);Array.Clear(energyByMetabolism,0,energyByMetabolism.Length);births=deaths=starvationDeaths=lifespanDeaths=zeroAchieved=resourceLimited=invalidHabitats=invalidBiologicalStates=zeroTemperaturePerformance=temperatureSamples=biologySteps=agentEvaluations=habitatSamples=oceanTemperatureReads=photosyntheticLightReads=resourceInventoryReads=competitionPairs=movementUpdates=wanderStateRefreshes=continuousKinematicUpdates=horizontalBoundaryCrossings=verticalTransitions=landBoundaryRejections=invalidLayerCorrections=0;maintenancePaid=diagnosticElapsed=temperatureSum=performanceSum=0d;lastBiologyStepSeconds=passiveMovementTime=0f;temperatureMin=performanceMin=float.PositiveInfinity;temperatureMax=performanceMax=float.NegativeInfinity;}
+    public void Clear(){planet=null;resources=null;sediment=null;oceanTemperature=null;experiencedTemperature=null;surfaceTemperature=null;grid=null;requests=Array.Empty<Request>();demand=availabilityFactor=delta=Array.Empty<double>();touched=stamps=lightStamps=Array.Empty<int>();temperatureByNode=lightByNode=oxygenByNode=Array.Empty<float>();touchedCount=0;Array.Clear(requestedByMetabolism,0,requestedByMetabolism.Length);Array.Clear(achievedByMetabolism,0,achievedByMetabolism.Length);Array.Clear(extentByMetabolism,0,extentByMetabolism.Length);Array.Clear(energyByMetabolism,0,energyByMetabolism.Length);births=deaths=starvationDeaths=lifespanDeaths=zeroAchieved=resourceLimited=invalidHabitats=invalidBiologicalStates=zeroTemperaturePerformance=temperatureSamples=biologySteps=agentEvaluations=habitatSamples=oceanTemperatureReads=photosyntheticLightReads=resourceInventoryReads=competitionPairs=movementUpdates=wanderStateRefreshes=continuousKinematicUpdates=horizontalBoundaryCrossings=verticalTransitions=landBoundaryRejections=invalidLayerCorrections=0;maintenancePaid=diagnosticElapsed=temperatureSum=performanceSum=0d;lastBiologyStepSeconds=passiveMovementTime=0f;hydrogenotrophyConfigLogged=false;temperatureMin=performanceMin=float.PositiveInfinity;temperatureMax=performanceMax=float.NegativeInfinity;}
 }
