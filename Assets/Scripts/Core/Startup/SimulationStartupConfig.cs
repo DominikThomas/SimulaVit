@@ -4,6 +4,7 @@ using UnityEngine;
 [Serializable]
 public class SimulationStartupConfig
 {
+    public const float DefaultAirSeaExchangeHalfLifeSeconds = 300f;
     [Header("Planet")]
     public int planetSeed = 12345;
     public bool useRandomSeed = true;
@@ -73,7 +74,7 @@ public class SimulationStartupConfig
     [Tooltip("Simulation inventory units represented by one atmospheric bar; not a physical Earth constant.")]
     public float atmosphereInventoryPerBar = 1000f;
     [Tooltip("Common v1 air-sea exchange half-life. Zero disables exchange; per-gas coefficients remain available on GeodesicAirSeaGasExchange.")]
-    public float airSeaExchangeHalfLifeSeconds = 0f;
+    public float airSeaExchangeHalfLifeSeconds = DefaultAirSeaExchangeHalfLifeSeconds;
 
     public SimulationStartupConfig Clone()
     {

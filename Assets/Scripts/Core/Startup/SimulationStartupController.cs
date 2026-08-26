@@ -116,7 +116,7 @@ public class SimulationStartupController : MonoBehaviour
     {
         ResolveReferences();
         CaptureSceneDefaults();
-        ResetDefaults();
+        ResetAllToDefaults();
         LoadSavedStartupConfigIfEnabled();
         PrepareDeferredStartup();
     }
@@ -388,18 +388,72 @@ public class SimulationStartupController : MonoBehaviour
 
     public void ResetDefaults()
     {
-        currentConfig = defaults.Clone();
+        if (currentConfig == null) currentConfig = new SimulationStartupConfig();
+        CopyNormalSettings(defaults ?? new SimulationStartupConfig(), currentConfig);
+        NormalizeAtmosphereComposition(currentConfig);
+        RefreshStartupPanels();
     }
 
     public void ResetAdvancedToDefaults()
     {
-        if (currentConfig == null) return;
-        currentConfig.approximateThermalIntervalSeconds = DefaultApproximateThermalIntervalSeconds;
-        currentConfig.geodesicResourceTransportIntervalSeconds = DefaultResourceTransportIntervalSeconds;
-        currentConfig.chemistryTelemetryIntervalSimSeconds = DefaultChemistryTelemetryIntervalSimSeconds;
-        currentConfig.atmosphereInventoryPerBar = 1000f;
-        currentConfig.allowDenseAtmosphere = false;
+        if (currentConfig == null) currentConfig = new SimulationStartupConfig();
+        CopyAdvancedSettings(defaults ?? new SimulationStartupConfig(), currentConfig);
         RefreshStartupPanels();
+    }
+
+    private void ResetAllToDefaults()
+    {
+        currentConfig = (defaults ?? new SimulationStartupConfig()).Clone();
+        NormalizeAtmosphereComposition(currentConfig);
+    }
+
+    public static void CopyNormalSettings(SimulationStartupConfig source, SimulationStartupConfig destination)
+    {
+        if (source == null || destination == null) return;
+        destination.planetSeed = source.planetSeed;
+        destination.useRandomSeed = source.useRandomSeed;
+        destination.gridType = source.gridType;
+        destination.cubeSphereResolution = source.cubeSphereResolution;
+        destination.axisTiltDegrees = source.axisTiltDegrees;
+        destination.dayLengthSeconds = source.dayLengthSeconds;
+        destination.yearLengthInDays = source.yearLengthInDays;
+        destination.insolationTempGain = source.insolationTempGain;
+        destination.initialCO2 = source.initialCO2;
+        destination.initialO2 = source.initialO2;
+        destination.initialCH4 = source.initialCH4;
+        destination.initialAtmospherePressureBar = source.initialAtmospherePressureBar;
+        destination.atmosphericCO2Fraction = source.atmosphericCO2Fraction;
+        destination.atmosphericO2Fraction = source.atmosphericO2Fraction;
+        destination.atmosphericCH4Fraction = source.atmosphericCH4Fraction;
+        destination.atmosphericH2Fraction = source.atmosphericH2Fraction;
+        destination.atmosphericH2SFraction = source.atmosphericH2SFraction;
+        destination.atmosphericN2Bar = source.atmosphericN2Bar;
+        destination.atmosphericCO2Bar = source.atmosphericCO2Bar;
+        destination.atmosphericO2Bar = source.atmosphericO2Bar;
+        destination.atmosphericCH4Bar = source.atmosphericCH4Bar;
+        destination.atmosphericH2Bar = source.atmosphericH2Bar;
+        destination.atmosphericH2SBar = source.atmosphericH2SBar;
+        destination.initialDissolvedFe2Plus = source.initialDissolvedFe2Plus;
+        destination.ventClustering = source.ventClustering;
+        destination.ventH2PerTick = source.ventH2PerTick;
+        destination.ventH2SPerTick = source.ventH2SPerTick;
+        destination.ventCO2PerTick = source.ventCO2PerTick;
+        destination.ventFe2PerTick = source.ventFe2PerTick;
+        destination.initialSpawnCount = source.initialSpawnCount;
+    }
+
+    public static void CopyAdvancedSettings(SimulationStartupConfig source, SimulationStartupConfig destination)
+    {
+        if (source == null || destination == null) return;
+        destination.geodesicSubdivisionLevel = source.geodesicSubdivisionLevel;
+        destination.baseTempKelvin = source.baseTempKelvin;
+        destination.terrestrialVentFraction = source.terrestrialVentFraction;
+        destination.allowDenseAtmosphere = source.allowDenseAtmosphere;
+        destination.atmosphereInventoryPerBar = source.atmosphereInventoryPerBar;
+        destination.airSeaExchangeHalfLifeSeconds = source.airSeaExchangeHalfLifeSeconds;
+        destination.approximateThermalIntervalSeconds = source.approximateThermalIntervalSeconds;
+        destination.geodesicResourceTransportIntervalSeconds = source.geodesicResourceTransportIntervalSeconds;
+        destination.chemistryTelemetryIntervalSimSeconds = source.chemistryTelemetryIntervalSimSeconds;
     }
 
     public void StartSimulation()
@@ -611,9 +665,7 @@ public class SimulationStartupController : MonoBehaviour
                 return false;
             }
 
-            SavedStartupConfig savedConfig = SavedStartupConfig.FromDefaults(defaults);
-            JsonUtility.FromJsonOverwrite(json, savedConfig);
-            currentConfig = savedConfig.ToConfig(defaults);
+            currentConfig = DeserializeSavedConfig(json, defaults);
             ClampLoadedConfig(currentConfig);
 
             if (logAppliedStartupConfig)
@@ -805,6 +857,14 @@ public class SimulationStartupController : MonoBehaviour
         builder.AppendLine($"Start Paused: {startPaused}");
         builder.AppendLine($"Saved Config Path: {SavedStartupConfigPath}");
         Debug.Log(builder.ToString());
+    }
+
+    public static SimulationStartupConfig DeserializeSavedConfig(string json, SimulationStartupConfig fallback)
+    {
+        SimulationStartupConfig authoritativeFallback = fallback ?? new SimulationStartupConfig();
+        SavedStartupConfig saved = SavedStartupConfig.FromDefaults(authoritativeFallback);
+        if (!string.IsNullOrWhiteSpace(json)) JsonUtility.FromJsonOverwrite(json, saved);
+        return saved.ToConfig(authoritativeFallback);
     }
 
     [Serializable]

@@ -188,7 +188,7 @@ MonoBehaviour:
     geodesicResourceTransportIntervalSeconds: 5
     chemistryTelemetryIntervalSimSeconds: 60
     atmosphereInventoryPerBar: 1000
-    airSeaExchangeHalfLifeSeconds: 0
+    airSeaExchangeHalfLifeSeconds: 300
   currentConfig:
     planetSeed: 12345
     useRandomSeed: 1
@@ -229,7 +229,7 @@ MonoBehaviour:
     geodesicResourceTransportIntervalSeconds: 5
     chemistryTelemetryIntervalSimSeconds: 60
     atmosphereInventoryPerBar: 1000
-    airSeaExchangeHalfLifeSeconds: 0
+    airSeaExchangeHalfLifeSeconds: 300
   loadSavedStartupConfig: 1
   saveStartupConfigOnStart: 1
   logAppliedStartupConfig: 1
