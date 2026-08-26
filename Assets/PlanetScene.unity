@@ -189,6 +189,7 @@ MonoBehaviour:
     chemistryTelemetryIntervalSimSeconds: 60
     atmosphereInventoryPerBar: 1000
     airSeaExchangeHalfLifeSeconds: 300
+    geodesicBiologySpawnDelaySeconds: 0
   currentConfig:
     planetSeed: 12345
     useRandomSeed: 1
@@ -230,6 +231,7 @@ MonoBehaviour:
     chemistryTelemetryIntervalSimSeconds: 60
     atmosphereInventoryPerBar: 1000
     airSeaExchangeHalfLifeSeconds: 300
+    geodesicBiologySpawnDelaySeconds: 0
   loadSavedStartupConfig: 1
   saveStartupConfigOnStart: 1
   logAppliedStartupConfig: 1

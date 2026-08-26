@@ -37,6 +37,7 @@ public class SimulationStartupConfigTests
         Assert.That(config.geodesicResourceTransportIntervalSeconds, Is.EqualTo(5f));
         Assert.That(config.atmosphereInventoryPerBar, Is.EqualTo(1000f));
         Assert.That(config.airSeaExchangeHalfLifeSeconds, Is.EqualTo(300f));
+        Assert.That(config.geodesicBiologySpawnDelaySeconds, Is.Zero);
         SimulationStartupController.NormalizeAtmosphereComposition(config);
         Assert.That(config.initialAtmospherePressureBar, Is.EqualTo(0.85f));
         Assert.That(config.atmosphericN2Bar, Is.EqualTo(0.8f).Within(1e-5f));
@@ -100,6 +101,10 @@ public class SimulationStartupConfigTests
         SimulationStartupConfig explicitZero = SimulationStartupController.DeserializeSavedConfig(
             "{\"version\":7,\"airSeaExchangeHalfLifeSeconds\":0}", defaults);
         Assert.That(explicitZero.airSeaExchangeHalfLifeSeconds, Is.Zero);
+
+        SimulationStartupConfig delayedBiology = SimulationStartupController.DeserializeSavedConfig(
+            "{\"version\":7,\"geodesicBiologySpawnDelaySeconds\":300}", defaults);
+        Assert.That(delayedBiology.geodesicBiologySpawnDelaySeconds, Is.EqualTo(300f));
     }
 
     [Test]
@@ -157,14 +162,13 @@ public class SimulationStartupConfigTests
             geodesicSubdivisionLevel = 5, baseTempKelvin = 310f, terrestrialVentFraction = 0.7f,
             allowDenseAtmosphere = true, atmosphereInventoryPerBar = 4321f,
             airSeaExchangeHalfLifeSeconds = 17f, approximateThermalIntervalSeconds = 5f,
-            geodesicResourceTransportIntervalSeconds = 10f, chemistryTelemetryIntervalSimSeconds = 19f
+            geodesicResourceTransportIntervalSeconds = 10f, chemistryTelemetryIntervalSimSeconds = 19f,
+            geodesicBiologySpawnDelaySeconds = 300f
         };
     }
 
     private static void AssertNormalSettingsEqual(SimulationStartupConfig expected, SimulationStartupConfig actual)
     {
-        Assert.Multiple(() =>
-        {
             Assert.That(actual.planetSeed, Is.EqualTo(expected.planetSeed)); Assert.That(actual.useRandomSeed, Is.EqualTo(expected.useRandomSeed));
             Assert.That(actual.gridType, Is.EqualTo(expected.gridType)); Assert.That(actual.cubeSphereResolution, Is.EqualTo(expected.cubeSphereResolution));
             Assert.That(actual.axisTiltDegrees, Is.EqualTo(expected.axisTiltDegrees)); Assert.That(actual.dayLengthSeconds, Is.EqualTo(expected.dayLengthSeconds));
@@ -179,18 +183,15 @@ public class SimulationStartupConfigTests
             Assert.That(actual.initialDissolvedFe2Plus, Is.EqualTo(expected.initialDissolvedFe2Plus)); Assert.That(actual.ventClustering, Is.EqualTo(expected.ventClustering));
             Assert.That(actual.ventH2PerTick, Is.EqualTo(expected.ventH2PerTick)); Assert.That(actual.ventH2SPerTick, Is.EqualTo(expected.ventH2SPerTick));
             Assert.That(actual.ventCO2PerTick, Is.EqualTo(expected.ventCO2PerTick)); Assert.That(actual.ventFe2PerTick, Is.EqualTo(expected.ventFe2PerTick)); Assert.That(actual.initialSpawnCount, Is.EqualTo(expected.initialSpawnCount));
-        });
     }
 
     private static void AssertAdvancedSettingsEqual(SimulationStartupConfig expected, SimulationStartupConfig actual)
     {
-        Assert.Multiple(() =>
-        {
             Assert.That(actual.geodesicSubdivisionLevel, Is.EqualTo(expected.geodesicSubdivisionLevel)); Assert.That(actual.baseTempKelvin, Is.EqualTo(expected.baseTempKelvin));
             Assert.That(actual.terrestrialVentFraction, Is.EqualTo(expected.terrestrialVentFraction)); Assert.That(actual.allowDenseAtmosphere, Is.EqualTo(expected.allowDenseAtmosphere));
             Assert.That(actual.atmosphereInventoryPerBar, Is.EqualTo(expected.atmosphereInventoryPerBar)); Assert.That(actual.airSeaExchangeHalfLifeSeconds, Is.EqualTo(expected.airSeaExchangeHalfLifeSeconds));
             Assert.That(actual.approximateThermalIntervalSeconds, Is.EqualTo(expected.approximateThermalIntervalSeconds)); Assert.That(actual.geodesicResourceTransportIntervalSeconds, Is.EqualTo(expected.geodesicResourceTransportIntervalSeconds));
             Assert.That(actual.chemistryTelemetryIntervalSimSeconds, Is.EqualTo(expected.chemistryTelemetryIntervalSimSeconds));
-        });
+            Assert.That(actual.geodesicBiologySpawnDelaySeconds, Is.EqualTo(expected.geodesicBiologySpawnDelaySeconds));
     }
 }

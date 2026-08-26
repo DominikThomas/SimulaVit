@@ -75,6 +75,8 @@ public class SimulationStartupConfig
     public float atmosphereInventoryPerBar = 1000f;
     [Tooltip("Common v1 air-sea exchange half-life. Zero disables exchange; per-gas coefficients remain available on GeodesicAirSeaGasExchange.")]
     public float airSeaExchangeHalfLifeSeconds = DefaultAirSeaExchangeHalfLifeSeconds;
+    [Tooltip("Simulated-time environmental warmup before normal Geodesic founders appear. Zero preserves immediate spawning.")]
+    public float geodesicBiologySpawnDelaySeconds = 0f;
 
     public SimulationStartupConfig Clone()
     {

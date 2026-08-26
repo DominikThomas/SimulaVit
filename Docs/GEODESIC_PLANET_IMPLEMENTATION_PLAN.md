@@ -310,6 +310,20 @@ actual bottom node of a compact submarine vent outlet, but they are not pinned t
 `PassiveDrift` means a non-motile organism transported by surrounding water; it is neither sessile
 nor active locomotion and it does not inspect resources, temperature, or habitat fitness.
 
+An Advanced `Prebiotic Biology Delay` setting can defer normal Geodesic founders while the ordinary
+runtime environment advances with population zero. Zero seconds preserves immediate startup. A
+positive delay is measured only by authoritative simulated time, so pause also pauses the warmup.
+At the threshold, the manager consumes a one-shot per-world schedule and asks the already initialized
+Geodesic biology runtime to create the normal deterministic Hydrogenotrophy + PassiveDrift vent-bottom
+founders. Their age is zero, their biology RNG is freshly derived from the unchanged Biology seed,
+and their wander/vertical event times are scheduled relative to actual spawn time. Teardown clears
+the pending schedule, preventing an old world's founders from appearing in a later world.
+
+Aggregate biology diagnostics now sample H2 and CO2 once per unique habitat occupied by the living
+post-lifecycle population at the diagnostic interval, rather than averaging all vent nodes or adding
+per-agent resource reads. They also report OrganicC-store and division-threshold min/mean/max,
+maximum division-carbon fraction, and division-eligible count.
+
 The Geodesic biology interval advances a continuous, Geodesic-local unit direction and tangent for
 each passive organism at a fixed angular speed. These contiguous population arrays are kinematic
 state only. They let organisms drift through cell interiors smoothly; neither resource nor

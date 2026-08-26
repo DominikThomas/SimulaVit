@@ -6,6 +6,59 @@ using UnityEngine;
 public sealed class GeodesicBiologyRuntimeTests
 {
     [Test]
+    public void ZeroDelayKeepsImmediateFounderSchedule()
+    {
+        var schedule = new GeodesicFounderSpawnSchedule();
+        schedule.Configure(0d, 0f, 50);
+        Assert.That(schedule.IsPending, Is.False);
+    }
+
+    [Test]
+    public void DelayedFounderScheduleWaitsForSimulatedTimeAndSpawnsExactlyOnce()
+    {
+        var schedule = new GeodesicFounderSpawnSchedule();
+        schedule.Configure(0d, 300f, 50);
+        Assert.That(schedule.IsPending, Is.True);
+        Assert.That(schedule.TryConsume(299.999d, out _), Is.False);
+        Assert.That(schedule.TryConsume(300d, out int requested), Is.True);
+        Assert.That(requested, Is.EqualTo(50));
+        Assert.That(schedule.TryConsume(301d, out _), Is.False);
+    }
+
+    [Test]
+    public void PausedClockDoesNotAdvanceDelayAndClearCancelsOldWorld()
+    {
+        var schedule = new GeodesicFounderSpawnSchedule();
+        schedule.Configure(10d, 300f, 50);
+        Assert.That(schedule.TryConsume(10d, out _), Is.False);
+        schedule.Clear();
+        Assert.That(schedule.TryConsume(1000d, out _), Is.False);
+        schedule.Configure(25d, 100f, 12);
+        Assert.That(schedule.SpawnAtSimulationTime, Is.EqualTo(125d));
+    }
+
+    [Test]
+    public void DelayedFounderStartsAtZeroAgeAndSchedulesMovementFromSpawnTime()
+    {
+        var agent = new Replicator(Vector3.up, Quaternion.identity, 10f, Color.white, default, 0.25f,
+            MetabolismType.Hydrogenotrophy, LocomotionType.PassiveDrift);
+        GeodesicBiologyRuntime.InitializeFounderBiologicalState(agent, 2, 1,
+            new Vector2(293.15f, 343.15f), 20f, 0.3f, 0f, 0.2f);
+        var state = new ReplicatorPopulationState();
+        state.AddAgentFromReplicatorData(agent);
+        GeodesicBiologyRuntime.InitializePassiveSchedulesAtSpawn(state, 0, 300f);
+        Assert.That(state.Age[0], Is.Zero);
+        Assert.That(state.NextPassiveWanderUpdateTime[0], Is.GreaterThan(300f));
+        Assert.That(state.NextPassiveVerticalDriftTime[0], Is.GreaterThan(300f));
+
+        var secondState = new ReplicatorPopulationState();
+        secondState.AddAgentFromReplicatorData(agent);
+        GeodesicBiologyRuntime.InitializePassiveSchedulesAtSpawn(secondState, 0, 300f);
+        Assert.That(secondState.NextPassiveWanderUpdateTime[0], Is.EqualTo(state.NextPassiveWanderUpdateTime[0]));
+        Assert.That(secondState.NextPassiveVerticalDriftTime[0], Is.EqualTo(state.NextPassiveVerticalDriftTime[0]));
+    }
+
+    [Test]
     public void HydrogenotrophyFullReferenceTickPreservesLegacyBalance()
     {
         var result = GeodesicBiologyRuntime.CalculateHydrogenotrophyTick(0.5f, 0.01f, 0.02f, 8f,
