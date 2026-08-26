@@ -116,7 +116,7 @@ public class SimulationStartupController : MonoBehaviour
     {
         ResolveReferences();
         CaptureSceneDefaults();
-        ResetDefaults();
+        ResetAllToDefaults();
         LoadSavedStartupConfigIfEnabled();
         PrepareDeferredStartup();
     }
@@ -388,18 +388,73 @@ public class SimulationStartupController : MonoBehaviour
 
     public void ResetDefaults()
     {
-        currentConfig = defaults.Clone();
+        if (currentConfig == null) currentConfig = new SimulationStartupConfig();
+        CopyNormalSettings(defaults ?? new SimulationStartupConfig(), currentConfig);
+        NormalizeAtmosphereComposition(currentConfig);
+        RefreshStartupPanels();
     }
 
     public void ResetAdvancedToDefaults()
     {
-        if (currentConfig == null) return;
-        currentConfig.approximateThermalIntervalSeconds = DefaultApproximateThermalIntervalSeconds;
-        currentConfig.geodesicResourceTransportIntervalSeconds = DefaultResourceTransportIntervalSeconds;
-        currentConfig.chemistryTelemetryIntervalSimSeconds = DefaultChemistryTelemetryIntervalSimSeconds;
-        currentConfig.atmosphereInventoryPerBar = 1000f;
-        currentConfig.allowDenseAtmosphere = false;
+        if (currentConfig == null) currentConfig = new SimulationStartupConfig();
+        CopyAdvancedSettings(defaults ?? new SimulationStartupConfig(), currentConfig);
         RefreshStartupPanels();
+    }
+
+    private void ResetAllToDefaults()
+    {
+        currentConfig = (defaults ?? new SimulationStartupConfig()).Clone();
+        NormalizeAtmosphereComposition(currentConfig);
+    }
+
+    public static void CopyNormalSettings(SimulationStartupConfig source, SimulationStartupConfig destination)
+    {
+        if (source == null || destination == null) return;
+        destination.planetSeed = source.planetSeed;
+        destination.useRandomSeed = source.useRandomSeed;
+        destination.gridType = source.gridType;
+        destination.cubeSphereResolution = source.cubeSphereResolution;
+        destination.axisTiltDegrees = source.axisTiltDegrees;
+        destination.dayLengthSeconds = source.dayLengthSeconds;
+        destination.yearLengthInDays = source.yearLengthInDays;
+        destination.insolationTempGain = source.insolationTempGain;
+        destination.initialCO2 = source.initialCO2;
+        destination.initialO2 = source.initialO2;
+        destination.initialCH4 = source.initialCH4;
+        destination.initialAtmospherePressureBar = source.initialAtmospherePressureBar;
+        destination.atmosphericCO2Fraction = source.atmosphericCO2Fraction;
+        destination.atmosphericO2Fraction = source.atmosphericO2Fraction;
+        destination.atmosphericCH4Fraction = source.atmosphericCH4Fraction;
+        destination.atmosphericH2Fraction = source.atmosphericH2Fraction;
+        destination.atmosphericH2SFraction = source.atmosphericH2SFraction;
+        destination.atmosphericN2Bar = source.atmosphericN2Bar;
+        destination.atmosphericCO2Bar = source.atmosphericCO2Bar;
+        destination.atmosphericO2Bar = source.atmosphericO2Bar;
+        destination.atmosphericCH4Bar = source.atmosphericCH4Bar;
+        destination.atmosphericH2Bar = source.atmosphericH2Bar;
+        destination.atmosphericH2SBar = source.atmosphericH2SBar;
+        destination.initialDissolvedFe2Plus = source.initialDissolvedFe2Plus;
+        destination.ventClustering = source.ventClustering;
+        destination.ventH2PerTick = source.ventH2PerTick;
+        destination.ventH2SPerTick = source.ventH2SPerTick;
+        destination.ventCO2PerTick = source.ventCO2PerTick;
+        destination.ventFe2PerTick = source.ventFe2PerTick;
+        destination.initialSpawnCount = source.initialSpawnCount;
+    }
+
+    public static void CopyAdvancedSettings(SimulationStartupConfig source, SimulationStartupConfig destination)
+    {
+        if (source == null || destination == null) return;
+        destination.geodesicSubdivisionLevel = source.geodesicSubdivisionLevel;
+        destination.baseTempKelvin = source.baseTempKelvin;
+        destination.terrestrialVentFraction = source.terrestrialVentFraction;
+        destination.allowDenseAtmosphere = source.allowDenseAtmosphere;
+        destination.atmosphereInventoryPerBar = source.atmosphereInventoryPerBar;
+        destination.airSeaExchangeHalfLifeSeconds = source.airSeaExchangeHalfLifeSeconds;
+        destination.geodesicBiologySpawnDelaySeconds = source.geodesicBiologySpawnDelaySeconds;
+        destination.approximateThermalIntervalSeconds = source.approximateThermalIntervalSeconds;
+        destination.geodesicResourceTransportIntervalSeconds = source.geodesicResourceTransportIntervalSeconds;
+        destination.chemistryTelemetryIntervalSimSeconds = source.chemistryTelemetryIntervalSimSeconds;
     }
 
     public void StartSimulation()
@@ -542,6 +597,7 @@ public class SimulationStartupController : MonoBehaviour
         if (replicatorManager != null)
         {
             replicatorManager.initialSpawnCount = Mathf.Max(0, config.initialSpawnCount);
+            replicatorManager.geodesicBiologySpawnDelaySeconds = Mathf.Max(0f, config.geodesicBiologySpawnDelaySeconds);
         }
     }
 
@@ -611,9 +667,7 @@ public class SimulationStartupController : MonoBehaviour
                 return false;
             }
 
-            SavedStartupConfig savedConfig = SavedStartupConfig.FromDefaults(defaults);
-            JsonUtility.FromJsonOverwrite(json, savedConfig);
-            currentConfig = savedConfig.ToConfig(defaults);
+            currentConfig = DeserializeSavedConfig(json, defaults);
             ClampLoadedConfig(currentConfig);
 
             if (logAppliedStartupConfig)
@@ -679,6 +733,7 @@ public class SimulationStartupController : MonoBehaviour
         NormalizeAtmosphereComposition(config);
         config.atmosphereInventoryPerBar = Mathf.Max(1e-6f, config.atmosphereInventoryPerBar);
         config.airSeaExchangeHalfLifeSeconds = Mathf.Max(0f, config.airSeaExchangeHalfLifeSeconds);
+        config.geodesicBiologySpawnDelaySeconds = Mathf.Max(0f, config.geodesicBiologySpawnDelaySeconds);
         config.initialDissolvedFe2Plus = Mathf.Clamp(config.initialDissolvedFe2Plus, InitialFe2Min, InitialFe2Max);
         config.ventH2PerTick = Mathf.Clamp(config.ventH2PerTick, VentPerTickMin, VentH2MaxPerTick);
         config.ventH2SPerTick = Mathf.Clamp(config.ventH2SPerTick, VentPerTickMin, VentH2SMaxPerTick);
@@ -794,6 +849,7 @@ public class SimulationStartupController : MonoBehaviour
         builder.AppendLine($"Atmosphere Partials (bar) N2/CO2/O2/CH4/H2/H2S={config.atmosphericN2Bar:0.######}/{config.atmosphericCO2Bar:0.######}/{config.atmosphericO2Bar:0.######}/{config.atmosphericCH4Bar:0.######}/{config.atmosphericH2Bar:0.######}/{config.atmosphericH2SBar:0.######}");
         builder.AppendLine($"Atmosphere Inventory / bar: {config.atmosphereInventoryPerBar:0.###} inventory units/bar");
         builder.AppendLine($"Air-Sea Exchange Half-Life: {config.airSeaExchangeHalfLifeSeconds:0.###} simulated s (0 disabled)");
+        builder.AppendLine($"Geodesic Prebiotic Biology Delay: {config.geodesicBiologySpawnDelaySeconds:0.###} simulated s");
         builder.AppendLine($"Initial Dissolved Fe2+: {config.initialDissolvedFe2Plus:0.###}");
         builder.AppendLine($"Vent Clustering: {config.ventClustering:0.###}");
         builder.AppendLine($"Global Vent H2 / sim s: {config.ventH2PerTick:0.####}");
@@ -805,6 +861,14 @@ public class SimulationStartupController : MonoBehaviour
         builder.AppendLine($"Start Paused: {startPaused}");
         builder.AppendLine($"Saved Config Path: {SavedStartupConfigPath}");
         Debug.Log(builder.ToString());
+    }
+
+    public static SimulationStartupConfig DeserializeSavedConfig(string json, SimulationStartupConfig fallback)
+    {
+        SimulationStartupConfig authoritativeFallback = fallback ?? new SimulationStartupConfig();
+        SavedStartupConfig saved = SavedStartupConfig.FromDefaults(authoritativeFallback);
+        if (!string.IsNullOrWhiteSpace(json)) JsonUtility.FromJsonOverwrite(json, saved);
+        return saved.ToConfig(authoritativeFallback);
     }
 
     [Serializable]
@@ -827,7 +891,7 @@ public class SimulationStartupController : MonoBehaviour
         public float atmosphericN2Bar, atmosphericCO2Bar, atmosphericO2Bar, atmosphericCH4Bar, atmosphericH2Bar, atmosphericH2SBar;
         public float initialAtmospherePressureBar, atmosphericCO2Fraction, atmosphericO2Fraction, atmosphericCH4Fraction, atmosphericH2Fraction, atmosphericH2SFraction;
         public bool allowDenseAtmosphere;
-        public float atmosphereInventoryPerBar, airSeaExchangeHalfLifeSeconds;
+        public float atmosphereInventoryPerBar, airSeaExchangeHalfLifeSeconds, geodesicBiologySpawnDelaySeconds;
         public float initialDissolvedFe2Plus;
         public float ventH2PerTick;
         public float ventH2SPerTick;
@@ -872,6 +936,7 @@ public class SimulationStartupController : MonoBehaviour
                 atmosphericH2Fraction = config.atmosphericH2Fraction, atmosphericH2SFraction = config.atmosphericH2SFraction,
                 allowDenseAtmosphere = config.allowDenseAtmosphere,
                 atmosphereInventoryPerBar = config.atmosphereInventoryPerBar, airSeaExchangeHalfLifeSeconds = config.airSeaExchangeHalfLifeSeconds,
+                geodesicBiologySpawnDelaySeconds = config.geodesicBiologySpawnDelaySeconds,
                 initialDissolvedFe2Plus = config.initialDissolvedFe2Plus,
                 ventH2PerTick = config.ventH2PerTick,
                 ventH2SPerTick = config.ventH2SPerTick,
@@ -910,6 +975,7 @@ public class SimulationStartupController : MonoBehaviour
                 config.atmosphericCH4Fraction = atmosphericCH4Fraction; config.atmosphericH2Fraction = atmosphericH2Fraction;
                 config.atmosphericH2SFraction = atmosphericH2SFraction; config.allowDenseAtmosphere = allowDenseAtmosphere;
                 config.atmosphereInventoryPerBar = atmosphereInventoryPerBar; config.airSeaExchangeHalfLifeSeconds = airSeaExchangeHalfLifeSeconds;
+                config.geodesicBiologySpawnDelaySeconds = geodesicBiologySpawnDelaySeconds;
             }
             else if (version >= 6)
             {
@@ -917,6 +983,7 @@ public class SimulationStartupController : MonoBehaviour
                 // never reinterpreted as composition fractions.
                 MigrateLegacyAtmospherePartials(config, atmosphericN2Bar, atmosphericCO2Bar, atmosphericO2Bar, atmosphericCH4Bar, atmosphericH2Bar, atmosphericH2SBar);
                 config.atmosphereInventoryPerBar = atmosphereInventoryPerBar; config.airSeaExchangeHalfLifeSeconds = airSeaExchangeHalfLifeSeconds;
+                config.geodesicBiologySpawnDelaySeconds = geodesicBiologySpawnDelaySeconds;
             }
             config.initialDissolvedFe2Plus = initialDissolvedFe2Plus;
             config.ventH2PerTick = ventH2PerTick;
@@ -1172,7 +1239,7 @@ public class SimulationStartupController : MonoBehaviour
         setupGuiScrollPosition = GUILayout.BeginScrollView(setupGuiScrollPosition, GUILayout.Width(width), GUILayout.Height(scrollHeight));
 
         float contentWidth = Mathf.Max(1f, width - 20f);
-        float advancedHeight = advancedSettingsExpanded ? 400f : 0f;
+        float advancedHeight = advancedSettingsExpanded ? 480f : 0f;
         float contentHeight = 44f + ((line + gap) * 25f) + advancedHeight + (gap * 2f) + 42f + 30f + 82f;
         Rect contentRect = GUILayoutUtility.GetRect(contentWidth, contentHeight, GUILayout.Width(contentWidth), GUILayout.Height(contentHeight));
         float controlX = contentRect.x;
@@ -1254,6 +1321,7 @@ public class SimulationStartupController : MonoBehaviour
             y += line + gap;
             DrawFloat(new Rect(controlX, y, contentWidth, line), "Atmosphere Inventory / bar", ref currentConfig.atmosphereInventoryPerBar, 0.000001f, 1000000f); y += line + gap;
             DrawFloat(new Rect(controlX, y, contentWidth, line), "Air-Sea L0 Relaxation Half-Life (sim s; 0 off)", ref currentConfig.airSeaExchangeHalfLifeSeconds, 0f, 1000000f); y += line + gap;
+            DrawFloat(new Rect(controlX, y, contentWidth, line), "Prebiotic Biology Delay (sim s)", ref currentConfig.geodesicBiologySpawnDelaySeconds, 0f, 5000f); y += line + gap;
             GUI.Label(new Rect(controlX, y, contentWidth, 38f), "Relaxation of surface-ocean L0 concentration toward atmosphere-controlled equilibrium; not finite-atmosphere depletion half-life.", labelStyle);
             y += 42f;
             GUI.Label(new Rect(controlX, y, contentWidth, 24f), "Environment Timing", labelStyle);

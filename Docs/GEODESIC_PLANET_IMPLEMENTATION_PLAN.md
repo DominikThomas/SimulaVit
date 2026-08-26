@@ -287,12 +287,104 @@ margin, and optional local-layer O2 inhibition curve are reused; no scaffold coe
 those runtime settings. Sulfur chemosynthesis, methanogenesis, oxygenic photosynthesis, and
 methanotrophy remain executable but are not normal founders.
 
-Founder rendering uses two samples from a separate Biology-derived visual RNG stream to place each
-visual on an area-uniform tangent disk whose radius is a small fraction of that cell's mean neighbor
-spacing, projected back to the selected ocean-layer radius. Visual RNG consumption therefore cannot
-change authoritative vent selection. This scatter changes only `Replicator.position`: authoritative founder
-cell and actual bottom layer remain the compact submarine outlet habitat, and neither resource nor
-temperature sampling reads the visual position.
+Founder initialization uses two samples from a separate Biology-derived visual RNG stream for
+initial sub-cell position dispersion on an area-uniform tangent disk whose radius is a small fraction
+of that cell's mean neighbor spacing, projected back to the selected ocean-layer radius. This occurs
+only at initial placement/child initialization and is never reapplied as a horizontal cell-transition
+destination. Visual RNG consumption cannot change authoritative vent selection. The initial
+dispersion changes only `Replicator.position`: authoritative founder cell and actual bottom layer
+remain the compact submarine outlet habitat, and neither resource nor temperature sampling reads the
+visual position.
+
+The first Hydrogenotrophy scene-wiring audit found that `PlanetScene.unity` still serialized stale
+values of energy 0.05 per full extent and store fraction 0.2, overriding the manager's code defaults
+of 8 and 0.8. This exactly explained telemetry energy = extent * 0.05 even though the runtime request,
+competition, commit, and telemetry equations were correct. The scene now serializes H2 0.02, CO2
+0.01, energy 8, store fraction 0.8, and basal maintenance remains 0.01 per simulated second. A compact
+`GeodesicHydrogenotrophyConfig` startup diagnostic reports the actual values passed into the runtime.
+
+### First Geodesic locomotion: passive drift (2026-08)
+
+Normal Geodesic founders are now `Hydrogenotrophy + PassiveDrift`. They still originate in the
+actual bottom node of a compact submarine vent outlet, but they are not pinned there after startup.
+`PassiveDrift` means a non-motile organism transported by surrounding water; it is neither sessile
+nor active locomotion and it does not inspect resources, temperature, or habitat fitness.
+
+An Advanced `Prebiotic Biology Delay` setting can defer normal Geodesic founders while the ordinary
+runtime environment advances with population zero. Zero seconds preserves immediate startup. A
+positive delay is measured only by authoritative simulated time, so pause also pauses the warmup.
+At the threshold, the manager consumes a one-shot per-world schedule and asks the already initialized
+Geodesic biology runtime to create the normal deterministic Hydrogenotrophy + PassiveDrift vent-bottom
+founders. Their age is zero, their biology RNG is freshly derived from the unchanged Biology seed,
+and their wander/vertical event times are scheduled relative to actual spawn time. Teardown clears
+the pending schedule, preventing an old world's founders from appearing in a later world.
+
+Aggregate biology diagnostics now sample H2 and CO2 once per unique habitat occupied by the living
+post-lifecycle population at the diagnostic interval, rather than averaging all vent nodes or adding
+per-agent resource reads. They also report OrganicC-store and division-threshold min/mean/max,
+maximum division-carbon fraction, and division-eligible count.
+
+The Geodesic biology interval advances a continuous, Geodesic-local unit direction and tangent for
+each passive organism at a fixed angular speed. These contiguous population arrays are kinematic
+state only. They let organisms drift through cell interiors smoothly; neither resource nor
+temperature code reads them. The former 0.8-per-second discrete horizontal transition model and its
+cell-centre visual targets were removed after profiling 10,000 founders showed movement at about
+11.8 ms/frame and exposed visibly choppy centre-to-centre paths.
+
+The initial continuous correction still retained almost one heading for an organism's lifetime,
+producing ballistic radial rings and evacuating vent habitats too efficiently. Passive drift is now
+a deterministic correlated random walk at the unchanged 0.006 radians/second translation speed.
+Each independently seeded founder receives an isotropic local tangent. Every deterministic 1-5
+simulated seconds, an allocation-free scheduled refresh selects a target turning tendency in
+[-2.0, +2.0] radians/second; the live turning rate approaches it over a two-second response
+timescale. Ordinary steps use only stored rates and cheap vector arithmetic, preserving short-term
+persistence while trajectories lose their original heading over longer periods. No environmental
+field participates in heading selection.
+
+After each continuous advance, containment is updated locally. Starting with the authoritative cell,
+the algorithm compares the continuous direction's dot product with that cell centre and its five or
+six real precomputed neighbours. A more-aligned neighbour becomes authoritative, and the check may
+repeat up to three times for unusually large timesteps. No global direction-to-cell scan occurs. A
+land neighbour is rejected and the tangent is reflected at the local cell-centre bisector. For an
+ocean neighbour, the numeric layer is preserved or clamped only to the shallower column's deepest
+active layer.
+
+Independent passive vertical drift remains discrete and adjacent-only at a provisional mean rate of
+0.015 events per simulated second (mean interval about 66.7 simulated seconds before boundary
+rejection). Each organism stores its next deterministic exponentially
+distributed event time, so ordinary updates only compare the simulation clock against that schedule.
+The event chooses up/down without habitat scoring, rejects a column boundary, and schedules the next
+event. Legacy's `0.32` sinusoidal probe gate and resource-scored layer choice are intentionally not
+used.
+
+Authoritative migration updates `(geodesic simulation cell, ocean layer)` before metabolism samples
+the environment. Rendering uses `continuousDirection * interpolatedLayerRadius`, so horizontal cell
+crossings do not snap. Only radial position eases after a layer change. Transform position never
+selects biology habitat. Birth initializes an independent deterministic stream; swap-back, resize,
+and teardown preserve or clear all continuous and scheduled state. Passive drift has no active
+locomotion energy charge; only existing maintenance applies.
+
+There is no hard-coded bottom affinity for Hydrogenotrophy or SulfurChemosynthesis in Geodesic mode.
+Vent association must emerge from resources, oxygen inhibition, temperature, maintenance,
+reproduction, and death. Locomotion mutation, Amoeboid, Flagellum, Anchored, metabolism mutation,
+and active temporal taxis remain deferred.
+
+#### Manual Unity validation
+
+With about 50 founders, confirm smooth meandering drift through cell interiors, short-term heading
+persistence without expanding radial rings, no centre-to-centre paths or horizontal snaps,
+occasional local cell-boundary crossings, much rarer adjacent-only layer changes, some chance
+retention near vents, coastline rejection, variable-depth validity, pause behaviour, and clean menu -> new game state.
+Confirm founders remain Hydrogenotrophy + PassiveDrift and that no Amoeboid, Flagellum, or Anchored
+organism appears.
+
+With 0, 50, 1,000, and 10,000 organisms, profile with Deep Profile off. Compare
+`GeodesicBiology.PassiveMovement` and its WanderRefresh, KinematicsAndBoundary, VerticalEvents, and
+VisualTarget children against ReactionEvaluation and ReplicatorManager.VisualSync. Reference values
+after the continuous correction were about 18.38 ms CPU active, 3.76 ms KinematicsAndBoundary,
+3.65 ms ReactionEvaluation, and 2.38 ms VisualSync, versus about 29 ms CPU active and 11.8 ms total
+movement before correction. Wandering must preserve that improvement. Repeat at 100x speed and
+confirm continuous containment remains local, layer events remain adjacent, and simulation-time motion is stable.
 
 - startup selection between legacy cube-sphere and geodesic icosphere;
 - persisted startup configuration;

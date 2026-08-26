@@ -12,6 +12,37 @@ public enum TemperatureDisplayUnit
     Fahrenheit
 }
 
+public struct GeodesicFounderSpawnSchedule
+{
+    public bool IsPending { get; private set; }
+    public double SpawnAtSimulationTime { get; private set; }
+    public int RequestedFounderCount { get; private set; }
+
+    public void Configure(double currentSimulationTime, float delaySeconds, int requestedFounderCount)
+    {
+        RequestedFounderCount = Mathf.Max(0, requestedFounderCount);
+        IsPending = delaySeconds > 0f && RequestedFounderCount > 0;
+        SpawnAtSimulationTime = currentSimulationTime + Mathf.Max(0f, delaySeconds);
+    }
+
+    public bool TryConsume(double currentSimulationTime, out int requestedFounderCount)
+    {
+        requestedFounderCount = 0;
+        if (!IsPending || currentSimulationTime < SpawnAtSimulationTime) return false;
+        IsPending = false;
+        requestedFounderCount = RequestedFounderCount;
+        RequestedFounderCount = 0;
+        return true;
+    }
+
+    public void Clear()
+    {
+        IsPending = false;
+        SpawnAtSimulationTime = 0d;
+        RequestedFounderCount = 0;
+    }
+}
+
 public class ReplicatorManager : MonoBehaviour
 {
     private static readonly int MetabolismTypeCount = Enum.GetValues(typeof(MetabolismType)).Length;
@@ -64,6 +95,7 @@ public class ReplicatorManager : MonoBehaviour
 
     [Header("Population")]
     public int initialSpawnCount = 100;
+    [Min(0f)] public float geodesicBiologySpawnDelaySeconds;
     public int maxPopulation = 50000;
     [Tooltip("When disabled, the manager initializes references but waits for an external startup controller to spawn the initial population.")]
     public bool autoStartOnSceneLoad = true;
@@ -633,6 +665,7 @@ public class ReplicatorManager : MonoBehaviour
     [SerializeField] private int topBlockedMutationGatePairCount;
     private readonly ReplicatorHudPresenter hudPresenter = new ReplicatorHudPresenter();
     private readonly ReplicatorDebugTelemetry debugTelemetry = new ReplicatorDebugTelemetry();
+    private GeodesicFounderSpawnSchedule geodesicFounderSpawnSchedule;
     private bool isInitialized;
     private GeodesicBiologyRuntime geodesicBiology;
     private readonly ReplicatorSpawnSystem spawnSystem = new ReplicatorSpawnSystem();
@@ -806,7 +839,9 @@ public class ReplicatorManager : MonoBehaviour
             enabled = true;
             ClearPopulation();
             geodesicBiology = new GeodesicBiologyRuntime();
-            if (!geodesicBiology.Initialize(planetGenerator, agents, populationState, spawnInitialPopulation ? initialSpawnCount : 0,
+            float spawnDelay = spawnInitialPopulation ? Mathf.Max(0f, geodesicBiologySpawnDelaySeconds) : 0f;
+            int immediateFounderCount = spawnInitialPopulation && spawnDelay <= 0f ? initialSpawnCount : 0;
+            if (!geodesicBiology.Initialize(planetGenerator, agents, populationState, immediateFounderCount,
                 minLifespan, maxLifespan, baseAgentColor, defaultBiomassTarget,
                 hydrogenTempRange, defaultLethalMargin))
             {
@@ -814,6 +849,10 @@ public class ReplicatorManager : MonoBehaviour
                 isInitialized = false;
                 return false;
             }
+            geodesicFounderSpawnSchedule.Configure(0d, spawnDelay,
+                spawnInitialPopulation ? initialSpawnCount : 0);
+            if (geodesicFounderSpawnSchedule.IsPending)
+                Debug.Log($"[GeodesicBiology] founder spawn deferred until simTime={geodesicFounderSpawnSchedule.SpawnAtSimulationTime:G6}", this);
             isInitialized = true;
             EnsureDeathCauseCounters();
             return true;
@@ -862,6 +901,7 @@ public class ReplicatorManager : MonoBehaviour
         metabolismTickTimer = 0f;
         currentStepDeltaTime = 0f;
         simulationTimeSeconds = 0d;
+        geodesicFounderSpawnSchedule.Clear();
         ResetScentDebugState();
     }
 
@@ -907,6 +947,12 @@ public class ReplicatorManager : MonoBehaviour
             photosynthesisCo2PerTickAtFullInsolation, photosynthesisEnergyPerCo2, maxOrganicCStore,
             reproductionRate, enableCarbonLimitedDivision, divisionEnergyCost, replicationEnergyCost,
             divisionBiomassMultiple, divisionCarbonSplitToChild, maxPopulation, RegisterDeathCause);
+        if (geodesicFounderSpawnSchedule.TryConsume(simulationTimeSeconds, out int requestedFounders))
+        {
+            int spawned = geodesicBiology.SpawnDeferredFounders(requestedFounders, agents, populationState,
+                simulationTimeSeconds);
+            Debug.Log($"[GeodesicBiology] deferred founder spawn simTime={simulationTimeSeconds:G6} requested={requestedFounders} spawned={spawned}", this);
+        }
         return true;
     }
 

@@ -168,6 +168,7 @@ public class SimulationStartupPanel : MonoBehaviour
 
     private void ResetDefaults()
     {
+        PushToConfig();
         controller?.ResetDefaults();
         RefreshFromConfig();
     }
@@ -184,6 +185,7 @@ public class SimulationStartupPanel : MonoBehaviour
 
     private void ResetAdvancedDefaults()
     {
+        PushToConfig();
         controller?.ResetAdvancedToDefaults();
         RefreshFromConfig();
     }
