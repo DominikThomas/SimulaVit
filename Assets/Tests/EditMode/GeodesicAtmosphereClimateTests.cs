@@ -60,7 +60,8 @@ public class GeodesicAtmosphereClimateTests
             atmosphere.Configure(100d, 0d, 0d, 0d, 0d, 0d, 0d);
             atmosphere.InitializeForWorld();
             float before = Gas(atmosphere.GetPartialPressureBar(GeodesicAtmosphericGas.CO2), 0.1f, 2f, 30f);
-            atmosphere.AddGeologicalSource(GeodesicAtmosphericGas.CO2, 10d);
+            atmosphere.AddGeologicalSource(GeodesicAtmosphericGas.CO2,
+                10d * GeodesicPhysicalScale.PhysicalCubicKilometresPerUnityUnitCubed);
             float after = Gas(atmosphere.GetPartialPressureBar(GeodesicAtmosphericGas.CO2), 0.1f, 2f, 30f);
             Assert.That(after, Is.GreaterThan(before));
             Assert.That(atmosphere.IsInitialized, Is.True);

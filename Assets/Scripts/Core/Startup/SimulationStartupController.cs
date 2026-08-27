@@ -847,7 +847,7 @@ public class SimulationStartupController : MonoBehaviour
         builder.AppendLine($"Atmosphere Authoring Mode: {atmosphereAuthoringMode}");
         builder.AppendLine($"Initial Atmosphere: {config.initialAtmospherePressureBar:0.###} bar total; composition N2/CO2/O2/CH4/H2/H2S={n2Fraction:P2}/{config.atmosphericCO2Fraction:P2}/{config.atmosphericO2Fraction:P2}/{config.atmosphericCH4Fraction:P2}/{config.atmosphericH2Fraction:P2}/{config.atmosphericH2SFraction:P2}");
         builder.AppendLine($"Atmosphere Partials (bar) N2/CO2/O2/CH4/H2/H2S={config.atmosphericN2Bar:0.######}/{config.atmosphericCO2Bar:0.######}/{config.atmosphericO2Bar:0.######}/{config.atmosphericCH4Bar:0.######}/{config.atmosphericH2Bar:0.######}/{config.atmosphericH2SBar:0.######}");
-        builder.AppendLine($"Atmosphere Inventory / bar: {config.atmosphereInventoryPerBar:0.###} inventory units/bar");
+        builder.AppendLine($"Atmosphere Inventory / bar (authoring, pre-physical-scale): {config.atmosphereInventoryPerBar:0.###}");
         builder.AppendLine($"Air-Sea Exchange Half-Life: {config.airSeaExchangeHalfLifeSeconds:0.###} simulated s (0 disabled)");
         builder.AppendLine($"Geodesic Prebiotic Biology Delay: {config.geodesicBiologySpawnDelaySeconds:0.###} simulated s");
         builder.AppendLine($"Initial Dissolved Fe2+: {config.initialDissolvedFe2Plus:0.###}");
@@ -1319,7 +1319,7 @@ public class SimulationStartupController : MonoBehaviour
             y += line + gap;
             DrawBool(new Rect(controlX, y, contentWidth, line), "Allow Dense Atmosphere (up to 600 bar)", ref currentConfig.allowDenseAtmosphere);
             y += line + gap;
-            DrawFloat(new Rect(controlX, y, contentWidth, line), "Atmosphere Inventory / bar", ref currentConfig.atmosphereInventoryPerBar, 0.000001f, 1000000f); y += line + gap;
+            DrawFloat(new Rect(controlX, y, contentWidth, line), "Atmosphere Inventory / bar (authoring)", ref currentConfig.atmosphereInventoryPerBar, 0.000001f, 1000000f); y += line + gap;
             DrawFloat(new Rect(controlX, y, contentWidth, line), "Air-Sea L0 Relaxation Half-Life (sim s; 0 off)", ref currentConfig.airSeaExchangeHalfLifeSeconds, 0f, 1000000f); y += line + gap;
             DrawFloat(new Rect(controlX, y, contentWidth, line), "Prebiotic Biology Delay (sim s)", ref currentConfig.geodesicBiologySpawnDelaySeconds, 0f, 5000f); y += line + gap;
             GUI.Label(new Rect(controlX, y, contentWidth, 38f), "Relaxation of surface-ocean L0 concentration toward atmosphere-controlled equilibrium; not finite-atmosphere depletion half-life.", labelStyle);

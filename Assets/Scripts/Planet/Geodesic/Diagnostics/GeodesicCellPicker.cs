@@ -693,7 +693,8 @@ public class GeodesicCellPicker : MonoBehaviour
             .Append("\nCH4 partial pressure: ").Append(atmosphereField.GetPartialPressureBar(GeodesicAtmosphericGas.CH4).ToString("G9"))
             .Append("\nH2 partial pressure: ").Append(atmosphereField.GetPartialPressureBar(GeodesicAtmosphericGas.H2).ToString("G9"))
             .Append("\nH2S partial pressure: ").Append(atmosphereField.GetPartialPressureBar(GeodesicAtmosphericGas.H2S).ToString("G9"))
-            .Append("\nAtmosphere inventory / bar: ").Append(atmosphereField.AtmosphereInventoryPerBar.ToString("G9"))
+            .Append("\nAtmosphere inventory / bar (authoring): ").Append(atmosphereField.AtmosphereInventoryPerBarAuthoring.ToString("G9"))
+            .Append("\nAtmosphere physical inventory / bar (concentration*km3): ").Append(atmosphereField.AtmosphereInventoryPerBar.ToString("G9"))
             .Append("\nEffective air-sea exchange half-life: ").Append(halfLife > 0d ? halfLife.ToString("G9") + " sim s" : "disabled (0)")
             .Append("\nExchange tick count: ").Append(atmosphereField.CompletedExchangeTicks);
         AppendAtmosphereTransfer(text, "CO2", GeodesicAtmosphericGas.CO2);
@@ -706,8 +707,14 @@ public class GeodesicCellPicker : MonoBehaviour
 
     private void AppendAtmosphereTransfer(StringBuilder text, string gas, GeodesicAtmosphericGas value)
     {
+        GeodesicAirSeaExchangeDiagnostics exchange = airSeaGasExchange != null ? airSeaGasExchange.GetLastExchangeDiagnostics(value) : default;
         text.Append("\nCumulative net air-sea transfer ").Append(gas).Append(" (to ocean +): ")
-            .Append(atmosphereField.GetCumulativeNetTransferToOcean(value).ToString("G9"));
+            .Append(atmosphereField.GetCumulativeNetTransferToOcean(value).ToString("G9"))
+            .Append("; last pressure bar ").Append(exchange.atmospherePressureBeforeBar.ToString("G6")).Append("->").Append(exchange.atmospherePressureAfterBar.ToString("G6"))
+            .Append("; requested/applied inventory=").Append(exchange.requestedTransferToOceanInventory.ToString("G6")).Append('/').Append(exchange.appliedTransferToOceanInventory.ToString("G6"))
+            .Append("; pressureDeltaBar=").Append(exchange.equivalentPressureDeltaBar.ToString("G6"))
+            .Append("; atmosphere inventory=").Append(exchange.atmosphereInventoryBefore.ToString("G6")).Append("->").Append(exchange.atmosphereInventoryAfter.ToString("G6"))
+            .Append("; donorClamps(atmosphere/ocean)=").Append(exchange.atmosphereDonorClampCount).Append('/').Append(exchange.oceanDonorClampCount);
     }
 
     private string BuildDynamicLayerEnvironmentText(bool detailed)
