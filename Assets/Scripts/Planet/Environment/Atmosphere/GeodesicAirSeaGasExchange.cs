@@ -49,7 +49,7 @@ public sealed class GeodesicAirSeaGasExchange : MonoBehaviour
         for (int cell = 0; cell < ocean.CellCount; cell++) if (grid.IsNodeActive(cell, 0))
         {
             int node = grid.GetNodeIndex(cell, 0); double current = ocean.GetRawConcentration(resource, node);
-            double request = (equilibrium - current) * fraction * grid.LayerVolume[node];
+            double request = (equilibrium - current) * fraction * grid.PhysicalLayerVolumeKm3[node];
             if (request > 0d) uptakeDemand += request; else outgasRequest += request;
         }
         double available = atmosphere.GetInventory(gas);
@@ -57,7 +57,7 @@ public sealed class GeodesicAirSeaGasExchange : MonoBehaviour
         double actualTotal = 0d;
         for (int cell = 0; cell < ocean.CellCount; cell++) if (grid.IsNodeActive(cell, 0))
         {
-            int node = grid.GetNodeIndex(cell, 0); double volume = grid.LayerVolume[node]; double current = ocean.GetRawConcentration(resource, node);
+            int node = grid.GetNodeIndex(cell, 0); double volume = grid.PhysicalLayerVolumeKm3[node]; double current = ocean.GetRawConcentration(resource, node);
             double request = (equilibrium - current) * fraction * volume;
             double proposed = request > 0d ? request * uptakeScale : request;
             double actual = ocean.ApplyDirectExchangeInventory(resource, node, proposed);

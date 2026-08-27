@@ -45,6 +45,30 @@ public sealed class GeodesicOceanLayerDomain : MonoBehaviour
         watch.Stop(); sourceGenerator = generator; buildDurationMilliseconds = watch.Elapsed.TotalMilliseconds; initialized = true;
         CacheDiagnostics(); RefreshSampleDiagnostics();
         UnityEngine.Debug.Log($"[GeodesicOceanLayers] initialized cells={runtimeCellCount}, oceanCells={oceanCellCount}, nodeCapacity={grid.NodeCapacity}, activeNodes={activeNodeCount}, horizontalLinks={horizontalLinkCount}, verticalLinks={verticalLinkCount}, histogram1to5={oceanCellsWithOneLayer}/{oceanCellsWithTwoLayers}/{oceanCellsWithThreeLayers}/{oceanCellsWithFourLayers}/{oceanCellsWithFiveLayers}, maxDepth={maximumOceanDepth:F6}, buildMs={buildDurationMilliseconds:F3}, approximateMemory={approximateMemoryBytes} bytes", this);
+        LogPhysicalScaleDiagnostics();
+    }
+
+    private void LogPhysicalScaleDiagnostics()
+    {
+        double geometricTotal = 0d, physicalTotal = 0d, physicalThicknessTotal = 0d, physicalDepthTotal = 0d;
+        double minVolume = double.PositiveInfinity, maxVolume = 0d, minThickness = double.PositiveInfinity, maxThickness = 0d, maxDepthKm = 0d;
+        int nodes = 0, columns = 0;
+        for (int cell = 0; cell < grid.CellCount; cell++)
+        {
+            int layers = grid.ActiveLayerCountByCell[cell];
+            if (layers == 0) continue;
+            double depthKm = GeodesicPhysicalScale.LengthKilometres(grid.OceanSurfaceRadius - grid.SourceSeafloorRadius[cell]);
+            physicalDepthTotal += depthKm; maxDepthKm = Math.Max(maxDepthKm, depthKm); columns++;
+            for (int layer = 0; layer < layers; layer++)
+            {
+                int node = grid.GetNodeIndex(cell, layer); double v = grid.PhysicalLayerVolumeKm3[node], t = grid.PhysicalLayerThicknessKm[node];
+                geometricTotal += grid.LayerVolume[node]; physicalTotal += v; physicalThicknessTotal += t;
+                minVolume = Math.Min(minVolume, v); maxVolume = Math.Max(maxVolume, v); minThickness = Math.Min(minThickness, t); maxThickness = Math.Max(maxThickness, t); nodes++;
+            }
+        }
+        if (nodes == 0) minVolume = minThickness = 0d;
+        UnityEngine.Debug.Log($"[GeodesicPhysicalScale] unityRadius={GeodesicPhysicalScale.BasePlanetRadiusUnity:G6} physicalRadiusKm={GeodesicPhysicalScale.PhysicalPlanetRadiusKm:G6} kmPerUnityUnit={GeodesicPhysicalScale.PhysicalKilometresPerUnityUnit:G6} km2PerUnity2={GeodesicPhysicalScale.PhysicalSquareKilometresPerUnityUnitSquared:G6} km3PerUnity3={GeodesicPhysicalScale.PhysicalCubicKilometresPerUnityUnitCubed:G6}", this);
+        UnityEngine.Debug.Log($"[GeodesicOceanPhysicalVolume] geometricOceanVolumeUnity3={geometricTotal:G9} physicalOceanVolumeKm3={physicalTotal:G9} physicalLayerVolumeKm3(min/mean/max)={minVolume:G6}/{(nodes > 0 ? physicalTotal / nodes : 0d):G6}/{maxVolume:G6} physicalLayerThicknessKm(min/mean/max)={minThickness:G6}/{(nodes > 0 ? physicalThicknessTotal / nodes : 0d):G6}/{maxThickness:G6} physicalOceanDepthKm(mean/max)={(columns > 0 ? physicalDepthTotal / columns : 0d):G6}/{maxDepthKm:G6}", this);
     }
 
     public void ClearGrid()
@@ -96,7 +120,7 @@ public sealed class GeodesicOceanLayerDomain : MonoBehaviour
         for (int i = 0; i < grid.VerticalLinkCount; i++) { int a = grid.VerticalUpperNode[i], b = grid.VerticalLowerNode[i]; if (a / grid.MaximumLayerCount == cell) vd[a % grid.MaximumLayerCount]++; if (b / grid.MaximumLayerCount == cell) vd[b % grid.MaximumLayerCount]++; }
         var s = new StringBuilder(); bool ocean = grid.SourceOceanMask[cell]; float depth = ocean ? grid.OceanSurfaceRadius - grid.SourceSeafloorRadius[cell] : 0f;
         s.AppendLine($"Cell {cell}: {(ocean ? "Ocean" : "Land")}; depth={depth:F6}; activeLayers={grid.ActiveLayerCountByCell[cell]}");
-        for (int layer = 0; layer < 5; layer++) { bool active = grid.IsNodeActive(cell, layer); int node = layer < grid.MaximumLayerCount ? grid.GetNodeIndex(cell, layer) : -1; s.AppendLine($"L{layer}: {(active ? "active" : "inactive")}; thickness={(active ? grid.LayerThickness[node] : 0f):F6}; volume={(active ? grid.LayerVolume[node] : 0f):G6}; centerDepth={(active ? grid.OceanSurfaceRadius - grid.LayerCenterRadius[node] : 0f):F6}; H/V degree={hd[layer]}/{vd[layer]}"); }
+        for (int layer = 0; layer < 5; layer++) { bool active = grid.IsNodeActive(cell, layer); int node = layer < grid.MaximumLayerCount ? grid.GetNodeIndex(cell, layer) : -1; s.AppendLine($"L{layer}: {(active ? "active" : "inactive")}; thickness={(active ? grid.LayerThickness[node] : 0f):F6}; geometricVolumeUnity3={(active ? grid.LayerVolume[node] : 0f):G6}; physicalVolumeKm3={(active ? grid.PhysicalLayerVolumeKm3[node] : 0d):G6}; centerDepth={(active ? grid.OceanSurfaceRadius - grid.LayerCenterRadius[node] : 0f):F6}; H/V degree={hd[layer]}/{vd[layer]}"); }
         sampleCellOutput = s.ToString();
     }
 

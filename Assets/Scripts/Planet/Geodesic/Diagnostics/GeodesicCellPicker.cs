@@ -532,13 +532,13 @@ public class GeodesicCellPicker : MonoBehaviour
             int verticalDegree = GetVerticalLayerDegree(grid, node);
             float centerDepth = grid.OceanSurfaceRadius - grid.LayerCenterRadius[node];
             log.Append(", layer[").Append(layer).Append("]={thickness=").Append(grid.LayerThickness[node].ToString("F6"))
-                .Append(", volume=").Append(grid.LayerVolume[node].ToString("G6"))
+                .Append(", geometricVolumeUnity3=").Append(grid.LayerVolume[node].ToString("G6")).Append(", physicalVolumeKm3=").Append(grid.PhysicalLayerVolumeKm3[node].ToString("G6"))
                 .Append(", centerDepth=").Append(centerDepth.ToString("F6"))
                 .Append(", horizontalDegree=").Append(horizontalDegree)
                 .Append(", verticalDegree=").Append(verticalDegree).Append('}');
             popup.Append("\nlayer ").Append(layer)
                 .Append(": thickness=").Append(grid.LayerThickness[node].ToString("F6"))
-                .Append(", volume=").Append(grid.LayerVolume[node].ToString("G6"))
+                .Append(", geometricVolumeUnity3=").Append(grid.LayerVolume[node].ToString("G6")).Append(", physicalVolumeKm3=").Append(grid.PhysicalLayerVolumeKm3[node].ToString("G6"))
                 .Append(", centerDepth=").Append(centerDepth.ToString("F6"))
                 .Append(", H/V degree=").Append(horizontalDegree).Append('/').Append(verticalDegree);
         }

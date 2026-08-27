@@ -113,7 +113,7 @@ public sealed class GeodesicAbioticChemistry : MonoBehaviour
                 float h2Concentration = concentrations[h2Offset + node];
                 float h2sConcentration = concentrations[h2sOffset + node];
                 float fe2Concentration = concentrations[fe2Offset + node];
-                double volume = resources.SourceGrid.LayerVolume[node];
+                double volume = resources.SourceGrid.PhysicalLayerVolumeKm3[node];
                 double o2 = concentrations[o2Offset + node] * volume;
                 double h2 = h2Concentration * volume;
                 double h2s = h2sConcentration * volume;
