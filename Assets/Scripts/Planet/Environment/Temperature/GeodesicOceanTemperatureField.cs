@@ -48,7 +48,7 @@ public sealed class GeodesicOceanTemperatureField : MonoBehaviour
     [SerializeField, Tooltip("Intrinsic hydrothermal-fluid source temperature; coarse ocean cells are only weakly blended toward this value.")] private float submarineVentSourceTemperatureC = GeodesicVentThermalModel.SourceTemperatureC;
     [SerializeField, Range(0f, 0.25f), Tooltip("Maximum bounded coarse-grid blend toward source-fluid temperature at a strongest bottom outlet.")] private float ventThermalInfluence = 0.08f;
     [SerializeField, Range(0f, 1f), Tooltip("Fraction of bottom vent heating applied only to the layer immediately above the bottom.")] private float aboveBottomVentHeatingFactor = 0.35f;
-    [SerializeField, Min(1e-8f), Tooltip("Thermal capacity per unit ocean-layer volume.")] private float subsurfaceHeatCapacityPerVolume = 1f;
+    [SerializeField, Min(1e-8f), Tooltip("Thermal capacity per physical ocean-layer volume (km3).")] private float subsurfaceHeatCapacityPerVolume = 1f;
     [SerializeField, Min(0f), Tooltip("Simulation-unit vertical diffusivity; this is not SI calibrated and will be tuned later.")] private float verticalThermalDiffusivity = 0.00002f;
     [SerializeField, Tooltip("Initializes subsurface layers from the surface or with a per-layer depth gradient.")] private GeodesicOceanTemperatureStartupMode startupMode = GeodesicOceanTemperatureStartupMode.DepthGradient;
     [SerializeField, Min(0f), Tooltip("Initial Kelvin decrease per layer index when Depth Gradient is selected.")] private float initialTemperatureDropPerLayerKelvin = 2f;
@@ -295,7 +295,7 @@ public sealed class GeodesicOceanTemperatureField : MonoBehaviour
     {
         totalSubsurfaceThermalCapacity = 0d;
         float density = Mathf.Max(1e-8f, subsurfaceHeatCapacityPerVolume);
-        for (int i = 0; i < activeSubsurfaceNodeIndices.Length; i++) { int node = activeSubsurfaceNodeIndices[i]; float capacity = sourceGrid.LayerVolume[node] * density; heatCapacityByNode[node] = capacity; inverseHeatCapacityByNode[node] = 1f / capacity; totalSubsurfaceThermalCapacity += capacity; }
+        for (int i = 0; i < activeSubsurfaceNodeIndices.Length; i++) { int node = activeSubsurfaceNodeIndices[i]; float capacity = (float)(sourceGrid.PhysicalLayerVolumeKm3[node] * density); heatCapacityByNode[node] = capacity; inverseHeatCapacityByNode[node] = 1f / capacity; totalSubsurfaceThermalCapacity += capacity; }
         cachedCapacityPerVolume = subsurfaceHeatCapacityPerVolume;
         sourceGridSummary = $"cells={sourceGrid.CellCount}, nodes={sourceGrid.NodeCapacity}, active={sourceGrid.ActiveNodeCount}, verticalLinks={sourceGrid.VerticalLinkCount}";
         approximateRuntimeMemoryBytes = (long)sourceGrid.NodeCapacity * sizeof(float) * 3L + (long)activeSubsurfaceNodeIndices.Length * sizeof(int) + (participatingSurfaceCells != null ? (long)participatingSurfaceCells.Length * (sizeof(int) + sizeof(float)) : 0L) + (columnInterfaceConductanceBase != null ? (long)columnInterfaceConductanceBase.Length * sizeof(float) : 0L) + approximateRelaxationCacheBytes;

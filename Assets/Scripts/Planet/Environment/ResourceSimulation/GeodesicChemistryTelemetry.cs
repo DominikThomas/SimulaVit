@@ -92,7 +92,7 @@ public sealed class GeodesicChemistryTelemetry : MonoBehaviour
             for (int layer = 0; layer < activeLayers; layer++)
             {
                 int node = grid.GetNodeIndex(cell, layer);
-                double volume = grid.LayerVolume[node];
+                double volume = grid.PhysicalLayerVolumeKm3[node];
                 float co2 = resources.GetConcentrationForTelemetry(node, GeodesicOceanResource.CO2);
                 float o2 = resources.GetConcentrationForTelemetry(node, GeodesicOceanResource.O2);
                 float ch4 = resources.GetConcentrationForTelemetry(node, GeodesicOceanResource.CH4);
@@ -156,14 +156,14 @@ public sealed class GeodesicChemistryTelemetry : MonoBehaviour
 
     private static void AppendLayer(StringBuilder text, int layer, WeightedChemistryStatistics value)
     {
-        text.Append('L').Append(layer).Append("={activeNodes=").Append(value.NodeCount).Append(",volume=").Append(value.Volume.ToString("G6"));
+        text.Append('L').Append(layer).Append("={activeNodes=").Append(value.NodeCount).Append(",physicalVolumeKm3=").Append(value.Volume.ToString("G6"));
         text.Append(",O2Mean=").Append(value.Mean(1).ToString("G6")).Append(",O2Min=").Append(value.O2Minimum.ToString("G6")).Append(",O2Max=").Append(value.O2Maximum.ToString("G6"));
         text.Append(",anoxicFraction=").Append(value.AnoxicFraction.ToString("G6")).Append(",CO2=").Append(value.Mean(0).ToString("G6")).Append(",CH4=").Append(value.Mean(2).ToString("G6"));
         text.Append(",H2=").Append(value.Mean(3).ToString("G6")).Append(",H2S=").Append(value.Mean(4).ToString("G6")).Append(",Fe2=").Append(value.Mean(5).ToString("G6")).Append(",OrganicC=").Append(value.Mean(6).ToString("G6")).Append('}');
     }
 
     private static void AppendReducingSummary(StringBuilder text, string name, WeightedChemistryStatistics value)
-    { text.Append(name).Append("={activeNodes=").Append(value.NodeCount).Append(",volume=").Append(value.Volume.ToString("G6")).Append(",O2Mean=").Append(value.Mean(1).ToString("G6")).Append(",H2Mean=").Append(value.Mean(3).ToString("G6")).Append(",H2SMean=").Append(value.Mean(4).ToString("G6")).Append(",Fe2Mean=").Append(value.Mean(5).ToString("G6")).Append(",anoxicFraction=").Append(value.AnoxicFraction.ToString("G6")).Append('}'); }
+    { text.Append(name).Append("={activeNodes=").Append(value.NodeCount).Append(",physicalVolumeKm3=").Append(value.Volume.ToString("G6")).Append(",O2Mean=").Append(value.Mean(1).ToString("G6")).Append(",H2Mean=").Append(value.Mean(3).ToString("G6")).Append(",H2SMean=").Append(value.Mean(4).ToString("G6")).Append(",Fe2Mean=").Append(value.Mean(5).ToString("G6")).Append(",anoxicFraction=").Append(value.AnoxicFraction.ToString("G6")).Append('}'); }
 
     private static void AppendCounters(StringBuilder text, string name, ChemistryCounters value)
     { text.Append(name).Append("={reactedH2=").Append(value.H2.ToString("G9")).Append(",reactedH2S=").Append(value.H2S.ToString("G9")).Append(",reactedFe2=").Append(value.Fe2.ToString("G9")).Append(",consumedO2=").Append(value.O2.ToString("G9")).Append(",depositedS0=").Append(value.S0.ToString("G9")).Append(",depositedFe3=").Append(value.Fe3.ToString("G9")).Append(",depositedFeS=").Append(value.FeS.ToString("G9")).Append('}'); }
