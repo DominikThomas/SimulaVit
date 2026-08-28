@@ -46,6 +46,10 @@ public class SimulationStartupConfigTests
         Assert.That(config.ventH2PerTick, Is.EqualTo(0.006f));
         Assert.That(config.ventH2SPerTick, Is.EqualTo(0.004f));
         Assert.That(config.ventFe2PerTick, Is.EqualTo(0.002f));
+        Assert.That(config.geodesicVentH2PhysicalPerSecond, Is.EqualTo(10f));
+        Assert.That(config.geodesicVentH2SPhysicalPerSecond, Is.Zero);
+        Assert.That(config.geodesicVentCO2PhysicalPerSecond, Is.Zero);
+        Assert.That(config.geodesicVentFe2PhysicalPerSecond, Is.Zero);
     }
 
     [Test]
@@ -108,6 +112,19 @@ public class SimulationStartupConfigTests
     }
 
     [Test]
+    public void SavedConfigWithoutPhysicalVentFieldsUsesNewDefaultsWithoutReinterpretingLegacyRates()
+    {
+        var defaults = new SimulationStartupConfig();
+        SimulationStartupConfig migrated = SimulationStartupController.DeserializeSavedConfig(
+            "{\"version\":7,\"gridType\":1,\"ventH2PerTick\":0.12,\"ventH2SPerTick\":0.004,\"ventCO2PerTick\":0.05,\"ventFe2PerTick\":0.002}", defaults);
+        Assert.That(migrated.ventH2PerTick, Is.EqualTo(0.12f));
+        Assert.That(migrated.geodesicVentH2PhysicalPerSecond, Is.EqualTo(10f));
+        Assert.That(migrated.geodesicVentH2SPhysicalPerSecond, Is.Zero);
+        Assert.That(migrated.geodesicVentCO2PhysicalPerSecond, Is.Zero);
+        Assert.That(migrated.geodesicVentFe2PhysicalPerSecond, Is.Zero);
+    }
+
+    [Test]
     public void AtmosphereComposition_NormalizesTraceGasesAndUsesN2Remainder()
     {
         var config = new SimulationStartupConfig
@@ -159,6 +176,8 @@ public class SimulationStartupConfigTests
             atmosphericCH4Fraction = 0.1f, atmosphericH2Fraction = 0.05f, atmosphericH2SFraction = 0.03f,
             initialDissolvedFe2Plus = 6f, ventClustering = 0.2f, ventH2PerTick = 0.1f,
             ventH2SPerTick = 0.2f, ventCO2PerTick = 0.3f, ventFe2PerTick = 0.4f, initialSpawnCount = 321,
+            geodesicVentH2PhysicalPerSecond = 10.25f, geodesicVentH2SPhysicalPerSecond = 0.25f,
+            geodesicVentCO2PhysicalPerSecond = 2f, geodesicVentFe2PhysicalPerSecond = 1f,
             geodesicSubdivisionLevel = 5, baseTempKelvin = 310f, terrestrialVentFraction = 0.7f,
             allowDenseAtmosphere = true, atmosphereInventoryPerBar = 4321f,
             airSeaExchangeHalfLifeSeconds = 17f, approximateThermalIntervalSeconds = 5f,
@@ -183,6 +202,8 @@ public class SimulationStartupConfigTests
             Assert.That(actual.initialDissolvedFe2Plus, Is.EqualTo(expected.initialDissolvedFe2Plus)); Assert.That(actual.ventClustering, Is.EqualTo(expected.ventClustering));
             Assert.That(actual.ventH2PerTick, Is.EqualTo(expected.ventH2PerTick)); Assert.That(actual.ventH2SPerTick, Is.EqualTo(expected.ventH2SPerTick));
             Assert.That(actual.ventCO2PerTick, Is.EqualTo(expected.ventCO2PerTick)); Assert.That(actual.ventFe2PerTick, Is.EqualTo(expected.ventFe2PerTick)); Assert.That(actual.initialSpawnCount, Is.EqualTo(expected.initialSpawnCount));
+            Assert.That(actual.geodesicVentH2PhysicalPerSecond, Is.EqualTo(expected.geodesicVentH2PhysicalPerSecond)); Assert.That(actual.geodesicVentH2SPhysicalPerSecond, Is.EqualTo(expected.geodesicVentH2SPhysicalPerSecond));
+            Assert.That(actual.geodesicVentCO2PhysicalPerSecond, Is.EqualTo(expected.geodesicVentCO2PhysicalPerSecond)); Assert.That(actual.geodesicVentFe2PhysicalPerSecond, Is.EqualTo(expected.geodesicVentFe2PhysicalPerSecond));
     }
 
     private static void AssertAdvancedSettingsEqual(SimulationStartupConfig expected, SimulationStartupConfig actual)

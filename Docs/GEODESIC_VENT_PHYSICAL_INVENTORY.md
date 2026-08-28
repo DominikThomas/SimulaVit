@@ -1,23 +1,23 @@
 # Geodesic vent physical-inventory units
 
-## Scope and conversion boundary
+## Current startup semantics
 
-This migration preserves historical vent authoring semantics; it is not a geological or ecological retune. `SimulationStartupConfig.vent*PerTick` retains its serialized field names and UI values. Despite the legacy name, each value is a global rate per simulated second in the old `concentration * Unity^3 / s` inventory convention. `SimulationStartupController` clamps, copies, saves, and passes those values unchanged to `GeodesicOceanResourceField.SetStartupVentRates`. Scene serialization and the legacy `PlanetResourceMap` therefore remain compatible and unchanged.
+Legacy Cube Sphere and Geodesic vent configuration use distinct fields. The existing `vent*PerTick` fields retain their serialized names, defaults, UI path, and legacy behavior. Geodesic startup instead uses `geodesicVent*PhysicalPerSecond`, whose values are already authoritative `concentration * km3 / simulated second` inventory fluxes.
 
-`GeodesicOceanResourceField.BuildTransportCaches` is the sole environmental runtime conversion boundary. It caches each rate as a `double` physical rate using `GeodesicPhysicalScale.PhysicalInventoryRate`, whose authority is `PhysicalCubicKilometresPerUnityUnitCubed`. At the current scale this maps H2/H2S/CO2/Fe2 authoring examples `0.12/0.004/0.05/0.002` to `1.2e8/4e6/5e7/2e6 concentration*km^3/s`. Cached runtime rates, telemetry, and source diagnostics are physical; the serialized floats remain authoring values.
+The provisional Geodesic defaults are H2/H2S/CO2/Fe2 = `10/0/0/0`. H2 is intentionally set to 10 for the immediate diagnostic. The other resources are disabled because no deliberate physical calibration has yet been selected; old legacy ratios are not silently carried forward.
+
+`SimulationStartupController` passes the four Geodesic fields directly to `GeodesicOceanResourceField.SetStartupPhysicalVentRates`. That setter validates finite, nonnegative values and stores them as runtime doubles. `BuildTransportCaches` performs no unit conversion. In particular, neither the startup path nor injection multiplies these values by `GeodesicPhysicalScale.PhysicalCubicKilometresPerUnityUnitCubed`.
+
+## Saved-config migration
+
+Startup-config schema v8 saves both the unchanged legacy fields and the distinct Geodesic physical fields. Schema v7 and older files lack the new fields. Loading them preserves their legacy vent values but initializes Geodesic rates from the current defaults (`10/0/0/0`); an old H2 value such as `0.12` is never reinterpreted as a calibrated physical Geodesic rate. Explicit zero values in v8 remain zero.
 
 ## Distribution and application
 
-Candidate generation and strongest-seed clustering store only location, habitat, and dimensionless raw strength. Systems normalize production weights independently within each habitat. Compact outlets divide a system budget with dimensionless within-system weights. None of these records cache a material rate or perform a unit conversion.
+Candidate generation and clustering store only location, habitat, and dimensionless strength. Compact outlets retain normalized system and within-system weights. Gases use the configured physical global rate on both sides of the unchanged submarine/terrestrial split. Submarine injection computes `rate * dt / physicalNodeVolumeKm3`; terrestrial injection adds the corresponding physical inventory directly to the physical atmosphere. Fe2 remains submarine-only. No outlet or atmosphere path converts the source rate again.
 
-The raw-strength submarine/terrestrial fractions are computed before injection and sum to one. Gases (CO2, H2, H2S) use the same converted global physical rate on both sides of that split. Each submarine outlet receives `physicalGlobalRate * submarineFraction * systemWeight * outletWeight`; dividing its `rate * dt` by physical node volume gives concentration delta. Each terrestrial outlet contributes the corresponding weighted physical inventory directly to `GeodesicAtmosphereField.AddGeologicalSource`; that API does no scale conversion, and pressure remains inventory divided by physical atmosphere inventory per bar. Fe2 remains submarine-only and its independently normalized submarine outlet weights preserve its global budget.
+## Deliberately unchanged paths
 
-Chemistry telemetry now reports cached physical source rates. Cell picking and biology diagnostics read concentrations after injection and require no rate conversion. Vent-system and outlet records contain only dimensionless weights, so there is no stale authoring-rate cache and no double scaling.
+Atmosphere inventory capacity and physical ocean volume remain unchanged. Legacy Cube Sphere vent source semantics remain unchanged. Vent thermal influence remains a dimensionless function of relative cluster/outlet strength, neighbor falloff, temperature targets, and local relaxation; it is not a material inventory flux and receives no scaling.
 
-## Thermal audit
-
-Vent thermal behavior is deliberately not converted. `BuildVentThermalInfluence` derives a dimensionless local influence from relative cluster and outlet strengths (square-root normalization plus a 0.3 neighbor falloff). `GeodesicExperiencedTemperatureField` uses vent target temperatures, distance falloff, and these normalized influences. These are temperature targets and dimensionless spatial/relaxation controls, not material inventory fluxes; multiplying them by the volume scale would be a unit error.
-
-## Geological calibration is separate
-
-This conversion preserves the historical SimulaVit authoring meaning under physical ocean and atmosphere inventory units. It does **not** assert realistic Earth hydrothermal fluxes. A later model may calibrate production against seafloor area, vent-system density, planetary heat flow, mantle activity, radius, or an ecological gameplay timescale. That modeling decision is separate from unit consistency and is intentionally not made here.
+Geological calibration remains a separate modeling question. The zero H2S/CO2/Fe2 defaults explicitly expose that those physical source rates still require a deliberate calibration decision.

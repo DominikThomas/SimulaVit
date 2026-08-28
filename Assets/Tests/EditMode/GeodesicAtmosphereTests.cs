@@ -8,7 +8,7 @@ public class GeodesicAtmosphereTests
     private GeodesicAtmosphereField atmosphere;
 
     [SetUp] public void SetUp() { owner = new GameObject("atmosphere-test"); atmosphere = owner.AddComponent<GeodesicAtmosphereField>(); }
-    [TearDown] public void TearDown() { Object.DestroyImmediate(owner); }
+    [TearDown] public void TearDown() { UnityEngine.Object.DestroyImmediate(owner); }
 
     [Test]
     public void AuthoringInventoryPerBarConvertsToPhysicalInventoryUnits()

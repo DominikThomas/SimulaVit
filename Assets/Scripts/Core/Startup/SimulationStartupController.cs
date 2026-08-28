@@ -31,9 +31,10 @@ public class SimulationStartupController : MonoBehaviour
     private const float VentH2MaxPerTick = 0.25f;
     private const float VentH2SMaxPerTick = 0.25f;
     private const float VentCO2MaxPerTick = 1f;
+    public const float GeodesicVentPhysicalMaxPerSecond = 1000f;
     private const int InitialSpawnMin = 0;
     private const int InitialSpawnMax = 10000;
-    private const int SavedStartupConfigVersion = 7;
+    private const int SavedStartupConfigVersion = 8;
     public const float NormalAtmospherePressureMaxBar = 5f;
     public const float DenseAtmospherePressureMaxBar = 600f;
     public const float DefaultApproximateThermalIntervalSeconds = 2f;
@@ -439,6 +440,10 @@ public class SimulationStartupController : MonoBehaviour
         destination.ventH2SPerTick = source.ventH2SPerTick;
         destination.ventCO2PerTick = source.ventCO2PerTick;
         destination.ventFe2PerTick = source.ventFe2PerTick;
+        destination.geodesicVentH2PhysicalPerSecond = source.geodesicVentH2PhysicalPerSecond;
+        destination.geodesicVentH2SPhysicalPerSecond = source.geodesicVentH2SPhysicalPerSecond;
+        destination.geodesicVentCO2PhysicalPerSecond = source.geodesicVentCO2PhysicalPerSecond;
+        destination.geodesicVentFe2PhysicalPerSecond = source.geodesicVentFe2PhysicalPerSecond;
         destination.initialSpawnCount = source.initialSpawnCount;
     }
 
@@ -552,7 +557,7 @@ public class SimulationStartupController : MonoBehaviour
                 planetGenerator.GetComponent<GeodesicSurfaceTemperatureField>()?.SetStartupTemperatureParameters(config.baseTempKelvin, config.insolationTempGain);
                 planetGenerator.GetComponent<GeodesicSurfaceTemperatureField>()?.SetStartupApproximateUpdateInterval(config.approximateThermalIntervalSeconds);
                 planetGenerator.GetComponent<GeodesicOceanResourceField>()?.SetStartupConcentrations(config.initialCO2, config.initialO2, config.initialCH4, config.initialDissolvedFe2Plus);
-                planetGenerator.GetComponent<GeodesicOceanResourceField>()?.SetStartupVentRates(config.ventH2PerTick, config.ventH2SPerTick, config.ventCO2PerTick, config.ventFe2PerTick);
+                planetGenerator.GetComponent<GeodesicOceanResourceField>()?.SetStartupPhysicalVentRates(config.geodesicVentH2PhysicalPerSecond, config.geodesicVentH2SPhysicalPerSecond, config.geodesicVentCO2PhysicalPerSecond, config.geodesicVentFe2PhysicalPerSecond);
                 planetGenerator.GetComponent<GeodesicOceanResourceField>()?.SetStartupVentGeography(config.ventClustering, config.terrestrialVentFraction);
                 planetGenerator.GetComponent<GeodesicOceanResourceField>()?.SetStartupTransportInterval(config.geodesicResourceTransportIntervalSeconds);
                 planetGenerator.GetComponent<GeodesicOceanResourceField>()?.SetStartupChemistryTelemetryInterval(config.chemistryTelemetryIntervalSimSeconds);
@@ -739,6 +744,10 @@ public class SimulationStartupController : MonoBehaviour
         config.ventH2SPerTick = Mathf.Clamp(config.ventH2SPerTick, VentPerTickMin, VentH2SMaxPerTick);
         config.ventCO2PerTick = Mathf.Clamp(config.ventCO2PerTick, VentPerTickMin, VentCO2MaxPerTick);
         config.ventFe2PerTick = Mathf.Clamp(config.ventFe2PerTick, VentPerTickMin, VentCO2MaxPerTick);
+        config.geodesicVentH2PhysicalPerSecond = Mathf.Clamp(config.geodesicVentH2PhysicalPerSecond, 0f, GeodesicVentPhysicalMaxPerSecond);
+        config.geodesicVentH2SPhysicalPerSecond = Mathf.Clamp(config.geodesicVentH2SPhysicalPerSecond, 0f, GeodesicVentPhysicalMaxPerSecond);
+        config.geodesicVentCO2PhysicalPerSecond = Mathf.Clamp(config.geodesicVentCO2PhysicalPerSecond, 0f, GeodesicVentPhysicalMaxPerSecond);
+        config.geodesicVentFe2PhysicalPerSecond = Mathf.Clamp(config.geodesicVentFe2PhysicalPerSecond, 0f, GeodesicVentPhysicalMaxPerSecond);
         config.ventClustering = Mathf.Clamp01(config.ventClustering);
         config.terrestrialVentFraction = Mathf.Clamp01(config.terrestrialVentFraction);
         config.initialSpawnCount = Mathf.Clamp(config.initialSpawnCount, InitialSpawnMin, InitialSpawnMax);
@@ -852,10 +861,10 @@ public class SimulationStartupController : MonoBehaviour
         builder.AppendLine($"Geodesic Prebiotic Biology Delay: {config.geodesicBiologySpawnDelaySeconds:0.###} simulated s");
         builder.AppendLine($"Initial Dissolved Fe2+: {config.initialDissolvedFe2Plus:0.###}");
         builder.AppendLine($"Vent Clustering: {config.ventClustering:0.###}");
-        builder.AppendLine($"Global Vent H2 / sim s: {config.ventH2PerTick:0.####}");
-        builder.AppendLine($"Global Vent H2S / sim s: {config.ventH2SPerTick:0.####}");
-        builder.AppendLine($"Global Vent CO2 / sim s: {config.ventCO2PerTick:0.####}");
-        builder.AppendLine($"Global Vent Fe2 / sim s: {config.ventFe2PerTick:0.####}");
+        if (config.gridType == PlanetGridType.GeodesicIcosphere)
+            builder.AppendLine($"Geodesic Physical Vent Rates H2/H2S/CO2/Fe2: {config.geodesicVentH2PhysicalPerSecond:0.######}/{config.geodesicVentH2SPhysicalPerSecond:0.######}/{config.geodesicVentCO2PhysicalPerSecond:0.######}/{config.geodesicVentFe2PhysicalPerSecond:0.######} concentration*km3/s (conversion: none; already physical)");
+        else
+            builder.AppendLine($"Legacy Vent Rates H2/H2S/CO2/Fe2: {config.ventH2PerTick:0.####}/{config.ventH2SPerTick:0.####}/{config.ventCO2PerTick:0.####}/{config.ventFe2PerTick:0.####} per legacy tick semantics");
         builder.AppendLine($"Terrestrial Vent Fraction: {config.terrestrialVentFraction:0.###}");
         builder.AppendLine($"Initial Spawn Count: {config.initialSpawnCount}");
         builder.AppendLine($"Start Paused: {startPaused}");
@@ -897,6 +906,10 @@ public class SimulationStartupController : MonoBehaviour
         public float ventH2SPerTick;
         public float ventCO2PerTick;
         public float ventFe2PerTick;
+        public float geodesicVentH2PhysicalPerSecond;
+        public float geodesicVentH2SPhysicalPerSecond;
+        public float geodesicVentCO2PhysicalPerSecond;
+        public float geodesicVentFe2PhysicalPerSecond;
         public float ventClustering;
         public float terrestrialVentFraction;
         public int initialSpawnCount;
@@ -942,6 +955,10 @@ public class SimulationStartupController : MonoBehaviour
                 ventH2SPerTick = config.ventH2SPerTick,
                 ventCO2PerTick = config.ventCO2PerTick,
                 ventFe2PerTick = config.ventFe2PerTick,
+                geodesicVentH2PhysicalPerSecond = config.geodesicVentH2PhysicalPerSecond,
+                geodesicVentH2SPhysicalPerSecond = config.geodesicVentH2SPhysicalPerSecond,
+                geodesicVentCO2PhysicalPerSecond = config.geodesicVentCO2PhysicalPerSecond,
+                geodesicVentFe2PhysicalPerSecond = config.geodesicVentFe2PhysicalPerSecond,
                 ventClustering = config.ventClustering,
                 terrestrialVentFraction = config.terrestrialVentFraction,
                 initialSpawnCount = config.initialSpawnCount,
@@ -990,6 +1007,15 @@ public class SimulationStartupController : MonoBehaviour
             config.ventH2SPerTick = ventH2SPerTick;
             config.ventCO2PerTick = ventCO2PerTick;
             config.ventFe2PerTick = ventFe2PerTick > 0f ? ventFe2PerTick : config.ventFe2PerTick;
+            // Schema v7 and older have no Geodesic physical-rate fields. Keep the cloned new
+            // defaults rather than reinterpreting their legacy/pre-physical vent values.
+            if (version >= 8)
+            {
+                config.geodesicVentH2PhysicalPerSecond = geodesicVentH2PhysicalPerSecond;
+                config.geodesicVentH2SPhysicalPerSecond = geodesicVentH2SPhysicalPerSecond;
+                config.geodesicVentCO2PhysicalPerSecond = geodesicVentCO2PhysicalPerSecond;
+                config.geodesicVentFe2PhysicalPerSecond = geodesicVentFe2PhysicalPerSecond;
+            }
             if (version >= 4) { config.ventClustering = ventClustering; config.terrestrialVentFraction = terrestrialVentFraction; }
             config.initialSpawnCount = initialSpawnCount;
             config.startPaused = startPaused;
@@ -1290,14 +1316,21 @@ public class SimulationStartupController : MonoBehaviour
         GUI.Label(new Rect(controlX, y, contentWidth, line), $"N2 remainder: {(currentConfig.initialAtmospherePressureBar > 0f ? currentConfig.atmosphericN2Bar / currentConfig.initialAtmospherePressureBar : 1f):P2} ({currentConfig.atmosphericN2Bar:0.###} bar)", labelStyle); y += line + gap;
         DrawFloat(new Rect(controlX, y, contentWidth, line), "Vent Clustering", ref currentConfig.ventClustering, 0f, 1f);
         y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Global Vent H2 / sim s", ref currentConfig.ventH2PerTick, VentPerTickMin, VentH2MaxPerTick);
-        y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Global Vent H2S / sim s", ref currentConfig.ventH2SPerTick, VentPerTickMin, VentH2SMaxPerTick);
-        y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Global Vent CO2 / sim s", ref currentConfig.ventCO2PerTick, VentPerTickMin, VentCO2MaxPerTick);
-        y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Global Vent Fe2 / sim s", ref currentConfig.ventFe2PerTick, VentPerTickMin, VentCO2MaxPerTick);
-        y += line + gap;
+        if (currentConfig.gridType == PlanetGridType.GeodesicIcosphere)
+        {
+            GUI.Label(new Rect(controlX, y, contentWidth, line), "Physical inventory rates (concentration·km³/s)", labelStyle); y += line + gap;
+            DrawFloat(new Rect(controlX, y, contentWidth, line), "Global Vent H2 / sim s", ref currentConfig.geodesicVentH2PhysicalPerSecond, 0f, GeodesicVentPhysicalMaxPerSecond); y += line + gap;
+            DrawFloat(new Rect(controlX, y, contentWidth, line), "Global Vent H2S / sim s", ref currentConfig.geodesicVentH2SPhysicalPerSecond, 0f, GeodesicVentPhysicalMaxPerSecond); y += line + gap;
+            DrawFloat(new Rect(controlX, y, contentWidth, line), "Global Vent CO2 / sim s", ref currentConfig.geodesicVentCO2PhysicalPerSecond, 0f, GeodesicVentPhysicalMaxPerSecond); y += line + gap;
+            DrawFloat(new Rect(controlX, y, contentWidth, line), "Global Vent Fe2 / sim s", ref currentConfig.geodesicVentFe2PhysicalPerSecond, 0f, GeodesicVentPhysicalMaxPerSecond); y += line + gap;
+        }
+        else
+        {
+            DrawFloat(new Rect(controlX, y, contentWidth, line), "Global Vent H2 / sim s", ref currentConfig.ventH2PerTick, VentPerTickMin, VentH2MaxPerTick); y += line + gap;
+            DrawFloat(new Rect(controlX, y, contentWidth, line), "Global Vent H2S / sim s", ref currentConfig.ventH2SPerTick, VentPerTickMin, VentH2SMaxPerTick); y += line + gap;
+            DrawFloat(new Rect(controlX, y, contentWidth, line), "Global Vent CO2 / sim s", ref currentConfig.ventCO2PerTick, VentPerTickMin, VentCO2MaxPerTick); y += line + gap;
+            DrawFloat(new Rect(controlX, y, contentWidth, line), "Global Vent Fe2 / sim s", ref currentConfig.ventFe2PerTick, VentPerTickMin, VentCO2MaxPerTick); y += line + gap;
+        }
         DrawInt(new Rect(controlX, y, contentWidth, line), "Initial Spawn Count", ref currentConfig.initialSpawnCount, true, InitialSpawnMin, InitialSpawnMax);
         y += line + (gap * 2f);
 

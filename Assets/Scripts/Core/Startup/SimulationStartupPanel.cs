@@ -26,6 +26,7 @@ public class SimulationStartupPanel : MonoBehaviour
     [SerializeField] private TMP_InputField ventH2Input;
     [SerializeField] private TMP_InputField ventH2SInput;
     [SerializeField] private TMP_InputField ventCO2Input;
+    [SerializeField] private TMP_InputField ventFe2Input;
     [SerializeField] private TMP_InputField initialSpawnCountInput;
 
     [Header("Advanced")]
@@ -107,9 +108,11 @@ public class SimulationStartupPanel : MonoBehaviour
         SetText(initialO2Input, config.initialO2.ToString("0.###"));
         SetText(initialCH4Input, config.initialCH4.ToString("0.###"));
         SetText(initialFe2Input, config.initialDissolvedFe2Plus.ToString("0.###"));
-        SetText(ventH2Input, config.ventH2PerTick.ToString("0.####"));
-        SetText(ventH2SInput, config.ventH2SPerTick.ToString("0.####"));
-        SetText(ventCO2Input, config.ventCO2PerTick.ToString("0.####"));
+        bool geodesic = config.gridType == PlanetGridType.GeodesicIcosphere;
+        SetText(ventH2Input, (geodesic ? config.geodesicVentH2PhysicalPerSecond : config.ventH2PerTick).ToString("0.######"));
+        SetText(ventH2SInput, (geodesic ? config.geodesicVentH2SPhysicalPerSecond : config.ventH2SPerTick).ToString("0.######"));
+        SetText(ventCO2Input, (geodesic ? config.geodesicVentCO2PhysicalPerSecond : config.ventCO2PerTick).ToString("0.######"));
+        SetText(ventFe2Input, (geodesic ? config.geodesicVentFe2PhysicalPerSecond : config.ventFe2PerTick).ToString("0.######"));
         SetText(initialSpawnCountInput, config.initialSpawnCount.ToString());
         SetPresetDropdown(approximateThermalIntervalDropdown, config.approximateThermalIntervalSeconds, SimulationStartupController.ApproximateThermalIntervalPresets);
         SetPresetDropdown(resourceTransportIntervalDropdown, config.geodesicResourceTransportIntervalSeconds, SimulationStartupController.ResourceTransportIntervalPresets);
@@ -139,9 +142,20 @@ public class SimulationStartupPanel : MonoBehaviour
         config.initialO2 = Mathf.Max(0f, ReadFloat(initialO2Input, config.initialO2));
         config.initialCH4 = Mathf.Max(0f, ReadFloat(initialCH4Input, config.initialCH4));
         config.initialDissolvedFe2Plus = Mathf.Max(0f, ReadFloat(initialFe2Input, config.initialDissolvedFe2Plus));
-        config.ventH2PerTick = Mathf.Max(0f, ReadFloat(ventH2Input, config.ventH2PerTick));
-        config.ventH2SPerTick = Mathf.Max(0f, ReadFloat(ventH2SInput, config.ventH2SPerTick));
-        config.ventCO2PerTick = Mathf.Max(0f, ReadFloat(ventCO2Input, config.ventCO2PerTick));
+        if (config.gridType == PlanetGridType.GeodesicIcosphere)
+        {
+            config.geodesicVentH2PhysicalPerSecond = Mathf.Clamp(ReadFloat(ventH2Input, config.geodesicVentH2PhysicalPerSecond), 0f, SimulationStartupController.GeodesicVentPhysicalMaxPerSecond);
+            config.geodesicVentH2SPhysicalPerSecond = Mathf.Clamp(ReadFloat(ventH2SInput, config.geodesicVentH2SPhysicalPerSecond), 0f, SimulationStartupController.GeodesicVentPhysicalMaxPerSecond);
+            config.geodesicVentCO2PhysicalPerSecond = Mathf.Clamp(ReadFloat(ventCO2Input, config.geodesicVentCO2PhysicalPerSecond), 0f, SimulationStartupController.GeodesicVentPhysicalMaxPerSecond);
+            config.geodesicVentFe2PhysicalPerSecond = Mathf.Clamp(ReadFloat(ventFe2Input, config.geodesicVentFe2PhysicalPerSecond), 0f, SimulationStartupController.GeodesicVentPhysicalMaxPerSecond);
+        }
+        else
+        {
+            config.ventH2PerTick = Mathf.Max(0f, ReadFloat(ventH2Input, config.ventH2PerTick));
+            config.ventH2SPerTick = Mathf.Max(0f, ReadFloat(ventH2SInput, config.ventH2SPerTick));
+            config.ventCO2PerTick = Mathf.Max(0f, ReadFloat(ventCO2Input, config.ventCO2PerTick));
+            config.ventFe2PerTick = Mathf.Max(0f, ReadFloat(ventFe2Input, config.ventFe2PerTick));
+        }
         config.initialSpawnCount = Mathf.Max(0, ReadInt(initialSpawnCountInput, config.initialSpawnCount));
         config.approximateThermalIntervalSeconds = ReadPresetDropdown(approximateThermalIntervalDropdown, config.approximateThermalIntervalSeconds, SimulationStartupController.ApproximateThermalIntervalPresets);
         config.geodesicResourceTransportIntervalSeconds = ReadPresetDropdown(resourceTransportIntervalDropdown, config.geodesicResourceTransportIntervalSeconds, SimulationStartupController.ResourceTransportIntervalPresets);
@@ -204,6 +218,7 @@ public class SimulationStartupPanel : MonoBehaviour
         {
             controller.CurrentConfig.gridType = value == 1 ? PlanetGridType.GeodesicIcosphere : PlanetGridType.LegacyCubeSphere;
             ApplyGridSpecificVisibility(controller.CurrentConfig.gridType);
+            RefreshFromConfig();
         }
     }
 

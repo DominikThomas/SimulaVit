@@ -58,10 +58,6 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     [SerializeField, Range(0f, 1f), Tooltip("Basic geography control. Zero gives weak clustering; one gives strong clustering.")] private float ventClustering = 0.65f;
     [SerializeField, Range(0f, 1f), Tooltip("Low-frequency deterministic geothermal province contrast. Zero is uniform; one creates broad inactive regions and concentrated provinces.")] private float geothermalPatchiness = 0.8f;
     [SerializeField, Range(0f, 1f), Tooltip("Fraction of otherwise eligible land candidates retained as terrestrial geothermal systems.")] private float terrestrialVentFraction = 0.25f;
-    [SerializeField, Min(0f), Tooltip("Historical authoring rate in concentration*Unity^3 per simulated second. Runtime converts it once to physical inventory.")] private float ventH2PerTick = 0.006f;
-    [SerializeField, Min(0f), Tooltip("Historical authoring rate in concentration*Unity^3 per simulated second. Runtime converts it once to physical inventory.")] private float ventH2SPerTick = 0.004f;
-    [SerializeField, Min(0f), Tooltip("Historical authoring rate in concentration*Unity^3 per simulated second. Runtime converts it once to physical inventory.")] private float ventCO2PerTick = 0.02f;
-    [SerializeField, Min(0f), Tooltip("Historical authoring rate in concentration*Unity^3 per simulated second. Runtime converts it once to physical inventory.")] private float ventFe2PerTick = 0.002f;
     [SerializeField, Range(1, 8), Tooltip("Maximum compact physical vent mouths retained per clustered system.")] private int maximumOutletsPerSystem = 5;
     [SerializeField, Range(0.1f, 20f), Tooltip("Maximum angular distance from a system representative for compact physical outlets.")] private float outletSelectionRadiusDegrees = 3.5f;
 
@@ -91,7 +87,7 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     [SerializeField] private float normalizedSubmarineWeightSum;
     [SerializeField] private double submarineGasProductionFraction;
     [SerializeField] private double terrestrialGasProductionFraction;
-    [SerializeField] private double physicalVentH2InventoryRatePerSecond;
+    [SerializeField, Min(0f), Tooltip("Authoritative physical inventory rate (concentration*km3/s).")] private double physicalVentH2InventoryRatePerSecond = 10d;
     [SerializeField] private double physicalVentH2SInventoryRatePerSecond;
     [SerializeField] private double physicalVentCO2InventoryRatePerSecond;
     [SerializeField] private double physicalVentFe2InventoryRatePerSecond;
@@ -228,8 +224,15 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
         lastStartupConcentrationDiagnostic = $"CO2={initialCO2Concentration:G6}, O2={initialO2Concentration:G6}, CH4={initialCH4Concentration:G6}, Fe2={initialFe2Concentration:G6}";
     }
 
-    public void SetStartupVentRates(float h2, float h2s, float co2, float fe2)
-    { ventH2PerTick = Mathf.Max(0f, h2); ventH2SPerTick = Mathf.Max(0f, h2s); ventCO2PerTick = Mathf.Max(0f, co2); ventFe2PerTick = Mathf.Max(0f, fe2); }
+    public void SetStartupPhysicalVentRates(double h2, double h2s, double co2, double fe2)
+    {
+        physicalVentH2InventoryRatePerSecond = FiniteNonnegative(h2);
+        physicalVentH2SInventoryRatePerSecond = FiniteNonnegative(h2s);
+        physicalVentCO2InventoryRatePerSecond = FiniteNonnegative(co2);
+        physicalVentFe2InventoryRatePerSecond = FiniteNonnegative(fe2);
+    }
+
+    private static double FiniteNonnegative(double value) => double.IsFinite(value) ? Math.Max(0d, value) : 0d;
 
     public void SetStartupVentGeography(float clustering, float landFraction)
     { ventClustering = Mathf.Clamp01(clustering); terrestrialVentFraction = Mathf.Clamp01(landFraction); }
@@ -398,12 +401,8 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
 
     private void BuildTransportCaches(GeodesicOceanLayerGrid grid, PlanetGenerator generator)
     {
-        // Single authoring-to-runtime boundary: all downstream habitat budgets and injections
-        // use physical concentration*km3/s rates and must not apply this scale again.
-        physicalVentH2InventoryRatePerSecond = GeodesicPhysicalScale.PhysicalInventoryRate(ventH2PerTick);
-        physicalVentH2SInventoryRatePerSecond = GeodesicPhysicalScale.PhysicalInventoryRate(ventH2SPerTick);
-        physicalVentCO2InventoryRatePerSecond = GeodesicPhysicalScale.PhysicalInventoryRate(ventCO2PerTick);
-        physicalVentFe2InventoryRatePerSecond = GeodesicPhysicalScale.PhysicalInventoryRate(ventFe2PerTick);
+        // Startup values are already authoritative physical concentration*km3/s rates.
+        // No Unity-volume conversion belongs on this path.
         horizontalLinkCount = grid.HorizontalLinkCount; verticalLinkCount = grid.VerticalLinkCount;
         // Resource-major staging preserves the old per-resource accumulation order while
         // allowing every topology link to be traversed only once per transport stage.
@@ -471,10 +470,9 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
         }
         CalculateHabitatProductionSplit(submarineRawWeight, terrestrialRawWeight, out submarineGasProductionFraction, out terrestrialGasProductionFraction);
         normalizedSubmarineWeightSum = (float)normalized;
-        double oldStrength = 0d; for (int i = 0; i < candidates.Count; i++) if (candidates[i].Habitat == GeodesicVentHabitat.Submarine) oldStrength += candidates[i].RawStrength;
         int submarineOutletCount = 0; for (int i = 0; i < ventOutlets.Length; i++) if (ventOutlets[i].Habitat == GeodesicVentHabitat.Submarine) submarineOutletCount++;
-        Debug.Log($"[GeodesicVentSystems] patchiness={geothermalPatchiness:F2}, activityField=4 spherical provinces, rawCandidates={rawVentCandidateCount}, clusteredVents={ventCount} (submarine={submarineVentCount}, terrestrial={terrestrialVentCount}), compactOutlets={ventOutlets.Length}, resourceSourceNodes={submarineOutletCount}, coarseThermalSourceNodes={ventOutlets.Length}, authority=compactOutlets, rawMembersGenerationOnly=true, clusterRadius={clusterRadiusDegrees:F2}deg, memberCountMinMeanMax={(ventCount > 0 ? memberMin : 0)}/{(ventCount > 0 ? members / (double)ventCount : 0d):F2}/{memberMax}, clusterStrengthMinMeanMax={(ventCount > 0 ? rawStrengthMin : 0f):G6}/{(ventCount > 0 ? rawWeight / ventCount : 0d):G6}/{rawStrengthMax:G6}, rawWeightTotal={rawWeight:G6}, normalizedSubmarineWeightSum={normalized:G9}, sourceDistribution=compactOutlets, authoringRates(H2/H2S/CO2/Fe2)={ventH2PerTick:G6}/{ventH2SPerTick:G6}/{ventCO2PerTick:G6}/{ventFe2PerTick:G6}, physicalInventoryRates={physicalVentH2InventoryRatePerSecond:G6}/{physicalVentH2SInventoryRatePerSecond:G6}/{physicalVentCO2InventoryRatePerSecond:G6}/{physicalVentFe2InventoryRatePerSecond:G6}; oldEffective={ventH2PerTick * oldStrength:G6}/{ventH2SPerTick * oldStrength:G6}/{ventCO2PerTick * oldStrength:G6}/{ventFe2PerTick * oldStrength:G6}; terrestrialAtmosphereInjection=enabled, gasProductionSplit(CO2/H2/H2S)=submarine:{submarineGasProductionFraction:G9}/terrestrial:{terrestrialGasProductionFraction:G9}, splitBasis=rawStrengthAcrossAuthoritativeHabitats, Fe2=submarineOnly", this);
-        Debug.Log($"[GeodesicVentFluxScale] inventoryRateAuthoring(H2/H2S/CO2/Fe2)={ventH2PerTick:G6}/{ventH2SPerTick:G6}/{ventCO2PerTick:G6}/{ventFe2PerTick:G6}, authoringUnit=concentration*Unity3/s, physicalScaleKm3PerUnity3={GeodesicPhysicalScale.PhysicalCubicKilometresPerUnityUnitCubed:G6}, physicalInventoryRate(H2/H2S/CO2/Fe2)={physicalVentH2InventoryRatePerSecond:G6}/{physicalVentH2SInventoryRatePerSecond:G6}/{physicalVentCO2InventoryRatePerSecond:G6}/{physicalVentFe2InventoryRatePerSecond:G6}, inventoryUnit=concentration*km3/s", this);
+        Debug.Log($"[GeodesicVentSystems] patchiness={geothermalPatchiness:F2}, rawCandidates={rawVentCandidateCount}, clusteredVents={ventCount} (submarine={submarineVentCount}, terrestrial={terrestrialVentCount}), compactOutlets={ventOutlets.Length}, normalizedSubmarineWeightSum={normalized:G9}, sourceDistribution=compactOutlets, physicalInventoryRates(H2/H2S/CO2/Fe2)={physicalVentH2InventoryRatePerSecond:G6}/{physicalVentH2SInventoryRatePerSecond:G6}/{physicalVentCO2InventoryRatePerSecond:G6}/{physicalVentFe2InventoryRatePerSecond:G6}, unit=concentration*km3/s, gasProductionSplit=submarine:{submarineGasProductionFraction:G9}/terrestrial:{terrestrialGasProductionFraction:G9}, Fe2=submarineOnly", this);
+        Debug.Log($"[GeodesicVentFlux] H2={physicalVentH2InventoryRatePerSecond:G6}, H2S={physicalVentH2SInventoryRatePerSecond:G6}, CO2={physicalVentCO2InventoryRatePerSecond:G6}, Fe2={physicalVentFe2InventoryRatePerSecond:G6}, unit=concentration*km3/s, conversion=none-already-physical", this);
         double[] diagnosticDurations = { 10d, 60d, 600d };
         for (int i = 0; i < diagnosticDurations.Length; i++)
         {
@@ -712,7 +710,7 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
 
     private void InjectVentSources(float tickScale)
     {
-        bool injectH2 = ventH2PerTick != 0f, injectH2S = ventH2SPerTick != 0f, injectCO2 = ventCO2PerTick != 0f, injectFe2 = ventFe2PerTick != 0f;
+        bool injectH2 = physicalVentH2InventoryRatePerSecond != 0d, injectH2S = physicalVentH2SInventoryRatePerSecond != 0d, injectCO2 = physicalVentCO2InventoryRatePerSecond != 0d, injectFe2 = physicalVentFe2InventoryRatePerSecond != 0d;
         if (submarineGasProductionFraction > 0d)
         {
             if (injectH2) resourceMayHaveSpatialVariation[(int)GeodesicOceanResource.H2] = true;
