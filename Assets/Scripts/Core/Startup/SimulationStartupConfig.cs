@@ -51,13 +51,20 @@ public class SimulationStartupConfig
 
     [Header("Vents")]
     [Range(0f, 1f)] public float ventClustering = 0.65f;
-    // Conservative normal-world global rates. These are intentionally startup tuning;
-    // the authoritative vent equations and terrestrial/submarine split are unchanged.
+    // Legacy Cube Sphere rates. Field names and behavior are retained for saved-config compatibility.
     public float ventH2PerTick = 0.006f;
     public float ventH2SPerTick = 0.004f;
     public float ventCO2PerTick = 0.02f;
-    [Tooltip("Fe2 inventory injected by each Geodesic logical vent per fixed resource tick. Legacy resource behavior is unchanged.")]
+    [Tooltip("Legacy Cube Sphere Fe2 vent rate. Geodesic uses its separate physical-rate field.")]
     public float ventFe2PerTick = 0.002f;
+    [Tooltip("Geodesic physical vent inventory rate in concentration*km3 per simulated second.")]
+    public float geodesicVentH2PhysicalPerSecond = 10f;
+    [Tooltip("Provisional uncalibrated Geodesic physical rate; zero disables this source.")]
+    public float geodesicVentH2SPhysicalPerSecond = 0f;
+    [Tooltip("Provisional uncalibrated Geodesic physical rate; zero disables this source.")]
+    public float geodesicVentCO2PhysicalPerSecond = 0f;
+    [Tooltip("Provisional uncalibrated Geodesic physical rate; zero disables this source.")]
+    public float geodesicVentFe2PhysicalPerSecond = 0f;
     [Range(0f, 1f)] public float terrestrialVentFraction = 0.25f;
 
     [Header("Population")]

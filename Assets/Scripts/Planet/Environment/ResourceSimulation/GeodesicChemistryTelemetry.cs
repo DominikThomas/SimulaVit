@@ -55,7 +55,7 @@ public sealed class GeodesicChemistryTelemetry : MonoBehaviour
         previousCounters = ReadCounters();
         schedule.Reset(simulationTime, Time.unscaledTimeAsDouble, chemistryTelemetryIntervalSimSeconds, EffectiveMinimumRealIntervalSeconds);
         BuildVentFootprint();
-        Debug.Log($"[GeodesicChemistryTelemetry] initialized atmosphere=global-authoritative telemetryInterval={chemistryTelemetryIntervalSimSeconds:G6}s anoxicO2Threshold={telemetryAnoxicO2Threshold:G6} concentrationUnits ventRates={{H2={resources.VentH2Rate:G6},H2S={resources.VentH2SRate:G6},CO2={resources.VentCO2Rate:G6},Fe2={resources.VentFe2Rate:G6}}}", this);
+        Debug.Log($"[GeodesicChemistryTelemetry] initialized atmosphere=global-authoritative telemetryInterval={chemistryTelemetryIntervalSimSeconds:G6}s anoxicO2Threshold={telemetryAnoxicO2Threshold:G6} concentrationUnits physicalVentInventoryRates={{H2={resources.VentH2Rate:G6},H2S={resources.VentH2SRate:G6},CO2={resources.VentCO2Rate:G6},Fe2={resources.VentFe2Rate:G6}}} inventoryUnit=concentration*km3/s", this);
     }
 
     internal void ClearWorld()
