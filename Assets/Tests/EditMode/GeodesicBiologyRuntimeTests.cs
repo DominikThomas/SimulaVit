@@ -228,6 +228,37 @@ public sealed class GeodesicBiologyRuntimeTests
     }
 
     [Test]
+    public void FixedPassiveTickPreservesDisplacementWithinDocumentedTolerance()
+    {
+        Vector3 fineDirection = Vector3.up, coarseDirection = Vector3.up;
+        Vector3 fineTangent = Vector3.right, coarseTangent = Vector3.right;
+        for (int i = 0; i < 20; i++)
+            GeodesicBiologyRuntime.AdvancePassiveKinematics(ref fineDirection, ref fineTangent, 0.35f, 0.005f);
+        GeodesicBiologyRuntime.AdvancePassiveKinematics(ref coarseDirection, ref coarseTangent, 0.35f,
+            GeodesicBiologyRuntime.PassiveKinematicsIntervalSeconds);
+        // Semi-implicit tangent integration differs slightly with step size, but the physical
+        // travel distance is invariant to substantially below a rendered pixel at planet scale.
+        Assert.That(Vector3.Angle(fineDirection, coarseDirection), Is.LessThan(0.0001f));
+        Assert.That(Vector3.Angle(Vector3.up, coarseDirection), Is.EqualTo(
+            PassiveTravelDegrees(GeodesicBiologyRuntime.PassiveKinematicsIntervalSeconds)).Within(0.0001f));
+    }
+
+    [Test]
+    public void FixedSimulatedTimeSchedulerRetainsRemainderAndCoalescesCatchUp()
+    {
+        float accumulator = 0f;
+        Assert.That(GeodesicBiologyRuntime.ConsumeFixedInterval(ref accumulator, 0.033f, 0.1f), Is.Zero);
+        Assert.That(GeodesicBiologyRuntime.ConsumeFixedInterval(ref accumulator, 0.033f, 0.1f), Is.Zero);
+        Assert.That(GeodesicBiologyRuntime.ConsumeFixedInterval(ref accumulator, 0.034f, 0.1f), Is.EqualTo(0.1f).Within(1e-6f));
+        Assert.That(accumulator, Is.Zero.Within(1e-6f));
+        Assert.That(GeodesicBiologyRuntime.ConsumeFixedInterval(ref accumulator, 1.05f, 0.1f), Is.EqualTo(1f).Within(1e-5f));
+        Assert.That(accumulator, Is.EqualTo(0.05f).Within(1e-5f));
+    }
+
+    private static float PassiveTravelDegrees(float seconds)
+        => GeodesicBiologyRuntime.PassiveAngularSpeedRadiansPerSecond * seconds * Mathf.Rad2Deg;
+
+    [Test]
     public void PassiveKinematicsIsDeterministicAndHasNoHabitatInputs()
     {
         Vector3 directionA = Vector3.up, directionB = Vector3.up;

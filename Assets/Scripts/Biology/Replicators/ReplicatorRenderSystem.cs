@@ -12,6 +12,7 @@ public class ReplicatorRenderSystem
     private static readonly int EmissionID = Shader.PropertyToID("_EmissionColor");
 
     private readonly List<Vector3> smoothedForwardByIndex = new List<Vector3>(1024);
+    private readonly List<Vector3> passiveVisualPositionByIndex = new List<Vector3>(1024);
 
     // Visual-only smoothing.
     // Higher = snappier. Lower = smoother.
@@ -102,7 +103,14 @@ public class ReplicatorRenderSystem
         // founder population; their authoritative continuous position is already render-ready.
         if (locomotion == LocomotionType.PassiveDrift)
         {
-            AddInstance(Matrix4x4.TRS(position, fallbackRotation, Vector3.one * baseScale * 0.50f),
+            while (passiveVisualPositionByIndex.Count <= agentIndex) passiveVisualPositionByIndex.Add(position);
+            Vector3 visualPosition = passiveVisualPositionByIndex[agentIndex];
+            if ((visualPosition - position).sqrMagnitude > Mathf.Max(1f, position.sqrMagnitude * 0.01f))
+                visualPosition = position;
+            else
+                visualPosition = Vector3.Lerp(visualPosition, position, 1f - Mathf.Exp(-18f * Time.deltaTime));
+            passiveVisualPositionByIndex[agentIndex] = visualPosition;
+            AddInstance(Matrix4x4.TRS(visualPosition, fallbackRotation, Vector3.one * baseScale * 0.50f),
                 color, ref batchCount, replicatorMesh, replicatorMaterial);
             return;
         }
