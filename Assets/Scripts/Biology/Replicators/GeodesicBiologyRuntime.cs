@@ -17,7 +17,7 @@ public sealed class GeodesicBiologyRuntime
     private static readonly ProfilerMarker MovementVisual = new ProfilerMarker("GeodesicBiology.PassiveMovement.VisualTarget");
     private const int ResourceCount = 7;
     public const float ReferenceTickSeconds = 0.5f;
-    public const float PassiveAngularSpeedRadiansPerSecond = 0.006f;
+    public const float PassiveAngularSpeedRadiansPerSecond = 0.002f;
     public const float PassiveVerticalOpportunitiesPerSecond = 0.0015f;
     public const float PassiveWanderMinimumIntervalSeconds = 1f;
     public const float PassiveWanderMaximumIntervalSeconds = 5f;
