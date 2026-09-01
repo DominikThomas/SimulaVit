@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using Unity.Profiling;
 
 /// <summary>
 /// ReplicatorPopulationState is authoritative for hot per-agent simulation fields.
@@ -9,6 +10,8 @@ using UnityEngine;
 /// </summary>
 public class ReplicatorPopulationState
 {
+    private static readonly ProfilerMarker CapacityGrowth = new ProfilerMarker("ReplicatorPopulationState.CapacityGrowth");
+    private static readonly ProfilerMarker SwapBackRemoval = new ProfilerMarker("ReplicatorPopulationState.SwapBackRemoval");
     public int Count { get; private set; }
 
     public Vector3[] Position = new Vector3[0];
@@ -24,6 +27,10 @@ public class ReplicatorPopulationState
     public float[] AttackCooldown = new float[0];
     public float[] FearCooldown = new float[0];
     public bool[] Alive = new bool[0];
+    // Habitat identity is simulation authority. Position remains a render coordinate.
+    public int[] GeodesicCellIndex = new int[0];
+    public float[] MaxLifespan = new float[0];
+    public float[] BiomassTarget = new float[0];
 
     public MetabolismType[] Metabolism = new MetabolismType[0];
     public LocomotionType[] Locomotion = new LocomotionType[0];
@@ -104,14 +111,23 @@ public class ReplicatorPopulationState
             return;
         }
 
-        int last = Count - 1;
-        if (index != last)
+        using (SwapBackRemoval.Auto())
         {
-            CopyEntry(last, index);
-        }
+            int last = Count - 1;
+            if (index != last)
+            {
+                CopyEntry(last, index);
+            }
 
-        ClearEntry(last);
-        Count = last;
+            ClearEntry(last);
+            Count = last;
+        }
+    }
+
+    /// <summary>Clears live state while retaining allocated buffers for the next game.</summary>
+    public void Reset()
+    {
+        Count = 0;
     }
 
     public void CopyToRenderState(int index, Replicator agent)
@@ -155,6 +171,9 @@ public class ReplicatorPopulationState
         agent.o2ToxicSeconds = O2ToxicSeconds[index];
         agent.currentOceanLayerIndex = CurrentOceanLayerIndex[index];
         agent.preferredOceanLayerIndex = PreferredOceanLayerIndex[index];
+        agent.geodesicCellIndex = GeodesicCellIndex[index];
+        agent.maxLifespan = MaxLifespan[index];
+        agent.biomassTarget = BiomassTarget[index];
         agent.color = Color[index];
     }
 
@@ -222,6 +241,9 @@ public class ReplicatorPopulationState
         agent.nextSenseTime = NextSenseTime[index];
         agent.currentOceanLayerIndex = CurrentOceanLayerIndex[index];
         agent.preferredOceanLayerIndex = PreferredOceanLayerIndex[index];
+        agent.geodesicCellIndex = GeodesicCellIndex[index];
+        agent.maxLifespan = MaxLifespan[index];
+        agent.biomassTarget = BiomassTarget[index];
         agent.color = Color[index];
         agent.size = Size[index];
     }
@@ -263,6 +285,9 @@ public class ReplicatorPopulationState
         Metabolism[index] = agent.metabolism;
         Locomotion[index] = agent.locomotion;
         Alive[index] = true;
+        GeodesicCellIndex[index] = agent.geodesicCellIndex;
+        MaxLifespan[index] = agent.maxLifespan;
+        BiomassTarget[index] = agent.biomassTarget;
         OptimalTempMin[index] = agent.optimalTempMin;
         OptimalTempMax[index] = agent.optimalTempMax;
         LethalTempMargin[index] = agent.lethalTempMargin;
@@ -303,6 +328,9 @@ public class ReplicatorPopulationState
         AttackCooldown[dstIndex] = AttackCooldown[srcIndex];
         FearCooldown[dstIndex] = FearCooldown[srcIndex];
         Alive[dstIndex] = Alive[srcIndex];
+        GeodesicCellIndex[dstIndex] = GeodesicCellIndex[srcIndex];
+        MaxLifespan[dstIndex] = MaxLifespan[srcIndex];
+        BiomassTarget[dstIndex] = BiomassTarget[srcIndex];
         Metabolism[dstIndex] = Metabolism[srcIndex];
         Locomotion[dstIndex] = Locomotion[srcIndex];
         OptimalTempMin[dstIndex] = OptimalTempMin[srcIndex];
@@ -354,6 +382,9 @@ public class ReplicatorPopulationState
         AttackCooldown[index] = 0f;
         FearCooldown[index] = 0f;
         Alive[index] = false;
+        GeodesicCellIndex[index] = 0;
+        MaxLifespan[index] = 0f;
+        BiomassTarget[index] = 0f;
         Metabolism[index] = default;
         Locomotion[index] = default;
         ResetPassiveMovementEntry(index);
@@ -379,6 +410,8 @@ public class ReplicatorPopulationState
             return;
         }
 
+        using (CapacityGrowth.Auto())
+        {
         int newCapacity = Mathf.NextPowerOfTwo(Mathf.Max(4, required));
         Array.Resize(ref Position, newCapacity);
         Array.Resize(ref Rotation, newCapacity);
@@ -393,6 +426,9 @@ public class ReplicatorPopulationState
         Array.Resize(ref AttackCooldown, newCapacity);
         Array.Resize(ref FearCooldown, newCapacity);
         Array.Resize(ref Alive, newCapacity);
+        Array.Resize(ref GeodesicCellIndex, newCapacity);
+        Array.Resize(ref MaxLifespan, newCapacity);
+        Array.Resize(ref BiomassTarget, newCapacity);
         Array.Resize(ref Metabolism, newCapacity);
         Array.Resize(ref Locomotion, newCapacity);
         Array.Resize(ref OptimalTempMin, newCapacity);
@@ -427,5 +463,6 @@ public class ReplicatorPopulationState
         Array.Resize(ref Color, newCapacity);
         Array.Resize(ref CurrentOceanLayerIndex, newCapacity);
         Array.Resize(ref PreferredOceanLayerIndex, newCapacity);
+        }
     }
 }

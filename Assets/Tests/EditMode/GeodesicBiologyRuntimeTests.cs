@@ -395,6 +395,88 @@ public sealed class GeodesicBiologyRuntimeTests
     }
 
     [Test]
+    public void PackedSpawnAndCapacityGrowthPreserveGeodesicAuthority()
+    {
+        var state = new ReplicatorPopulationState();
+        for (int i = 0; i < 9; i++)
+        {
+            var agent = new Replicator(Vector3.up * (i + 1), Quaternion.identity, 20f + i, Color.white,
+                default, i / 10f, MetabolismType.Hydrogenotrophy, LocomotionType.PassiveDrift);
+            agent.geodesicCellIndex = 100 + i;
+            agent.currentOceanLayerIndex = i % 3;
+            agent.biomassTarget = 0.25f + i;
+            state.AddAgentFromReplicatorData(agent);
+        }
+
+        Assert.That(state.Count, Is.EqualTo(9));
+        Assert.That(state.Position.Length, Is.EqualTo(16));
+        for (int i = 0; i < state.Count; i++)
+        {
+            Assert.That(state.GeodesicCellIndex[i], Is.EqualTo(100 + i));
+            Assert.That(state.CurrentOceanLayerIndex[i], Is.EqualTo(i % 3));
+            Assert.That(state.MaxLifespan[i], Is.EqualTo(20f + i));
+            Assert.That(state.BiomassTarget[i], Is.EqualTo(0.25f + i));
+            Assert.That(state.Locomotion[i], Is.EqualTo(LocomotionType.PassiveDrift));
+        }
+    }
+
+    [Test]
+    public void SwapBackCopiesPackedHabitatLifecycleAndMovementFieldsTogether()
+    {
+        var state = new ReplicatorPopulationState();
+        var agents = new List<Replicator>();
+        for (int i = 0; i < 3; i++)
+        {
+            var agent = new Replicator(Vector3.one * i, Quaternion.identity, 30f + i, Color.white,
+                default, 0.1f + i, MetabolismType.Hydrogenotrophy, LocomotionType.PassiveDrift);
+            agent.geodesicCellIndex = 7 + i;
+            agent.currentOceanLayerIndex = i;
+            agent.biomassTarget = 2f + i;
+            agents.Add(agent);
+            state.AddAgentFromReplicatorData(agent);
+        }
+        state.Energy[2] = 91f;
+        state.PassiveWanderSequence[2] = 123u;
+        state.NextPassiveVerticalDriftTime[2] = 45f;
+
+        GeodesicBiologyRuntime.RemoveAgentAtSwapBack(1, agents, state);
+
+        Assert.That(state.Count, Is.EqualTo(2));
+        Assert.That(state.GeodesicCellIndex[1], Is.EqualTo(9));
+        Assert.That(state.CurrentOceanLayerIndex[1], Is.EqualTo(2));
+        Assert.That(state.MaxLifespan[1], Is.EqualTo(32f));
+        Assert.That(state.BiomassTarget[1], Is.EqualTo(4f));
+        Assert.That(state.Energy[1], Is.EqualTo(91f));
+        Assert.That(state.PassiveWanderSequence[1], Is.EqualTo(123u));
+        Assert.That(state.NextPassiveVerticalDriftTime[1], Is.EqualTo(45f));
+        Assert.That(agents[1].geodesicCellIndex, Is.EqualTo(9));
+    }
+
+    [Test]
+    public void ResetRetainsCapacityAndVisualBridgeCannotChangeHabitatAuthority()
+    {
+        var state = new ReplicatorPopulationState();
+        var source = new Replicator(Vector3.up, Quaternion.identity, 10f, Color.white, default, 0.1f,
+            MetabolismType.Hydrogenotrophy, LocomotionType.PassiveDrift);
+        source.geodesicCellIndex = 42;
+        source.currentOceanLayerIndex = 2;
+        state.AddAgentFromReplicatorData(source);
+        int capacity = state.Position.Length;
+        var visual = new Replicator(Vector3.down, Quaternion.identity, 1f, Color.black, default, 0f,
+            MetabolismType.Predation, LocomotionType.Flagellum);
+        visual.geodesicCellIndex = 999;
+
+        state.CopyToRenderState(0, visual);
+
+        Assert.That(state.GeodesicCellIndex[0], Is.EqualTo(42));
+        Assert.That(state.CurrentOceanLayerIndex[0], Is.EqualTo(2));
+        Assert.That(visual.geodesicCellIndex, Is.EqualTo(999));
+        state.Reset();
+        Assert.That(state.Count, Is.Zero);
+        Assert.That(state.Position.Length, Is.EqualTo(capacity));
+    }
+
+    [Test]
     public void NewChildPopulationEntryInitializesIndependentWanderState()
     {
         var state = new ReplicatorPopulationState();
