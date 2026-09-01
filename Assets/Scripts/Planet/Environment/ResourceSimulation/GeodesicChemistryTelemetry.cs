@@ -126,6 +126,18 @@ public sealed class GeodesicChemistryTelemetry : MonoBehaviour
         if (ventBottom.NodeCount > 0) AppendReducingSummary(text, " ventBottom", ventBottom); else text.Append(" ventBottom={activeNodes=0}");
         AppendCounters(text, " chemistryDelta", delta);
         AppendCounters(text, " chemistryTotal", current);
+        if (chemistry != null)
+        {
+            text.Append(" chemistryScan={ticks=").Append(chemistry.ChemistryTicks)
+                .Append(",nodesVisited=").Append(chemistry.NodesProcessed)
+                .Append(",candidateNodes=").Append(chemistry.ChemistryCandidateNodes)
+                .Append(",reactiveNodes=").Append(chemistry.ReactiveNodes)
+                .Append(",reactionsApplied=").Append(chemistry.ReactionsApplied)
+                .Append(",skippedNoReactants=").Append(chemistry.SkippedNoReactants)
+                .Append(",sparseCandidateCount=").Append(chemistry.ChemistryCandidateNodes)
+                .Append(",denseFallbackTicks=").Append(chemistry.DenseFallbackTicks)
+                .Append('}');
+        }
         text.Append(" sediment={S0=").Append(sedimentS0.ToString("G9")).Append(",Fe3=").Append(sedimentFe3.ToString("G9")).Append(",FeS=").Append(sedimentFeS.ToString("G9"));
         text.Append(",columnsWithS0=").Append(columnsWithS0).Append(",columnsWithFe3=").Append(columnsWithFe3).Append(",columnsWithFeS=").Append(columnsWithFeS).Append('}');
         AppendAtmosphere(text);

@@ -33,20 +33,49 @@ public class GeodesicAbioticChemistryTests
     }
 
     [Test]
+    public void CandidatePredicateRequiresACompleteReactionPair()
+    {
+        Assert.That(GeodesicAbioticChemistry.CanReact(0f, 1f, 0f, 0f), Is.False, "H2 alone cannot oxidize in an anoxic node.");
+        Assert.That(GeodesicAbioticChemistry.CanReact(0f, 0f, 1f, 0f), Is.False, "H2S alone cannot oxidize or precipitate.");
+        Assert.That(GeodesicAbioticChemistry.CanReact(0f, 0f, 0f, 1f), Is.False, "Fe2 alone cannot oxidize or precipitate.");
+        Assert.That(GeodesicAbioticChemistry.CanReact(1f, float.Epsilon, 0f, 0f), Is.True);
+        Assert.That(GeodesicAbioticChemistry.CanReact(0f, 0f, float.Epsilon, float.Epsilon), Is.True);
+        Assert.That(GeodesicAbioticChemistry.CanReact(float.NaN, 1f, 0f, 0f), Is.False);
+    }
+
+    [Test]
+    public void SparseCandidateWorkTracksCompleteReactionPairs()
+    {
+        const int activeNodes = 112679;
+        const int reactiveNodes = 100;
+        int[] candidates = new int[activeNodes];
+        int count = 0;
+        for (int node = 0; node < activeNodes; node++)
+        {
+            bool reactive = node < reactiveNodes;
+            count = GeodesicOceanResourceField.AppendChemistryCandidate(
+                node, reactive ? 1f : 0f, 1f, 0f, 0f, candidates, count);
+        }
+
+        Assert.That(count, Is.EqualTo(reactiveNodes));
+        Assert.That(count, Is.LessThan(activeNodes / 1000 * 2), "Chemistry scan work, unlike the fused post-transport refresh, is proportional to candidates.");
+    }
+
+    [Test]
     public void PostTransportCandidateCollectionTracksOnlyCurrentAuthoritativeReactants()
     {
         int[] candidates = new int[4];
-        int count = GeodesicOceanResourceField.AppendChemistryCandidate(10, 0f, 0f, 0f, candidates, 0);
+        int count = GeodesicOceanResourceField.AppendChemistryCandidate(10, 0f, 0f, 0f, 0f, candidates, 0);
         Assert.That(count, Is.Zero, "A tick with no reduced reactants must not schedule chemistry.");
 
-        count = GeodesicOceanResourceField.AppendChemistryCandidate(10, 1f, 2f, 3f, candidates, count);
-        count = GeodesicOceanResourceField.AppendChemistryCandidate(11, 0.25f, 0f, 0f, candidates, count);
-        count = GeodesicOceanResourceField.AppendChemistryCandidate(12, 0f, 0.5f, 0f, candidates, count);
+        count = GeodesicOceanResourceField.AppendChemistryCandidate(10, 0f, 1f, 2f, 3f, candidates, count);
+        count = GeodesicOceanResourceField.AppendChemistryCandidate(11, 1f, 0.25f, 0f, 0f, candidates, count);
+        count = GeodesicOceanResourceField.AppendChemistryCandidate(12, 0f, 0f, 0.5f, 1f, candidates, count);
         Assert.That(count, Is.EqualTo(3), "Vent, horizontal, and vertical arrivals visible after staged application must be candidates in this tick.");
         CollectionAssert.AreEqual(new[] { 10, 11, 12 }, new ArraySegment<int>(candidates, 0, count));
 
         count = 0; // Start of the following resource tick.
-        count = GeodesicOceanResourceField.AppendChemistryCandidate(10, 0f, 0f, 0f, candidates, count);
+        count = GeodesicOceanResourceField.AppendChemistryCandidate(10, 0f, 0f, 0f, 0f, candidates, count);
         Assert.That(count, Is.Zero, "A node whose reactants disappeared must naturally leave the rebuilt list.");
     }
 
@@ -57,7 +86,7 @@ public class GeodesicAbioticChemistryTests
         int[] candidates = new int[activeNodes.Length];
         int count = 0;
         for (int i = 0; i < activeNodes.Length; i++)
-            count = GeodesicOceanResourceField.AppendChemistryCandidate(activeNodes[i], 0f, 0f, 1f, candidates, count);
+            count = GeodesicOceanResourceField.AppendChemistryCandidate(activeNodes[i], 1f, 0f, 0f, 1f, candidates, count);
 
         Assert.That(count, Is.EqualTo(activeNodes.Length));
         CollectionAssert.AreEqual(activeNodes, candidates, "Dense chemistry must degrade to the original authoritative active-node order.");

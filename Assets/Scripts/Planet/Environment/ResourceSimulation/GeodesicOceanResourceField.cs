@@ -31,6 +31,7 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     private static readonly ProfilerMarker HorizontalMarker = new ProfilerMarker("GeodesicOceanResource.HorizontalMixing");
     private static readonly ProfilerMarker VerticalMarker = new ProfilerMarker("GeodesicOceanResource.VerticalMixing");
     private static readonly ProfilerMarker VentMarker = new ProfilerMarker("GeodesicOceanResource.VentSources");
+    private static readonly ProfilerMarker ChemistryCandidateRefreshMarker = new ProfilerMarker("GeodesicOceanResource.Chemistry.CandidateRefresh");
     private static readonly ProfilerMarker DiagnosticsMarker = new ProfilerMarker("GeodesicOceanResource.RecurringDiagnostics");
     private static ProfilerCounterValue<int> TicksPerFrameCounter = new ProfilerCounterValue<int>(ProfilerCategory.Scripts, "Geodesic Resource Ticks / Frame", ProfilerMarkerDataUnit.Count, ProfilerCounterOptions.FlushOnEndOfFrame);
     private static ProfilerCounterValue<float> SimSecondsPerFrameCounter = new ProfilerCounterValue<float>(ProfilerCategory.Scripts, "Geodesic Resource Sim Seconds / Frame", ProfilerMarkerDataUnit.Count, ProfilerCounterOptions.FlushOnEndOfFrame);
@@ -681,8 +682,9 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
         int h2Offset = (int)GeodesicOceanResource.H2 * capacity;
         int h2sOffset = (int)GeodesicOceanResource.H2S * capacity;
         int fe2Offset = (int)GeodesicOceanResource.Fe2 * capacity;
+        int o2Offset = (int)GeodesicOceanResource.O2 * capacity;
         chemistryCandidateCount = 0;
-        for (int i = 0; i < activeNodeCount; i++)
+        using (ChemistryCandidateRefreshMarker.Auto()) for (int i = 0; i < activeNodeCount; i++)
         {
             int node = activeNodeIndices[i]; double volume = activeNodeVolumes[i];
             ApplyStagedNode(state, delta, node, volume);
@@ -693,13 +695,13 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
             node += capacity; ApplyStagedNode(state, delta, node, volume);
             node += capacity; ApplyStagedNode(state, delta, node, volume);
             node = activeNodeIndices[i];
-            chemistryCandidateCount = AppendChemistryCandidate(node, state[h2Offset + node], state[h2sOffset + node], state[fe2Offset + node], chemistryCandidateNodes, chemistryCandidateCount);
+            chemistryCandidateCount = AppendChemistryCandidate(node, state[o2Offset + node], state[h2Offset + node], state[h2sOffset + node], state[fe2Offset + node], chemistryCandidateNodes, chemistryCandidateCount);
         }
     }
 
-    public static int AppendChemistryCandidate(int node, float h2, float h2s, float fe2, int[] candidates, int count)
+    public static int AppendChemistryCandidate(int node, float o2, float h2, float h2s, float fe2, int[] candidates, int count)
     {
-        if (!GeodesicAbioticChemistry.HasReducedReactants(h2, h2s, fe2)) return count;
+        if (!GeodesicAbioticChemistry.CanReact(o2, h2, h2s, fe2)) return count;
         candidates[count] = node;
         return count + 1;
     }
