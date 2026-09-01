@@ -30,7 +30,7 @@ public sealed class GeodesicBiologyRuntime
     private const int ResourceCount = 7;
     public const float ReferenceTickSeconds = 0.5f;
     public const float PassiveKinematicsIntervalSeconds = 0.1f;
-    public const float ReactionIntervalSeconds = 0.1f;
+    public const float ReactionIntervalSeconds = 0.25f;
     public const float PassiveAngularSpeedRadiansPerSecond = 0.002f;
     public const float PassiveVerticalOpportunitiesPerSecond = 0.0015f;
     public const float PassiveWanderMinimumIntervalSeconds = 1f;
