@@ -512,6 +512,33 @@ public sealed class GeodesicBiologyRuntimeTests
     }
 
     [Test]
+    public void VentBottomResolutionRejectsDryCellsAndDoesNotDefaultToZero()
+    {
+        int[] activeLayers = { 0, 2, 4 };
+
+        Assert.That(GeodesicBiologyRuntime.GetValidVentBottomLayer(0, activeLayers), Is.EqualTo(-1));
+        Assert.That(GeodesicBiologyRuntime.GetValidVentBottomLayer(2, activeLayers), Is.EqualTo(3));
+        Assert.That(GeodesicBiologyRuntime.GetValidVentBottomLayer(-1, activeLayers), Is.EqualTo(-1));
+    }
+
+    [Test]
+    public void FounderVentWeightUsesExistingProductionShare()
+    {
+        var lower = new GeodesicVentSourceOutlet(GeodesicVentHabitat.Submarine, 7, 18, 0, 1f, 0.25f, 0.5f);
+        var higher = new GeodesicVentSourceOutlet(GeodesicVentHabitat.Submarine, 9, 24, 1, 1f, 0.5f, 0.75f);
+
+        Assert.That(GeodesicBiologyRuntime.GetFounderVentWeight(lower), Is.EqualTo(0.125d).Within(1e-9d));
+        Assert.That(GeodesicBiologyRuntime.GetFounderVentWeight(higher), Is.EqualTo(0.375d).Within(1e-9d));
+    }
+
+    [Test]
+    public void FounderLayerHistogramSupportsLocallyVariableBottomLayers()
+    {
+        Assert.That(GeodesicBiologyRuntime.FormatLayerHistogram(new[] { 0, 2, 0, 3, 1 }),
+            Is.EqualTo("layer0=0/layer1=2/layer2=0/layer3=3/layer4=1"));
+    }
+
+    [Test]
     public void StarvationAndLifespanRemainDistinctAndRemovalStaysSynchronized()
     {
         Assert.That(GeodesicBiologyRuntime.ClassifyLifecycleDeath(0f, 2f, 10f), Is.EqualTo(DeathCause.EnergyDepletion));
