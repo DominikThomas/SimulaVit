@@ -602,7 +602,7 @@ public class ReplicatorManager : MonoBehaviour
         }
 
         agents.Clear();
-        populationState.EnsureMatchesAgentCount(agents);
+        populationState.Reset();
 
         for (int i = 0; i < loadedAgents.Count; i++)
         {
@@ -890,7 +890,7 @@ public class ReplicatorManager : MonoBehaviour
     public void ClearPopulation()
     {
         agents.Clear();
-        populationState.EnsureMatchesAgentCount(agents);
+        populationState.Reset();
         preyAgentsBySpatialBin.Clear();
         spontaneousHydrogenSpawnCandidateCells.Clear();
         spontaneousSpawnCandidateCacheLastRefreshStep = -1;

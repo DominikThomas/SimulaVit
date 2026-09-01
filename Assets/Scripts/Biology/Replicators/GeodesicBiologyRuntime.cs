@@ -188,7 +188,7 @@ public sealed class GeodesicBiologyRuntime
             hydrogenTemperatureRange, lethalTemperatureMargin, false);
         int occupiedCells = 0, occupiedLayers = 0;
         var cellSeen = new bool[grid.CellCount]; var layerSeen = new bool[grid.MaximumLayerCount];
-        for (int i = 0; i < spawned; i++) { if (!cellSeen[agents[i].geodesicCellIndex]) { cellSeen[agents[i].geodesicCellIndex] = true; occupiedCells++; } int layer=agents[i].currentOceanLayerIndex; if(!layerSeen[layer]){layerSeen[layer]=true;occupiedLayers++;} }
+        for (int i = 0; i < spawned; i++) { int cell=state.GeodesicCellIndex[i]; if (!cellSeen[cell]) { cellSeen[cell] = true; occupiedCells++; } int layer=state.CurrentOceanLayerIndex[i]; if(!layerSeen[layer]){layerSeen[layer]=true;occupiedLayers++;} }
         Debug.Log($"[GeodesicBiology] mode=Geodesic biologySeed={biologySeed} requested={requestedFounders} spawned={spawned} hydrogenotrophy={spawned} passiveDrift={spawned} occupiedCells={occupiedCells} occupiedLayers={occupiedLayers} ventFounders={spawned} founders=hydrogenotrophy-passive-drift-compact-submarine-vent-bottom");
         return true;
     }
@@ -296,9 +296,9 @@ public sealed class GeodesicBiologyRuntime
             EnsureRequestCapacity(agents.Count); BeginSparseStep();
             using (Evaluation.Auto())
             {
-                using (HabitatSampling.Auto()) SampleOccupiedHabitats(state.Count, agents, state);
+                using (HabitatSampling.Auto()) SampleOccupiedHabitats(state.Count, state);
                 using (RequestBuild.Auto())
-                    for (int i = 0; i < state.Count; i++) BuildRequest(i, agents[i], state, reactionDt,
+                    for (int i = 0; i < state.Count; i++) BuildRequest(i, state, reactionDt,
                         hydrogenCo2, hydrogenH2, hydrogenEnergy, hydrogenStoreFraction, hydrogenO2InhibitionEnabled,
                         o2ComfortMax, o2StressMax, hydrogenMinimumO2Efficiency, sulfurCo2, sulfurH2s, sulfurEnergy,
                         methaneCo2, methaneH2, methaneEnergy, methanotrophyCh4, methanotrophyO2, methanotrophyEnergy, photoCo2, photoEnergy);
@@ -318,14 +318,14 @@ public sealed class GeodesicBiologyRuntime
         }
     }
 
-    private void BuildRequest(int i, Replicator agent, ReplicatorPopulationState state, float dt,
+    private void BuildRequest(int i, ReplicatorPopulationState state, float dt,
         float hCo2, float hH2, float hEnergy, float hStoreFraction, bool hO2InhibitionEnabled,
         float o2ComfortMax, float o2StressMax, float hMinimumO2Efficiency,
         float sCo2, float sH2s, float sEnergy, float mCo2, float mH2, float mEnergy,
         float mtCh4, float mtO2, float mtEnergy, float pCo2, float pEnergy)
     {
         agentEvaluations++;
-        int cell = agent.geodesicCellIndex, layer = state.CurrentOceanLayerIndex[i]; Request r = default; r.Cell = cell; r.Layer = layer; r.Metabolism = state.Metabolism[i];
+        int cell = state.GeodesicCellIndex[i], layer = state.CurrentOceanLayerIndex[i]; Request r = default; r.Cell = cell; r.Layer = layer; r.Metabolism = state.Metabolism[i];
         if (!grid.IsNodeActive(cell, layer)) { invalidHabitats++; requests[i] = r; return; }
         r.Node = grid.GetNodeIndex(cell, layer); float scale = dt / ReferenceTickSeconds;
         switch (state.Metabolism[i])
@@ -367,11 +367,11 @@ public sealed class GeodesicBiologyRuntime
         r.Desired=Math.Max(0,scale*temperatureScale*oxygenEfficiency); requests[i]=r;
     }
 
-    private void SampleOccupiedHabitats(int count, List<Replicator> agents, ReplicatorPopulationState state)
+    private void SampleOccupiedHabitats(int count, ReplicatorPopulationState state)
     {
         for (int i = 0; i < count; i++)
         {
-            int cell = agents[i].geodesicCellIndex;
+            int cell = state.GeodesicCellIndex[i];
             int layer = state.CurrentOceanLayerIndex[i];
             if (grid.IsNodeActive(cell, layer)) EnsureHabitatSample(grid.GetNodeIndex(cell, layer), cell, layer);
         }
@@ -381,7 +381,7 @@ public sealed class GeodesicBiologyRuntime
     {
         for (int i = 0; i < count; i++)
         {
-            Request r = requests[i];
+            ref Request r = ref requests[i];
             if (!r.Supported || r.Desired <= 0d || r.NeedA <= 0d) continue;
             demand[(int)r.A * grid.NodeCapacity + r.Node] += r.NeedA * r.Desired;
             if (r.NeedB > 0d) demand[(int)r.B * grid.NodeCapacity + r.Node] += r.NeedB * r.Desired;
@@ -412,7 +412,7 @@ public sealed class GeodesicBiologyRuntime
     {
         for (int i = 0; i < count; i++)
         {
-            Request r = requests[i];
+            ref Request r = ref requests[i];
             if (!r.Supported) continue;
             int metabolism = (int)r.Metabolism;
             requestedByMetabolism[metabolism]++;
@@ -426,7 +426,6 @@ public sealed class GeodesicBiologyRuntime
             r.Actual = r.Desired * factor;
             if (factor < 1d && r.Desired > 0) resourceLimited++;
             if (r.Actual > 0) achievedByMetabolism[metabolism]++; else zeroAchieved++;
-            requests[i] = r;
         }
     }
     private void CommitRequests(int count, ReplicatorPopulationState state, float maxStore)
@@ -434,7 +433,7 @@ public sealed class GeodesicBiologyRuntime
         using (AgentEnergyAndStores.Auto())
         for (int i = 0; i < count; i++)
         {
-            Request r = requests[i]; if (r.Actual <= 0) continue;
+            ref Request r = ref requests[i]; if (r.Actual <= 0) continue;
             delta[(int)r.A*grid.NodeCapacity+r.Node] -= r.NeedA*r.Actual;
             if (r.NeedB > 0) delta[(int)r.B*grid.NodeCapacity+r.Node] -= r.NeedB*r.Actual;
             if (r.ProductCoefficient > 0) delta[(int)r.Product*grid.NodeCapacity+r.Node] += r.ProductCoefficient*r.Actual;
@@ -465,7 +464,7 @@ public sealed class GeodesicBiologyRuntime
             float paid = Mathf.Max(0f, maintenance * dt);
             state.Energy[i] -= paid;
             maintenancePaid += paid;
-            DeathCause cause = ClassifyLifecycleDeath(state.Energy[i], state.Age[i], agents[i].maxLifespan);
+            DeathCause cause = ClassifyLifecycleDeath(state.Energy[i], state.Age[i], state.MaxLifespan[i]);
             if (cause != DeathCause.Unknown)
             {
                 deaths++;
@@ -476,16 +475,16 @@ public sealed class GeodesicBiologyRuntime
             }
 
             bool eligible = state.Energy[i] >= (carbon ? divisionCost : replicationCost)
-                && (!carbon || state.OrganicCStore[i] >= Mathf.Max(1, multiple) * agents[i].biomassTarget);
+                && (!carbon || state.OrganicCStore[i] >= Mathf.Max(1, multiple) * state.BiomassTarget[i]);
             if (!eligible || agents.Count >= maxPopulation || reproductionRandom.NextDouble() >= rate * dt) continue;
             Replicator parent = agents[i];
             float childMovementSeed = (float)reproductionRandom.NextDouble();
-            var child = new Replicator(state.Position[i], state.Rotation[i], parent.maxLifespan, parent.color, parent.traits,
+            var child = new Replicator(state.Position[i], state.Rotation[i], state.MaxLifespan[i], parent.color, parent.traits,
                 childMovementSeed, state.Metabolism[i], state.Locomotion[i], parent.locomotionSkill);
-            child.geodesicCellIndex = parent.geodesicCellIndex;
+            child.geodesicCellIndex = state.GeodesicCellIndex[i];
             child.currentOceanLayerIndex = state.CurrentOceanLayerIndex[i];
             child.preferredOceanLayerIndex = state.CurrentOceanLayerIndex[i];
-            child.biomassTarget = parent.biomassTarget;
+            child.biomassTarget = state.BiomassTarget[i];
             child.optimalTempMin = state.OptimalTempMin[i];
             child.optimalTempMax = state.OptimalTempMax[i];
             child.lethalTempMargin = state.LethalTempMargin[i];
@@ -561,7 +560,7 @@ public sealed class GeodesicBiologyRuntime
                 using (MovementDirectionUpdate.Auto()) AdvancePassiveKinematics(ref direction, ref tangent, wanderRate, integrationDt);
                 proposedDirection = direction;
 
-                int cell = agents[i].geodesicCellIndex;
+                int cell = state.GeodesicCellIndex[i];
                 for (int crossing = 0; crossing < MaximumBoundaryCrossingsPerStep; crossing++)
                 {
                     int candidate;
@@ -581,7 +580,7 @@ public sealed class GeodesicBiologyRuntime
                     if (mappedLayer != state.CurrentOceanLayerIndex[i]) invalidLayerCorrections++;
                     state.CurrentOceanLayerIndex[i] = mappedLayer;
                     cell = candidate;
-                    agents[i].geodesicCellIndex = cell;
+                    state.GeodesicCellIndex[i] = cell;
                     horizontalBoundaryCrossings++;
                     }
                 }
@@ -602,8 +601,6 @@ public sealed class GeodesicBiologyRuntime
             for (int i = 0; i < state.Count; i++)
             {
                 if (state.Locomotion[i] != LocomotionType.PassiveDrift) continue;
-                agents[i].currentOceanLayerIndex = state.CurrentOceanLayerIndex[i];
-                agents[i].preferredOceanLayerIndex = state.CurrentOceanLayerIndex[i];
                 state.PreferredOceanLayerIndex[i] = state.CurrentOceanLayerIndex[i];
                 bool uninitialized = !(state.NextPassiveVerticalDriftTime[i] > 0f);
                 if (!uninitialized && passiveMovementTime < state.NextPassiveVerticalDriftTime[i]) continue;
@@ -614,7 +611,7 @@ public sealed class GeodesicBiologyRuntime
                 int eventSafety = 0;
                 while (passiveMovementTime >= state.NextPassiveVerticalDriftTime[i] && eventSafety++ < 4)
                 {
-                    int cell = agents[i].geodesicCellIndex;
+                    int cell = state.GeodesicCellIndex[i];
                     int layer = state.CurrentOceanLayerIndex[i];
                     int verticalDirection = (Hash(seed, sequence++) & 1u) == 0u ? -1 : 1;
                     int targetLayer = ResolveAdjacentVerticalLayer(layer, verticalDirection, grid.ActiveLayerCountByCell[cell]);
@@ -634,7 +631,7 @@ public sealed class GeodesicBiologyRuntime
             for (int i = 0; i < state.Count; i++)
             {
                 if (state.Locomotion[i] != LocomotionType.PassiveDrift) continue;
-                int cell = agents[i].geodesicCellIndex;
+                int cell = state.GeodesicCellIndex[i];
                 int layer = state.CurrentOceanLayerIndex[i];
                 float targetRadius = grid.LayerCenterRadius[grid.GetNodeIndex(cell, layer)];
                 float visualRadius = state.PassiveVisualRadius[i];
@@ -889,7 +886,7 @@ public sealed class GeodesicBiologyRuntime
     {
         int hydrogen=0,sulfur=0,methanogenesis=0,photosynthesis=0,methanotrophy=0,passive=0,amoeboid=0,flagellum=0,anchored=0;
         float organicMin=float.PositiveInfinity,organicMax=float.NegativeInfinity,thresholdMin=float.PositiveInfinity,thresholdMax=float.NegativeInfinity,maxDivisionCarbonFraction=0f;double organicSum=0d,thresholdSum=0d;int divisionEligible=0,occupiedNodeCount=0;
-        for(int i=0;i<state.Count;i++){switch(state.Metabolism[i]){case MetabolismType.Hydrogenotrophy:hydrogen++;break;case MetabolismType.SulfurChemosynthesis:sulfur++;break;case MetabolismType.Methanogenesis:methanogenesis++;break;case MetabolismType.Photosynthesis:photosynthesis++;break;case MetabolismType.Methanotrophy:methanotrophy++;break;}switch(state.Locomotion[i]){case LocomotionType.PassiveDrift:passive++;break;case LocomotionType.Amoeboid:amoeboid++;break;case LocomotionType.Flagellum:flagellum++;break;case LocomotionType.Anchored:anchored++;break;}float store=Mathf.Max(0f,state.OrganicCStore[i]);float threshold=Mathf.Max(1f,divisionMultiple)*(i<agents.Count?Mathf.Max(0.0001f,agents[i].biomassTarget):0.0001f);organicMin=Mathf.Min(organicMin,store);organicMax=Mathf.Max(organicMax,store);organicSum+=store;thresholdMin=Mathf.Min(thresholdMin,threshold);thresholdMax=Mathf.Max(thresholdMax,threshold);thresholdSum+=threshold;maxDivisionCarbonFraction=Mathf.Max(maxDivisionCarbonFraction,store/threshold);bool energyReady=state.Energy[i]>=(carbonDivision?divisionCost:replicationCost);if(energyReady&&(!carbonDivision||store>=threshold))divisionEligible++;int cell=agents[i].geodesicCellIndex;int layer=state.CurrentOceanLayerIndex[i];if(grid.IsNodeActive(cell,layer)){int node=grid.GetNodeIndex(cell,layer);if(MarkTouchedNode(node,-generation,lightStamps))touched[occupiedNodeCount++]=node;}}
+        for(int i=0;i<state.Count;i++){switch(state.Metabolism[i]){case MetabolismType.Hydrogenotrophy:hydrogen++;break;case MetabolismType.SulfurChemosynthesis:sulfur++;break;case MetabolismType.Methanogenesis:methanogenesis++;break;case MetabolismType.Photosynthesis:photosynthesis++;break;case MetabolismType.Methanotrophy:methanotrophy++;break;}switch(state.Locomotion[i]){case LocomotionType.PassiveDrift:passive++;break;case LocomotionType.Amoeboid:amoeboid++;break;case LocomotionType.Flagellum:flagellum++;break;case LocomotionType.Anchored:anchored++;break;}float store=Mathf.Max(0f,state.OrganicCStore[i]);float threshold=Mathf.Max(1f,divisionMultiple)*Mathf.Max(0.0001f,state.BiomassTarget[i]);organicMin=Mathf.Min(organicMin,store);organicMax=Mathf.Max(organicMax,store);organicSum+=store;thresholdMin=Mathf.Min(thresholdMin,threshold);thresholdMax=Mathf.Max(thresholdMax,threshold);thresholdSum+=threshold;maxDivisionCarbonFraction=Mathf.Max(maxDivisionCarbonFraction,store/threshold);bool energyReady=state.Energy[i]>=(carbonDivision?divisionCost:replicationCost);if(energyReady&&(!carbonDivision||store>=threshold))divisionEligible++;int cell=state.GeodesicCellIndex[i];int layer=state.CurrentOceanLayerIndex[i];if(grid.IsNodeActive(cell,layer)){int node=grid.GetNodeIndex(cell,layer);if(MarkTouchedNode(node,-generation,lightStamps))touched[occupiedNodeCount++]=node;}}
         float occupiedH2Min=float.PositiveInfinity,occupiedH2Max=float.NegativeInfinity,occupiedCo2Min=float.PositiveInfinity,occupiedCo2Max=float.NegativeInfinity;double occupiedH2Sum=0d,occupiedCo2Sum=0d;int occupiedSamples=0;
         for(int t=0;t<occupiedNodeCount;t++){int node=touched[t];int cell=node/grid.MaximumLayerCount;int layer=node%grid.MaximumLayerCount;if(resources.TryGetConcentration(cell,layer,GeodesicOceanResource.H2,out float h2Value)&&resources.TryGetConcentration(cell,layer,GeodesicOceanResource.CO2,out float co2Value)){occupiedH2Min=Mathf.Min(occupiedH2Min,h2Value);occupiedH2Max=Mathf.Max(occupiedH2Max,h2Value);occupiedH2Sum+=h2Value;occupiedCo2Min=Mathf.Min(occupiedCo2Min,co2Value);occupiedCo2Max=Mathf.Max(occupiedCo2Max,co2Value);occupiedCo2Sum+=co2Value;occupiedSamples++;}}
         if(state.Count==0){organicMin=organicMax=thresholdMin=thresholdMax=float.NaN;}if(occupiedSamples==0){occupiedH2Min=occupiedH2Max=occupiedCo2Min=occupiedCo2Max=float.NaN;}
