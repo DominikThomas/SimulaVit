@@ -468,6 +468,7 @@ public sealed class GeodesicBiologyRuntimeTests
 
         state.CopyToRenderState(0, visual);
 
+        Assert.That(visual.position, Is.EqualTo(state.Position[0]));
         Assert.That(state.GeodesicCellIndex[0], Is.EqualTo(42));
         Assert.That(state.CurrentOceanLayerIndex[0], Is.EqualTo(2));
         Assert.That(visual.geodesicCellIndex, Is.EqualTo(999));
@@ -519,6 +520,43 @@ public sealed class GeodesicBiologyRuntimeTests
         Assert.That(GeodesicBiologyRuntime.GetValidVentBottomLayer(0, activeLayers), Is.EqualTo(-1));
         Assert.That(GeodesicBiologyRuntime.GetValidVentBottomLayer(2, activeLayers), Is.EqualTo(3));
         Assert.That(GeodesicBiologyRuntime.GetValidVentBottomLayer(-1, activeLayers), Is.EqualTo(-1));
+        Assert.That(GeodesicBiologyRuntime.GetValidVentBottomLayer(1, new[] { 0, 5 }), Is.EqualTo(4));
+        Assert.That(GeodesicBiologyRuntime.GetValidVentBottomLayer(1, new[] { 0, 4 }), Is.EqualTo(3));
+    }
+
+    [Test]
+    public void ZeroScatterFounderUsesExactSourceDirectionAndBottomRadius()
+    {
+        Vector3 sourceDirection = new Vector3(1f, 2f, 3f).normalized;
+        Vector3 local = GeodesicBiologyRuntime.CalculateVisualFounderPosition(sourceDirection, 7.78f, 0f, 0.9f, 0.4f);
+
+        Assert.That(Vector3.Angle(local, sourceDirection), Is.LessThan(1e-5f));
+        Assert.That(local.magnitude, Is.EqualTo(7.78f).Within(1e-5f));
+    }
+
+    [Test]
+    public void PassiveRenderBridgeDoesNotSnapBottomPositionToOceanSurface()
+    {
+        Vector3 packedBottomWorld = new Vector3(12f, -4f, 3f) + Quaternion.Euler(20f, 40f, 10f) * (Vector3.up * 7.78f);
+        Vector3 rendered = ReplicatorRenderSystem.ResolvePassiveRenderPosition(packedBottomWorld);
+
+        Assert.That(rendered, Is.EqualTo(packedBottomWorld));
+        Assert.That(rendered, Is.Not.EqualTo(packedBottomWorld.normalized * 8.09f));
+    }
+
+    [Test]
+    public void PlanetTransformRoundTripPreservesFounderLocalDirectionAndRadius()
+    {
+        var go = new GameObject("founder-transform-test");
+        try
+        {
+            go.transform.SetPositionAndRotation(new Vector3(12f, -4f, 3f), Quaternion.Euler(20f, 40f, 10f));
+            Vector3 local = new Vector3(1f, 2f, 3f).normalized * 7.78f;
+            Vector3 roundTrip = go.transform.InverseTransformPoint(go.transform.TransformPoint(local));
+            Assert.That(Vector3.Angle(roundTrip, local), Is.LessThan(1e-4f));
+            Assert.That(roundTrip.magnitude, Is.EqualTo(7.78f).Within(1e-4f));
+        }
+        finally { Object.DestroyImmediate(go); }
     }
 
     [Test]

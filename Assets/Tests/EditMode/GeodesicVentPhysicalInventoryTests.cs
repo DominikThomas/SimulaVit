@@ -3,6 +3,23 @@ using UnityEngine;
 
 public sealed class GeodesicVentPhysicalInventoryTests
 {
+    [Test]
+    public void CompactOutletCellMatchesAuthoritativeInjectionNodeCell()
+    {
+        const int maximumLayers = 5;
+        var candidates = new[]
+        {
+            new GeodesicVentCandidate(2, 2 * maximumLayers + 4, 1f, GeodesicVentHabitat.Submarine)
+        };
+        Vector3[] directions = { Vector3.left, Vector3.down, Vector3.forward };
+        GeodesicVentSystem[] systems = GeodesicVentSystemClusterer.Cluster(candidates, directions, 3f);
+        GeodesicVentSourceOutlet[] outlets = GeodesicOceanResourceField.BuildCompactOutlets(systems, directions, 3f, 1);
+
+        Assert.That(outlets, Has.Length.EqualTo(1));
+        Assert.That(outlets[0].SourceNode / maximumLayers, Is.EqualTo(outlets[0].CellIndex));
+        Assert.That(outlets[0].SourceNode % maximumLayers, Is.EqualTo(4));
+    }
+
     [TestCase(10d)]
     [TestCase(0d)]
     [TestCase(0.25d)]
