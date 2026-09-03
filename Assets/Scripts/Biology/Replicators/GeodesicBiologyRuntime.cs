@@ -228,20 +228,36 @@ public sealed class GeodesicBiologyRuntime
         float minLife, float maxLife, Color color, float biomassTarget, Vector2 hydrogenTemperatureRange,
         float lethalTemperatureMargin, bool forceZeroAge)
     {
-        int validVents = 0;
+        int validVents = 0, invalidVents = 0;
+        double totalVentWeight = 0d;
         for (int i = 0; i < resources.CompactOutletCount; i++)
-            if (resources.TryGetVentOutlet(i, out GeodesicVentSourceOutlet outlet) && outlet.Habitat == GeodesicVentHabitat.Submarine && grid.IsNodeActive(outlet.CellIndex, outlet.SourceNode % grid.MaximumLayerCount)) validVents++;
+        {
+            if (!resources.TryGetVentOutlet(i, out GeodesicVentSourceOutlet raw) || raw.Habitat != GeodesicVentHabitat.Submarine) continue;
+            if (!TryResolveFounderVent(i, out GeodesicVentSourceOutlet outlet, out _, out _)) { invalidVents++; continue; }
+            validVents++;
+            totalVentWeight += GetFounderVentWeight(outlet);
+        }
         if (count > 0 && validVents == 0) { Debug.LogWarning("[GeodesicBiology] No valid submarine vent habitat; no founders were spawned."); return 0; }
+        int firstFounder = state.Count, bottomMatches = 0, exactVentCells = 0, visualCellMismatches = 0, visualLayerMismatches = 0;
+        var usedVentCells = new HashSet<int>();
+        var layerHistogram = new int[grid.MaximumLayerCount];
         for (int i = 0; i < count; i++)
         {
-            int pick = random.Next(validVents), seen = 0; GeodesicVentSourceOutlet selected = default;
-            for (int v = 0; v < resources.CompactOutletCount; v++) if (resources.TryGetVentOutlet(v, out var candidate) && candidate.Habitat == GeodesicVentHabitat.Submarine && grid.IsNodeActive(candidate.CellIndex, candidate.SourceNode % grid.MaximumLayerCount) && seen++ == pick) { selected = candidate; break; }
+            double pick = random.NextDouble() * totalVentWeight, cumulative = 0d; GeodesicVentSourceOutlet selected = default;
+            for (int v = 0; v < resources.CompactOutletCount; v++)
+            {
+                if (!TryResolveFounderVent(v, out var candidate, out _, out _)) continue;
+                selected = candidate;
+                cumulative += GetFounderVentWeight(candidate);
+                if (pick < cumulative) break;
+            }
             MetabolismType metabolism = NormalFounderMetabolism;
-            Vector3 direction = planet.GeodesicTopology.CellDirections[selected.CellIndex];
-            int bottomLayer = selected.SourceNode % grid.MaximumLayerCount;
-            float layerRadius = grid.LayerCenterRadius[grid.GetNodeIndex(selected.CellIndex, bottomLayer)];
-            float meanSpacingRadians = GetMeanNeighborSpacingRadians(selected.CellIndex);
-            Vector3 visualLocalPosition = CalculateVisualFounderPosition(direction, layerRadius, meanSpacingRadians,
+            int sourceCell = selected.SourceNode / grid.MaximumLayerCount;
+            int bottomLayer = grid.GetBottomLayerIndex(sourceCell);
+            Vector3 direction = planet.GeodesicTopology.CellDirections[sourceCell]; // planet-local
+            float layerRadius = grid.LayerCenterRadius[selected.SourceNode];
+            float safeScatterRadians = GetMinimumNeighborSpacingRadians(sourceCell) * 0.1f;
+            Vector3 visualLocalPosition = CalculateVisualFounderPosition(direction, layerRadius, safeScatterRadians,
                 (float)visualRandom.NextDouble(), (float)visualRandom.NextDouble());
             Vector3 position = planet.transform.TransformPoint(visualLocalPosition);
             float life = Mathf.Lerp(minLife, maxLife, (float)random.NextDouble());
@@ -249,22 +265,93 @@ public sealed class GeodesicBiologyRuntime
                 new Replicator.Traits(true, true, true, 0f), (float)random.NextDouble(), metabolism, NormalFounderLocomotion);
             float initialEnergy = Mathf.Lerp(0.1f, 0.5f, (float)random.NextDouble());
             float sampledAge = Mathf.Lerp(0f, life * 0.5f, (float)random.NextDouble());
-            InitializeFounderBiologicalState(agent, selected.CellIndex, bottomLayer, hydrogenTemperatureRange,
+            InitializeFounderBiologicalState(agent, sourceCell, bottomLayer, hydrogenTemperatureRange,
                 lethalTemperatureMargin, initialEnergy, forceZeroAge ? 0f : sampledAge, biomassTarget);
-            agents.Add(agent); state.AddAgentFromReplicatorData(agent);
+            agents.Add(agent);
+            state.AddAgentFromReplicatorData(agent);
+            int packed = state.Count - 1;
+            // Packed state is authoritative. Write both habitat fields explicitly before any movement or sampling.
+            state.GeodesicCellIndex[packed] = sourceCell;
+            state.CurrentOceanLayerIndex[packed] = bottomLayer;
+            state.PreferredOceanLayerIndex[packed] = bottomLayer;
+            state.PassiveVisualRadius[packed] = layerRadius;
+            state.PassiveDriftDirection[packed] = visualLocalPosition.normalized; // planet-local
+            state.Position[packed] = position; // world-space
+            usedVentCells.Add(sourceCell);
+            if (state.GeodesicCellIndex[packed] == sourceCell) exactVentCells++;
+            if (state.CurrentOceanLayerIndex[packed] == grid.GetBottomLayerIndex(state.GeodesicCellIndex[packed])) bottomMatches++;
+            layerHistogram[bottomLayer]++;
+            int visualCell = FindNearestCell(visualLocalPosition.normalized, planet.GeodesicTopology.CellDirections);
+            if (visualCell != sourceCell) visualCellMismatches++;
+            if (Mathf.Abs(visualLocalPosition.magnitude - layerRadius) > 1e-4f) visualLayerMismatches++;
+            if (i < 3) LogFounderPositionAudit(packed, agent, sourceCell, bottomLayer, layerRadius, state);
         }
+        Debug.Log($"[GeodesicFounderSpawn] founders={count} submarineVentOutletsUsed={usedVentCells.Count} authoritativeBottomLayer={bottomMatches}/{count} exactVentCell={exactVentCells}/{count} maxCellDistanceFromSelectedVent=0 invalidVentCandidates={invalidVents} visualCellMismatch={visualCellMismatches} visualLayerMismatch={visualLayerMismatches} layers={FormatLayerHistogram(layerHistogram)} packedRange={firstFounder}-{state.Count - 1}");
         return count;
     }
 
-    private float GetMeanNeighborSpacingRadians(int cellIndex)
+    private void LogFounderPositionAudit(int founder, Replicator companion, int sourceCell, int layer,
+        float expectedLayerRadius, ReplicatorPopulationState state)
+    {
+        Vector3 sourceDirection = planet.GeodesicTopology.CellDirections[sourceCell];
+        Vector3 packedLocal = planet.transform.InverseTransformPoint(state.Position[founder]);
+        Vector3 companionLocal = planet.transform.InverseTransformPoint(companion.position);
+        Vector3 renderedWorld = ReplicatorRenderSystem.ResolvePassiveRenderPosition(state.Position[founder]);
+        Vector3 renderedLocal = planet.transform.InverseTransformPoint(renderedWorld);
+        int markerCell = -1; float sourceMarkerDegrees = float.NaN, markerRadius = float.NaN;
+        for (int i = 0; i < experiencedTemperature.OutletCount; i++)
+            if (experiencedTemperature.TryGetOutlet(i, out GeodesicVentOutlet marker) && marker.Habitat == GeodesicVentHabitat.Submarine && marker.CellIndex == sourceCell)
+            { markerCell = FindNearestCell(marker.PlanetLocalPosition.normalized, planet.GeodesicTopology.CellDirections); markerRadius = marker.PlanetLocalPosition.magnitude; sourceMarkerDegrees = Vector3.Angle(sourceDirection, marker.PlanetLocalPosition); break; }
+        float sourceFounderDegrees = Vector3.Angle(sourceDirection, packedLocal);
+        float packedRenderedDegrees = Vector3.Angle(packedLocal, renderedLocal);
+        int activeLayers = grid.ActiveLayerCountByCell[sourceCell], expectedBottom = activeLayers - 1;
+        Debug.Assert(layer == expectedBottom && state.GeodesicCellIndex[founder] == sourceCell);
+        Debug.Log($"[GeodesicFounderPositionAudit] founder={founder} ventSourceCell={sourceCell} markerCell={markerCell} founderCell={state.GeodesicCellIndex[founder]} layer={layer}/{expectedBottom} activeLayerCount={activeLayers} node={grid.GetNodeIndex(sourceCell, layer)} expectedLayerRadius={expectedLayerRadius:F6} packedRadius={packedLocal.magnitude:F6} companionRadius={companionLocal.magnitude:F6} renderedRadius={renderedLocal.magnitude:F6} oceanTopRadius={grid.OceanSurfaceRadius:F6} seafloorRadius={grid.SourceSeafloorRadius[sourceCell]:F6} markerRadius={markerRadius:F6} angularDegrees(source-marker/source-founder/packed-rendered)={sourceMarkerDegrees:F6}/{sourceFounderDegrees:F6}/{packedRenderedDegrees:F6}");
+    }
+
+    private bool TryResolveFounderVent(int outletIndex, out GeodesicVentSourceOutlet outlet, out int sourceCell, out int sourceLayer)
+    {
+        if (!resources.TryGetVentInjectionHabitat(outletIndex, out outlet, out sourceCell, out sourceLayer)
+            || outlet.Habitat != GeodesicVentHabitat.Submarine) return false;
+        int bottom = GetValidVentBottomLayer(sourceCell, grid.ActiveLayerCountByCell);
+        bool consistent = outlet.CellIndex == sourceCell && sourceLayer == bottom;
+        Debug.Assert(consistent, $"Vent outlet {outletIndex} disagrees with injection node: CellIndex={outlet.CellIndex}, sourceCell={sourceCell}, sourceLayer={sourceLayer}, bottom={bottom}.");
+        return consistent;
+    }
+
+    private float GetMinimumNeighborSpacingRadians(int cellIndex)
     {
         GeodesicGridTopology topology = grid.SourceTopology;
         int count = topology.NeighborCounts[cellIndex];
         if (count <= 0) return 0f;
-        float sum = 0f;
+        float minimum = float.PositiveInfinity;
         int offset = cellIndex * 6;
-        for (int i = 0; i < count; i++) sum += topology.NeighborAngularDistances6[offset + i];
-        return sum / count;
+        for (int i = 0; i < count; i++) minimum = Mathf.Min(minimum, topology.NeighborAngularDistances6[offset + i]);
+        return float.IsFinite(minimum) ? minimum : 0f;
+    }
+
+    public static int GetValidVentBottomLayer(int cellIndex, int[] activeLayerCounts)
+        => activeLayerCounts != null && cellIndex >= 0 && cellIndex < activeLayerCounts.Length && activeLayerCounts[cellIndex] > 0
+            ? activeLayerCounts[cellIndex] - 1 : -1;
+
+    public static double GetFounderVentWeight(GeodesicVentSourceOutlet outlet)
+    {
+        double weight = (double)outlet.SystemBudgetWeight * outlet.WithinSystemWeight;
+        return double.IsFinite(weight) && weight > 0d ? weight : double.Epsilon;
+    }
+
+    private static int FindNearestCell(Vector3 direction, Vector3[] directions)
+    {
+        int nearest = -1; float best = -2f;
+        for (int i = 0; i < directions.Length; i++) { float dot = Vector3.Dot(direction, directions[i]); if (dot > best) { best = dot; nearest = i; } }
+        return nearest;
+    }
+
+    public static string FormatLayerHistogram(int[] histogram)
+    {
+        var text = new System.Text.StringBuilder();
+        for (int i = 0; i < histogram.Length; i++) { if (i > 0) text.Append('/'); text.Append("layer").Append(i).Append('=').Append(histogram[i]); }
+        return text.ToString();
     }
 
     public void Step(float dt, List<Replicator> agents, ReplicatorPopulationState state, float maintenance,

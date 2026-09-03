@@ -180,6 +180,19 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     public bool TryGetVentOutlet(int index, out GeodesicVentSourceOutlet outlet)
     { if (!initialized || ventOutlets == null || index < 0 || index >= ventOutlets.Length) { outlet = default; return false; } outlet = ventOutlets[index]; return true; }
 
+    /// <summary>Resolves the node that receives inventory into its cell/layer identity.</summary>
+    public bool TryGetVentInjectionHabitat(int index, out GeodesicVentSourceOutlet outlet, out int cellIndex, out int layerIndex)
+    {
+        cellIndex = layerIndex = -1;
+        if (!TryGetVentOutlet(index, out outlet)) return false;
+        if (outlet.Habitat == GeodesicVentHabitat.Terrestrial) { cellIndex = outlet.CellIndex; return outlet.SourceNode < 0; }
+        int node = outlet.SourceNode;
+        if (node < 0 || node >= sourceGrid.NodeCapacity) return false;
+        cellIndex = node / sourceGrid.MaximumLayerCount;
+        layerIndex = node % sourceGrid.MaximumLayerCount;
+        return sourceGrid.IsNodeActive(cellIndex, layerIndex);
+    }
+
     public void SetStartupTransportInterval(float intervalSeconds)
     {
         transportIntervalSeconds = Mathf.Max(0.01f, intervalSeconds);
@@ -461,6 +474,19 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
         }
         ventSystems = GeodesicVentSystemClusterer.Cluster(candidates, grid.SourceTopology.CellDirections, clusterRadiusDegrees);
         ventOutlets = BuildCompactOutlets(ventSystems, grid.SourceTopology.CellDirections, outletSelectionRadiusDegrees, maximumOutletsPerSystem);
+        int outletCellNodeMismatches = 0, outletNonBottomSources = 0;
+        for (int i = 0; i < ventOutlets.Length; i++)
+        {
+            GeodesicVentSourceOutlet outlet = ventOutlets[i];
+            if (outlet.Habitat != GeodesicVentHabitat.Submarine) continue;
+            int sourceCell = outlet.SourceNode / grid.MaximumLayerCount;
+            int sourceLayer = outlet.SourceNode % grid.MaximumLayerCount;
+            if (sourceCell != outlet.CellIndex) outletCellNodeMismatches++;
+            if (!grid.IsNodeActive(sourceCell, sourceLayer) || sourceLayer != grid.GetBottomLayerIndex(sourceCell)) outletNonBottomSources++;
+        }
+        Debug.Assert(outletCellNodeMismatches == 0 && outletNonBottomSources == 0,
+            $"Geodesic compact vent identity is inconsistent: cellNodeMismatches={outletCellNodeMismatches}, nonBottomSources={outletNonBottomSources}.");
+        Debug.Log($"[GeodesicVentSourceIdentity] outlets={ventOutlets.Length} cellNodeMismatches={outletCellNodeMismatches} nonBottomSources={outletNonBottomSources} injectionAuthority=SourceNode", this);
         BuildVentThermalInfluence(grid);
         rawVentCandidateCount = candidates.Count; ventCount = ventSystems.Length;
         int memberMin = int.MaxValue, memberMax = 0, members = 0; double rawWeight = 0d, normalized = 0d, submarineRawWeight = 0d, terrestrialRawWeight = 0d; float rawStrengthMin = float.PositiveInfinity, rawStrengthMax = 0f;
