@@ -275,7 +275,9 @@ public sealed class GeodesicBiologyRuntime
             state.CurrentOceanLayerIndex[packed] = bottomLayer;
             state.PreferredOceanLayerIndex[packed] = bottomLayer;
             state.PassiveVisualRadius[packed] = layerRadius;
+            uint seed = MovementSeedBits(state.MovementSeed[packed]);
             state.PassiveDriftDirection[packed] = visualLocalPosition.normalized; // planet-local
+            state.PassiveDriftTangent[packed] = CreateInitialPassiveTangent(direction, seed);
             state.Position[packed] = position; // world-space
             usedVentCells.Add(sourceCell);
             if (state.GeodesicCellIndex[packed] == sourceCell) exactVentCells++;
@@ -330,9 +332,21 @@ public sealed class GeodesicBiologyRuntime
         return float.IsFinite(minimum) ? minimum : 0f;
     }
 
+    public static int GetValidVentBottomLayer(int cellIndex, byte[] activeLayerCounts)
+    => activeLayerCounts != null
+       && cellIndex >= 0
+       && cellIndex < activeLayerCounts.Length
+       && activeLayerCounts[cellIndex] > 0
+        ? activeLayerCounts[cellIndex] - 1
+        : -1;
+
     public static int GetValidVentBottomLayer(int cellIndex, int[] activeLayerCounts)
-        => activeLayerCounts != null && cellIndex >= 0 && cellIndex < activeLayerCounts.Length && activeLayerCounts[cellIndex] > 0
-            ? activeLayerCounts[cellIndex] - 1 : -1;
+        => activeLayerCounts != null
+           && cellIndex >= 0
+           && cellIndex < activeLayerCounts.Length
+           && activeLayerCounts[cellIndex] > 0
+            ? activeLayerCounts[cellIndex] - 1
+            : -1;
 
     public static double GetFounderVentWeight(GeodesicVentSourceOutlet outlet)
     {
