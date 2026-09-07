@@ -277,7 +277,7 @@ public sealed class GeodesicBiologyRuntime
             state.PassiveVisualRadius[packed] = layerRadius;
             uint seed = MovementSeedBits(state.MovementSeed[packed]);
             state.PassiveDriftDirection[packed] = visualLocalPosition.normalized; // planet-local
-            state.PassiveDriftTangent[packed] = CreateInitialPassiveTangent(direction, seed);
+            state.PassiveDriftTangent[packed] = CreateInitialPassiveTangent(state.PassiveDriftDirection[packed], seed);
             state.Position[packed] = position; // world-space
             usedVentCells.Add(sourceCell);
             if (state.GeodesicCellIndex[packed] == sourceCell) exactVentCells++;
@@ -758,13 +758,25 @@ public sealed class GeodesicBiologyRuntime
 
     private void EnsurePassiveKinematicState(int index, ReplicatorPopulationState state, Matrix4x4 worldToLocal)
     {
-        if (state.PassiveDriftDirection[index].sqrMagnitude > 0.9f) return;
-        Vector3 direction = worldToLocal.MultiplyPoint3x4(state.Position[index]).normalized;
-        if (direction.sqrMagnitude < 0.9f) direction = planet.GeodesicTopology.CellDirections[0];
-        uint seed = MovementSeedBits(state.MovementSeed[index]);
-        state.PassiveDriftDirection[index] = direction;
-        state.PassiveDriftTangent[index] = CreateInitialPassiveTangent(direction, seed);
-        state.PassiveVisualRadius[index] = worldToLocal.MultiplyPoint3x4(state.Position[index]).magnitude;
+        // Spawn may already have supplied direction/radius without a travel tangent.
+        // Validate each part independently so partial state cannot disable horizontal drift.
+        Vector3 direction = state.PassiveDriftDirection[index];
+        if (!(direction.sqrMagnitude > 0.9f))
+        {
+            direction = worldToLocal.MultiplyPoint3x4(state.Position[index]).normalized;
+            if (direction.sqrMagnitude < 0.9f) direction = planet.GeodesicTopology.CellDirections[0];
+            state.PassiveDriftDirection[index] = direction;
+        }
+        Vector3 tangent = state.PassiveDriftTangent[index];
+        if (!(tangent.sqrMagnitude > 0.9f) || Mathf.Abs(Vector3.Dot(direction, tangent)) > 1e-4f)
+        {
+            tangent = Vector3.ProjectOnPlane(tangent, direction);
+            state.PassiveDriftTangent[index] = tangent.sqrMagnitude > 1e-10f
+                ? tangent.normalized
+                : CreateInitialPassiveTangent(direction, MovementSeedBits(state.MovementSeed[index]));
+        }
+        if (!(state.PassiveVisualRadius[index] > 0f))
+            state.PassiveVisualRadius[index] = worldToLocal.MultiplyPoint3x4(state.Position[index]).magnitude;
     }
 
     public static int FindCloserRealNeighbor(int currentCell, Vector3 continuousDirection, Vector3[] cellDirections,
