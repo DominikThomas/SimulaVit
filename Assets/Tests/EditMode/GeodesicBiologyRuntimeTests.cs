@@ -5,6 +5,80 @@ using UnityEngine;
 
 public sealed class GeodesicBiologyRuntimeTests
 {
+    [TestCase(false)]
+    [TestCase(true)]
+    public void FounderWithDirectionButMissingTangentMovesOnFirstKinematicTick(bool delayed)
+    {
+        Vector3 direction = new Vector3(0.31f, 0.87f, -0.38f).normalized;
+        var agent = new Replicator(direction * 7.78f, Quaternion.identity, 100f, Color.white,
+            default, 0.37f, MetabolismType.Hydrogenotrophy, LocomotionType.PassiveDrift);
+        var state = new ReplicatorPopulationState();
+        state.AddAgentFromReplicatorData(agent);
+        state.GeodesicCellIndex[0] = 12;
+        state.CurrentOceanLayerIndex[0] = 4;
+        state.PassiveDriftDirection[0] = direction;
+        state.PassiveVisualRadius[0] = 7.78f;
+        if (delayed) GeodesicBiologyRuntime.InitializePassiveSchedulesAtSpawn(state, 0, 300f);
+        float nextVertical = state.NextPassiveVerticalDriftTime[0];
+        float nextWander = state.NextPassiveWanderUpdateTime[0];
+
+        EnsureKinematicsForTest(state, Matrix4x4.identity);
+        Vector3 tangent = state.PassiveDriftTangent[0];
+        Assert.That(tangent.magnitude, Is.EqualTo(1f).Within(1e-5f));
+        Assert.That(Mathf.Abs(Vector3.Dot(direction, tangent)), Is.LessThan(1e-5f));
+        Vector3 moved = direction;
+        GeodesicBiologyRuntime.AdvancePassiveKinematics(ref moved, ref tangent, 0f,
+            GeodesicBiologyRuntime.PassiveKinematicsIntervalSeconds);
+        Assert.That((moved - direction).magnitude, Is.GreaterThan(1e-5f));
+        Assert.That(state.Position[0], Is.EqualTo(agent.position));
+        Assert.That(state.PassiveVisualRadius[0], Is.EqualTo(7.78f));
+        Assert.That(state.GeodesicCellIndex[0], Is.EqualTo(12));
+        Assert.That(state.CurrentOceanLayerIndex[0], Is.EqualTo(4));
+        Assert.That(state.NextPassiveVerticalDriftTime[0], Is.EqualTo(nextVertical));
+        Assert.That(state.NextPassiveWanderUpdateTime[0], Is.EqualTo(nextWander));
+    }
+
+    [Test]
+    public void KinematicInitializationPreservesValidStateAndRepairsMissingRadius()
+    {
+        var agent = new Replicator(Vector3.up * 7.78f, Quaternion.identity, 100f, Color.white,
+            default, 0.37f, MetabolismType.Hydrogenotrophy);
+        var state = new ReplicatorPopulationState();
+        state.AddAgentFromReplicatorData(agent);
+        state.PassiveDriftDirection[0] = Vector3.up;
+        state.PassiveDriftTangent[0] = Vector3.right;
+        EnsureKinematicsForTest(state, Matrix4x4.identity);
+        Assert.That(state.PassiveVisualRadius[0], Is.EqualTo(7.78f).Within(1e-5f));
+        EnsureKinematicsForTest(state, Matrix4x4.identity);
+        Assert.That(state.PassiveDriftDirection[0], Is.EqualTo(Vector3.up));
+        Assert.That(state.PassiveDriftTangent[0], Is.EqualTo(Vector3.right));
+    }
+
+    [Test]
+    public void ChildKinematicInitializationUsesPlanetLocalPosition()
+    {
+        Matrix4x4 transform = Matrix4x4.TRS(new Vector3(12f, -4f, 3f),
+            Quaternion.Euler(20f, 40f, 10f), Vector3.one);
+        Vector3 local = new Vector3(1f, 2f, 3f).normalized * 7.78f;
+        var agent = new Replicator(transform.MultiplyPoint3x4(local), Quaternion.identity,
+            100f, Color.white, default, 0.9f, MetabolismType.Hydrogenotrophy);
+        var state = new ReplicatorPopulationState();
+        state.AddAgentFromReplicatorData(agent);
+        EnsureKinematicsForTest(state, transform.inverse);
+        Assert.That((state.PassiveDriftDirection[0] - local.normalized).magnitude, Is.LessThan(1e-5f));
+        Assert.That(state.PassiveVisualRadius[0], Is.EqualTo(7.78f).Within(1e-5f));
+        Assert.That(state.PassiveDriftTangent[0].magnitude, Is.EqualTo(1f).Within(1e-5f));
+        Assert.That(Mathf.Abs(Vector3.Dot(state.PassiveDriftDirection[0], state.PassiveDriftTangent[0])), Is.LessThan(1e-5f));
+    }
+
+    private static void EnsureKinematicsForTest(ReplicatorPopulationState state, Matrix4x4 worldToLocal)
+    {
+        var method = typeof(GeodesicBiologyRuntime).GetMethod("EnsurePassiveKinematicState",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        Assert.That(method, Is.Not.Null);
+        method.Invoke(new GeodesicBiologyRuntime(), new object[] { 0, state, worldToLocal });
+    }
+
     [Test]
     public void ZeroDelayKeepsImmediateFounderSchedule()
     {
@@ -468,6 +542,7 @@ public sealed class GeodesicBiologyRuntimeTests
 
         state.CopyToRenderState(0, visual);
 
+        Assert.That(visual.position, Is.EqualTo(state.Position[0]));
         Assert.That(state.GeodesicCellIndex[0], Is.EqualTo(42));
         Assert.That(state.CurrentOceanLayerIndex[0], Is.EqualTo(2));
         Assert.That(visual.geodesicCellIndex, Is.EqualTo(999));
@@ -509,6 +584,70 @@ public sealed class GeodesicBiologyRuntimeTests
         agent.position = different;
         Assert.That(agent.geodesicCellIndex, Is.EqualTo(6));
         Assert.That(agent.currentOceanLayerIndex, Is.EqualTo(2));
+    }
+
+    [Test]
+    public void VentBottomResolutionRejectsDryCellsAndDoesNotDefaultToZero()
+    {
+        int[] activeLayers = { 0, 2, 4 };
+
+        Assert.That(GeodesicBiologyRuntime.GetValidVentBottomLayer(0, activeLayers), Is.EqualTo(-1));
+        Assert.That(GeodesicBiologyRuntime.GetValidVentBottomLayer(2, activeLayers), Is.EqualTo(3));
+        Assert.That(GeodesicBiologyRuntime.GetValidVentBottomLayer(-1, activeLayers), Is.EqualTo(-1));
+        Assert.That(GeodesicBiologyRuntime.GetValidVentBottomLayer(1, new[] { 0, 5 }), Is.EqualTo(4));
+        Assert.That(GeodesicBiologyRuntime.GetValidVentBottomLayer(1, new[] { 0, 4 }), Is.EqualTo(3));
+    }
+
+    [Test]
+    public void ZeroScatterFounderUsesExactSourceDirectionAndBottomRadius()
+    {
+        Vector3 sourceDirection = new Vector3(1f, 2f, 3f).normalized;
+        Vector3 local = GeodesicBiologyRuntime.CalculateVisualFounderPosition(sourceDirection, 7.78f, 0f, 0.9f, 0.4f);
+
+        Assert.That(Vector3.Angle(local, sourceDirection), Is.LessThan(1e-5f));
+        Assert.That(local.magnitude, Is.EqualTo(7.78f).Within(1e-5f));
+    }
+
+    [Test]
+    public void PassiveRenderBridgeDoesNotSnapBottomPositionToOceanSurface()
+    {
+        Vector3 packedBottomWorld = new Vector3(12f, -4f, 3f) + Quaternion.Euler(20f, 40f, 10f) * (Vector3.up * 7.78f);
+        Vector3 rendered = ReplicatorRenderSystem.ResolvePassiveRenderPosition(packedBottomWorld);
+
+        Assert.That(rendered, Is.EqualTo(packedBottomWorld));
+        Assert.That(rendered, Is.Not.EqualTo(packedBottomWorld.normalized * 8.09f));
+    }
+
+    [Test]
+    public void PlanetTransformRoundTripPreservesFounderLocalDirectionAndRadius()
+    {
+        var go = new GameObject("founder-transform-test");
+        try
+        {
+            go.transform.SetPositionAndRotation(new Vector3(12f, -4f, 3f), Quaternion.Euler(20f, 40f, 10f));
+            Vector3 local = new Vector3(1f, 2f, 3f).normalized * 7.78f;
+            Vector3 roundTrip = go.transform.InverseTransformPoint(go.transform.TransformPoint(local));
+            Assert.That(Vector3.Angle(roundTrip, local), Is.LessThan(1e-4f));
+            Assert.That(roundTrip.magnitude, Is.EqualTo(7.78f).Within(1e-4f));
+        }
+        finally { Object.DestroyImmediate(go); }
+    }
+
+    [Test]
+    public void FounderVentWeightUsesExistingProductionShare()
+    {
+        var lower = new GeodesicVentSourceOutlet(GeodesicVentHabitat.Submarine, 7, 18, 0, 1f, 0.25f, 0.5f);
+        var higher = new GeodesicVentSourceOutlet(GeodesicVentHabitat.Submarine, 9, 24, 1, 1f, 0.5f, 0.75f);
+
+        Assert.That(GeodesicBiologyRuntime.GetFounderVentWeight(lower), Is.EqualTo(0.125d).Within(1e-9d));
+        Assert.That(GeodesicBiologyRuntime.GetFounderVentWeight(higher), Is.EqualTo(0.375d).Within(1e-9d));
+    }
+
+    [Test]
+    public void FounderLayerHistogramSupportsLocallyVariableBottomLayers()
+    {
+        Assert.That(GeodesicBiologyRuntime.FormatLayerHistogram(new[] { 0, 2, 0, 3, 1 }),
+            Is.EqualTo("layer0=0/layer1=2/layer2=0/layer3=3/layer4=1"));
     }
 
     [Test]

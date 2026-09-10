@@ -98,14 +98,22 @@ public sealed class GeodesicExperiencedTemperatureField : MonoBehaviour
         for (int outletIndex = 0; outletIndex < resources.CompactOutletCount; outletIndex++)
         {
             if (!resources.TryGetVentOutlet(outletIndex, out GeodesicVentSourceOutlet source) || !resources.TryGetVentSystem(source.SystemIndex, out GeodesicVentSystem system)) continue;
-            int cell = source.CellIndex;
-            if (!generator.TryGetVisibleGeodesicSeafloorWorldAnchor(cell, out Vector3 worldPosition, out Vector3 worldNormal)) continue;
+            if (!resources.TryGetVentInjectionHabitat(outletIndex, out source, out int cell, out int injectionLayer)) continue;
+            if (source.Habitat == GeodesicVentHabitat.Submarine &&
+                (source.CellIndex != cell || injectionLayer != resources.SourceGrid.GetBottomLayerIndex(cell))) continue;
+            if (!generator.TryGetVisibleGeodesicSeafloorWorldAnchor(cell, out Vector3 worldPosition, out _)) continue;
             float systemStrength = maximumRaw > 0f ? Mathf.Sqrt(system.RawStrengthSum / maximumRaw) : 0f;
             float memberStrength = Mathf.Sqrt(source.RawStrength / Mathf.Max(system.RawStrengthMax, 1e-6f));
-            int bottom = source.Habitat == GeodesicVentHabitat.Submarine ? resources.SourceGrid.GetBottomLayerIndex(cell) : -1;
+            int bottom = source.Habitat == GeodesicVentHabitat.Submarine ? injectionLayer : -1;
             float strength = Mathf.Clamp01(systemStrength * memberStrength);
             float coreRadius = Mathf.Lerp(Mathf.Max(0f, minimumOutletCoreRadius), Mathf.Max(minimumOutletCoreRadius, maximumOutletCoreRadius), strength);
-            built[count++] = new GeodesicVentOutlet(source.Habitat, cell, bottom, source.SystemIndex, transform.InverseTransformPoint(worldPosition), transform.InverseTransformDirection(worldNormal).normalized, strength, coreRadius);
+            Vector3 anchorLocal = transform.InverseTransformPoint(worldPosition);
+            // Orange markers use the exact simulation-cell direction while retaining the completed
+            // visible terrain's seafloor radius. CellDirections and this stored anchor are planet-local.
+            Vector3 sourceDirection = resources.SourceGrid.SourceTopology.CellDirections[cell];
+            Vector3 exactSourceAnchor = sourceDirection * anchorLocal.magnitude;
+            built[count++] = new GeodesicVentOutlet(source.Habitat, cell, bottom, source.SystemIndex,
+                exactSourceAnchor, sourceDirection, strength, coreRadius);
         }
         outlets = new GeodesicVentOutlet[count]; Array.Copy(built, outlets, count); outletCount = count;
     }
