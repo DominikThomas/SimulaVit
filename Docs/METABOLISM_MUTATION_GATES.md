@@ -4,7 +4,7 @@ This note documents the centralized viability gates used when reproduction mutat
 
 ## Implementation location
 
-Mutation-gate code lives in `Assets/Scripts/ReplicatorManager.cs` near the reproduction mutation helpers:
+Mutation-gate code lives in `Assets/Scripts/Biology/Replicators/ReplicatorManager.cs` near the reproduction mutation helpers:
 
 - `GetMutationGateRequirements(...)`
 - `TryGetReactionDerivedMutationGateRequirements(...)`

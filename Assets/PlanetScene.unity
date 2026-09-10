@@ -37,7 +37,7 @@ RenderSettings:
   m_ReflectionBounces: 1
   m_ReflectionIntensity: 1
   m_CustomReflection: {fileID: 8900000, guid: 09999639e73bcd64abda22253af612d8, type: 3}
-  m_Sun: {fileID: 0}
+  m_Sun: {fileID: 313342985}
   m_UseRadianceAmbientProbe: 0
 --- !u!157 &3
 LightmapSettings:
@@ -151,6 +151,9 @@ MonoBehaviour:
   defaults:
     planetSeed: 12345
     useRandomSeed: 1
+    gridType: 0
+    cubeSphereResolution: 10
+    geodesicSubdivisionLevel: 3
     axisTiltDegrees: 23.5
     dayLengthSeconds: 480
     yearLengthInDays: 100
@@ -159,15 +162,40 @@ MonoBehaviour:
     initialCO2: 1
     initialO2: 0.01
     initialCH4: 0
+    initialAtmospherePressureBar: 0.85
+    atmosphericCO2Fraction: 0.05882353
+    atmosphericO2Fraction: 0
+    atmosphericCH4Fraction: 0
+    atmosphericH2Fraction: 0
+    atmosphericH2SFraction: 0
+    allowDenseAtmosphere: 0
+    atmosphericN2Bar: 0.8
+    atmosphericCO2Bar: 0.05
+    atmosphericO2Bar: 0
+    atmosphericCH4Bar: 0
+    atmosphericH2Bar: 0
+    atmosphericH2SBar: 0
     initialDissolvedFe2Plus: 8
+    ventClustering: 0.65
     ventH2PerTick: 0.006
-    ventH2SPerTick: 0.01
-    ventCO2PerTick: 0
+    ventH2SPerTick: 0.004
+    ventCO2PerTick: 0.02
+    ventFe2PerTick: 0.002
+    terrestrialVentFraction: 0.25
     initialSpawnCount: 100
     startPaused: 0
+    approximateThermalIntervalSeconds: 2
+    geodesicResourceTransportIntervalSeconds: 5
+    chemistryTelemetryIntervalSimSeconds: 60
+    atmosphereInventoryPerBar: 1000
+    airSeaExchangeHalfLifeSeconds: 300
+    geodesicBiologySpawnDelaySeconds: 0
   currentConfig:
     planetSeed: 12345
     useRandomSeed: 1
+    gridType: 0
+    cubeSphereResolution: 10
+    geodesicSubdivisionLevel: 3
     axisTiltDegrees: 23.5
     dayLengthSeconds: 480
     yearLengthInDays: 100
@@ -176,12 +204,34 @@ MonoBehaviour:
     initialCO2: 1
     initialO2: 0.01
     initialCH4: 0
+    initialAtmospherePressureBar: 0.85
+    atmosphericCO2Fraction: 0.05882353
+    atmosphericO2Fraction: 0
+    atmosphericCH4Fraction: 0
+    atmosphericH2Fraction: 0
+    atmosphericH2SFraction: 0
+    allowDenseAtmosphere: 0
+    atmosphericN2Bar: 0.8
+    atmosphericCO2Bar: 0.05
+    atmosphericO2Bar: 0
+    atmosphericCH4Bar: 0
+    atmosphericH2Bar: 0
+    atmosphericH2SBar: 0
     initialDissolvedFe2Plus: 8
+    ventClustering: 0.65
     ventH2PerTick: 0.006
-    ventH2SPerTick: 0.01
-    ventCO2PerTick: 0
+    ventH2SPerTick: 0.004
+    ventCO2PerTick: 0.02
+    ventFe2PerTick: 0.002
+    terrestrialVentFraction: 0.25
     initialSpawnCount: 100
     startPaused: 0
+    approximateThermalIntervalSeconds: 2
+    geodesicResourceTransportIntervalSeconds: 5
+    chemistryTelemetryIntervalSimSeconds: 60
+    atmosphereInventoryPerBar: 1000
+    airSeaExchangeHalfLifeSeconds: 300
+    geodesicBiologySpawnDelaySeconds: 0
   loadSavedStartupConfig: 1
   saveStartupConfigOnStart: 1
   logAppliedStartupConfig: 1
@@ -642,11 +692,13 @@ MonoBehaviour:
   planetCenter: {fileID: 382753103}
   viewer: {fileID: 370080327}
   planetRadius: 8
-  horizonTriggerOffsetDegrees: 0
-  horizonTransitionDegrees: 18
+  horizonTransitionDegrees: 15
   horizonColor: {r: 0.6431373, g: 0, b: 0, a: 1}
   dayColor: {r: 1, g: 0.95, b: 0.75, a: 1}
-  colorShiftStrength: 1
+  colorShiftStrength: 0.77
+  minimumSunsetCentreBrightness: 0.8
+  afterHorizonGlowPersistenceDegrees: 8
+  sunOcclusionSoftness: 1
   dayEmissionMultiplier: 1
   behindPlanetEmissionMultiplier: 0.8
   horizonEmissionBoost: 0.3
@@ -655,6 +707,22 @@ MonoBehaviour:
   skyboxOverride: {fileID: 0}
   scaleRotationWithSimulationSpeed: 1
   replicatorManager: {fileID: 0}
+  logSunLightingDiagnostics: 0
+  angularMismatchWarningDegrees: 1
+  currentDirectionalLight: {fileID: 313342985}
+  planetToSunDirectionWorld: {x: 0, y: 0, z: 0}
+  sunToPlanetDirectionWorld: {x: 0, y: 0, z: 0}
+  lightDirectionAngularError: 0
+  terrainMainLightSupport: 1
+  oceanMainLightSupport: 1
+  cameraToPlanetDistance: 0
+  resolvedVisiblePlanetRadius: 0
+  apparentPlanetAngularRadiusDegrees: 0
+  apparentSunAngularRadiusDegrees: 0
+  sunCentreHeightAboveLimbDegrees: 0
+  sunsetColourFactor: 0
+  visibleDiscFactor: 0
+  glowFactor: 0
 --- !u!1 &370080324
 GameObject:
   m_ObjectHideFlags: 0
@@ -862,6 +930,11 @@ GameObject:
   - component: {fileID: 382753102}
   - component: {fileID: 382753104}
   - component: {fileID: 382753105}
+  - component: {fileID: 382753106}
+  - component: {fileID: 382753107}
+  - component: {fileID: 382753108}
+  - component: {fileID: 382753109}
+  - component: {fileID: 382753110}
   m_Layer: 0
   m_Name: Planet Generator
   m_TagString: Planet
@@ -881,7 +954,138 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: eee7f655e5979404cabff8cefd535095, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  replicatorManager: {fileID: 0}
+  replicatorManager: {fileID: 1064713443}
+  generationMode: 1
+  geodesicSubdivisionLevel: 6
+  geodesicSimulationSubdivisionLevel: 6
+  geodesicRenderSubdivisionLevel: 7
+  geodesicColliderSubdivisionLevel: 6
+  geodesicDiagnosticTriangleWarningThreshold: 350000
+  validateOptimizedGeodesicShoreDistances: 0
+  showGeodesicCellOutlines: 0
+  highlightGeodesicPentagons: 0
+  showGeodesicCellCentres: 0
+  showSelectedGeodesicCell: 1
+  highlightGeodesicOceanCells: 0
+  highlightGeodesicCoastlineCells: 0
+  oceanAppearance:
+    baseWaterColor: {r: 0.15966536, g: 0.30129746, b: 0.49056602, a: 0.58}
+    shallowWaterColor: {r: 0.1, g: 0.55, b: 0.75, a: 0.58}
+    deepWaterColor: {r: 0.02, g: 0.12, b: 0.28, a: 0.58}
+    opacity: 0.58
+    smoothness: 0.876
+    fresnelStrength: 0.18
+    fresnelPower: 3
+    ambientResponse: 1
+    colorIntensity: 1
+    oxygenatedWaterColor: {r: 0, g: 0, b: 0, a: 0}
+    oxygenatedWaterBlendStrength: 0
+    dissolvedFe2Tint: {r: 0.18, g: 0.38, b: 0.52, a: 1}
+    suspendedFeOxTint: {r: 0.72, g: 0.36, b: 0.12, a: 1}
+    sulfurTint: {r: 0, g: 0, b: 0, a: 0}
+    dissolvedFe2TintStrength: 0
+    suspendedFeOxTurbidityStrength: 0
+    suspendedSulfurTintStrength: 0
+    organicTurbidityStrength: 0
+    temperatureTintStrength: 0
+    iceTintStrength: 0
+  deprecatedLegacyOxygenatedWaterColor: {r: 0, g: 0, b: 0, a: 0}
+  enableGeodesicBathymetry: 1
+  geodesicShelfWidthDegrees: 5
+  geodesicShelfDepth: 0.06
+  geodesicMaximumOceanDepth: 0.32
+  geodesicContinentalSlopeExponent: 0.1
+  enableGeodesicOceanicIslandMargins: 1
+  geodesicOceanicIslandShelfWidthDegrees: 0.01
+  geodesicOceanicIslandShelfDepth: 0.025
+  geodesicOceanicIslandSlopeExponent: 0.55
+  geodesicOceanicIslandShelfVariationStrength: 0.25
+  geodesicMixedMarginOceanicBlendStrength: 0.15
+  geodesicContinentalShelfMinWidthMultiplier: 0.05
+  geodesicContinentalShelfMaxWidthMultiplier: 1.25
+  geodesicContinentalShelfWidthVariationStrength: 1
+  geodesicContinentalShelfWidthVariationScale: 0.55
+  geodesicContinentalShelfMinDepthMultiplier: 0.75
+  geodesicContinentalShelfMaxDepthMultiplier: 1.25
+  geodesicContinentalShelfDepthVariationStrength: 0.1
+  geodesicContinentalShelfDepthVariationScale: 0.55
+  geodesicContinentalSlopeVariationStrength: 0
+  geodesicShelfVariationScale: 0.55
+  geodesicShelfWidthDepthCorrelation: 0
+  geodesicOceanicRidgeStrength: 0
+  geodesicOceanicRidgeScale: 1.8
+  geodesicOceanicRidgeThreshold: 0.72
+  geodesicOceanicPlateauStrength: 0
+  geodesicOceanicPlateauScale: 0.65
+  enableGeodesicSeamounts: 1
+  geodesicSeamountDensity: 0.18
+  geodesicSeamountAmplitude: 0.12
+  geodesicSeamountRadiusDegrees: 1.5
+  geodesicSeamountChainProbability: 0.35
+  geodesicSeamountChainLength: 4
+  geodesicSeamountChainSpacingDegrees: 3
+  geodesicSeamountEmergenceBias: -0.35
+  geodesicBasinNoiseScale: 1.35
+  geodesicBasinNoiseStrength: 0.25
+  geodesicShorelinePreservationDegrees: 0.7
+  geodesicBathymetrySmoothPasses: 2
+  geodesicBathymetrySmoothStrength: 0.35
+  geodesicBathymetryStrength: 1
+  geodesicOceanRenderSubdivisionLevel: 5
+  deprecatedGeodesicOceanColour: {r: 0.02, g: 0.28, b: 0.55, a: 0.42}
+  deprecatedGeodesicOceanShallowTint: {r: 0.1, g: 0.55, b: 0.75, a: 0.42}
+  deprecatedGeodesicOceanOpacity: 0.42
+  deprecatedGeodesicOceanSmoothness: 0.82
+  geodesicSurfaceAmbientStrength: 0.08
+  geodesicSurfaceDiffuseStrength: 1
+  enableGeodesicTerrainDisplacement: 1
+  usePlanetSeedForTerrain: 1
+  customTerrainSeed: 67890
+  deprecatedGeodesicBaseRadius: 1
+  geodesicContinentAmplitude: 0.09
+  geodesicContinentNoiseScale: 0.85
+  geodesicContinentBias: -0.08
+  geodesicMountainAmplitude: 0.8
+  geodesicMountainNoiseScale: 4.25
+  geodesicMountainCoverageThreshold: 0.248
+  geodesicMountainMaskSoftness: 0.18
+  geodesicRidgeSharpness: 1.25
+  geodesicDomainWarpScale: 1.35
+  geodesicDomainWarpStrength: 0.28
+  geodesicFineDetailScale: 18
+  geodesicFineDetailAmplitude: 0.018
+  geodesicTerrainOctaves: 5
+  geodesicTerrainPersistence: 0.48
+  geodesicTerrainLacunarity: 2
+  geodesicTerrainHeightContrast: 3.78
+  geodesicMinimumTerrainOffset: -0.937
+  geodesicMaximumTerrainOffset: 0.941
+  geodesicSeaLevelControlMode: 1
+  geodesicSeaLevelOffset: 0.181
+  geodesicTargetOceanCoveragePercent: 70
+  geodesicOceanWorldMinimumDepth: 0.06
+  resolvedGeodesicSeaLevelRadius: 0
+  resolvedGeodesicSeaLevelOffset: 0
+  achievedGeodesicOceanCellCoveragePercent: 0
+  achievedGeodesicOceanAreaCoveragePercent: 0
+  geodesicOceanCellCount: 0
+  geodesicCoastlineOceanCellCount: 0
+  geodesicMinimumLocalOceanDepth: 0
+  geodesicAreaWeightedMeanLocalOceanDepth: 0
+  geodesicMaximumLocalOceanDepth: 0
+  geodesicColoursUseTerrainHeight: 1
+  geodesicOutlineRadialOffset: 0.003
+  enableGeodesicProceduralSurfaceColours: 1
+  usePlanetSeedForVisuals: 1
+  customVisualSeed: 12345
+  geodesicVisualNoiseScale: 2.25
+  geodesicVisualOctaves: 4
+  geodesicVisualPersistence: 0.5
+  geodesicVisualLacunarity: 2
+  geodesicLowColour: {r: 0.16, g: 0.2, b: 0.15, a: 1}
+  geodesicMiddleColour: {r: 0.42, g: 0.38, b: 0.25, a: 1}
+  geodesicHighColour: {r: 0.72, g: 0.7, b: 0.58, a: 1}
+  geodesicVisualContrast: 1.2
   resolution: 100
   radius: 8
   planetMaterial: {fileID: 2100000, guid: 513d49edfa76328498dfe1098aab132c, type: 2}
@@ -915,7 +1119,8 @@ MonoBehaviour:
   shorelinePreservationDistance: 3
   bathymetryVisualStrength: 0.35
   enableAtmosphere: 1
-  atmosphereRadiusMultiplier: 1.06
+  atmosphereRadiusMultiplier: 1.01
+  geodesicAtmosphereRenderSubdivisionLevel: 4
   atmosphereMaterial: {fileID: 2100000, guid: 359c2383b6d970d4e90649d66110cde6, type: 2}
   randomizeOnStart: 0
   useRandomSeed: 1
@@ -925,6 +1130,11 @@ MonoBehaviour:
   oceanCoverageRange: {x: 25, y: 60}
   photosynthesisUnlockSeconds: 0
   saprotrophyUnlockSeconds: 0
+  geodesicTransportGraphInitialized: 0
+  geodesicTransportGraphCellCount: 0
+  geodesicTransportGraphEdgeCount: 0
+  geodesicTransportGraphApproximateMemoryBytes: 0
+  geodesicTransportGraphBuildMilliseconds: 0
 --- !u!4 &382753103
 Transform:
   m_ObjectHideFlags: 0
@@ -990,6 +1200,305 @@ MonoBehaviour:
   seaIceThresholdKelvin: 269.15
   seaIceFadeKelvin: 3
   seaIceRadiusMultiplier: 1.002
+--- !u!114 &382753106
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 382753101}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7fb57947876b4edb963edbe2a66187cc, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: SimulaVit::GeodesicSurfaceTemperatureField
+  thermalModel: 0
+  enableGeodesicSurfaceTemperature: 1
+  approximateUpdateIntervalSeconds: 2
+  updateIntervalSeconds: 0.25
+  maximumThermalTicksPerFrame: 64
+  diagnosticSnapshotIntervalSeconds: 0.25
+  diffusionConservationAuditIntervalSeconds: 5
+  heatingTimescaleSeconds: 20
+  coolingTimescaleSeconds: 35
+  diffusionStrength: 0.002
+  landHeatCapacityMultiplier: 1
+  oceanSurfaceHeatCapacityMultiplier: 8
+  insolationExponent: 1
+  terrestrialVentSourceTemperatureC: 350
+  terrestrialVentThermalInfluence: 0.06
+  debugTemperatureVisualization: 0
+  enableProfilingDiagnostics: 0
+  initialized: 0
+  runtimeCellCount: 0
+  minimumTemperatureKelvin: 0
+  areaWeightedMeanTemperatureKelvin: 0
+  maximumTemperatureKelvin: 0
+  lastCompletedTemperatureTick: 0
+  lastTickDurationMilliseconds: 0
+  currentSunDirectionProvider: None
+  latestDiffusionConservationRelativeError: 0
+  lastTargetUpdateDurationMilliseconds: 0
+  lastDiffusionDurationMilliseconds: 0
+  lastDiffusionSubstepCount: 0
+  totalAuthoritativeSimulationSecondsReceived: 0
+  totalSimulationSecondsConsumedByThermalTicks: 0
+  unconsumedThermalRemainderSeconds: 0
+  discardedSimulationSeconds: 0
+  thermalTicksCurrentRenderedFrame: 0
+  thermalSimSecondsProcessedThisFrame: 0
+  maximumThermalTicksPerRenderedFrame: 0
+  currentAuthoritativeSimulationTime: 0
+  thermalIntegrationCursorTime: 0
+  currentSunOrbitTime: 0
+  currentSunPhase01: 0
+  maximumSolarAngularAdvancePerThermalTickDegrees: 0
+  lastCompletedSolarDayIndex: -1
+  lastCompletedDayMinimumTemperatureKelvin: 0
+  lastCompletedDayMeanTemperatureKelvin: 0
+  lastCompletedDayMaximumTemperatureKelvin: 0
+  lastThermalTickRepresentativeSimulationTime: 0
+  lastThermalTickSolarPhase01: 0
+  lastExactDiffusionAuditSimulationTime: 0
+  ticksSinceLastExactDiffusionAudit: 0
+  lastTickUsedAlgebraicDiffusionConservationOnly: 0
+  activeThermalModelDiagnostic: Not initialized
+  hasActiveThermalModel: 0
+  surfaceCellsUpdatedLastTick: 0
+  horizontalEdgesProcessedLastTick: 0
+--- !u!114 &382753107
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 382753101}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 10580f2e998f41d483f48a29e76bed20, type: 3}
+  m_Name: GeodesicOceanLayerDomain
+  m_EditorClassIdentifier: SimulaVit::GeodesicOceanLayerDomain
+  enableGeodesicLayeredOcean: 1
+  maximumLayerCount: 5
+  secondLayerBeginsAtDepthFraction: 0.12
+  thirdLayerBeginsAtDepthFraction: 0.32
+  fourthLayerBeginsAtDepthFraction: 0.58
+  fifthLayerBeginsAtDepthFraction: 0.82
+  initialized: 0
+  runtimeCellCount: 0
+  oceanCellCount: 0
+  runtimeMaximumLayers: 0
+  activeNodeCount: 0
+  horizontalLinkCount: 0
+  verticalLinkCount: 0
+  minimumActiveLayers: 0
+  maximumActiveLayers: 0
+  meanActiveLayers: 0
+  oceanCellsWithOneLayer: 0
+  oceanCellsWithTwoLayers: 0
+  oceanCellsWithThreeLayers: 0
+  oceanCellsWithFourLayers: 0
+  oceanCellsWithFiveLayers: 0
+  minimumLayerVolume: 0
+  meanLayerVolume: 0
+  maximumLayerVolume: 0
+  maximumOceanDepth: 0
+  buildDurationMilliseconds: 0
+  approximateMemoryBytes: 0
+  sampleCellIndex: 0
+  sampleCellOutput: Grid not initialized.
+--- !u!114 &382753108
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 382753101}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7c4f916d78b9443a890b8e6a1631aeee, type: 3}
+  m_Name: GeodesicOceanTemperatureField
+  m_EditorClassIdentifier: SimulaVit::GeodesicOceanTemperatureField
+  enableGeodesicOceanTemperature: 1
+  abyssalBaselineTemperatureC: 1.5
+  abyssalClimateCoupling: 0.25
+  shallowResponseTimescaleSeconds: 80
+  deepResponseTimescaleSeconds: 1200
+  depthProfileExponent: 1.4
+  submarineVentSourceTemperatureC: 350
+  ventThermalInfluence: 0.08
+  aboveBottomVentHeatingFactor: 0.35
+  subsurfaceHeatCapacityPerVolume: 1
+  verticalThermalDiffusivity: 0.00002
+  startupMode: 1
+  initialTemperatureDropPerLayerKelvin: 2
+  maximumVerticalSubsteps: 64
+  inspectorSnapshotIntervalSeconds: 1
+  exactConservationAuditIntervalSeconds: 5
+  enableProfilingDiagnostics: 0
+  initialized: 0
+  activeSubsurfaceNodeCount: 0
+  participatingSurfaceCellCount: 0
+  totalSubsurfaceThermalCapacity: 0
+  sourceGridSummary: None
+  lastCompletedOceanTemperatureTick: 0
+  lastVerticalExchangeSimulationDelta: 0
+  solverMode: ImplicitBackwardEuler
+  columnsSolvedLastTick: 0
+  layersSolvedLastTick: 0
+  lastVerticalExchangeDurationMilliseconds: 0
+  lastSurfaceBatchDurationMilliseconds: 0
+  lastSubsurfaceCommitDurationMilliseconds: 0
+  maximumEquationResidual: 0
+  failedColumnCount: 0
+  latestVerticalConservationRelativeError: 0
+  lastExactConservationAuditSimulationTime: 0
+  ticksSinceLastExactConservationAudit: 0
+  lastTickUsedAlgebraicConservationOnly: 0
+  lastAbsoluteEnergyTransferred: 0
+  lastStabilityClampingOccurred: 0
+  maximumSurfaceToBottomTemperatureDifference: 0
+  approximateRuntimeMemoryBytes: 0
+  oceanCallbacksLastRenderedFrame: 0
+  maximumOceanCallbacksPerRenderedFrame: 0
+  verticalSubstepsLastRenderedFrame: 0
+  verticalLinksProcessedLastRenderedFrame: 0
+  oceanTemperatureMillisecondsLastRenderedFrame: 0
+  duplicateOrStaleCallbackCount: 0
+  activeThermalModelDiagnostic: Not initialized
+  subsurfaceNodesUpdatedLastTick: 0
+  verticalInterfacesProcessedLastTick: 0
+  implicitColumnsSolvedLastTick: 0
+  approximateNodesRelaxedLastTick: 0
+  thermalSubstepsLastTick: 0
+  lastApproximateOceanUpdateDurationMilliseconds: 0
+  lastConservativeOceanCallbackDurationMilliseconds: 0
+  layerActiveCellCount: 0000000000000000000000000000000000000000
+  layerMinimumTemperatureKelvin:
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  layerMeanTemperatureKelvin:
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  layerMaximumTemperatureKelvin:
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+--- !u!114 &382753109
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 382753101}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2019979015eb4f069151bac084de2ab2, type: 3}
+  m_Name: GeodesicOceanResourceField
+  m_EditorClassIdentifier: SimulaVit::GeodesicOceanResourceField
+  initialCO2Concentration: 1
+  initialO2Concentration: 0.21
+  initialCH4Concentration: 0
+  initialFe2Concentration: 0
+  transportIntervalSeconds: 5
+  horizontalMixingRate: 0.02
+  defaultVerticalMixingRate: 0.005
+  horizontalResourceMultipliers:
+  - 1
+  - 1
+  - 1
+  - 1
+  - 1
+  - 1
+  - 1
+  verticalResourceMultipliers:
+  - 1
+  - 0.1
+  - 1
+  - 1
+  - 1
+  - 1
+  - 1
+  maximumTransportTicksPerFrame: 64
+  ventColumnFraction: 0.02
+  ventClustering: 0.65
+  geothermalPatchiness: 0.8
+  terrestrialVentFraction: 0.25
+  ventH2PerTick: 0.006
+  ventH2SPerTick: 0.004
+  ventCO2PerTick: 0.02
+  ventFe2PerTick: 0.002
+  maximumOutletsPerSystem: 5
+  outletSelectionRadiusDegrees: 3.5
+  initialized: 0
+  cellCount: 0
+  nodeCapacity: 0
+  activeNodeCount: 0
+  activeOceanVolume: 0
+  approximateRuntimeMemoryBytes: 0
+  initializationCount: 0
+  clearCount: 0
+  invalidQueryCount: 0
+  rejectedNonfiniteWriteCount: 0
+  rejectedNegativeWriteCount: 0
+  resourceDiagnostics: []
+  lastInitializationFailure: 0
+  lastInitializationFailureMessage: 
+  lastStartupConcentrationDiagnostic: 
+  lastSentinelVerificationDiagnostic: 
+  horizontalLinkCount: 0
+  verticalLinkCount: 0
+  ventCount: 0
+  rawVentCandidateCount: 0
+  submarineVentCount: 0
+  terrestrialVentCount: 0
+  normalizedSubmarineWeightSum: 0
+  transportIntegrationCursorTime: 0
+  unconsumedTransportRemainderSeconds: 0
+  completedTransportTicks: 0
+  transportCacheMemoryBytes: 0
+  stagingBufferMemoryBytes: 0
+  resourceTicksExecutedThisFrame: 0
+  resourceSimSecondsProcessedThisFrame: 0
+  cachedMeanO2ByLayer:
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  horizontalActiveResourceChannelsLastTick: 0
+  horizontalSkippedUniformChannelsLastTick: 0
+  horizontalLinkResourceEvaluationsLastTick: 0
+--- !u!114 &382753110
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 382753101}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 92de4c5e03f147e3ab7ff12762f21d8c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: SimulaVit::GeodesicOceanFe2Visual
+  minimumVisualizedFe2: 0
+  maximumVisualizedFe2: 8
+  lowFe2Tint: {r: 0.2, g: 0.36, b: 0.44, a: 1}
+  highFe2Tint: {r: 0.12156861, g: 0.5803922, b: 0.16663016, a: 1}
+  intensityMultiplier: 0.42
+  refreshIntervalSeconds: 0.5
+  layer1VisualWeight: 0.4
+  maximumVisualizedRecentOxidation: 2
+  rustyOxidationTint: {r: 0.72, g: 0.3, b: 0.08, a: 1}
+  rustyOxidationIntensity: 0.65
 --- !u!1 &581314702
 GameObject:
   m_ObjectHideFlags: 0
@@ -1072,8 +1581,8 @@ MonoBehaviour:
   m_TargetGraphic: {fileID: 1049548737}
   m_HandleRect: {fileID: 1049548736}
   m_Direction: 2
-  m_Value: 0
-  m_Size: 0.47368428
+  m_Value: 1
+  m_Size: 1
   m_NumberOfSteps: 0
   m_OnValueChanged:
     m_PersistentCalls:
@@ -1470,8 +1979,8 @@ MonoBehaviour:
   metabolismMutationChance: 0.2
   hydrogenotrophyH2PerTick: 0.02
   hydrogenotrophyCO2PerTick: 0.01
-  hydrogenotrophyEnergyPerTick: 0.05
-  hydrogenotrophyStoreFraction: 0.2
+  hydrogenotrophyEnergyPerTick: 8
+  hydrogenotrophyStoreFraction: 0.8
   fermentationOrganicCPerTick: 0.02
   fermentationEnergyPerTick: 0.7
   fermentationAssimilationFraction: 0.4
@@ -1651,6 +2160,13 @@ MonoBehaviour:
     BlockedByTarget: 
     BlockedByReason: 
     BlockedByTargetAndReason: 
+  replicationHabitatTelemetry:
+    OceanAttempts: 0
+    SurfaceAttempts: 0
+    SurfaceRejected: 0
+    BlockedByHabitat: 0
+    RepresentativeParentCell: -1
+    RepresentativeParentMetabolism: 0
   topBlockedMutationGateTarget: 0
   topBlockedMutationGateTargetCount: 0
   topMutationGateBlockReason: 0
@@ -1709,6 +2225,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: SimulaVit::ReplicatorSimulationPipeline
   replicatorManager: {fileID: 1064713443}
   simulationStepsPerFrame: 1
+  maximumSimulationStepDeltaSeconds: 0.033333335
   simulationSpeedMultiplier: 1
   frameDeltaTime: 0
   simulationDeltaTime: 0
@@ -1717,6 +2234,10 @@ MonoBehaviour:
   movementUsesAuthoritativeSimulationDelta: 1
   shouldAdvanceSimulation: 1
   pauseDetected: 0
+  rawRenderedFrameDelta: 0
+  simulationStepDeltaClamped: 0
+  simulationStepsExecutedThisFrame: 0
+  effectiveSimulationTimeAdvanceThisFrame: 0
 --- !u!1 &1222684992
 GameObject:
   m_ObjectHideFlags: 0
@@ -1773,9 +2294,9 @@ MonoBehaviour:
   enableVentReplenishment: 1
   ventTickSeconds: 0.5
   ventsOnlyBelowSeaLevel: 0
-  ventH2SPerTick: 0.04
-  ventH2PerTick: 0.06
-  ventCO2PerTick: 0.25
+  ventH2SPerTick: 0.004
+  ventH2PerTick: 0.006
+  ventCO2PerTick: 0.02
   ventH2SMax: 1
   ventH2Max: 1.5
   h2sDiffuseStrength: 0.08
@@ -1790,10 +2311,38 @@ MonoBehaviour:
   atmosphereTickSeconds: 2
   landExchangeRate: 0.25
   oceanExchangeRate: 0.05
-  atmosphereToOceanO2TransferFractionPerTick: 1
+  atmosphereOceanO2ExchangeRatePerSecond: 1
   debugGlobalCO2: 5
   debugGlobalO2: 0.010003356
   debugGlobalCH4: 0
+  debugAtmosphereO2Total: 0
+  debugAtmosphereToSurfaceOceanO2LastTick: 0
+  debugAtmosphereOceanO2ExchangeMassBalanceErrorLastTick: 0
+  debugOceanO2TopLayerTotal: 0
+  debugOceanO2TopLayerMean: 0
+  debugOceanO2SecondLayerTotal: 0
+  debugOceanO2SecondLayerMean: 0
+  debugOceanO2DeepestLayerTotal: 0
+  debugOceanO2DeepestLayerMean: 0
+  debugO2ConsumedByFe2OxidationLastTick: 0
+  debugFe2TotalByLayer:
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  debugFe2OxidizedLastTickByLayer:
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  debugFeOxPrecipitateGeneratedLastTickByLayer:
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
   debugSimulationDeltaTimeUsedByPlanetResourceMap: 0
   debugLastVentDeltaTime: 0
   debugVentTimer: 0
@@ -1891,7 +2440,6 @@ MonoBehaviour:
   layeredSecondLayerLightFactor: 0.55
   layeredThirdLayerLightFactor: 0.02
   layeredVerticalMixRate: 0.02
-  layeredSurfaceOxygenationRate: 0.02
   layeredMarineSnowRate: 0.015
   layeredOrganicCLateralSpreadRate: 0.002
   layeredOrganicCUpwardBleedRate: 0.0002
@@ -51684,7 +52232,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 1}
   m_AnchorMax: {x: 1, y: 1}
-  m_AnchoredPosition: {x: 0, y: 0.000030517578}
+  m_AnchoredPosition: {x: 0, y: -0.00018310547}
   m_SizeDelta: {x: 0, y: 500}
   m_Pivot: {x: 0, y: 1}
 --- !u!114 &1582151553
