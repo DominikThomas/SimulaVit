@@ -29,8 +29,12 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     private static readonly ProfilerMarker InitializeMarker = new ProfilerMarker("GeodesicOceanResource.Initialize");
     private static readonly ProfilerMarker TransportMarker = new ProfilerMarker("GeodesicOceanResource.Transport");
     private static readonly ProfilerMarker HorizontalMarker = new ProfilerMarker("GeodesicOceanResource.HorizontalMixing");
+    private static readonly ProfilerMarker HorizontalChannelSelectionMarker = new ProfilerMarker("GeodesicOceanResource.HorizontalMixing.ChannelSelection");
+    private static readonly ProfilerMarker HorizontalLinkScanMarker = new ProfilerMarker("GeodesicOceanResource.HorizontalMixing.LinkScanAndAccumulate");
     private static readonly ProfilerMarker VerticalMarker = new ProfilerMarker("GeodesicOceanResource.VerticalMixing");
+    private static readonly ProfilerMarker StagedWritebackMarker = new ProfilerMarker("GeodesicOceanResource.StagedWriteback");
     private static readonly ProfilerMarker VentMarker = new ProfilerMarker("GeodesicOceanResource.VentSources");
+    private static readonly ProfilerMarker DeltaClearMarker = new ProfilerMarker("GeodesicOceanResource.DeltaClear");
     private static readonly ProfilerMarker ChemistryCandidateRefreshMarker = new ProfilerMarker("GeodesicOceanResource.Chemistry.CandidateRefresh");
     private static readonly ProfilerMarker DiagnosticsMarker = new ProfilerMarker("GeodesicOceanResource.RecurringDiagnostics");
     private static ProfilerCounterValue<int> TicksPerFrameCounter = new ProfilerCounterValue<int>(ProfilerCategory.Scripts, "Geodesic Resource Ticks / Frame", ProfilerMarkerDataUnit.Count, ProfilerCounterOptions.FlushOnEndOfFrame);
@@ -39,6 +43,18 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     private static ProfilerCounterValue<int> HorizontalActiveChannelsCounter = new ProfilerCounterValue<int>(ProfilerCategory.Scripts, "Geodesic Horizontal Active Resource Channels", ProfilerMarkerDataUnit.Count, ProfilerCounterOptions.FlushOnEndOfFrame);
     private static ProfilerCounterValue<int> HorizontalSkippedChannelsCounter = new ProfilerCounterValue<int>(ProfilerCategory.Scripts, "Geodesic Horizontal Skipped Uniform Channels", ProfilerMarkerDataUnit.Count, ProfilerCounterOptions.FlushOnEndOfFrame);
     private static ProfilerCounterValue<int> HorizontalLinkResourceEvaluationsCounter = new ProfilerCounterValue<int>(ProfilerCategory.Scripts, "Geodesic Horizontal Link-Resource Evaluations", ProfilerMarkerDataUnit.Count, ProfilerCounterOptions.FlushOnEndOfFrame);
+    private static ProfilerCounterValue<int> HorizontalTicksCounter = new ProfilerCounterValue<int>(ProfilerCategory.Scripts, "Geodesic Horizontal Mix Ticks", ProfilerMarkerDataUnit.Count, ProfilerCounterOptions.FlushOnEndOfFrame);
+    private static ProfilerCounterValue<int> HorizontalDenseChannelsCounter = new ProfilerCounterValue<int>(ProfilerCategory.Scripts, "Geodesic Horizontal Dense Channels", ProfilerMarkerDataUnit.Count, ProfilerCounterOptions.FlushOnEndOfFrame);
+    private static ProfilerCounterValue<int> HorizontalSparseChannelsCounter = new ProfilerCounterValue<int>(ProfilerCategory.Scripts, "Geodesic Horizontal Sparse Channels", ProfilerMarkerDataUnit.Count, ProfilerCounterOptions.FlushOnEndOfFrame);
+    private static ProfilerCounterValue<int> HorizontalZeroZeroCounter = new ProfilerCounterValue<int>(ProfilerCategory.Scripts, "Geodesic Horizontal Zero-Zero Links Skipped", ProfilerMarkerDataUnit.Count, ProfilerCounterOptions.FlushOnEndOfFrame);
+    private static ProfilerCounterValue<int> HorizontalEqualCounter = new ProfilerCounterValue<int>(ProfilerCategory.Scripts, "Geodesic Horizontal Equal-Concentration Links", ProfilerMarkerDataUnit.Count, ProfilerCounterOptions.FlushOnEndOfFrame);
+    private static ProfilerCounterValue<int> HorizontalFluxCounter = new ProfilerCounterValue<int>(ProfilerCategory.Scripts, "Geodesic Horizontal Nonzero-Flux Links", ProfilerMarkerDataUnit.Count, ProfilerCounterOptions.FlushOnEndOfFrame);
+    private static ProfilerCounterValue<int> HorizontalFrontierLinksCounter = new ProfilerCounterValue<int>(ProfilerCategory.Scripts, "Geodesic Horizontal Nonzero-Support Links", ProfilerMarkerDataUnit.Count, ProfilerCounterOptions.FlushOnEndOfFrame);
+    private static ProfilerCounterValue<int> HorizontalDeltaWritesCounter = new ProfilerCounterValue<int>(ProfilerCategory.Scripts, "Geodesic Horizontal Delta Writes", ProfilerMarkerDataUnit.Count, ProfilerCounterOptions.FlushOnEndOfFrame);
+    private static ProfilerCounterValue<int> HorizontalChannelsConsideredCounter = new ProfilerCounterValue<int>(ProfilerCategory.Scripts, "Geodesic Horizontal Channels Considered", ProfilerMarkerDataUnit.Count, ProfilerCounterOptions.FlushOnEndOfFrame);
+    private static ProfilerCounterValue<int> HorizontalEndpointReadsCounter = new ProfilerCounterValue<int>(ProfilerCategory.Scripts, "Geodesic Horizontal Endpoint Reads", ProfilerMarkerDataUnit.Count, ProfilerCounterOptions.FlushOnEndOfFrame);
+    private static ProfilerCounterValue<int> HorizontalConductanceReadsCounter = new ProfilerCounterValue<int>(ProfilerCategory.Scripts, "Geodesic Horizontal Conductance Reads", ProfilerMarkerDataUnit.Count, ProfilerCounterOptions.FlushOnEndOfFrame);
+    private static ProfilerCounterValue<int> HorizontalFrontierNodesCounter = new ProfilerCounterValue<int>(ProfilerCategory.Scripts, "Geodesic Horizontal Frontier Nodes", ProfilerMarkerDataUnit.Count, ProfilerCounterOptions.FlushOnEndOfFrame);
 
     [Header("Startup Concentrations (Geodesic Dissolved Ocean)")]
     [SerializeField, Min(0f)] private float initialCO2Concentration = 1f;
@@ -53,6 +69,7 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     [SerializeField] private float[] horizontalResourceMultipliers = { 1f, 1f, 1f, 1f, 1f, 1f, 1f };
     [SerializeField, Tooltip("CO2, O2, CH4, H2, H2S, Fe2, OrganicC. O2 defaults to 0.1 so deep oxygenation lags.")] private float[] verticalResourceMultipliers = { 1f, 0.1f, 1f, 1f, 1f, 1f, 1f };
     [SerializeField, Range(1, 256)] private int maximumTransportTicksPerFrame = 64;
+    [SerializeField, Min(1), Tooltip("Detailed horizontal work counters are sampled at this tick interval to keep instrumentation out of ordinary hot loops.")] private int horizontalDetailedCounterIntervalTicks = 12;
 
     [Header("Geodesic Vent Sources")]
     [SerializeField, Range(0f, 0.25f), Tooltip("Deterministic fraction of eligible cells selected as generation-only geothermal candidates.")] private float ventColumnFraction = 0.02f;
@@ -103,6 +120,16 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     [SerializeField] private int horizontalActiveResourceChannelsLastTick;
     [SerializeField] private int horizontalSkippedUniformChannelsLastTick;
     [SerializeField] private int horizontalLinkResourceEvaluationsLastTick;
+    [SerializeField] private int horizontalZeroZeroLinksSkippedLastTick;
+    [SerializeField] private int horizontalEqualConcentrationLinksLastTick;
+    [SerializeField] private int horizontalNonzeroFluxLinksLastTick;
+    [SerializeField] private int horizontalNonzeroSupportLinksLastTick;
+    [SerializeField] private int horizontalDeltaWritesLastTick;
+    [SerializeField] private int verticalLinkResourceEvaluationsLastTick;
+    [SerializeField] private int[] horizontalSupportNodesByResource = new int[ResourceCount];
+    [SerializeField] private int[] horizontalLinksVisitedByResource = new int[ResourceCount];
+    [SerializeField] private int[] horizontalNonzeroSupportLinksByResource = new int[ResourceCount];
+    [SerializeField] private int[] horizontalUnequalLinksByResource = new int[ResourceCount];
 
     private GeodesicOceanLayerDomain domain;
     private PlanetGenerator planetGenerator;
@@ -163,6 +190,11 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     public int HorizontalActiveResourceChannelsLastTick => horizontalActiveResourceChannelsLastTick;
     public int HorizontalSkippedUniformChannelsLastTick => horizontalSkippedUniformChannelsLastTick;
     public int HorizontalLinkResourceEvaluationsLastTick => horizontalLinkResourceEvaluationsLastTick;
+    public int HorizontalZeroZeroLinksSkippedLastTick => horizontalZeroZeroLinksSkippedLastTick;
+    public int HorizontalEqualConcentrationLinksLastTick => horizontalEqualConcentrationLinksLastTick;
+    public int HorizontalNonzeroFluxLinksLastTick => horizontalNonzeroFluxLinksLastTick;
+    public int HorizontalDeltaWritesLastTick => horizontalDeltaWritesLastTick;
+    public int VerticalLinkResourceEvaluationsLastTick => verticalLinkResourceEvaluationsLastTick;
 
     public bool TryGetVent(int index, out int cellIndex, out int bottomLayerIndex, out float strength)
     {
@@ -217,17 +249,20 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
         lastObservedSimulationTime = target;
         double interval = TransportIntervalSeconds;
         int ticks = 0, guard = Mathf.Max(1, maximumTransportTicksPerFrame);
-        while (transportIntegrationCursorTime + interval <= target + 1e-9d && ticks < guard)
+        while (IsTransportTickDue(transportIntegrationCursorTime, target, interval) && ticks < guard)
         {
             TickResources((float)interval);
             transportIntegrationCursorTime += interval; completedTransportTicks++; ticks++;
         }
-        if (transportIntegrationCursorTime + interval <= target + 1e-9d && !warnedTransportBacklog)
+        if (IsTransportTickDue(transportIntegrationCursorTime, target, interval) && !warnedTransportBacklog)
         { warnedTransportBacklog = true; Debug.LogWarning("[GeodesicOceanResourceTransport] Catch-up guard reached; backlog retained.", this); }
         unconsumedTransportRemainderSeconds = Math.Max(0d, target - transportIntegrationCursorTime);
         resourceTicksExecutedThisFrame = ticks; resourceSimSecondsProcessedThisFrame = (float)(ticks * interval);
         TicksPerFrameCounter.Value = ticks; SimSecondsPerFrameCounter.Value = resourceSimSecondsProcessedThisFrame; BacklogCounter.Value = (float)unconsumedTransportRemainderSeconds;
     }
+
+    internal static bool IsTransportTickDue(double cursor, double target, double interval)
+    { return interval > 0d && cursor + interval <= target + 1e-9d; }
 
     public void SetStartupConcentrations(float co2, float o2, float ch4, float fe2)
     {
@@ -604,7 +639,7 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
             // Historically named "Per Tick" startup values are rates per simulated second.
             InjectVentSources(dt);
             airSeaGasExchange.Step(this, dt);
-            Array.Clear(stagedInventoryDelta, 0, stagedInventoryDelta.Length);
+            using (DeltaClearMarker.Auto()) Array.Clear(stagedInventoryDelta, 0, stagedInventoryDelta.Length);
             PrepareTickCoefficients(dt);
             AccumulateHorizontalAllResources();
             AccumulateVerticalAllResources();
@@ -637,29 +672,87 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
         int[] nodeA = sourceGrid.HorizontalNodeA, nodeB = sourceGrid.HorizontalNodeB;
         float[] state = concentrationsByResourceThenNode; double[] delta = stagedInventoryDelta; int capacity = nodeCapacity;
         float dt = preparedTickDeltaTime;
+        bool collectDetailedCounters = completedTransportTicks % Math.Max(1, horizontalDetailedCounterIntervalTicks) == 0;
         int activeMask = CalculateHorizontalActiveMask(resourceMayHaveSpatialVariation, horizontalTickCoefficients);
-        horizontalActiveResourceChannelsLastTick = CountResourceBits(activeMask);
-        horizontalSkippedUniformChannelsLastTick = 0;
-        for (int resource = 0; resource < ResourceCount; resource++) if (!resourceMayHaveSpatialVariation[resource]) horizontalSkippedUniformChannelsLastTick++;
-        horizontalLinkResourceEvaluationsLastTick = horizontalLinkCount * horizontalActiveResourceChannelsLastTick;
+        using (HorizontalMarker.Auto())
+        {
+            using (HorizontalChannelSelectionMarker.Auto())
+            {
+                horizontalActiveResourceChannelsLastTick = CountResourceBits(activeMask);
+                horizontalSkippedUniformChannelsLastTick = 0;
+                for (int resource = 0; resource < ResourceCount; resource++)
+                {
+                    horizontalLinksVisitedByResource[resource] = 0;
+                    if (collectDetailedCounters)
+                    {
+                        horizontalNonzeroSupportLinksByResource[resource] = 0;
+                        horizontalUnequalLinksByResource[resource] = 0;
+                    }
+                    if (!resourceMayHaveSpatialVariation[resource]) horizontalSkippedUniformChannelsLastTick++;
+                }
+                horizontalLinkResourceEvaluationsLastTick = horizontalLinkCount * horizontalActiveResourceChannelsLastTick;
+                if (collectDetailedCounters)
+                    horizontalZeroZeroLinksSkippedLastTick = horizontalEqualConcentrationLinksLastTick = horizontalNonzeroFluxLinksLastTick = horizontalNonzeroSupportLinksLastTick = horizontalDeltaWritesLastTick = 0;
+            }
+            // Channel-major traversal removes seven per-link mask branches and repeated
+            // channel-offset arithmetic. It preserves each channel's authoritative link order.
+            using (HorizontalLinkScanMarker.Auto()) for (int resource = 0; resource < ResourceCount && activeMask != 0; resource++)
+            {
+                if ((activeMask & (1 << resource)) == 0) continue;
+                int offset = resource * capacity;
+                float coefficient = horizontalTickCoefficients[resource] * dt;
+                horizontalLinksVisitedByResource[resource] = horizontalLinkCount;
+                if (!collectDetailedCounters)
+                {
+                    for (int i = 0; i < horizontalLinkCount; i++)
+                    {
+                        int a = offset + nodeA[i], b = offset + nodeB[i];
+                        float concentrationA = state[a], concentrationB = state[b];
+                        if (concentrationA == concentrationB) continue;
+                        double transfer = horizontalConductanceBase[i] * coefficient * (concentrationA - concentrationB);
+                        if (transfer == 0d) continue;
+                        delta[a] -= transfer; delta[b] += transfer;
+                    }
+                    continue;
+                }
+                for (int i = 0; i < horizontalLinkCount; i++)
+                {
+                    int a = offset + nodeA[i], b = offset + nodeB[i];
+                    float concentrationA = state[a], concentrationB = state[b];
+                    if (concentrationA == concentrationB)
+                    {
+                        horizontalEqualConcentrationLinksLastTick++;
+                        if (concentrationA == 0f) horizontalZeroZeroLinksSkippedLastTick++;
+                        else { horizontalNonzeroSupportLinksLastTick++; horizontalNonzeroSupportLinksByResource[resource]++; }
+                        continue;
+                    }
+                    if (concentrationA != 0f || concentrationB != 0f)
+                    { horizontalNonzeroSupportLinksLastTick++; horizontalNonzeroSupportLinksByResource[resource]++; }
+                    horizontalUnequalLinksByResource[resource]++;
+                    double transfer = horizontalConductanceBase[i] * coefficient * (concentrationA - concentrationB);
+                    if (transfer == 0d) continue;
+                    delta[a] -= transfer; delta[b] += transfer;
+                    horizontalNonzeroFluxLinksLastTick++; horizontalDeltaWritesLastTick += 2;
+                }
+            }
+        }
+        HorizontalTicksCounter.Value++;
+        HorizontalChannelsConsideredCounter.Value = ResourceCount;
+        HorizontalDenseChannelsCounter.Value = horizontalActiveResourceChannelsLastTick;
+        HorizontalSparseChannelsCounter.Value = 0;
+        HorizontalFrontierNodesCounter.Value = 0;
         HorizontalActiveChannelsCounter.Value = horizontalActiveResourceChannelsLastTick;
         HorizontalSkippedChannelsCounter.Value = horizontalSkippedUniformChannelsLastTick;
         HorizontalLinkResourceEvaluationsCounter.Value = horizontalLinkResourceEvaluationsLastTick;
-        using (HorizontalMarker.Auto())
+        HorizontalEndpointReadsCounter.Value = horizontalLinkResourceEvaluationsLastTick * 2;
+        if (collectDetailedCounters)
         {
-            if (activeMask == 0) return;
-            float k0 = horizontalTickCoefficients[0], k1 = horizontalTickCoefficients[1], k2 = horizontalTickCoefficients[2], k3 = horizontalTickCoefficients[3], k4 = horizontalTickCoefficients[4], k5 = horizontalTickCoefficients[5], k6 = horizontalTickCoefficients[6];
-            for (int i = 0; i < horizontalLinkCount; i++)
-            {
-                int a = nodeA[i], b = nodeB[i]; float conductance = horizontalConductanceBase[i];
-                if ((activeMask & 1) != 0) AccumulatePair(state, delta, a, b, conductance * k0 * dt);
-                a += capacity; b += capacity; if ((activeMask & 2) != 0) AccumulatePair(state, delta, a, b, conductance * k1 * dt);
-                a += capacity; b += capacity; if ((activeMask & 4) != 0) AccumulatePair(state, delta, a, b, conductance * k2 * dt);
-                a += capacity; b += capacity; if ((activeMask & 8) != 0) AccumulatePair(state, delta, a, b, conductance * k3 * dt);
-                a += capacity; b += capacity; if ((activeMask & 16) != 0) AccumulatePair(state, delta, a, b, conductance * k4 * dt);
-                a += capacity; b += capacity; if ((activeMask & 32) != 0) AccumulatePair(state, delta, a, b, conductance * k5 * dt);
-                a += capacity; b += capacity; if ((activeMask & 64) != 0) AccumulatePair(state, delta, a, b, conductance * k6 * dt);
-            }
+            HorizontalZeroZeroCounter.Value = horizontalZeroZeroLinksSkippedLastTick;
+            HorizontalEqualCounter.Value = horizontalEqualConcentrationLinksLastTick;
+            HorizontalFluxCounter.Value = horizontalNonzeroFluxLinksLastTick;
+            HorizontalFrontierLinksCounter.Value = horizontalNonzeroSupportLinksLastTick;
+            HorizontalDeltaWritesCounter.Value = horizontalDeltaWritesLastTick;
+            HorizontalConductanceReadsCounter.Value = horizontalLinkResourceEvaluationsLastTick - horizontalEqualConcentrationLinksLastTick;
         }
     }
 
@@ -681,6 +774,7 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
         float[] state = concentrationsByResourceThenNode; double[] delta = stagedInventoryDelta; int capacity = nodeCapacity;
         float dt = preparedTickDeltaTime;
         float k0 = verticalTickCoefficients[0], k1 = verticalTickCoefficients[1], k2 = verticalTickCoefficients[2], k3 = verticalTickCoefficients[3], k4 = verticalTickCoefficients[4], k5 = verticalTickCoefficients[5], k6 = verticalTickCoefficients[6];
+        verticalLinkResourceEvaluationsLastTick = verticalLinkCount * ResourceCount;
         using (VerticalMarker.Auto()) for (int i = 0; i < verticalLinkCount; i++)
         {
             int a = nodeA[i], b = nodeB[i]; float conductance = verticalConductanceBase[i];
@@ -702,6 +796,36 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
         delta[a] -= transfer; delta[b] += transfer;
     }
 
+    /// <summary>Allocation-free dense reference kernel used by deterministic transport tests.</summary>
+    internal static void AccumulateHorizontalDenseReference(float[] state, double[] delta, int[] nodeA, int[] nodeB, float[] conductance, float coefficient)
+    {
+        for (int i = 0; i < nodeA.Length; i++)
+            AccumulatePair(state, delta, nodeA[i], nodeB[i], conductance[i] * coefficient);
+    }
+
+    /// <summary>
+    /// Optimized single-channel kernel. Exact equality is the only cutoff: zero/zero and
+    /// equal-positive endpoints have zero flux under transfer=k*(Ca-Cb).
+    /// </summary>
+    internal static void AccumulateHorizontalDenseOptimized(float[] state, double[] delta, int[] nodeA, int[] nodeB, float[] conductance, float coefficient)
+    {
+        for (int i = 0; i < nodeA.Length; i++)
+        {
+            int a = nodeA[i], b = nodeB[i];
+            float concentrationA = state[a], concentrationB = state[b];
+            if (concentrationA == concentrationB) continue;
+            double transfer = conductance[i] * coefficient * (concentrationA - concentrationB);
+            if (transfer == 0d) continue;
+            delta[a] -= transfer; delta[b] += transfer;
+        }
+    }
+
+    internal static void ApplyInventoryDeltas(float[] state, double[] delta, double[] volumes)
+    {
+        for (int i = 0; i < state.Length; i++)
+            state[i] = (float)Math.Max(0d, (state[i] * volumes[i] + delta[i]) / volumes[i]);
+    }
+
     private void ApplyStagedAllResources()
     {
         float[] state = concentrationsByResourceThenNode; double[] delta = stagedInventoryDelta; int capacity = nodeCapacity;
@@ -710,18 +834,19 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
         int fe2Offset = (int)GeodesicOceanResource.Fe2 * capacity;
         int o2Offset = (int)GeodesicOceanResource.O2 * capacity;
         chemistryCandidateCount = 0;
+        Array.Clear(horizontalSupportNodesByResource, 0, horizontalSupportNodesByResource.Length);
+        using (StagedWritebackMarker.Auto())
         using (ChemistryCandidateRefreshMarker.Auto()) for (int i = 0; i < activeNodeCount; i++)
         {
-            int node = activeNodeIndices[i]; double volume = activeNodeVolumes[i];
-            ApplyStagedNode(state, delta, node, volume);
-            node += capacity; ApplyStagedNode(state, delta, node, volume);
-            node += capacity; ApplyStagedNode(state, delta, node, volume);
-            node += capacity; ApplyStagedNode(state, delta, node, volume);
-            node += capacity; ApplyStagedNode(state, delta, node, volume);
-            node += capacity; ApplyStagedNode(state, delta, node, volume);
-            node += capacity; ApplyStagedNode(state, delta, node, volume);
-            node = activeNodeIndices[i];
-            chemistryCandidateCount = AppendChemistryCandidate(node, state[o2Offset + node], state[h2Offset + node], state[h2sOffset + node], state[fe2Offset + node], chemistryCandidateNodes, chemistryCandidateCount);
+            int baseNode = activeNodeIndices[i]; int node = baseNode; double volume = activeNodeVolumes[i];
+            ApplyStagedNode(state, delta, node, volume); if (state[node] != 0f) horizontalSupportNodesByResource[0]++;
+            node += capacity; ApplyStagedNode(state, delta, node, volume); if (state[node] != 0f) horizontalSupportNodesByResource[1]++;
+            node += capacity; ApplyStagedNode(state, delta, node, volume); if (state[node] != 0f) horizontalSupportNodesByResource[2]++;
+            node += capacity; ApplyStagedNode(state, delta, node, volume); if (state[node] != 0f) horizontalSupportNodesByResource[3]++;
+            node += capacity; ApplyStagedNode(state, delta, node, volume); if (state[node] != 0f) horizontalSupportNodesByResource[4]++;
+            node += capacity; ApplyStagedNode(state, delta, node, volume); if (state[node] != 0f) horizontalSupportNodesByResource[5]++;
+            node += capacity; ApplyStagedNode(state, delta, node, volume); if (state[node] != 0f) horizontalSupportNodesByResource[6]++;
+            chemistryCandidateCount = AppendChemistryCandidate(baseNode, state[o2Offset + baseNode], state[h2Offset + baseNode], state[h2sOffset + baseNode], state[fe2Offset + baseNode], chemistryCandidateNodes, chemistryCandidateCount);
         }
     }
 
