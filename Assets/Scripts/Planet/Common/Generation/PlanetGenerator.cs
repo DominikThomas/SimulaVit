@@ -115,11 +115,13 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     private struct GeodesicRenderTerrainData
     {
         public float[] RawRadii;
+        public float[] HydrologicalRadii;
         public float[] SurfaceRadii;
         public float[] Heights;
         public float[] NormalizedHeights;
         public float[] MountainMasks;
     }
+    internal float[] GeodesicHydrologicalRenderRadii => geodesicCurrentRenderTerrainData.HydrologicalRadii;
     public bool showGeodesicCellOutlines = true;
     public bool highlightGeodesicPentagons = true;
     public bool showGeodesicCellCentres;
@@ -203,6 +205,10 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     [SerializeField, HideInInspector] private float deprecatedGeodesicOceanOpacity = 0.42f;
     [FormerlySerializedAs("geodesicOceanSmoothness")]
     [SerializeField, HideInInspector] private float deprecatedGeodesicOceanSmoothness = 0.82f;
+
+    [Header("Geodesic Rivers")]
+    [Tooltip("Precompute land drainage and terrain-conforming river ribbons during generation. Configure GeodesicRiverSystem for thresholds and runoff.")]
+    public bool enableGeodesicRivers = true;
 
     [Header("Geodesic Terrain")]
     [Tooltip("Visual nightside floor for the geodesic terrain shader. This is not thermal energy and must not be used as temperature input.")]
@@ -613,6 +619,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
         GetComponent<PlanetTemperatureIceVisuals>()?.ClearForGeodesicMode();
         GetComponent<GeodesicVentVisualizer>()?.ClearMarkers();
+        GetComponent<GeodesicRiverSystem>()?.Clear();
         GetComponent<GeodesicExperiencedTemperatureField>()?.Clear();
         GetComponent<GeodesicOceanFe2Visual>()?.ClearVisual();
         GetComponent<GeodesicOceanSedimentVisual>()?.ClearVisual();
@@ -853,6 +860,12 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         meshFilter.sharedMesh = mesh;
         if (meshRenderer != null) meshRenderer.enabled = true;
         LogStage("terrain mesh assignment/upload", stage);
+
+        stage = System.Diagnostics.Stopwatch.StartNew();
+        if (enableGeodesicRivers)
+            GetOrAddComponent<GeodesicRiverSystem>(gameObject).Initialize(this, renderGeometry, mesh);
+        else GetComponent<GeodesicRiverSystem>()?.Clear();
+        LogStage("river drainage and ribbons", stage);
 
         var experiencedTemperatureField = GetOrAddComponent<GeodesicExperiencedTemperatureField>(gameObject);
         experiencedTemperatureField.Initialize(oceanResourceField, this);
@@ -1319,7 +1332,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         Vector3[] vertices = targetMesh.vertices;
         if (captureTerrainData)
         {
-            data.RawRadii = new float[vertices.Length]; data.SurfaceRadii = new float[vertices.Length]; data.Heights = new float[vertices.Length]; data.NormalizedHeights = new float[vertices.Length]; data.MountainMasks = new float[vertices.Length];
+            data.HydrologicalRadii = new float[vertices.Length]; data.RawRadii = new float[vertices.Length]; data.SurfaceRadii = new float[vertices.Length]; data.Heights = new float[vertices.Length]; data.NormalizedHeights = new float[vertices.Length]; data.MountainMasks = new float[vertices.Length];
         }
         bool hasGeometryDirections = geometry.UnitVertices != null;
         PlanetTerrainSettings settings = GetGeodesicTerrainSettings();
@@ -1336,6 +1349,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
             vertices[i] = direction * surface;
             if (captureTerrainData)
             {
+                data.HydrologicalRadii[i] = BasePlanetRadius + sample.LargeScaleHeightOffset;
                 data.RawRadii[i] = raw; data.SurfaceRadii[i] = surface; data.Heights[i] = height; data.NormalizedHeights[i] = max > min ? Mathf.InverseLerp(min, max, height) : 0.5f; data.MountainMasks[i] = sample.MountainMask;
             }
         }

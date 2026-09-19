@@ -3,6 +3,8 @@ using UnityEngine;
 public struct PlanetTerrainSample
 {
     public float HeightOffset;
+    // Routing height: excludes only high-frequency, low-amplitude visual detail.
+    public float LargeScaleHeightOffset;
     public float ContinentValue;
     public float MountainMask;
     public float RidgeValue;
@@ -54,7 +56,11 @@ public static class PlanetTerrainSampler
         height = Mathf.Sign(height) * Mathf.Pow(Mathf.Abs(height), Mathf.Max(0.25f, settings.heightContrast));
         float min = Mathf.Min(settings.minimumTerrainOffset, settings.maximumTerrainOffset);
         float max = Mathf.Max(settings.minimumTerrainOffset, settings.maximumTerrainOffset);
-        return new PlanetTerrainSample { HeightOffset = Mathf.Clamp(height, min, max), ContinentValue = continentNoise, MountainMask = mask, RidgeValue = ridge };
+        bool fineIsMicroDetail = settings.fineDetailScale >= 2f * Mathf.Max(settings.continentScale, settings.mountainScale)
+            && settings.fineDetailAmplitude <= 0.25f * Mathf.Max(settings.continentAmplitude, settings.mountainAmplitude);
+        float largeScale = continentHeight + mountainHeight;
+        largeScale = Mathf.Sign(largeScale) * Mathf.Pow(Mathf.Abs(largeScale), Mathf.Max(0.25f, settings.heightContrast));
+        return new PlanetTerrainSample { LargeScaleHeightOffset = fineIsMicroDetail ? Mathf.Clamp(largeScale, min, max) : Mathf.Clamp(height, min, max), HeightOffset = Mathf.Clamp(height, min, max), ContinentValue = continentNoise, MountainMask = mask, RidgeValue = ridge };
     }
 
     private static float Fractal01(Vector3 d, Vector3 offset, float scale, int octaves, float persistence, float lacunarity)
