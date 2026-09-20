@@ -6,6 +6,8 @@ using UnityEngine;
 public sealed class GeodesicDrainageGraph
 {
     public int[] DrainageReceiver { get; }
+    public int[] FloodParent { get; }
+    public int[] FloodRank { get; }
     public int[] UpstreamToDownstream { get; }
     public int[] OutletCell { get; }
     public float[] HydrologicalElevation { get; }
@@ -22,6 +24,7 @@ public sealed class GeodesicDrainageGraph
     private GeodesicDrainageGraph(int count)
     {
         DrainageReceiver = new int[count]; Array.Fill(DrainageReceiver, -1);
+        FloodParent = new int[count]; Array.Fill(FloodParent, -1); FloodRank = new int[count];
         UpstreamToDownstream = new int[count]; OutletCell = new int[count];
         HydrologicalElevation = new float[count]; FilledElevation = new float[count];
         FillDepth = new float[count]; LocalArea = new double[count];
@@ -40,7 +43,7 @@ public sealed class GeodesicDrainageGraph
         int count = topology.CellCount;
         var graph = new GeodesicDrainageGraph(count);
         var settled = new bool[count];
-        var rank = new int[count];
+        var rank = graph.FloodRank;
         var heap = new CellHeap(graph.FilledElevation);
         Array.Fill(graph.FilledElevation, float.PositiveInfinity);
         for (int i = 0; i < count; i++)
@@ -77,6 +80,7 @@ public sealed class GeodesicDrainageGraph
                 if (candidate >= graph.FilledElevation[neighbor]) continue;
                 graph.FilledElevation[neighbor] = candidate;
                 graph.DrainageReceiver[neighbor] = cell;
+                graph.FloodParent[neighbor] = cell;
                 heap.PushOrDecrease(neighbor);
             }
         }
@@ -127,6 +131,35 @@ public sealed class GeodesicDrainageGraph
         Accumulate(AccumulatedRunoff);
     }
 
+    /// <summary>Generation-only lake routing. Reject cycles before publishing; recompute terrain catchment
+    /// area independently of runoff. Original flood topology and elevations remain unchanged.</summary>
+    public void ApplyLakeReceivers(int[] receivers)
+    {
+        if (receivers == null || receivers.Length != CellCount) throw new ArgumentException("Receiver count mismatch.");
+        int[] degree = new int[CellCount], order = new int[CellCount];
+        for (int cell = 0; cell < CellCount; cell++)
+        {
+            int receiver = receivers[cell];
+            if (receiver < -1 || receiver >= CellCount || receiver == cell || (Ocean[cell] && receiver >= 0))
+                throw new ArgumentException("Invalid lake receiver.");
+            if (receiver >= 0) degree[receiver]++;
+        }
+        int head = 0, tail = 0;
+        for (int cell = 0; cell < CellCount; cell++) if (degree[cell] == 0) order[tail++] = cell;
+        while (head < tail)
+        {
+            int receiver = receivers[order[head++]];
+            if (receiver >= 0 && --degree[receiver] == 0) order[tail++] = receiver;
+        }
+        if (tail != CellCount) throw new ArgumentException("Lake receivers contain a cycle.");
+        Array.Copy(receivers, DrainageReceiver, CellCount); Array.Copy(order, UpstreamToDownstream, CellCount);
+        for (int i = CellCount - 1; i >= 0; i--)
+        {
+            int cell = order[i], receiver = receivers[cell];
+            OutletCell[cell] = receiver < 0 ? cell : OutletCell[receiver];
+        }
+        Array.Copy(LocalArea, DrainageArea, CellCount); Accumulate(DrainageArea); UpdateRunoff(null);
+    }
     private void Accumulate(double[] values)
     {
         foreach (int cell in UpstreamToDownstream)

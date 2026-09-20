@@ -46,6 +46,23 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
     [SerializeField] private double topologyMilliseconds, visualMilliseconds;
 
     public GeodesicDrainageGraph Drainage { get; private set; }
+    public GeodesicLakeBasins Lakes { get; private set; }
+    public GeodesicLakeGeometry LakeGeometry { get; private set; }
+    public int LakeConnectedReaches { get; private set; }
+    public int LakeBridgedReaches { get; private set; }
+    public int LakeInlets { get; private set; }
+    public int LakeOutlets { get; private set; }
+    public int SuppressedProjectionMismatch { get; private set; }
+    public int SuppressedCorridorFailure { get; private set; }
+    public int UnrenderedSmallDepression { get; private set; }
+    public int TrueTopologyFailure { get; private set; }
+    public int InlandVisibleTerminations { get; private set; }
+    public int OceanConnectedChains { get; private set; }
+    private double lakeMilliseconds;
+    private readonly Dictionary<int, GeodesicRiverReachPlan> reachPlans = new Dictionary<int, GeodesicRiverReachPlan>();
+    private GameObject lakeVisualRoot;
+    private Mesh lakeMesh;
+    private Material lakeMaterial;
     public float[] RiverStrength { get; private set; } = Array.Empty<float>();
     public Vector3[] ChannelAnchors { get; private set; } = Array.Empty<Vector3>();
     public IReadOnlyList<GeodesicRiverMouth> Mouths => mouths;
@@ -69,7 +86,8 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
             owner.GeodesicTopology == null || surfaceMesh == null) return;
         var watch = System.Diagnostics.Stopwatch.StartNew();
         planet = owner; topology = owner.GeodesicTopology;
-        terrain = new GeodesicRiverTerrain(geometry, surfaceMesh.vertices, owner.GeodesicHydrologicalRenderRadii);
+        Vector3[] completedSurface = surfaceMesh.vertices;
+        terrain = new GeodesicRiverTerrain(geometry, completedSurface, owner.GeodesicHydrologicalRenderRadii);
         int count = topology.CellCount;
         ChannelAnchors = new Vector3[count]; RiverStrength = new float[count];
         var elevations = new float[count]; var ocean = new bool[count];
@@ -109,6 +127,22 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
         }
         Drainage = GeodesicDrainageGraph.Build(topology, elevations, ocean, owner.GeodesicSeaLevelRadius,
             owner.BasePlanetRadius, Spill);
+        var lakeWatch = System.Diagnostics.Stopwatch.StartNew();
+        Lakes = GeodesicLakeBasins.Build(topology, Drainage, owner.BasePlanetRadius, owner.generateHydrologicalLakes,
+            owner.minimumLakeBasinAreaFraction, owner.minimumLakeDepth, Spill);
+        if (owner.generateHydrologicalLakes)
+        {
+            LakeGeometry = GeodesicLakeGeometry.Build(topology, Drainage, Lakes, geometry, completedSurface, terrain,
+                owner.BasePlanetRadius, owner.minimumLakeBasinAreaFraction);
+            Drainage.ApplyLakeReceivers(Lakes.CreateReceivers(topology, Drainage, Spill));
+            BuildLakeVisual();
+        }
+        foreach (var basin in Lakes.Basins)
+        {
+            if (basin.SpillFromCell >= 0) basin.CatchmentArea = Drainage.DrainageArea[basin.SpillFromCell];
+            if (basin.SpillCell >= 0) basin.DownstreamReceiver = Drainage.DrainageReceiver[basin.SpillCell];
+        }
+        lakeWatch.Stop(); lakeMilliseconds = lakeWatch.Elapsed.TotalMilliseconds;
         unresolvedSinks = Drainage.UnresolvedSinkCount; filledCells = Drainage.FilledCellCount;
         for (int i = 0; i < count; i++) if (Drainage.FillDepth[i] > majorBasinDepth) majorBasinCells++;
         topologyMilliseconds = watch.Elapsed.TotalMilliseconds;
@@ -116,7 +150,9 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
         Debug.Log($"[GeodesicDrainage] cells={count} land={landCells} rivers={riverCells} visibleReaches={visibleReaches} " +
             $"mouths={riverMouths} filledCells={filledCells} majorBasinCells={majorBasinCells} unresolvedSinks={unresolvedSinks} " +
             $"suppressedUphillReaches={suppressedUphillReaches} topologyMs={topologyMilliseconds:F2} visualMs={visualMilliseconds:F2} " +
+            $"lakeConnectedReaches={LakeConnectedReaches} suppressedProjectionMismatch={SuppressedProjectionMismatch} suppressedCorridorFailure={SuppressedCorridorFailure} unresolvedSmallDepression={UnrenderedSmallDepression} trueTopologyFailure={TrueTopologyFailure} inlandVisibleTerminations={InlandVisibleTerminations} oceanConnectedChains={OceanConnectedChains} " +
             "authority=shared-large-scale-terrain projection=completed-visible-mesh topology=priority-flood runoff=replaceable-per-cell", this);
+        LogLakeDiagnostics();
     }
 
     /// <summary>Null restores uniform density; otherwise input is a nonnegative volume/time per cell.
@@ -138,7 +174,7 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
     public void RebuildForCurrentTerrain()
     {
         PlanetGenerator owner = GetComponent<PlanetGenerator>();
-        if (owner == null || owner.CurrentGridType != PlanetGridType.GeodesicIcosphere || !owner.enableGeodesicRivers)
+        if (owner == null || owner.CurrentGridType != PlanetGridType.GeodesicIcosphere || (!owner.enableGeodesicRivers && !owner.generateHydrologicalLakes))
         { Clear(); return; }
         var filter = owner.GetComponent<MeshFilter>();
         Initialize(owner, IcosphereRenderGeometryCache.GetOrBuild(owner.geodesicRenderSubdivisionLevel), filter != null ? filter.sharedMesh : null);
@@ -152,10 +188,12 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
     {
         ClearVisual(); mouths.Clear();
         riverCells = visibleReaches = suppressedUphillReaches = riverMouths = majorBasinCells = 0;
+        LakeConnectedReaches = LakeBridgedReaches = LakeInlets = LakeOutlets = SuppressedProjectionMismatch = SuppressedCorridorFailure = UnrenderedSmallDepression = TrueTopologyFailure = InlandVisibleTerminations = OceanConnectedChains = 0;
+        if (Lakes != null) foreach (var basin in Lakes.Basins) basin.IncomingRiverCount = 0;
         if (Drainage == null || planet == null) return;
         var watch = System.Diagnostics.Stopwatch.StartNew();
         int hash = HashCode.Combine(refinementSteps, refinementLanes, corridorWidthInCellSpacings, uphillTolerance);
-        if (hash != pathSettingsHash) { paths.Clear(); pathSettingsHash = hash; }
+        if (hash != pathSettingsHash) { paths.Clear(); reachPlans.Clear(); pathSettingsHash = hash; }
         var vertices = new List<Vector3>(); var triangles = new List<int>(); var colors = new List<Color>();
         double threshold = meanCellArea * Math.Max(0.01f, riverFlowThreshold);
         for (int cell = 0; cell < Drainage.CellCount; cell++)
@@ -169,16 +207,31 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
             if (RiverStrength[cell] >= 1f)
             {
                 riverCells++;
-                if (!paths.TryGetValue(cell, out path))
+                if (!reachPlans.TryGetValue(cell, out var plan))
                 {
-                    path = GeodesicRiverPath.Refine(ChannelAnchors[cell], ChannelAnchors[receiver], terrain.Height,
-                        refinementSteps, refinementLanes, corridorWidthInCellSpacings, Mathf.Max(0f, uphillTolerance));
-                    if (planet.enableOcean && path.Length > 0)
-                        path = GeodesicRiverPath.ClipAtCoast(path, terrain.VisibleHeight, planet.GeodesicSeaLevelRadius, planet.IsGeodesicOceanConnectivityFilteringActive ? planet.IsGeodesicDirectionInOceanMask : (Func<Vector3, bool>)null);
-                    paths[cell] = path;
+                    plan = GeodesicLakeRiverRouting.Build(cell, Drainage, ChannelAnchors, terrain, Lakes, LakeGeometry,
+                        refinementSteps, refinementLanes, corridorWidthInCellSpacings, Mathf.Max(0f, uphillTolerance),
+                        planet.enableOcean, planet.GeodesicSeaLevelRadius,
+                        planet.IsGeodesicOceanConnectivityFilteringActive ? planet.IsGeodesicDirectionInOceanMask : (Func<Vector3, bool>)null);
+                    reachPlans[cell] = plan; paths[cell] = plan.Path;
                 }
-                if (path.Length < 2) suppressedUphillReaches++;
-                else { AddRibbon(path, cell, vertices, triangles, colors); visibleReaches++; }
+                path = plan.Path;
+                if (plan.LakeConnected) { LakeConnectedReaches++; if (plan.Path.Length < 2) LakeBridgedReaches++; }
+                if (plan.Failure != GeodesicRiverReachFailure.None)
+                {
+                    suppressedUphillReaches++;
+                    if (plan.Failure == GeodesicRiverReachFailure.ProjectionMismatch) SuppressedProjectionMismatch++;
+                    else if (plan.Failure == GeodesicRiverReachFailure.CorridorFailure) SuppressedCorridorFailure++;
+                    else if (plan.Failure == GeodesicRiverReachFailure.UnresolvedDepression) UnrenderedSmallDepression++;
+                    else TrueTopologyFailure++;
+                }
+                if (path.Length > 1)
+                {
+                    AddRibbon(path, cell, vertices, triangles, colors); visibleReaches++;
+                    if (plan.InletBasin >= 0) { LakeInlets++; Lakes.Basins[plan.InletBasin].IncomingRiverCount++; }
+                    if (plan.OutletBasin >= 0) LakeOutlets++;
+                }
+                if (plan.InletBasin >= 0) isMouth = false;
             }
             if (isMouth)
             {
@@ -191,7 +244,8 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
                 if (RiverStrength[cell] >= 1f) riverMouths++;
             }
         }
-        if (vertices.Count > 0)
+        UpdateContinuityDiagnostics();
+        if (vertices.Count > 0 && planet.enableGeodesicRivers)
         {
             riverMesh = new Mesh { name = "Geodesic River Ribbons", indexFormat = IndexFormat.UInt32 };
             riverMesh.SetVertices(vertices); riverMesh.SetTriangles(triangles, 0); riverMesh.SetColors(colors);
@@ -209,11 +263,69 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
             }
             else Debug.LogError("[GeodesicDrainage] Terrain vertex-colour shader is missing; river ribbons cannot render.", this);
             renderer.shadowCastingMode = ShadowCastingMode.Off;
-            visualRoot.SetActive(showRivers && isActiveAndEnabled);
+            visualRoot.SetActive(showRivers && planet.enableGeodesicRivers && isActiveAndEnabled);
         }
         visualMilliseconds = watch.Elapsed.TotalMilliseconds;
     }
 
+    public float VisibleTerrainRadius(Vector3 localDirection) => terrain != null ? terrain.Radius(localDirection) : 0f;
+    public int LakeAtDirection(Vector3 localDirection) => LakeGeometry != null ? LakeGeometry.BasinAtDirection(localDirection) : -1;
+
+    private void BuildLakeVisual()
+    {
+        if (LakeGeometry == null || LakeGeometry.Triangles.Length == 0) return;
+        lakeMesh = new Mesh { name = "Geodesic Static Lakes", indexFormat = IndexFormat.UInt32 };
+        lakeMesh.vertices = LakeGeometry.Vertices; lakeMesh.triangles = LakeGeometry.Triangles;
+        var normals = new Vector3[LakeGeometry.Vertices.Length];
+        for (int i = 0; i < normals.Length; i++) normals[i] = LakeGeometry.Vertices[i].normalized;
+        lakeMesh.normals = normals; lakeMesh.RecalculateBounds();
+        lakeVisualRoot = new GameObject("Geodesic Lakes"); lakeVisualRoot.layer = gameObject.layer;
+        lakeVisualRoot.transform.SetParent(transform, false);
+        lakeVisualRoot.AddComponent<MeshFilter>().sharedMesh = lakeMesh;
+        var renderer = lakeVisualRoot.AddComponent<MeshRenderer>();
+        Shader shader = Resources.Load<Shader>("GeodesicLakeURP");
+        if (shader != null)
+        { lakeMaterial = new Material(shader) { name = "Geodesic Lakes (Runtime)" }; renderer.sharedMaterial = lakeMaterial; }
+        else Debug.LogError("[GeodesicLakes] Lake shader is missing.", this);
+        renderer.shadowCastingMode = ShadowCastingMode.Off; renderer.receiveShadows = false;
+        lakeVisualRoot.SetActive(isActiveAndEnabled);
+    }
+
+    private void UpdateContinuityDiagnostics()
+    {
+        var reachesOcean = new bool[Drainage.CellCount]; var incoming = new bool[Drainage.CellCount];
+        foreach (int cell in Drainage.UpstreamToDownstream)
+        {
+            int receiver = Drainage.DrainageReceiver[cell];
+            if (receiver >= 0 && RiverStrength[cell] >= 1f) incoming[receiver] = true;
+        }
+        for (int i = Drainage.CellCount - 1; i >= 0; i--)
+        {
+            int cell = Drainage.UpstreamToDownstream[i], receiver = Drainage.DrainageReceiver[cell];
+            if (Drainage.Ocean[cell]) { reachesOcean[cell] = true; continue; }
+            if (receiver < 0 || RiverStrength[cell] < 1f || !reachPlans.TryGetValue(cell, out var plan)) continue;
+            bool visible = plan.Path.Length > 1;
+            reachesOcean[cell] = (visible || plan.LakeConnected) && reachesOcean[receiver];
+            if (reachesOcean[cell] && !incoming[cell]) OceanConnectedChains++;
+            if (visible && plan.InletBasin < 0 && !Drainage.Ocean[receiver] &&
+                (!reachPlans.TryGetValue(receiver, out var next) || (next.Path.Length < 2 && !next.LakeConnected))) InlandVisibleTerminations++;
+        }
+    }
+
+    private void LogLakeDiagnostics()
+    {
+        if (Lakes == null) return;
+        int visible = 0, terminal = 0, lakeCells = 0; double area = 0d, largest = 0d; float maxDepth = 0f;
+        foreach (var basin in Lakes.Basins)
+        {
+            if (basin.Terminal) terminal++;
+            if (!basin.Selected) continue;
+            visible++; area += LakeGeometry.VisibleAreas[basin.Id]; largest = Math.Max(largest, LakeGeometry.VisibleAreas[basin.Id]); maxDepth = Mathf.Max(maxDepth, basin.MaximumDepth);
+        }
+        foreach (bool lake in Lakes.LakeMask) if (lake) lakeCells++;
+        double planetArea = 4d * Math.PI * planet.BasePlanetRadius * planet.BasePlanetRadius;
+        Debug.Log($"[GeodesicLakes] enabled={Lakes.Enabled} candidateBasins={Lakes.Basins.Length} visibleLakes={visible} silentlyResolvedBasins={Lakes.Basins.Length - visible - terminal - (LakeGeometry != null ? LakeGeometry.RejectedProjectionBasins : 0)} terminalBasins={terminal} rejectedProjectionBasins={(LakeGeometry != null ? LakeGeometry.RejectedProjectionBasins : 0)} lakeCells={lakeCells} totalLakeAreaFraction={area / planetArea:F8} largestLakeAreaFraction={largest / planetArea:F8} maxLakeDepth={maxDepth:F6} lakeInlets={LakeInlets} lakeOutlets={LakeOutlets} lakeBridgedRiverReaches={LakeBridgedReaches} generationMs={lakeMilliseconds:F2}", this);
+    }
     private void AddRibbon(Vector3[] path, int cell, List<Vector3> vertices, List<int> triangles, List<Color> colors)
     {
         float width = planet.BasePlanetRadius * Mathf.Max(0.00001f, widthAtThreshold) *
@@ -270,11 +382,15 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
         }
     }
 
-    private void OnEnable() { if (visualRoot != null) visualRoot.SetActive(showRivers); }
-    private void OnDisable() { if (visualRoot != null) visualRoot.SetActive(false); }
+    private void OnEnable() { if (visualRoot != null) visualRoot.SetActive(showRivers && planet != null && planet.enableGeodesicRivers); if (lakeVisualRoot != null) lakeVisualRoot.SetActive(true); }
+    private void OnDisable() { if (visualRoot != null) visualRoot.SetActive(false); if (lakeVisualRoot != null) lakeVisualRoot.SetActive(false); }
     private void OnDestroy() => Clear();
     public void Clear()
     {
+        if (lakeVisualRoot != null) lakeVisualRoot.SetActive(false);
+        Release(lakeVisualRoot); Release(lakeMesh); Release(lakeMaterial); lakeVisualRoot = null; lakeMesh = null; lakeMaterial = null;
+        Lakes = null; LakeGeometry = null; reachPlans.Clear(); lakeMilliseconds = 0d;
+        LakeConnectedReaches = LakeBridgedReaches = LakeInlets = LakeOutlets = SuppressedProjectionMismatch = SuppressedCorridorFailure = UnrenderedSmallDepression = TrueTopologyFailure = InlandVisibleTerminations = OceanConnectedChains = 0;
         ClearVisual(); paths.Clear(); mouths.Clear(); Drainage = null; terrain = null; topology = null; planet = null;
         ChannelAnchors = Array.Empty<Vector3>(); RiverStrength = Array.Empty<float>();
         landCells = riverCells = visibleReaches = suppressedUphillReaches = riverMouths = unresolvedSinks = filledCells = majorBasinCells = 0;

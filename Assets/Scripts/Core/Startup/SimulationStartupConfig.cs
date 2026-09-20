@@ -77,6 +77,12 @@ public class SimulationStartupConfig
     [Range(0f, GeodesicOceanConnectivity.MaximumAreaFraction)]
     public float minimumOceanComponentAreaFraction = GeodesicOceanConnectivity.DefaultMinimumAreaFraction;
 
+    [Header("Advanced Geodesic Lakes")]
+    [Tooltip("Fill significant terrain depressions with static lakes at their spill elevation. Small depressions remain virtual hydrological fills.")]
+    public bool generateHydrologicalLakes;
+    [Range(0f, .05f)] public float minimumLakeBasinAreaFraction = GeodesicLakeBasins.DefaultMinimumAreaFraction;
+    [Range(0f, 1f)] public float minimumLakeDepth = GeodesicLakeBasins.DefaultMinimumDepth;
+
     [Header("Advanced Environment Timing")]
     [Tooltip("Fixed simulated-time interval used only by ApproximateEcologicalProfiles temperature updates.")]
     public float approximateThermalIntervalSeconds = 2f;

@@ -47,7 +47,7 @@ public sealed class GeodesicRiverTerrain
     public float VisibleHeight(Vector3 direction) => Sample(direction, false, false);
     public float Radius(Vector3 direction) => Sample(direction, true, false);
 
-    private float Sample(Vector3 direction, bool exactRadius, bool largeScale)
+    public int FindTriangle(Vector3 direction)
     {
         Vector3 d = direction.normalized;
         int face = 0, first = 0, count = 20;
@@ -64,6 +64,13 @@ public sealed class GeodesicRiverTerrain
             }
             first = face * 4; count = 4; // Subdivide appends four children for each parent in this order.
         }
+        return face;
+    }
+
+    private float Sample(Vector3 direction, bool exactRadius, bool largeScale)
+    {
+        Vector3 d = direction.normalized;
+        int face = FindTriangle(d);
         var final = levels[levels.Length - 1];
         int ia = final.Triangles[face * 3], ib = final.Triangles[face * 3 + 1], ic = final.Triangles[face * 3 + 2];
         if (exactRadius) return 1f / Vector3.Dot(surfacePlanes[face], d);

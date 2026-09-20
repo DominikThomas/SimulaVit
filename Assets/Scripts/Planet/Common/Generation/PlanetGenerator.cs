@@ -209,6 +209,11 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     [Header("Geodesic Rivers")]
     [Tooltip("Precompute land drainage and terrain-conforming river ribbons during generation. Configure GeodesicRiverSystem for thresholds and runoff.")]
     public bool enableGeodesicRivers = true;
+    [Header("Geodesic Static Lakes")]
+    [Tooltip("Fill significant priority-flood depressions to their spill level. No lake chemistry or terrain modification.")]
+    public bool generateHydrologicalLakes;
+    [Range(0f, .05f)] public float minimumLakeBasinAreaFraction = GeodesicLakeBasins.DefaultMinimumAreaFraction;
+    [Range(0f, 1f)] public float minimumLakeDepth = GeodesicLakeBasins.DefaultMinimumDepth;
 
     [Header("Geodesic Terrain")]
     [Tooltip("Visual nightside floor for the geodesic terrain shader. This is not thermal energy and must not be used as temperature input.")]
@@ -875,7 +880,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         LogStage("terrain mesh assignment/upload", stage);
 
         stage = System.Diagnostics.Stopwatch.StartNew();
-        if (enableGeodesicRivers)
+        if (enableGeodesicRivers || generateHydrologicalLakes)
             GetOrAddComponent<GeodesicRiverSystem>(gameObject).Initialize(this, renderGeometry, mesh);
         else GetComponent<GeodesicRiverSystem>()?.Clear();
         LogStage("river drainage and ribbons", stage);
@@ -1248,6 +1253,24 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     {
         geodesicLastOceanQueryCell = GeodesicOceanConnectivity.FindNearestCell(GeodesicTopology, localDirection, geodesicLastOceanQueryCell);
         return geodesicOceanMask != null && geodesicLastOceanQueryCell >= 0 && geodesicOceanMask[geodesicLastOceanQueryCell];
+    }
+
+    public bool IsGeodesicCellLake(int cell)
+    {
+        if (CurrentGridType != PlanetGridType.GeodesicIcosphere) return false;
+        var lakes = GetComponent<GeodesicRiverSystem>()?.Lakes;
+        return lakes != null && cell >= 0 && cell < lakes.LakeMask.Length && lakes.LakeMask[cell];
+    }
+    public string GetGeodesicCellSurfaceClassification(int cell) => IsGeodesicCellOcean(cell) ? "Ocean" : IsGeodesicCellLake(cell) ? "Lake" : GetGeodesicCellOceanClassification(cell);
+    public string GetGeodesicLakeCellDiagnostics(int cell)
+    {
+        var rivers = GetComponent<GeodesicRiverSystem>(); var lakes = rivers != null ? rivers.Lakes : null;
+        if (lakes == null || cell < 0 || cell >= lakes.BasinId.Length) return "lakeBasinId=None";
+        int id = rivers.LakeAtDirection(GeodesicTopology.CellDirections[cell]);
+        if (id < 0) id = lakes.BasinId[cell];
+        if (id < 0) return "lakeBasinId=None";
+        var basin = lakes.Basins[id];
+        return $"lakeBasinId={id}, lakeSelected={basin.Selected}, terrainElevation={rivers.Drainage.HydrologicalElevation[cell]:F6}, hydrologicalFilledElevation={rivers.Drainage.FilledElevation[cell]:F6}, lakeSurfaceElevation={(basin.Selected ? basin.CurrentSurfaceElevation : 0f):F6}, lakeDepth={(IsGeodesicCellLake(cell) ? Mathf.Max(0f, basin.CurrentSurfaceElevation - rivers.VisibleTerrainRadius(GeodesicTopology.CellDirections[cell])) : 0f):F6}, spillElevation={basin.SpillElevation:F6}, spillFromCell={basin.SpillFromCell}, spillCell={basin.SpillCell}, downstreamReceiver={basin.DownstreamReceiver}, basinArea={basin.Area:G6}, catchmentArea={basin.CatchmentArea:G6}, inlets={basin.IncomingRiverCount}, status={basin.RejectionReason ?? "static-full-to-spill"}";
     }
 
     public bool IsGeodesicCellBelowSeaLevel(int cell) => OceanConnectivity != null && cell >= 0 && cell < OceanConnectivity.BelowSeaLevel.Length && OceanConnectivity.BelowSeaLevel[cell];

@@ -34,7 +34,7 @@ public class SimulationStartupController : MonoBehaviour
     public const float GeodesicVentPhysicalMaxPerSecond = 1000f;
     private const int InitialSpawnMin = 0;
     private const int InitialSpawnMax = 10000;
-    private const int SavedStartupConfigVersion = 9;
+    private const int SavedStartupConfigVersion = 10;
     public const float NormalAtmospherePressureMaxBar = 5f;
     public const float DenseAtmospherePressureMaxBar = 600f;
     public const float DefaultApproximateThermalIntervalSeconds = 2f;
@@ -453,6 +453,9 @@ public class SimulationStartupController : MonoBehaviour
         destination.geodesicSubdivisionLevel = source.geodesicSubdivisionLevel;
         destination.excludeSmallDisconnectedSeas = source.excludeSmallDisconnectedSeas;
         destination.minimumOceanComponentAreaFraction = source.minimumOceanComponentAreaFraction;
+        destination.generateHydrologicalLakes = source.generateHydrologicalLakes;
+        destination.minimumLakeBasinAreaFraction = source.minimumLakeBasinAreaFraction;
+        destination.minimumLakeDepth = source.minimumLakeDepth;
         destination.baseTempKelvin = source.baseTempKelvin;
         destination.terrestrialVentFraction = source.terrestrialVentFraction;
         destination.allowDenseAtmosphere = source.allowDenseAtmosphere;
@@ -569,6 +572,9 @@ public class SimulationStartupController : MonoBehaviour
             }
             planetGenerator.excludeSmallDisconnectedSeas = config.excludeSmallDisconnectedSeas;
             planetGenerator.minimumOceanComponentAreaFraction = GeodesicOceanConnectivity.NormalizeThreshold(config.minimumOceanComponentAreaFraction);
+            planetGenerator.generateHydrologicalLakes = config.generateHydrologicalLakes;
+            planetGenerator.minimumLakeBasinAreaFraction = GeodesicLakeBasins.NormalizeArea(config.minimumLakeBasinAreaFraction);
+            planetGenerator.minimumLakeDepth = GeodesicLakeBasins.NormalizeDepth(config.minimumLakeDepth);
             planetGenerator.InitializeAuthoritativePlanet("New Game startup selection");
         }
 
@@ -756,6 +762,8 @@ public class SimulationStartupController : MonoBehaviour
         config.terrestrialVentFraction = Mathf.Clamp01(config.terrestrialVentFraction);
         config.initialSpawnCount = Mathf.Clamp(config.initialSpawnCount, InitialSpawnMin, InitialSpawnMax);
         config.minimumOceanComponentAreaFraction = GeodesicOceanConnectivity.NormalizeThreshold(config.minimumOceanComponentAreaFraction);
+        config.minimumLakeBasinAreaFraction = GeodesicLakeBasins.NormalizeArea(config.minimumLakeBasinAreaFraction);
+        config.minimumLakeDepth = GeodesicLakeBasins.NormalizeDepth(config.minimumLakeDepth);
         config.cubeSphereResolution = Mathf.Clamp(config.cubeSphereResolution, 3, 240);
         config.geodesicSubdivisionLevel = Mathf.Clamp(config.geodesicSubdivisionLevel, 0, GeodesicGridTopology.MaxSupportedSubdivision);
         config.approximateThermalIntervalSeconds = NormalizeToPreset(config.approximateThermalIntervalSeconds, ApproximateThermalIntervalPresets, DefaultApproximateThermalIntervalSeconds);
@@ -872,6 +880,7 @@ public class SimulationStartupController : MonoBehaviour
             builder.AppendLine($"Legacy Vent Rates H2/H2S/CO2/Fe2: {config.ventH2PerTick:0.####}/{config.ventH2SPerTick:0.####}/{config.ventCO2PerTick:0.####}/{config.ventFe2PerTick:0.####} per legacy tick semantics");
         builder.AppendLine($"Terrestrial Vent Fraction: {config.terrestrialVentFraction:0.###}");
         builder.AppendLine($"Exclude small inland seas: {config.excludeSmallDisconnectedSeas}; minimum ocean basin area: {config.minimumOceanComponentAreaFraction * 100f:0.###}% of planet surface");
+        builder.AppendLine($"Hydrological lakes: {config.generateHydrologicalLakes}; minimum basin area: {config.minimumLakeBasinAreaFraction * 100f:0.####}% of planet; minimum depth: {config.minimumLakeDepth:0.####} planet units");
         builder.AppendLine($"Initial Spawn Count: {config.initialSpawnCount}");
         builder.AppendLine($"Start Paused: {startPaused}");
         builder.AppendLine($"Saved Config Path: {SavedStartupConfigPath}");
@@ -897,6 +906,8 @@ public class SimulationStartupController : MonoBehaviour
         public int geodesicSubdivisionLevel;
         public bool excludeSmallDisconnectedSeas;
         public float minimumOceanComponentAreaFraction;
+        public bool generateHydrologicalLakes;
+        public float minimumLakeBasinAreaFraction, minimumLakeDepth;
         public float axisTiltDegrees;
         public float dayLengthSeconds;
         public float yearLengthInDays;
@@ -944,6 +955,9 @@ public class SimulationStartupController : MonoBehaviour
                 geodesicSubdivisionLevel = config.geodesicSubdivisionLevel,
                 excludeSmallDisconnectedSeas = config.excludeSmallDisconnectedSeas,
                 minimumOceanComponentAreaFraction = config.minimumOceanComponentAreaFraction,
+                generateHydrologicalLakes = config.generateHydrologicalLakes,
+                minimumLakeBasinAreaFraction = config.minimumLakeBasinAreaFraction,
+                minimumLakeDepth = config.minimumLakeDepth,
                 axisTiltDegrees = config.axisTiltDegrees,
                 dayLengthSeconds = config.dayLengthSeconds,
                 yearLengthInDays = config.yearLengthInDays,
@@ -987,6 +1001,9 @@ public class SimulationStartupController : MonoBehaviour
             config.gridType = gridType;
             config.cubeSphereResolution = cubeSphereResolution > 0 ? cubeSphereResolution : config.cubeSphereResolution;
             config.geodesicSubdivisionLevel = geodesicSubdivisionLevel;
+            config.generateHydrologicalLakes = version >= 10 && generateHydrologicalLakes;
+            config.minimumLakeBasinAreaFraction = GeodesicLakeBasins.NormalizeArea(version >= 10 ? minimumLakeBasinAreaFraction : GeodesicLakeBasins.DefaultMinimumAreaFraction);
+            config.minimumLakeDepth = GeodesicLakeBasins.NormalizeDepth(version >= 10 ? minimumLakeDepth : GeodesicLakeBasins.DefaultMinimumDepth);
             // Older saved worlds must not silently opt into a changed water mask.
             config.excludeSmallDisconnectedSeas = version >= 9 && excludeSmallDisconnectedSeas;
             config.minimumOceanComponentAreaFraction = GeodesicOceanConnectivity.NormalizeThreshold(version >= 9
@@ -1279,7 +1296,7 @@ public class SimulationStartupController : MonoBehaviour
         setupGuiScrollPosition = GUILayout.BeginScrollView(setupGuiScrollPosition, GUILayout.Width(width), GUILayout.Height(scrollHeight));
 
         float contentWidth = Mathf.Max(1f, width - 20f);
-        float advancedHeight = advancedSettingsExpanded ? 650f : 0f;
+        float advancedHeight = advancedSettingsExpanded ? 900f : 0f;
         float contentHeight = 44f + ((line + gap) * 25f) + advancedHeight + (gap * 2f) + 42f + 30f + 82f;
         Rect contentRect = GUILayoutUtility.GetRect(contentWidth, contentHeight, GUILayout.Width(contentWidth), GUILayout.Height(contentHeight));
         float controlX = contentRect.x;
@@ -1368,7 +1385,19 @@ public class SimulationStartupController : MonoBehaviour
                 currentConfig.minimumOceanComponentAreaFraction = GeodesicOceanConnectivity.NormalizeThreshold(basinPercent / 100f);
                 GUI.enabled = oceanControlEnabled;
                 y += line * 2f + gap;
-                GUI.Label(new Rect(controlX, y, contentWidth, 52f), "Small enclosed depressions below sea level stay dry.\nTerrain is unchanged; a future lake system can fill them.", labelStyle);
+                GUI.Label(new Rect(controlX, y, contentWidth, 52f), "Small enclosed depressions stay outside the ocean.\nTerrain is unchanged; hydrological lakes can fill valid basins.", labelStyle);
+                y += 58f;
+                DrawBool(new Rect(controlX, y, contentWidth, line), "Generate hydrological lakes", ref currentConfig.generateHydrologicalLakes);
+                y += line + gap;
+                GUI.enabled = oceanControlEnabled && currentConfig.generateHydrologicalLakes;
+                float lakePercent = currentConfig.minimumLakeBasinAreaFraction * 100f;
+                DrawFloat(new Rect(controlX, y, contentWidth, line), "Minimum lake basin area (% of planet)", ref lakePercent, 0f, 5f, labelAbove: true);
+                currentConfig.minimumLakeBasinAreaFraction = GeodesicLakeBasins.NormalizeArea(lakePercent / 100f);
+                y += line * 2f + gap;
+                DrawFloat(new Rect(controlX, y, contentWidth, line), "Minimum lake depth (planet units)", ref currentConfig.minimumLakeDepth, 0f, 1f, labelAbove: true);
+                y += line * 2f + gap;
+                GUI.enabled = oceanControlEnabled;
+                GUI.Label(new Rect(controlX, y, contentWidth, 52f), "Fills significant depressions to their spill elevation.\nSmall depressions remain resolved without visible water.", labelStyle);
                 y += 58f;
             }
             DrawFloat(new Rect(controlX, y, contentWidth, line), "Base Temperature (K)", ref currentConfig.baseTempKelvin, BaseTempMinKelvin, BaseTempMaxKelvin);
