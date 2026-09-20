@@ -31,6 +31,8 @@ public class SimulationStartupPanel : MonoBehaviour
 
     [Header("Advanced")]
     [SerializeField] private GameObject advancedSettingsRoot;
+    [SerializeField] private Toggle excludeSmallInlandSeasToggle;
+    [SerializeField] private TMP_InputField minimumOceanBasinPercentInput;
     [SerializeField] private TMP_Dropdown approximateThermalIntervalDropdown;
     [SerializeField] private TMP_Dropdown resourceTransportIntervalDropdown;
     [SerializeField] private TMP_InputField chemistryTelemetryIntervalInput;
@@ -68,6 +70,7 @@ public class SimulationStartupPanel : MonoBehaviour
         if (backButton != null) backButton.onClick.RemoveListener(BackToMainMenu);
         if (advancedButton != null) advancedButton.onClick.RemoveListener(ToggleAdvanced);
         if (resetAdvancedDefaultsButton != null) resetAdvancedDefaultsButton.onClick.RemoveListener(ResetAdvancedDefaults);
+        if (excludeSmallInlandSeasToggle != null) excludeSmallInlandSeasToggle.onValueChanged.RemoveListener(OnOceanFilterChanged);
         if (axisTiltSlider != null) axisTiltSlider.onValueChanged.RemoveListener(OnAxisTiltChanged);
         if (planetGridDropdown != null) planetGridDropdown.onValueChanged.RemoveListener(OnPlanetGridChanged);
     }
@@ -81,6 +84,7 @@ public class SimulationStartupPanel : MonoBehaviour
         if (backButton != null) backButton.onClick.AddListener(BackToMainMenu);
         if (advancedButton != null) advancedButton.onClick.AddListener(ToggleAdvanced);
         if (resetAdvancedDefaultsButton != null) resetAdvancedDefaultsButton.onClick.AddListener(ResetAdvancedDefaults);
+        if (excludeSmallInlandSeasToggle != null) excludeSmallInlandSeasToggle.onValueChanged.AddListener(OnOceanFilterChanged);
         if (axisTiltSlider != null) axisTiltSlider.onValueChanged.AddListener(OnAxisTiltChanged);
         if (planetGridDropdown != null) planetGridDropdown.onValueChanged.AddListener(OnPlanetGridChanged);
     }
@@ -98,6 +102,9 @@ public class SimulationStartupPanel : MonoBehaviour
         if (planetGridDropdown != null) planetGridDropdown.SetValueWithoutNotify(config.gridType == PlanetGridType.GeodesicIcosphere ? 1 : 0);
         SetText(cubeSphereResolutionInput, config.cubeSphereResolution.ToString());
         SetText(geodesicSubdivisionInput, config.geodesicSubdivisionLevel.ToString());
+        SetToggle(excludeSmallInlandSeasToggle, config.excludeSmallDisconnectedSeas);
+        SetText(minimumOceanBasinPercentInput, (config.minimumOceanComponentAreaFraction * 100f).ToString("0.###"));
+        OnOceanFilterChanged(config.excludeSmallDisconnectedSeas);
         ApplyGridSpecificVisibility(config.gridType);
         SetSlider(axisTiltSlider, config.axisTiltDegrees);
         SetText(dayLengthInput, config.dayLengthSeconds.ToString("0.###"));
@@ -160,6 +167,8 @@ public class SimulationStartupPanel : MonoBehaviour
         config.approximateThermalIntervalSeconds = ReadPresetDropdown(approximateThermalIntervalDropdown, config.approximateThermalIntervalSeconds, SimulationStartupController.ApproximateThermalIntervalPresets);
         config.geodesicResourceTransportIntervalSeconds = ReadPresetDropdown(resourceTransportIntervalDropdown, config.geodesicResourceTransportIntervalSeconds, SimulationStartupController.ResourceTransportIntervalPresets);
         config.chemistryTelemetryIntervalSimSeconds = ReadFloat(chemistryTelemetryIntervalInput, config.chemistryTelemetryIntervalSimSeconds);
+        if (excludeSmallInlandSeasToggle != null) config.excludeSmallDisconnectedSeas = excludeSmallInlandSeasToggle.isOn;
+        config.minimumOceanComponentAreaFraction = GeodesicOceanConnectivity.NormalizeThreshold(ReadFloat(minimumOceanBasinPercentInput, config.minimumOceanComponentAreaFraction * 100f) / 100f);
     }
 
     private void StartSimulation()
@@ -222,8 +231,15 @@ public class SimulationStartupPanel : MonoBehaviour
         }
     }
 
+    private void OnOceanFilterChanged(bool enabledFilter)
+    {
+        if (minimumOceanBasinPercentInput != null) minimumOceanBasinPercentInput.interactable = enabledFilter;
+    }
+
     private void ApplyGridSpecificVisibility(PlanetGridType gridType)
     {
+        if (excludeSmallInlandSeasToggle != null) excludeSmallInlandSeasToggle.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
+        if (minimumOceanBasinPercentInput != null) minimumOceanBasinPercentInput.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
         SetRoots(cubeSphereOnlySettings, gridType == PlanetGridType.LegacyCubeSphere);
         SetRoots(geodesicOnlySettings, gridType == PlanetGridType.GeodesicIcosphere);
     }

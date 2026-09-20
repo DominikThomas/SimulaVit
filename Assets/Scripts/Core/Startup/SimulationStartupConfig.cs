@@ -71,6 +71,12 @@ public class SimulationStartupConfig
     [Min(0)] public int initialSpawnCount = 100;
     public bool startPaused;
 
+    [Header("Advanced Geodesic Ocean")]
+    [Tooltip("Prevents small enclosed terrain depressions below global sea level from automatically becoming ocean. These basins can later support proper lakes.")]
+    public bool excludeSmallDisconnectedSeas;
+    [Range(0f, GeodesicOceanConnectivity.MaximumAreaFraction)]
+    public float minimumOceanComponentAreaFraction = GeodesicOceanConnectivity.DefaultMinimumAreaFraction;
+
     [Header("Advanced Environment Timing")]
     [Tooltip("Fixed simulated-time interval used only by ApproximateEcologicalProfiles temperature updates.")]
     public float approximateThermalIntervalSeconds = 2f;
