@@ -127,6 +127,8 @@ public class UnderwaterVolumeController : MonoBehaviour
 
     private float CalculateTargetWeight()
     {
+        if (planet.CurrentGridType == PlanetGridType.GeodesicIcosphere && planet.IsGeodesicOceanConnectivityFilteringActive &&
+            !planet.IsGeodesicDirectionInOceanMask(planet.transform.InverseTransformPoint(cameraTransform.position).normalized)) return 0f;
         float oceanRadiusWorld = GetOceanRadiusWorld();
         Vector3 fromCenter = cameraTransform.position - planet.transform.position;
         float distanceFromCenter = fromCenter.magnitude;
@@ -150,7 +152,7 @@ public class UnderwaterVolumeController : MonoBehaviour
             Mathf.Abs(planet.transform.lossyScale.y),
             Mathf.Abs(planet.transform.lossyScale.z));
 
-        return planet.GetOceanRadius() * lossyScaleMax;
+        return (planet.CurrentGridType == PlanetGridType.GeodesicIcosphere && planet.IsGeodesicOceanConnectivityFilteringActive ? planet.GeodesicSeaLevelRadius : planet.GetOceanRadius()) * lossyScaleMax;
     }
 
     private void CaptureOriginalFogSettings()

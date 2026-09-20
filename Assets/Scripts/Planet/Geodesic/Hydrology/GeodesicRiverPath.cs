@@ -75,16 +75,16 @@ public static class GeodesicRiverPath
     }
 
     /// <summary>Stop at the first sea-level crossing, rather than extending to the ocean cell centre.</summary>
-    public static Vector3[] ClipAtCoast(Vector3[] path, Func<Vector3, float> height, float seaLevel)
+    public static Vector3[] ClipAtCoast(Vector3[] path, Func<Vector3, float> height, float seaLevel, Func<Vector3, bool> retainedOcean = null)
     {
         var result = new List<Vector3>();
         for (int i = 0; i < path.Length; i++)
         {
-            if (height(path[i]) <= seaLevel && result.Count > 0)
+            if (height(path[i]) <= seaLevel && (retainedOcean == null || retainedOcean(path[i])) && result.Count > 0)
             {
                 Vector3 land = result[result.Count - 1], water = path[i];
                 for (int j = 0; j < 16; j++)
-                { Vector3 middle = (land + water).normalized; if (height(middle) > seaLevel) land = middle; else water = middle; }
+                { Vector3 middle = (land + water).normalized; if (height(middle) > seaLevel || (retainedOcean != null && !retainedOcean(middle))) land = middle; else water = middle; }
                 result.Add((land + water).normalized); break;
             }
             result.Add(path[i]);

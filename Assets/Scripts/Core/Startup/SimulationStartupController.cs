@@ -34,7 +34,7 @@ public class SimulationStartupController : MonoBehaviour
     public const float GeodesicVentPhysicalMaxPerSecond = 1000f;
     private const int InitialSpawnMin = 0;
     private const int InitialSpawnMax = 10000;
-    private const int SavedStartupConfigVersion = 8;
+    private const int SavedStartupConfigVersion = 9;
     public const float NormalAtmospherePressureMaxBar = 5f;
     public const float DenseAtmospherePressureMaxBar = 600f;
     public const float DefaultApproximateThermalIntervalSeconds = 2f;
@@ -451,6 +451,8 @@ public class SimulationStartupController : MonoBehaviour
     {
         if (source == null || destination == null) return;
         destination.geodesicSubdivisionLevel = source.geodesicSubdivisionLevel;
+        destination.excludeSmallDisconnectedSeas = source.excludeSmallDisconnectedSeas;
+        destination.minimumOceanComponentAreaFraction = source.minimumOceanComponentAreaFraction;
         destination.baseTempKelvin = source.baseTempKelvin;
         destination.terrestrialVentFraction = source.terrestrialVentFraction;
         destination.allowDenseAtmosphere = source.allowDenseAtmosphere;
@@ -565,6 +567,8 @@ public class SimulationStartupController : MonoBehaviour
                 atmosphere?.Configure(config.atmosphereInventoryPerBar, config.atmosphericN2Bar, config.atmosphericCO2Bar, config.atmosphericO2Bar, config.atmosphericCH4Bar, config.atmosphericH2Bar, config.atmosphericH2SBar);
                 planetGenerator.GetComponent<GeodesicAirSeaGasExchange>()?.SetCommonHalfLife(config.airSeaExchangeHalfLifeSeconds);
             }
+            planetGenerator.excludeSmallDisconnectedSeas = config.excludeSmallDisconnectedSeas;
+            planetGenerator.minimumOceanComponentAreaFraction = GeodesicOceanConnectivity.NormalizeThreshold(config.minimumOceanComponentAreaFraction);
             planetGenerator.InitializeAuthoritativePlanet("New Game startup selection");
         }
 
@@ -751,6 +755,7 @@ public class SimulationStartupController : MonoBehaviour
         config.ventClustering = Mathf.Clamp01(config.ventClustering);
         config.terrestrialVentFraction = Mathf.Clamp01(config.terrestrialVentFraction);
         config.initialSpawnCount = Mathf.Clamp(config.initialSpawnCount, InitialSpawnMin, InitialSpawnMax);
+        config.minimumOceanComponentAreaFraction = GeodesicOceanConnectivity.NormalizeThreshold(config.minimumOceanComponentAreaFraction);
         config.cubeSphereResolution = Mathf.Clamp(config.cubeSphereResolution, 3, 240);
         config.geodesicSubdivisionLevel = Mathf.Clamp(config.geodesicSubdivisionLevel, 0, GeodesicGridTopology.MaxSupportedSubdivision);
         config.approximateThermalIntervalSeconds = NormalizeToPreset(config.approximateThermalIntervalSeconds, ApproximateThermalIntervalPresets, DefaultApproximateThermalIntervalSeconds);
@@ -866,6 +871,7 @@ public class SimulationStartupController : MonoBehaviour
         else
             builder.AppendLine($"Legacy Vent Rates H2/H2S/CO2/Fe2: {config.ventH2PerTick:0.####}/{config.ventH2SPerTick:0.####}/{config.ventCO2PerTick:0.####}/{config.ventFe2PerTick:0.####} per legacy tick semantics");
         builder.AppendLine($"Terrestrial Vent Fraction: {config.terrestrialVentFraction:0.###}");
+        builder.AppendLine($"Exclude small inland seas: {config.excludeSmallDisconnectedSeas}; minimum ocean basin area: {config.minimumOceanComponentAreaFraction * 100f:0.###}% of planet surface");
         builder.AppendLine($"Initial Spawn Count: {config.initialSpawnCount}");
         builder.AppendLine($"Start Paused: {startPaused}");
         builder.AppendLine($"Saved Config Path: {SavedStartupConfigPath}");
@@ -889,6 +895,8 @@ public class SimulationStartupController : MonoBehaviour
         public PlanetGridType gridType;
         public int cubeSphereResolution;
         public int geodesicSubdivisionLevel;
+        public bool excludeSmallDisconnectedSeas;
+        public float minimumOceanComponentAreaFraction;
         public float axisTiltDegrees;
         public float dayLengthSeconds;
         public float yearLengthInDays;
@@ -934,6 +942,8 @@ public class SimulationStartupController : MonoBehaviour
                 gridType = config.gridType,
                 cubeSphereResolution = config.cubeSphereResolution,
                 geodesicSubdivisionLevel = config.geodesicSubdivisionLevel,
+                excludeSmallDisconnectedSeas = config.excludeSmallDisconnectedSeas,
+                minimumOceanComponentAreaFraction = config.minimumOceanComponentAreaFraction,
                 axisTiltDegrees = config.axisTiltDegrees,
                 dayLengthSeconds = config.dayLengthSeconds,
                 yearLengthInDays = config.yearLengthInDays,
@@ -977,6 +987,10 @@ public class SimulationStartupController : MonoBehaviour
             config.gridType = gridType;
             config.cubeSphereResolution = cubeSphereResolution > 0 ? cubeSphereResolution : config.cubeSphereResolution;
             config.geodesicSubdivisionLevel = geodesicSubdivisionLevel;
+            // Older saved worlds must not silently opt into a changed water mask.
+            config.excludeSmallDisconnectedSeas = version >= 9 && excludeSmallDisconnectedSeas;
+            config.minimumOceanComponentAreaFraction = GeodesicOceanConnectivity.NormalizeThreshold(version >= 9
+                ? minimumOceanComponentAreaFraction : GeodesicOceanConnectivity.DefaultMinimumAreaFraction);
             config.axisTiltDegrees = axisTiltDegrees;
             config.dayLengthSeconds = dayLengthSeconds;
             config.yearLengthInDays = yearLengthInDays;
@@ -1265,7 +1279,7 @@ public class SimulationStartupController : MonoBehaviour
         setupGuiScrollPosition = GUILayout.BeginScrollView(setupGuiScrollPosition, GUILayout.Width(width), GUILayout.Height(scrollHeight));
 
         float contentWidth = Mathf.Max(1f, width - 20f);
-        float advancedHeight = advancedSettingsExpanded ? 480f : 0f;
+        float advancedHeight = advancedSettingsExpanded ? 650f : 0f;
         float contentHeight = 44f + ((line + gap) * 25f) + advancedHeight + (gap * 2f) + 42f + 30f + 82f;
         Rect contentRect = GUILayoutUtility.GetRect(contentWidth, contentHeight, GUILayout.Width(contentWidth), GUILayout.Height(contentHeight));
         float controlX = contentRect.x;
@@ -1345,6 +1359,17 @@ public class SimulationStartupController : MonoBehaviour
             {
                 DrawInt(new Rect(controlX, y, contentWidth, line), "Geodesic Subdivision Level", ref currentConfig.geodesicSubdivisionLevel, true, 0, GeodesicGridTopology.MaxSupportedSubdivision);
                 y += line + gap;
+                DrawBool(new Rect(controlX, y, contentWidth, line), "Exclude small inland seas", ref currentConfig.excludeSmallDisconnectedSeas);
+                y += line + gap;
+                bool oceanControlEnabled = GUI.enabled;
+                GUI.enabled = oceanControlEnabled && currentConfig.excludeSmallDisconnectedSeas;
+                float basinPercent = currentConfig.minimumOceanComponentAreaFraction * 100f;
+                DrawFloat(new Rect(controlX, y, contentWidth, line), "Minimum ocean basin area (% of planet)", ref basinPercent, 0f, GeodesicOceanConnectivity.MaximumAreaFraction * 100f, labelAbove: true);
+                currentConfig.minimumOceanComponentAreaFraction = GeodesicOceanConnectivity.NormalizeThreshold(basinPercent / 100f);
+                GUI.enabled = oceanControlEnabled;
+                y += line * 2f + gap;
+                GUI.Label(new Rect(controlX, y, contentWidth, 52f), "Small enclosed depressions below sea level stay dry.\nTerrain is unchanged; a future lake system can fill them.", labelStyle);
+                y += 58f;
             }
             DrawFloat(new Rect(controlX, y, contentWidth, line), "Base Temperature (K)", ref currentConfig.baseTempKelvin, BaseTempMinKelvin, BaseTempMaxKelvin);
             y += line + gap;
@@ -1450,7 +1475,7 @@ public class SimulationStartupController : MonoBehaviour
         currentConfig.gridType = selected == 1 ? PlanetGridType.GeodesicIcosphere : PlanetGridType.LegacyCubeSphere;
     }
 
-    private void DrawFloat(Rect rect, string label, ref float value, float min, float max)
+    private void DrawFloat(Rect rect, string label, ref float value, float min, float max, bool labelAbove = false)
     {
         float clampedValue = Mathf.Clamp(value, min, max);
         if (!Mathf.Approximately(value, clampedValue))
@@ -1458,9 +1483,10 @@ public class SimulationStartupController : MonoBehaviour
             value = clampedValue;
         }
 
-        GUI.Label(new Rect(rect.x, rect.y, rect.width * 0.42f, rect.height), $"{label}: {value:0.###} [{min:0.###}-{max:0.###}]", labelStyle);
+        GUI.Label(new Rect(rect.x, rect.y, rect.width * (labelAbove ? 1f : 0.42f), rect.height), $"{label}: {value:0.###} [{min:0.###}-{max:0.###}]", labelStyle);
+        if (labelAbove) rect.y += rect.height;
 
-        Rect sliderRect = new Rect(rect.x + rect.width * 0.44f, rect.y + 8f, rect.width * 0.34f, rect.height);
+        Rect sliderRect = new Rect(rect.x + rect.width * (labelAbove ? 0f : 0.44f), rect.y + 8f, rect.width * (labelAbove ? 0.76f : 0.34f), rect.height);
         float sliderValue = GUI.HorizontalSlider(sliderRect, value, min, max);
         if (!Mathf.Approximately(value, sliderValue))
         {

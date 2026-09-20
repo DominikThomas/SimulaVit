@@ -89,7 +89,7 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
                     int neighbor = topology.Neighbors6[cell * 6 + slot];
                     Vector3 sample = Vector3.Lerp(topology.CellDirections[cell], topology.CellDirections[neighbor], 0.2f).normalized;
                     float height = terrain.Height(sample);
-                    if (height < lowest && (!owner.enableOcean || terrain.VisibleHeight(sample) > owner.GeodesicSeaLevelRadius))
+                    if (height < lowest && (!owner.enableOcean || (owner.IsGeodesicOceanConnectivityFilteringActive && !owner.IsGeodesicDirectionInOceanMask(sample)) || terrain.VisibleHeight(sample) > owner.GeodesicSeaLevelRadius))
                     { lowest = height; anchor = sample; }
                 }
             }
@@ -174,7 +174,7 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
                     path = GeodesicRiverPath.Refine(ChannelAnchors[cell], ChannelAnchors[receiver], terrain.Height,
                         refinementSteps, refinementLanes, corridorWidthInCellSpacings, Mathf.Max(0f, uphillTolerance));
                     if (planet.enableOcean && path.Length > 0)
-                        path = GeodesicRiverPath.ClipAtCoast(path, terrain.VisibleHeight, planet.GeodesicSeaLevelRadius);
+                        path = GeodesicRiverPath.ClipAtCoast(path, terrain.VisibleHeight, planet.GeodesicSeaLevelRadius, planet.IsGeodesicOceanConnectivityFilteringActive ? planet.IsGeodesicDirectionInOceanMask : (Func<Vector3, bool>)null);
                     paths[cell] = path;
                 }
                 if (path.Length < 2) suppressedUphillReaches++;
