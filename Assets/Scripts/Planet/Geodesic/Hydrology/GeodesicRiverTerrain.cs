@@ -47,6 +47,22 @@ public sealed class GeodesicRiverTerrain
     public float VisibleHeight(Vector3 direction) => Sample(direction, false, false);
     public float Radius(Vector3 direction) => Sample(direction, true, false);
 
+    /// <summary>Diagnostic reference only. Measures interpolation roundoff against double
+    /// barycentric arithmetic over the same stored float vertex radii and selected face.
+    /// It does not replace the height function used for any routing or rendering decision.</summary>
+    public double InterpolationReference(Vector3 direction, bool visible)
+    {
+        Vector3 d = direction.normalized; int face = FindTriangle(d);
+        var geometry = levels[levels.Length - 1];
+        int a = geometry.Triangles[face * 3], b = geometry.Triangles[face * 3 + 1], c = geometry.Triangles[face * 3 + 2];
+        double Triple(Vector3 x, Vector3 y) => d.x * ((double)x.y*y.z - (double)x.z*y.y) +
+            d.y * ((double)x.z*y.x - (double)x.x*y.z) + d.z * ((double)x.x*y.y - (double)x.y*y.x);
+        double wa = Triple(geometry.UnitVertices[b], geometry.UnitVertices[c]);
+        double wb = Triple(geometry.UnitVertices[c], geometry.UnitVertices[a]);
+        double wc = Triple(geometry.UnitVertices[a], geometry.UnitVertices[b]);
+        float[] radii = visible || largeScaleRadii == null ? visibleRadii : largeScaleRadii;
+        return radii[a] + (wb * (radii[b] - (double)radii[a]) + wc * (radii[c] - (double)radii[a])) / (wa + wb + wc);
+    }
     public int FindTriangle(Vector3 direction)
     {
         Vector3 d = direction.normalized;

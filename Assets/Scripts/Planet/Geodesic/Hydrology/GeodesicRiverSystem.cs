@@ -45,6 +45,11 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
     [SerializeField] private int riverMouths, unresolvedSinks, filledCells, majorBasinCells;
     [SerializeField] private double topologyMilliseconds, visualMilliseconds;
 
+    [Header("Grade diagnostics (observation only)")]
+    public bool logGradeBreakExamples;
+    [Range(0, 30)] public int gradeBreakExampleLimit = 6;
+    public GeodesicRiverGradeReport GradeDiagnostics { get; private set; }
+
     public GeodesicDrainageGraph Drainage { get; private set; }
     public GeodesicLakeBasins Lakes { get; private set; }
     public GeodesicLakeGeometry LakeGeometry { get; private set; }
@@ -153,6 +158,7 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
             $"lakeConnectedReaches={LakeConnectedReaches} suppressedProjectionMismatch={SuppressedProjectionMismatch} suppressedCorridorFailure={SuppressedCorridorFailure} unresolvedSmallDepression={UnrenderedSmallDepression} trueTopologyFailure={TrueTopologyFailure} inlandVisibleTerminations={InlandVisibleTerminations} oceanConnectedChains={OceanConnectedChains} " +
             "authority=shared-large-scale-terrain projection=completed-visible-mesh topology=priority-flood runoff=replaceable-per-cell", this);
         LogLakeDiagnostics();
+        LogGradeDiagnostics();
     }
 
     /// <summary>Null restores uniform density; otherwise input is a nonnegative volume/time per cell.
@@ -245,6 +251,7 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
             }
         }
         UpdateContinuityDiagnostics();
+        GradeDiagnostics = GeodesicRiverGradeAudit.Build(Drainage, ChannelAnchors, terrain, Lakes, reachPlans, threshold, planet.BasePlanetRadius, uphillTolerance);
         if (vertices.Count > 0 && planet.enableGeodesicRivers)
         {
             riverMesh = new Mesh { name = "Geodesic River Ribbons", indexFormat = IndexFormat.UInt32 };
@@ -312,6 +319,26 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
         }
     }
 
+    [ContextMenu("Log River Grade Diagnostics")]
+    public void LogGradeDiagnostics()
+    {
+        if (GradeDiagnostics == null) return;
+        Debug.Log(GradeDiagnostics.Summary(), this);
+        if (logGradeBreakExamples)
+            foreach (string example in GradeDiagnostics.BreakExamples(gradeBreakExampleLimit)) Debug.Log(example, this);
+    }
+
+    [ContextMenu("Audit Suppressed River Corridors (Detailed)")]
+    public void AuditSuppressedRiverCorridors()
+    {
+        if (Drainage == null || planet == null) return;
+        // Explicit diagnostic action only. Replays the sampled corridor as a minimax problem;
+        // no route, geometry, accumulation or production tolerance is modified.
+        GradeDiagnostics = GeodesicRiverGradeAudit.Build(Drainage, ChannelAnchors, terrain, Lakes, reachPlans,
+            meanCellArea * Math.Max(.01f, riverFlowThreshold), planet.BasePlanetRadius, uphillTolerance,
+            true, refinementSteps, refinementLanes, corridorWidthInCellSpacings);
+        LogGradeDiagnostics();
+    }
     private void LogLakeDiagnostics()
     {
         if (Lakes == null) return;
@@ -389,6 +416,7 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
     {
         if (lakeVisualRoot != null) lakeVisualRoot.SetActive(false);
         Release(lakeVisualRoot); Release(lakeMesh); Release(lakeMaterial); lakeVisualRoot = null; lakeMesh = null; lakeMaterial = null;
+        GradeDiagnostics = null;
         Lakes = null; LakeGeometry = null; reachPlans.Clear(); lakeMilliseconds = 0d;
         LakeConnectedReaches = LakeBridgedReaches = LakeInlets = LakeOutlets = SuppressedProjectionMismatch = SuppressedCorridorFailure = UnrenderedSmallDepression = TrueTopologyFailure = InlandVisibleTerminations = OceanConnectedChains = 0;
         ClearVisual(); paths.Clear(); mouths.Clear(); Drainage = null; terrain = null; topology = null; planet = null;

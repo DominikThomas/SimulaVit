@@ -6,7 +6,7 @@ using UnityEngine;
 // Standalone comparison of the actual pure hydrology classes; not a Unity scene benchmark.
 public static class GeodesicLakeBenchmark
 {
-    public static string Run(int seed, int subdivision, float minDepth = .005f, bool broadDepressions = false)
+    public static string Run(int seed, int subdivision, float minDepth = .005f, bool broadDepressions = false, Func<GeodesicGridTopology, GeodesicDrainageGraph, Vector3[], GeodesicRiverTerrain, GeodesicLakeBasins, IReadOnlyDictionary<int, GeodesicRiverReachPlan>, double, string> observe = null)
     {
         var clock = Stopwatch.StartNew();
         var topology = GeodesicGridTopology.Build(subdivision);
@@ -77,7 +77,9 @@ public static class GeodesicLakeBenchmark
                 if(reachesOcean[i]&&!incoming[i])chains++;
                 if(p.Path.Length>1&&p.InletBasin<0&&!ocean[next]&&(plans[next]==null||(plans[next].Path.Length<2&&!plans[next].LakeConnected)))terminations++;
             }
-            return $"candidates={candidates} visible={visible} suppressed={failures.Sum()} lakeConnected={connected} inlets={inlets} outlets={outlets} oceanMouths={mouths} inlandTerminations={terminations} oceanChains={chains} projection={failures[1]} corridor={failures[2]} unrenderedDepression={failures[3]} topologyFailure={failures[4]} refinementMs={sw.Elapsed.TotalMilliseconds:F0}";
+            double refinementMs = sw.Elapsed.TotalMilliseconds;
+            string observation = observe != null ? observe(topology, graph, anchors, terrain, basins, Enumerable.Range(0, n).Where(i => plans[i] != null).ToDictionary(i => i, i => plans[i]), threshold) : string.Empty;
+            return $"candidates={candidates} visible={visible} suppressed={failures.Sum()} lakeConnected={connected} inlets={inlets} outlets={outlets} oceanMouths={mouths} inlandTerminations={terminations} oceanChains={chains} projection={failures[1]} corridor={failures[2]} unrenderedDepression={failures[3]} topologyFailure={failures[4]} refinementMs={refinementMs:F0}" + observation;
         }
     }
 }

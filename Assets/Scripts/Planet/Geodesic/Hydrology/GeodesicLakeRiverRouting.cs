@@ -8,6 +8,7 @@ public sealed class GeodesicRiverReachPlan
     public bool LakeConnected;
     public int InletBasin = -1, OutletBasin = -1;
     public GeodesicRiverReachFailure Failure;
+    public GeodesicRiverGradeObservation GradeObservation;
 }
 
 /// <summary>Visual river planning consumes existing lakes; rendering failure can never create one.</summary>
@@ -70,8 +71,10 @@ public static class GeodesicLakeRiverRouting
         // Radius includes spherical facet sag even on a level spillway; it remains the
         // authority for ribbon placement, not the downhill test.
         Func<Vector3, float> height = lakeEdge ? terrain.VisibleHeight : terrain.Height;
+        plan.GradeObservation = new GeodesicRiverGradeObservation { Evaluated = true, VisibleHeight = lakeEdge, Start = start, End = end, UpstreamHeight = height(start), DownstreamHeight = height(end), Stage = GeodesicRiverGradeStage.EndpointGate };
         if (lakeEdge && height(end) > height(start) + tolerance)
         { plan.Failure = GeodesicRiverReachFailure.ProjectionMismatch; return plan; }
+        plan.GradeObservation.Stage = GeodesicRiverGradeStage.Refinement;
         plan.Path = GeodesicRiverPath.Refine(start, end, height, steps, lanes, corridor, tolerance);
         if (plan.Path.Length < 2)
         {
@@ -79,6 +82,7 @@ public static class GeodesicLakeRiverRouting
                 graph.FillDepth[cell] > GeodesicLakeBasins.ElevationEpsilon ? GeodesicRiverReachFailure.UnresolvedDepression : GeodesicRiverReachFailure.CorridorFailure;
             return plan;
         }
+        plan.GradeObservation.Stage = GeodesicRiverGradeStage.Projection;
         if (oceanEnabled) plan.Path = GeodesicRiverPath.ClipAtCoast(plan.Path, terrain.VisibleHeight, seaLevel, oceanMask);
         if (water != null)
         {
@@ -114,6 +118,7 @@ public static class GeodesicLakeRiverRouting
                 plan.Path = clipped; plan.InletBasin = id; break;
             }
         }
+        plan.GradeObservation.Stage = GeodesicRiverGradeStage.Complete;
         plan.LakeConnected = plan.Path.Length > 1 && (plan.InletBasin >= 0 || plan.OutletBasin >= 0);
         return plan;
 
