@@ -19,21 +19,29 @@ public sealed class GeodesicDrainageGraph
     public bool[] Ocean { get; }
     public int UnresolvedSinkCount { get; private set; }
     public int FilledCellCount { get; private set; }
+    public bool UsesSharedHydrologicalElevation { get; }
     public int CellCount => DrainageReceiver.Length;
+    public double PriorityFloodMilliseconds { get; private set; }
+    public double FlowAccumulationMilliseconds { get; private set; }
+    public long ApproximateMemoryBytes => (long)CellCount * (5L * sizeof(int) +
+        (UsesSharedHydrologicalElevation ? 2L : 3L) * sizeof(float) + 3L * sizeof(double) + sizeof(byte));
 
-    private GeodesicDrainageGraph(int count)
+    private GeodesicDrainageGraph(int count, float[] sharedHydrologicalElevation = null)
     {
         DrainageReceiver = new int[count]; Array.Fill(DrainageReceiver, -1);
         FloodParent = new int[count]; Array.Fill(FloodParent, -1); FloodRank = new int[count];
         UpstreamToDownstream = new int[count]; OutletCell = new int[count];
-        HydrologicalElevation = new float[count]; FilledElevation = new float[count];
+        HydrologicalElevation = sharedHydrologicalElevation ?? new float[count];
+        UsesSharedHydrologicalElevation = sharedHydrologicalElevation != null;
+        FilledElevation = new float[count];
         FillDepth = new float[count]; LocalArea = new double[count];
         DrainageArea = new double[count]; AccumulatedRunoff = new double[count]; Ocean = new bool[count];
     }
 
     /// <param name="edgeSpillHeight">Optional symmetric sampled saddle height between adjacent cells.</param>
-    public static GeodesicDrainageGraph Build(GeodesicGridTopology topology, float[] elevations,
-        bool[] ocean, float seaLevel, float radius, Func<int, int, float> edgeSpillHeight = null)
+    public static GeodesicDrainageGraph Build(IGeodesicHydrologyTopology topology, float[] elevations,
+        bool[] ocean, float seaLevel, float radius, Func<int, int, float> edgeSpillHeight = null,
+        bool shareElevationInput = false)
     {
         if (topology == null || elevations == null || ocean == null ||
             elevations.Length != topology.CellCount || ocean.Length != topology.CellCount)
@@ -41,7 +49,7 @@ public sealed class GeodesicDrainageGraph
         if (!float.IsFinite(seaLevel) || !float.IsFinite(radius) || radius <= 0f)
             throw new ArgumentOutOfRangeException(nameof(radius));
         int count = topology.CellCount;
-        var graph = new GeodesicDrainageGraph(count);
+        var graph = new GeodesicDrainageGraph(count, shareElevationInput ? elevations : null);
         var settled = new bool[count];
         var rank = graph.FloodRank;
         var heap = new CellHeap(graph.FilledElevation);
@@ -49,12 +57,13 @@ public sealed class GeodesicDrainageGraph
         for (int i = 0; i < count; i++)
         {
             if (!float.IsFinite(elevations[i])) throw new ArgumentException("Nonfinite terrain height.");
-            graph.HydrologicalElevation[i] = elevations[i];
+            if (!shareElevationInput) graph.HydrologicalElevation[i] = elevations[i];
             graph.Ocean[i] = ocean[i];
             // Area is in squared planet-local length units; ocean contributes no terrestrial runoff.
             graph.LocalArea[i] = ocean[i] ? 0d : Math.Max(0d, topology.UnitCellAreas[i]) * radius * radius;
             if (ocean[i]) { graph.FilledElevation[i] = seaLevel; heap.PushOrDecrease(i); }
         }
+        var priorityWatch = System.Diagnostics.Stopwatch.StartNew();
         int processed = 0;
         while (processed < count)
         {
@@ -96,7 +105,7 @@ public sealed class GeodesicDrainageGraph
                 if (rank[neighbor] >= rank[cell]) continue;
                 float neighborHeight = ocean[neighbor] ? seaLevel : elevations[neighbor];
                 float slope = (elevations[cell] - neighborHeight) /
-                    Mathf.Max(1e-7f, topology.NeighborAngularDistances6[cell * 6 + slot]);
+                    Mathf.Max(1e-7f, topology.NeighborAngularDistance(cell, slot));
                 if (slope <= bestSlope) continue;
                 if (edgeSpillHeight != null && edgeSpillHeight(cell, neighbor) > graph.FilledElevation[cell]) continue;
                 bestSlope = slope; graph.DrainageReceiver[cell] = neighbor;
@@ -109,9 +118,12 @@ public sealed class GeodesicDrainageGraph
             int cell = graph.UpstreamToDownstream[i], receiver = graph.DrainageReceiver[cell];
             graph.OutletCell[cell] = receiver < 0 ? cell : graph.OutletCell[receiver];
         }
+        priorityWatch.Stop(); graph.PriorityFloodMilliseconds = priorityWatch.Elapsed.TotalMilliseconds;
+        var flowWatch = System.Diagnostics.Stopwatch.StartNew();
         Array.Copy(graph.LocalArea, graph.DrainageArea, count);
         graph.Accumulate(graph.DrainageArea);
         graph.UpdateRunoff(null);
+        flowWatch.Stop(); graph.FlowAccumulationMilliseconds = flowWatch.Elapsed.TotalMilliseconds;
         return graph;
     }
 

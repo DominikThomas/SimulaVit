@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-public sealed class GeodesicGridTopology
+public sealed class GeodesicGridTopology : IGeodesicHydrologyTopology
 {
     public const int MaxSupportedSubdivision = 8;
     public int SubdivisionLevel { get; private set; }
@@ -19,6 +19,8 @@ public sealed class GeodesicGridTopology
     public int TriangleCount => Triangles != null ? Triangles.Length / 3 : 0;
     public int EdgeCount => TriangleCount * 3 / 2;
     public long ApproximateMemoryBytes => (long)CellCount * (12 + 1 + 24 + 1 + 4 + 24 + 24) + (long)Triangles.Length * 4;
+    public long ApproximateHydrologyMemoryBytes => ApproximateMemoryBytes;
+    public static int BuildInvocationCount { get; private set; }
 
     public static int ExpectedCellCount(int s) => 10 * (int)Mathf.Pow(4, s) + 2;
     public static int ExpectedTriangleCount(int s) => 20 * (int)Mathf.Pow(4, s);
@@ -26,6 +28,7 @@ public sealed class GeodesicGridTopology
 
     public static GeodesicGridTopology Build(int subdivision)
     {
+        BuildInvocationCount++;
         subdivision = Mathf.Clamp(subdivision, 0, MaxSupportedSubdivision);
         List<Vector3> verts = new List<Vector3>();
         List<int> tris = new List<int>();
@@ -35,6 +38,8 @@ public sealed class GeodesicGridTopology
         t.BuildAdjacencyAndMetrics();
         return t;
     }
+
+    public float NeighborAngularDistance(int cell, int slot) => NeighborAngularDistances6[cell * 6 + slot];
 
     private static void BuildIcosahedron(List<Vector3> v, List<int> tri)
     {

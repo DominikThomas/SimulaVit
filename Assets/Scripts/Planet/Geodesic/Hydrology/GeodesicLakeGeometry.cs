@@ -47,7 +47,7 @@ public sealed class GeodesicLakeGeometry
         double z = (double)a.x * b.y - (double)a.y * b.x;
         return x * direction.x + y * direction.y + z * direction.z >= -0.0000001d * Math.Sqrt(x*x + y*y + z*z);
     }
-    public static GeodesicLakeGeometry Build(GeodesicGridTopology topology, GeodesicDrainageGraph drainage,
+    public static GeodesicLakeGeometry Build(IGeodesicHydrologyTopology topology, GeodesicDrainageGraph drainage,
         GeodesicLakeBasins lakes, IcosphereRenderGeometry geometry, Vector3[] surface, GeodesicRiverTerrain terrain,
         float planetRadius, float minimumAreaFraction)
     {
@@ -60,7 +60,12 @@ public sealed class GeodesicLakeGeometry
         bool anySelected = false; foreach (var basin in lakes.Basins) anySelected |= basin.Selected;
         if (anySelected)
         {
-            var mapping = IcosphereDirectionMappingBuilder.Build(topology, geometry);
+            bool identity = topology.SubdivisionLevel == geometry.SubdivisionLevel &&
+                topology.CellCount == geometry.VertexCount && ReferenceEquals(topology.CellDirections, geometry.UnitVertices);
+            IcosphereDirectionMapping mapping = identity ? null :
+                IcosphereDirectionMappingBuilder.Build(topology as GeodesicGridTopology ??
+                    throw new InvalidOperationException("Non-identity lightweight hydrology/render mapping is unsupported."), geometry);
+            int CellForVertex(int vertex) => identity ? vertex : mapping.Samples[vertex].NearestCell;
             int[] counts = new int[geometry.VertexCount];
             foreach (int vertex in geometry.Triangles) counts[vertex]++;
             int[] starts = new int[counts.Length + 1];
@@ -71,7 +76,7 @@ public sealed class GeodesicLakeGeometry
             var seeds = new int[lakes.Basins.Length]; Array.Fill(seeds, -1);
             for (int v = 0; v < surface.Length; v++)
             {
-                int id = lakes.BasinId[mapping.Samples[v].NearestCell];
+                int id = lakes.BasinId[CellForVertex(v)];
                 if (id >= 0 && lakes.Basins[id].Selected && (seeds[id] < 0 || surface[v].sqrMagnitude < surface[seeds[id]].sqrMagnitude)) seeds[id] = v;
             }
             int[] allowed = new int[topology.CellCount], visited = new int[surface.Length], touched = new int[geometry.TriangleCount];
@@ -101,7 +106,7 @@ public sealed class GeodesicLakeGeometry
                         {
                             int neighbor = geometry.Triangles[face * 3 + n];
                             if (visited[neighbor] == stamp || surface[neighbor].magnitude >= level - GeodesicLakeBasins.ElevationEpsilon) continue;
-                            int cell = mapping.Samples[neighbor].NearestCell;
+                            int cell = CellForVertex(neighbor);
                             if (allowed[cell] != stamp || drainage.Ocean[cell] || (lakes.BasinId[cell] >= 0 && lakes.BasinId[cell] != basin.Id))
                             { leaks = true; continue; }
                             visited[neighbor] = stamp; queue[tail++] = neighbor;

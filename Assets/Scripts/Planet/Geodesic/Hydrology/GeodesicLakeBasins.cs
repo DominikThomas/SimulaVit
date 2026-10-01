@@ -39,7 +39,7 @@ public sealed class GeodesicLakeBasins
     public static float NormalizeArea(float value) => float.IsFinite(value) ? Mathf.Clamp(value, 0f, .05f) : DefaultMinimumAreaFraction;
     public static float NormalizeDepth(float value) => float.IsFinite(value) ? Mathf.Clamp(value, 0f, 1f) : DefaultMinimumDepth;
 
-    public static GeodesicLakeBasins Build(GeodesicGridTopology topology, GeodesicDrainageGraph graph,
+    public static GeodesicLakeBasins Build(IGeodesicHydrologyTopology topology, GeodesicDrainageGraph graph,
         float radius, bool enabled, float minimumAreaFraction, float minimumDepth, Func<int, int, float> edgeSpill = null)
     {
         if (topology == null || graph == null || topology.CellCount != graph.CellCount) throw new ArgumentException("Lake topology must match drainage.");
@@ -105,7 +105,7 @@ public sealed class GeodesicLakeBasins
 
     /// <summary>Collapse each selected pool to its one authoritative spill edge without changing terrain.
     /// The receiver DAG, catchment areas and runoff are rebuilt once by the caller.</summary>
-    public int[] CreateReceivers(GeodesicGridTopology topology, GeodesicDrainageGraph graph, Func<int, int, float> edgeSpill = null)
+    public int[] CreateReceivers(IGeodesicHydrologyTopology topology, GeodesicDrainageGraph graph, Func<int, int, float> edgeSpill = null)
     {
         int[] receivers = (int[])graph.DrainageReceiver.Clone();
         var visited = new bool[graph.CellCount]; var queue = new int[graph.CellCount];

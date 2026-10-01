@@ -86,6 +86,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     private double geodesicSurfaceRadiusQueryMilliseconds;
     private Dictionary<GeodesicDebugDirectionKey, float> geodesicDebugSurfaceRadiusCache;
     private GeodesicRenderTerrainData geodesicCurrentRenderTerrainData;
+    private IcosphereDirectionMapping geodesicCurrentRenderMapping;
     private Vector3[] geodesicVisibleSeafloorPositionByCell;
     private Vector3[] geodesicVisibleSeafloorNormalByCell;
     private float maximumGeneratedOpaqueSurfaceRadius;
@@ -122,6 +123,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         public float[] MountainMasks;
     }
     internal float[] GeodesicHydrologicalRenderRadii => geodesicCurrentRenderTerrainData.HydrologicalRadii;
+    internal IcosphereDirectionMapping GeodesicCurrentRenderMapping => geodesicCurrentRenderMapping;
     public bool showGeodesicCellOutlines = true;
     public bool highlightGeodesicPentagons = true;
     public bool showGeodesicCellCentres;
@@ -663,6 +665,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         geodesicCoastlineMask = null;
         geodesicDebugSurfaceRadiusCache = null;
         geodesicCurrentRenderTerrainData = default;
+        geodesicCurrentRenderMapping = null;
         geodesicVisibleSeafloorPositionByCell = null;
         geodesicVisibleSeafloorNormalByCell = null;
         maximumGeneratedOpaqueSurfaceRadius = BasePlanetRadius;
@@ -856,6 +859,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         stage = System.Diagnostics.Stopwatch.StartNew();
         IcosphereRenderGeometry renderGeometry = IcosphereRenderGeometryCache.GetOrBuild(renderSubdivision);
         IcosphereDirectionMapping renderMapping = GetOrBuildDirectionMapping(renderGeometry);
+        geodesicCurrentRenderMapping = renderMapping;
         mesh = IcosphereRenderMeshBuilder.BuildSurfaceMesh(renderGeometry, BasePlanetRadius, $"Geodesic Terrain Render L{renderSubdivision}");
         LogStage("render icosphere generation", stage);
 

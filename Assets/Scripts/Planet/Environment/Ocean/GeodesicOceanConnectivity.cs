@@ -41,7 +41,7 @@ public sealed class GeodesicOceanConnectivity
 
     /// <summary>Walk the convex spherical neighbor graph to the nearest cell. No allocations or flood fill.
     /// A caller can reuse the previous cell for spatially coherent local-direction queries.</summary>
-    public static int FindNearestCell(GeodesicGridTopology topology, Vector3 localDirection, int startCell = 0)
+    public static int FindNearestCell(IGeodesicHydrologyTopology topology, Vector3 localDirection, int startCell = 0)
     {
         if (topology == null || topology.CellCount == 0) return -1;
         int current = Math.Max(0, Math.Min(topology.CellCount - 1, startCell));
@@ -60,7 +60,7 @@ public sealed class GeodesicOceanConnectivity
         }
     }
 
-    public static GeodesicOceanConnectivity Build(GeodesicGridTopology topology, float[] terrainRadius,
+    public static GeodesicOceanConnectivity Build(IGeodesicHydrologyTopology topology, float[] terrainRadius,
         float seaRadius, bool oceanEnabled, bool filterEnabled, float minimumAreaFraction, bool oceanWorld = false)
     {
         if (topology == null) throw new ArgumentNullException(nameof(topology));

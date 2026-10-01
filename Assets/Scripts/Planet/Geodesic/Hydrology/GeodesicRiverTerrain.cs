@@ -11,15 +11,18 @@ public sealed class GeodesicRiverTerrain
     private readonly float[] visibleRadii;
     private readonly Vector3[][] faceNormals;
     private readonly Vector3[] surfacePlanes;
+    public bool UsesSharedHydrologicalRadii { get; }
 
-    public GeodesicRiverTerrain(IcosphereRenderGeometry geometry, Vector3[] renderedVertices, float[] hydrologicalRadii = null)
+    public GeodesicRiverTerrain(IcosphereRenderGeometry geometry, Vector3[] renderedVertices,
+        float[] hydrologicalRadii = null, bool shareHydrologicalRadii = false)
     {
         if (renderedVertices == null || renderedVertices.Length != geometry.VertexCount)
             throw new ArgumentException("Rendered vertices must match the render geometry.");
         Vector3[] vertices = renderedVertices;
         if (hydrologicalRadii != null && hydrologicalRadii.Length != vertices.Length)
             throw new ArgumentException("Hydrological radii must match the render geometry.");
-        largeScaleRadii = hydrologicalRadii != null ? (float[])hydrologicalRadii.Clone() : null;
+        largeScaleRadii = hydrologicalRadii == null ? null : shareHydrologicalRadii ? hydrologicalRadii : (float[])hydrologicalRadii.Clone();
+        UsesSharedHydrologicalRadii = hydrologicalRadii != null && shareHydrologicalRadii;
         visibleRadii = new float[vertices.Length];
         for (int i = 0; i < vertices.Length; i++) visibleRadii[i] = vertices[i].magnitude;
         levels = new IcosphereRenderGeometry[geometry.SubdivisionLevel + 1];

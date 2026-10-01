@@ -6,6 +6,8 @@ public sealed class GeodesicRiverReachPlan
 {
     public Vector3[] Path = Array.Empty<Vector3>();
     public bool LakeConnected;
+    public bool ShorelineFailure;
+    public double ShorelineCoastMilliseconds;
     public int InletBasin = -1, OutletBasin = -1;
     public GeodesicRiverReachFailure Failure;
     public GeodesicRiverGradeObservation GradeObservation;
@@ -17,9 +19,17 @@ public static class GeodesicLakeRiverRouting
     public static GeodesicRiverReachPlan Build(int cell, GeodesicDrainageGraph graph, Vector3[] anchors,
         GeodesicRiverTerrain terrain, GeodesicLakeBasins lakes, GeodesicLakeGeometry water,
         int steps, int lanes, float corridor, float tolerance, bool oceanEnabled, float seaLevel,
-        Func<Vector3, bool> oceanMask)
+        Func<Vector3, bool> oceanMask, bool directHydrologyEdge = false)
     {
         var plan = new GeodesicRiverReachPlan();
+        bool ClosestShore(int basin, Vector3 toward, out Vector3 direction)
+        {
+            long started = System.Diagnostics.Stopwatch.GetTimestamp();
+            bool found = water.TryClosestShore(basin, toward, out direction);
+            plan.ShorelineCoastMilliseconds += (System.Diagnostics.Stopwatch.GetTimestamp() - started) *
+                1000d / System.Diagnostics.Stopwatch.Frequency;
+            return found;
+        }
         int receiver = graph.DrainageReceiver[cell];
         if (receiver < 0 || graph.FilledElevation[receiver] > graph.FilledElevation[cell] + GeodesicLakeBasins.ElevationEpsilon)
         { plan.Failure = GeodesicRiverReachFailure.TopologyFailure; return plan; }
@@ -45,8 +55,8 @@ public static class GeodesicLakeRiverRouting
             var basin = lakes.Basins[sourceBasin];
             if (!outletContinuation && (cell != basin.SpillFromCell || receiver != basin.SpillCell))
             { plan.Failure = GeodesicRiverReachFailure.TopologyFailure; return plan; }
-            if (!water.TryClosestShore(sourceBasin, end, out start))
-            { plan.Failure = GeodesicRiverReachFailure.ProjectionMismatch; return plan; }
+            if (!ClosestShore(sourceBasin, end, out start))
+            { plan.ShorelineFailure = true; plan.Failure = GeodesicRiverReachFailure.ProjectionMismatch; return plan; }
             plan.OutletBasin = sourceBasin;
         }
         else if (sourceWater >= 0)
@@ -57,8 +67,8 @@ public static class GeodesicLakeRiverRouting
         if (targetBasin >= 0 || targetWater >= 0)
         {
             int id = targetBasin >= 0 ? targetBasin : targetWater;
-            if (!water.TryClosestShore(id, start, out end))
-            { plan.Failure = GeodesicRiverReachFailure.ProjectionMismatch; return plan; }
+            if (!ClosestShore(id, start, out end))
+            { plan.ShorelineFailure = true; plan.Failure = GeodesicRiverReachFailure.ProjectionMismatch; return plan; }
             plan.InletBasin = id;
         }
         bool lakeEdge = plan.InletBasin >= 0 || plan.OutletBasin >= 0;
@@ -74,8 +84,9 @@ public static class GeodesicLakeRiverRouting
         plan.GradeObservation = new GeodesicRiverGradeObservation { Evaluated = true, VisibleHeight = lakeEdge, Start = start, End = end, UpstreamHeight = height(start), DownstreamHeight = height(end), Stage = GeodesicRiverGradeStage.EndpointGate };
         if (lakeEdge && height(end) > height(start) + tolerance)
         { plan.Failure = GeodesicRiverReachFailure.ProjectionMismatch; return plan; }
-        plan.GradeObservation.Stage = GeodesicRiverGradeStage.Refinement;
-        plan.Path = GeodesicRiverPath.Refine(start, end, height, steps, lanes, corridor, tolerance);
+        plan.GradeObservation.Stage = directHydrologyEdge && !lakeEdge ? GeodesicRiverGradeStage.Complete : GeodesicRiverGradeStage.Refinement;
+        plan.Path = directHydrologyEdge && !lakeEdge ? new[] { start, end } :
+            GeodesicRiverPath.Refine(start, end, height, steps, lanes, corridor, tolerance);
         if (plan.Path.Length < 2)
         {
             plan.Failure = lakeEdge ? GeodesicRiverReachFailure.CorridorFailure :
@@ -83,7 +94,13 @@ public static class GeodesicLakeRiverRouting
             return plan;
         }
         plan.GradeObservation.Stage = GeodesicRiverGradeStage.Projection;
-        if (oceanEnabled) plan.Path = GeodesicRiverPath.ClipAtCoast(plan.Path, terrain.VisibleHeight, seaLevel, oceanMask);
+        if (oceanEnabled)
+        {
+            long coastStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+            plan.Path = GeodesicRiverPath.ClipAtCoast(plan.Path, terrain.VisibleHeight, seaLevel, oceanMask);
+            plan.ShorelineCoastMilliseconds += (System.Diagnostics.Stopwatch.GetTimestamp() - coastStarted) *
+                1000d / System.Diagnostics.Stopwatch.Frequency;
+        }
         if (water != null)
         {
             // A clipped pool can extend into the spill's neighbouring routing cell. Follow
