@@ -18,10 +18,13 @@ public static class GeodesicHydrologyBenchmark
         public int LakeOutletBelowThreshold, LakeOutletProjectionFailure, LakeOutletShorelineFailure, LakeOutletTopologyFailure;
         public int ProjectionFailures, CorridorFailures, UnresolvedDepressions, TrueTopologyFailures;
         public int RiverMeshVertexCount, LakeMeshVertexCount, FullTopologyBuilds;
+        public int MajorRiverReaches;
         public long RetainedMemoryBytes;
         public double AdjacencyMs, OceanMappingMs, PriorityFloodMs, FlowAccumulationMs;
         public double LakeTopologyMs, LakeGeometryMs, PathExtractionMs, ShorelineCoastMs, RibbonGeometryEstimateMs, TotalMs;
         public double ResolvedThresholdArea;
+        public double TotalRenderedRiverLength;
+        public GeodesicRiverVisualDiagnostics VisualDiagnostics;
 
         public override string ToString()
         {
@@ -35,11 +38,13 @@ public static class GeodesicHydrologyBenchmark
                 $"lakeOutletShorelineFailure={LakeOutletShorelineFailure} lakeOutletTopologyFailure={LakeOutletTopologyFailure} " +
                 $"projectionFailures={ProjectionFailures} corridorFailures={CorridorFailures} unresolvedDepressions={UnresolvedDepressions} " +
                 $"trueTopologyFailures={TrueTopologyFailures} riverMeshVertices={RiverMeshVertexCount} lakeMeshVertices={LakeMeshVertexCount} " +
+                $"majorRiverReaches={MajorRiverReaches} totalRenderedRiverLength={TotalRenderedRiverLength:G9} " +
                 $"thresholdArea={ResolvedThresholdArea:G9} retainedMemoryBytes={RetainedMemoryBytes} " +
                 $"adjacencyMs={AdjacencyMs:F1} oceanMappingMs={OceanMappingMs:F1} priorityFloodMs={PriorityFloodMs:F1} " +
                 $"flowAccumulationMs={FlowAccumulationMs:F1} lakeTopologyMs={LakeTopologyMs:F1} lakeGeometryMs={LakeGeometryMs:F1} " +
                 $"pathExtractionMs={PathExtractionMs:F1} shorelineCoastMs={ShorelineCoastMs:F1} " +
-                $"ribbonGeometryEstimateMs={RibbonGeometryEstimateMs:F1} totalMs={TotalMs:F1}";
+                $"ribbonGeometryEstimateMs={RibbonGeometryEstimateMs:F1} valleySnapMs={(VisualDiagnostics != null ? VisualDiagnostics.ValleySnapMilliseconds : 0d):F1} smoothingMs={(VisualDiagnostics != null ? VisualDiagnostics.SmoothingMilliseconds : 0d):F1} totalMs={TotalMs:F1}" +
+                (VisualDiagnostics != null ? $" anchors0={VisualDiagnostics.UnadjustedAnchors} anchors1={VisualDiagnostics.OneRingAdjustments} anchors2={VisualDiagnostics.TwoRingAdjustments} anchorsUnresolved={VisualDiagnostics.UnresolvedAdjustments} visibleUphillBefore={VisualDiagnostics.VisibleUphillBefore} visibleUphillAfter={VisualDiagnostics.VisibleUphillAfter} ridgeBefore={VisualDiagnostics.RidgeCrossingsBefore} ridgeAfter={VisualDiagnostics.RidgeCrossingsAfter}" : string.Empty);
         }
     }
 
@@ -74,13 +79,14 @@ public static class GeodesicHydrologyBenchmark
             return cell >= 0 && connectivity.OceanMask[cell];
         }
 
-        Result legacy = Build(false);
-        Result dedicated = Build(true);
+        Result legacy = Build(false, false);
+        Result dedicated = Build(true, false);
+        Result corrected = Build(true, true);
         return $"HYDROLOGY A/B seed={seed} sharedSimulationCells={simulation.CellCount} sharedRenderVertices={geometry.VertexCount} " +
             $"simulationTopologyBuilds={simulationBuilds} configuredThresholdSimulationCells={configuredThreshold:G6}\n" +
-            legacy + "\n" + dedicated;
+            legacy + "\n" + dedicated + "\n" + corrected;
 
-        Result Build(bool dedicated)
+        Result Build(bool dedicated, bool corrected)
         {
             var total = Stopwatch.StartNew();
             int fullBefore = GeodesicGridTopology.BuildInvocationCount;
@@ -99,7 +105,9 @@ public static class GeodesicHydrologyBenchmark
             {
                 anchors = topology.CellDirections;
                 elevations = hydrologicalRadii;
-                ocean = GeodesicHydrologyMapping.MapAuthoritativeOcean(mapping, connectivity.OceanMask, surface, sea);
+                ocean = corrected ? GeodesicHydrologyMapping.MapAuthoritativeOcean(mapping, connectivity.OceanMask, surface, sea) :
+                    Enumerable.Range(0, geometry.VertexCount).Select(vertex =>
+                        connectivity.OceanMask[mapping.Samples[vertex].NearestCell] && surface[vertex].sqrMagnitude < sea * sea).ToArray();
             }
             else
             {
@@ -146,23 +154,29 @@ public static class GeodesicHydrologyBenchmark
                 terrain, radius, minimumLakeArea);
             stage.Stop(); double lakeGeometryMs = stage.Elapsed.TotalMilliseconds;
             graph.ApplyLakeReceivers(lakes.CreateReceivers(topology, graph, edgeSpill));
+            GeodesicRiverVisualDiagnostics visualDiagnostics = null;
+            if (corrected)
+                anchors = GeodesicRiverVisualPath.BuildSharedAnchors(topology, graph, terrain, lakes, threshold,
+                    .000002f, out visualDiagnostics);
 
             stage.Restart();
             var plans = new GeodesicRiverReachPlan[topology.CellCount];
             var incoming = new bool[topology.CellCount];
             var maximumLakeInflow = new double[lakes.Basins.Length];
-            int candidates = 0, visible = 0, lakeConnected = 0, lakeInlets = 0;
+            int candidates = 0, visible = 0, major = 0, lakeConnected = 0, lakeInlets = 0;
             int projection = 0, corridor = 0, unresolved = 0, topologyFailures = 0, riverVertices = 0;
             double shorelineCoastMs = 0d;
             var renderedOutletBasins = new HashSet<int>();
             var visiblePaths = new List<Vector3[]>();
+            double renderedLength = 0d;
             for (int cell = 0; cell < topology.CellCount; cell++)
             {
                 int receiver = graph.DrainageReceiver[cell];
                 if (ocean[cell] || receiver < 0 || graph.AccumulatedRunoff[cell] < threshold) continue;
                 candidates++; incoming[receiver] = true;
                 GeodesicRiverReachPlan plan = plans[cell] = GeodesicLakeRiverRouting.Build(cell, graph, anchors,
-                    terrain, lakes, water, 12, 7, .35f, .000002f, true, sea, SimulationOcean, dedicated);
+                    terrain, lakes, water, 12, 7, .35f, .000002f, true, sea, SimulationOcean, dedicated,
+                    corrected ? topology : null, visualDiagnostics);
                 shorelineCoastMs += plan.ShorelineCoastMilliseconds;
                 if (plan.LakeConnected) lakeConnected++;
                 if (plan.Failure == GeodesicRiverReachFailure.ProjectionMismatch) projection++;
@@ -171,7 +185,10 @@ public static class GeodesicHydrologyBenchmark
                 else if (plan.Failure == GeodesicRiverReachFailure.TopologyFailure) topologyFailures++;
                 if (plan.Path.Length < 2) continue;
                 visible++;
+                if (graph.AccumulatedRunoff[cell] >= threshold * 8d) major++;
                 visiblePaths.Add(plan.Path);
+                for (int point = 1; point < plan.Path.Length; point++)
+                    renderedLength += radius * Mathf.Acos(Mathf.Clamp(Vector3.Dot(plan.Path[point - 1], plan.Path[point]), -1f, 1f));
                 riverVertices += 2 * (3 * (plan.Path.Length - 1) + 1);
                 if (plan.InletBasin >= 0)
                 {
@@ -234,7 +251,7 @@ public static class GeodesicHydrologyBenchmark
                 pathBytes + (long)water.Vertices.Length * 12L + (long)water.Triangles.Length * sizeof(int);
             return new Result
             {
-                Mode = dedicated ? "dedicated-render-7" : "legacy-simulation-6",
+                Mode = !dedicated ? "GOOD_VISUAL_OLD-legacy-simulation-6" : corrected ? "corrected-render-7" : "CURRENT_HIGHRES-raw-render-7",
                 SimulationSubdivision = simulationSubdivision, RenderSubdivision = renderSubdivision,
                 HydrologySubdivision = topology.SubdivisionLevel, HydrologyNodes = topology.CellCount,
                 FullTopologyBuilds = GeodesicGridTopology.BuildInvocationCount - fullBefore,
@@ -249,6 +266,7 @@ public static class GeodesicHydrologyBenchmark
                 LakeOutletTopologyFailure = outletTopology, ProjectionFailures = projection, CorridorFailures = corridor,
                 UnresolvedDepressions = unresolved, TrueTopologyFailures = topologyFailures,
                 RiverMeshVertexCount = riverVertices, LakeMeshVertexCount = water.Vertices.Length,
+                MajorRiverReaches = major, TotalRenderedRiverLength = renderedLength, VisualDiagnostics = visualDiagnostics,
                 RetainedMemoryBytes = retained, ResolvedThresholdArea = threshold,
                 AdjacencyMs = adjacencyMs, OceanMappingMs = oceanMs,
                 PriorityFloodMs = graph.PriorityFloodMilliseconds, FlowAccumulationMs = graph.FlowAccumulationMilliseconds,

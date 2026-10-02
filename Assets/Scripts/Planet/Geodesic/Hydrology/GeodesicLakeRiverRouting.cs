@@ -19,7 +19,8 @@ public static class GeodesicLakeRiverRouting
     public static GeodesicRiverReachPlan Build(int cell, GeodesicDrainageGraph graph, Vector3[] anchors,
         GeodesicRiverTerrain terrain, GeodesicLakeBasins lakes, GeodesicLakeGeometry water,
         int steps, int lanes, float corridor, float tolerance, bool oceanEnabled, float seaLevel,
-        Func<Vector3, bool> oceanMask, bool directHydrologyEdge = false)
+        Func<Vector3, bool> oceanMask, bool directHydrologyEdge = false,
+        IGeodesicHydrologyTopology directTopology = null, GeodesicRiverVisualDiagnostics visualDiagnostics = null)
     {
         var plan = new GeodesicRiverReachPlan();
         bool ClosestShore(int basin, Vector3 toward, out Vector3 direction)
@@ -85,7 +86,9 @@ public static class GeodesicLakeRiverRouting
         if (lakeEdge && height(end) > height(start) + tolerance)
         { plan.Failure = GeodesicRiverReachFailure.ProjectionMismatch; return plan; }
         plan.GradeObservation.Stage = directHydrologyEdge && !lakeEdge ? GeodesicRiverGradeStage.Complete : GeodesicRiverGradeStage.Refinement;
-        plan.Path = directHydrologyEdge && !lakeEdge ? new[] { start, end } :
+        plan.Path = directHydrologyEdge && !lakeEdge && directTopology != null && visualDiagnostics != null ?
+            GeodesicRiverVisualPath.SmoothEdge(cell, directTopology, graph, anchors, terrain, tolerance, visualDiagnostics) :
+            directHydrologyEdge && !lakeEdge ? new[] { start, end } :
             GeodesicRiverPath.Refine(start, end, height, steps, lanes, corridor, tolerance);
         if (plan.Path.Length < 2)
         {

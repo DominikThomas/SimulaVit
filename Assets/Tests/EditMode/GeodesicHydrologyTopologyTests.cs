@@ -61,9 +61,11 @@ public sealed class GeodesicHydrologyTopologyTests
         var mapping = IcosphereDirectionMappingBuilder.Build(simulation, geometry);
         var simulationOcean = new bool[simulation.CellCount]; simulationOcean[0] = true;
         var surface = geometry.UnitVertices.Select(x => x * 7.9f).ToArray();
-        bool[] mapped = GeodesicHydrologyMapping.MapAuthoritativeOcean(mapping, simulationOcean, surface, 8f);
+        bool[] mapped = GeodesicHydrologyMapping.MapAuthoritativeOcean(mapping, simulationOcean, surface, 8f, out var report);
         for (int vertex = 0; vertex < mapped.Length; vertex++)
-            Assert.That(mapped[vertex], Is.EqualTo(mapping.Samples[vertex].NearestCell == 0));
+            Assert.That(mapped[vertex], Is.EqualTo(HasAuthority(vertex)));
+        Assert.That(report.MappedOceanVertices, Is.EqualTo(mapped.Count(x => x)));
+        Assert.That(report.AuthorityDisagreementVertices, Is.GreaterThan(0));
         int retained = Array.FindIndex(mapped, x => x);
         Assert.That(retained, Is.GreaterThanOrEqualTo(0));
         surface[retained] = geometry.UnitVertices[retained] * 8.1f;
@@ -71,6 +73,15 @@ public sealed class GeodesicHydrologyTopologyTests
         Assert.That(mapped[retained], Is.False);
         simulationOcean[0] = false;
         Assert.That(GeodesicHydrologyMapping.MapAuthoritativeOcean(mapping, simulationOcean, surface, 8f).Any(x => x), Is.False);
+
+        bool HasAuthority(int vertex)
+        {
+            var sample = mapping.Samples[vertex];
+            if (sample.NearestCell == 0) return true;
+            for (int entry = sample.NeighborStart; entry < sample.NeighborStart + sample.NeighborCount; entry++)
+                if (mapping.NeighborIndices[entry] == 0) return true;
+            return false;
+        }
     }
 
     [Test]
@@ -191,9 +202,53 @@ public sealed class GeodesicHydrologyTopologyTests
         var submerged = geometry.UnitVertices.Select(x => x * 9f).ToArray();
         bool[] mapped = GeodesicHydrologyMapping.MapAuthoritativeOcean(mapping, connectivity.OceanMask, submerged, 10f);
         for (int vertex = 0; vertex < mapped.Length; vertex++)
-            Assert.That(mapped[vertex], Is.EqualTo(connectivity.OceanMask[mapping.Samples[vertex].NearestCell]));
+            Assert.That(mapped[vertex], Is.EqualTo(HasRetainedAuthority(vertex)));
         Assert.That(Enumerable.Range(0, mapped.Length).Any(x => mapping.Samples[x].NearestCell == excluded && !mapped[x]), Is.True);
         Assert.That(mapped.Any(x => x), Is.True);
+
+        bool HasRetainedAuthority(int vertex)
+        {
+            var sample = mapping.Samples[vertex];
+            if (connectivity.OceanMask[sample.NearestCell]) return true;
+            for (int entry = sample.NeighborStart; entry < sample.NeighborStart + sample.NeighborCount; entry++)
+                if (connectivity.OceanMask[mapping.NeighborIndices[entry]]) return true;
+            return false;
+        }
+    }
+
+    [Test]
+    public void SharedValleyAnchorsPreserveConfluencesAndSmoothedEdgeEndpoints()
+    {
+        var geometry = IcosphereRenderMeshBuilder.BuildUnitGeometry(3);
+        var topology = GeodesicHydrologyTopology.Build(geometry);
+        var hydrology = geometry.UnitVertices.Select(x => 8f + x.y * .1f).ToArray();
+        var ocean = geometry.UnitVertices.Select(x => x.y < -.8f).ToArray();
+        var graph = GeodesicDrainageGraph.Build(topology, hydrology, ocean, 8f, 8f, null, true);
+        int raised = Enumerable.Range(0, graph.CellCount).First(x => !ocean[x] && graph.DrainageReceiver[x] >= 0 &&
+            !ocean[graph.DrainageReceiver[x]]);
+        var visibleRadii = (float[])hydrology.Clone(); visibleRadii[raised] += .03f;
+        var surface = geometry.UnitVertices.Select((x, i) => x * visibleRadii[i]).ToArray();
+        var terrain = new GeodesicRiverTerrain(geometry, surface, hydrology, true);
+        var anchors = GeodesicRiverVisualPath.BuildSharedAnchors(topology, graph, terrain, null, 0d, .000002f, out var diagnostics);
+        Assert.That(diagnostics.EligibleAnchors, Is.GreaterThan(0));
+        Assert.That(diagnostics.UnadjustedAnchors + diagnostics.OneRingAdjustments + diagnostics.TwoRingAdjustments,
+            Is.EqualTo(diagnostics.EligibleAnchors));
+        Assert.That((anchors[raised] - topology.CellDirections[raised]).magnitude, Is.GreaterThan(1e-6f));
+        Vector3[] path = GeodesicRiverVisualPath.SmoothEdge(raised, topology, graph, anchors, terrain, .000002f, diagnostics);
+        Assert.That(path.First(), Is.EqualTo(anchors[raised]));
+        Assert.That(path.Last(), Is.EqualTo(anchors[graph.DrainageReceiver[raised]]));
+        Assert.That(path.Length, Is.EqualTo(5));
+
+        int confluence = Enumerable.Range(0, graph.CellCount).FirstOrDefault(cell =>
+            Enumerable.Range(0, topology.NeighborCounts[cell]).Count(slot =>
+                graph.DrainageReceiver[topology.Neighbors6[cell * 6 + slot]] == cell) >= 2);
+        int[] tributaries = Enumerable.Range(0, topology.NeighborCounts[confluence])
+            .Select(slot => topology.Neighbors6[confluence * 6 + slot])
+            .Where(cell => graph.DrainageReceiver[cell] == confluence).Take(2).ToArray();
+        Assert.That(tributaries.Length, Is.EqualTo(2));
+        foreach (int tributary in tributaries)
+            Assert.That(GeodesicRiverVisualPath.SmoothEdge(tributary, topology, graph, anchors, terrain, .000002f, diagnostics).Last(),
+                Is.EqualTo(anchors[confluence]));
     }
 
     [Test]
