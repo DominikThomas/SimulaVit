@@ -1,0 +1,6 @@
+{
+    "name": "SimulaVit.HydrologyBaselineReference",
+    "references": ["SimulaVit"],
+    "autoReferenced": false,
+    "defineConstraints": ["UNITY_EDITOR"]
+}

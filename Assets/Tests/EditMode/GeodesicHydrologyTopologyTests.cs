@@ -114,7 +114,7 @@ public sealed class GeodesicHydrologyTopologyTests
     }
 
     [Test]
-    public void DirectHydrologyReachUsesTheActualGraphEdgeWithoutCorridorRefinement()
+    public void RenderResolutionReachStillRequiresTerrainRefinement()
     {
         var geometry = IcosphereRenderMeshBuilder.BuildUnitGeometry(1);
         var topology = GeodesicHydrologyTopology.Build(geometry);
@@ -126,9 +126,12 @@ public sealed class GeodesicHydrologyTopologyTests
         int source = Enumerable.Range(1, graph.CellCount - 1).First(x => graph.DrainageReceiver[x] >= 0 && !graph.Ocean[graph.DrainageReceiver[x]]);
         int receiver = graph.DrainageReceiver[source];
         var plan = GeodesicLakeRiverRouting.Build(source, graph, topology.CellDirections, terrain, null, null,
-            12, 7, .35f, 0f, false, 8f, null, true);
+            12, 7, .35f, .000002f, false, 8f, null);
         Assert.That(plan.Failure, Is.EqualTo(GeodesicRiverReachFailure.None));
-        Assert.That(plan.Path, Is.EqualTo(new[] { topology.CellDirections[source], topology.CellDirections[receiver] }));
+        Assert.That(plan.Path.Length, Is.GreaterThan(2));
+        Assert.That(plan.Path[0], Is.EqualTo(topology.CellDirections[source]));
+        Assert.That(plan.Path.Last(), Is.EqualTo(topology.CellDirections[receiver]));
+        Assert.That(GeodesicRiverPath.IsPathDownhill(plan.Path, terrain.VisibleHeight, .000002f), Is.True);
         Assert.That(plan.GradeObservation.Stage, Is.EqualTo(GeodesicRiverGradeStage.Complete));
     }
 
@@ -252,7 +255,7 @@ public sealed class GeodesicHydrologyTopologyTests
     }
 
     [Test]
-    public void ExplicitLegacyRoutingSwitchMatchesTheExistingDefaultPath()
+    public void RestoredBaselineKeepsLargeScaleRoutingIndependentOfVisibleDetail()
     {
         var topology = GeodesicGridTopology.Build(2);
         var geometry = IcosphereRenderMeshBuilder.BuildUnitGeometry(2);
@@ -262,12 +265,59 @@ public sealed class GeodesicHydrologyTopologyTests
         var surface = geometry.UnitVertices.Select((x, i) => x * heights[i]).ToArray();
         var terrain = new GeodesicRiverTerrain(geometry, surface, heights);
         int source = Enumerable.Range(0, graph.CellCount).First(x => !ocean[x] && graph.DrainageReceiver[x] >= 0);
-        var defaultPlan = GeodesicLakeRiverRouting.Build(source, graph, topology.CellDirections, terrain,
-            null, null, 12, 7, .35f, .000002f, true, 8f, null);
-        var explicitLegacy = GeodesicLakeRiverRouting.Build(source, graph, topology.CellDirections, terrain,
-            null, null, 12, 7, .35f, .000002f, true, 8f, null, false);
-        Assert.That(explicitLegacy.Failure, Is.EqualTo(defaultPlan.Failure));
-        Assert.That(explicitLegacy.Path, Is.EqualTo(defaultPlan.Path));
+        int receiver = graph.DrainageReceiver[source];
+        var before = GeodesicLakeRiverRouting.Build(source, graph, topology.CellDirections, terrain,
+            null, null, 12, 7, .35f, .000002f, false, 8f, null);
+        surface[receiver] = topology.CellDirections[receiver] * (heights[source] + .05f);
+        terrain = new GeodesicRiverTerrain(geometry, surface, heights);
+        Assert.That(graph.FilledElevation[receiver], Is.LessThanOrEqualTo(graph.FilledElevation[source]));
+        var plan = GeodesicLakeRiverRouting.Build(source, graph, topology.CellDirections, terrain,
+            null, null, 12, 7, .35f, .000002f, false, 8f, null);
+        // 6f48085 deliberately grades ordinary corridors against large-scale terrain.
+        // The later visible-height gate was a behavior change, not a baseline invariant.
+        Assert.That(before.Path.Length, Is.GreaterThan(1));
+        CollectionAssert.AreEqual(before.Path, plan.Path);
+        Assert.That(plan.GradeObservation.VisibleHeight, Is.False);
+        Assert.That(terrain.Radius(topology.CellDirections[receiver]),
+            Is.EqualTo(surface[receiver].magnitude).Within(.00001f), "Projection must still use the final mesh.");
+    }
+
+    [Test]
+    public void TerrainCorridorsKeepJunctionsAndEveryAcceptedPathDescends()
+    {
+        var geometry = IcosphereRenderMeshBuilder.BuildUnitGeometry(3);
+        var topology = GeodesicHydrologyTopology.Build(geometry);
+        var heights = topology.CellDirections.Select(d => 8f + d.y * .1f).ToArray();
+        var surface = topology.CellDirections.Select((d, i) => d * heights[i]).ToArray();
+        var ocean = topology.CellDirections.Select(d => d.y < -.8f).ToArray();
+        var graph = GeodesicDrainageGraph.Build(topology, heights, ocean, 7.92f, 8f);
+        var terrain = new GeodesicRiverTerrain(geometry, surface);
+        var anchors = GeodesicRiverPath.BuildTerrainAnchors(topology, graph, terrain, null, 0d, .000002f);
+        var incoming = new int[graph.CellCount];
+        foreach (int receiver in graph.DrainageReceiver) if (receiver >= 0) incoming[receiver]++;
+        int accepted = 0, moved = 0;
+        for (int cell = 0; cell < graph.CellCount; cell++)
+        {
+            int receiver = graph.DrainageReceiver[cell];
+            if (incoming[cell] != 1 || ocean[cell] || receiver < 0 || ocean[receiver])
+                Assert.That(anchors[cell], Is.EqualTo(topology.CellDirections[cell]));
+            if (anchors[cell] != topology.CellDirections[cell]) moved++;
+            if (ocean[cell] || receiver < 0) continue;
+            var plan = GeodesicLakeRiverRouting.Build(cell, graph, anchors, terrain, null, null,
+                12, 7, .35f, .000002f, true, 7.92f, null);
+            if (plan.Path.Length < 2) continue;
+            accepted++;
+            float minimum = terrain.VisibleHeight(plan.Path[0]);
+            for (int p = 1; p < plan.Path.Length; p++)
+            for (int sample = 1; sample <= 31; sample++)
+            {
+                float height = terrain.VisibleHeight(Vector3.Lerp(plan.Path[p - 1], plan.Path[p], sample / 31f).normalized);
+                Assert.That(height - minimum, Is.LessThanOrEqualTo(.000002f));
+                minimum = Mathf.Min(minimum, height);
+            }
+        }
+        Assert.That(accepted, Is.GreaterThan(100), "Rejecting the entire network is not a routing fix.");
+        Assert.That(moved, Is.GreaterThan(0), "Internal controls must be allowed to leave raw graph vertices.");
     }
 
     private static bool IsNeighbor(IGeodesicHydrologyTopology topology, int a, int b)

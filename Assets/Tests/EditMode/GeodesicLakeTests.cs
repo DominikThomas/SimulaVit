@@ -220,6 +220,10 @@ public sealed class GeodesicLakeTests
                 Assert.That(f.Graph.Ocean[target], Is.False);
                 Assert.That(plan.Path.Length, Is.GreaterThan(1));
                 Assert.That(f.Terrain.Radius(plan.Path.Last()), Is.EqualTo(basin.SpillElevation).Within(.00001f));
+                Assert.That(f.Terrain.MaximumVisibleUphillExcursion(plan.Path), Is.LessThanOrEqualTo(.00001f));
+                if (f.Water.BasinAtDirection(f.Topology.CellDirections[source]) < 0 &&
+                    f.Water.BasinAtDirection(f.Topology.CellDirections[target]) == basin.Id)
+                    Assert.That(Mathf.Abs(Vector3.Dot(plan.Path.Last(), Vector3.Cross(f.Topology.CellDirections[source], f.Topology.CellDirections[target]).normalized)), Is.LessThan(.00001f));
                 if (++tested == 2) break;
             }
             if (tested == 2) break;
@@ -241,6 +245,7 @@ public sealed class GeodesicLakeTests
                 Assert.That(plan.Failure, Is.EqualTo(GeodesicRiverReachFailure.None));
                 Assert.That(plan.OutletBasin, Is.EqualTo(basin.Id));
                 Assert.That(plan.Path.Length, Is.GreaterThan(1));
+                Assert.That(f.Terrain.MaximumVisibleUphillExcursion(plan.Path), Is.LessThanOrEqualTo(.00001f));
             }
             else if (plan.LakeConnected) { connected++; Assert.That(plan.Path, Is.Empty); }
         }
@@ -273,17 +278,16 @@ public sealed class GeodesicLakeTests
     }
 
     [Test]
-    public void DisabledLakePlannerPreservesExistingRiverPathsExactly()
+    public void DisabledLakePlannerPreservesRiverOnlyRoutingExactly()
     {
         var f = Create(enabled: false);
         for (int cell = 0; cell < f.Graph.CellCount; cell++)
         {
             int next = f.Graph.DrainageReceiver[cell];
             if (f.Graph.Ocean[cell] || next < 0) continue;
-            var original = GeodesicRiverPath.Refine(f.Topology.CellDirections[cell], f.Topology.CellDirections[next], f.Terrain.Height, 12, 7, .35f, .000002f);
-            if (original.Length > 1) original = GeodesicRiverPath.ClipAtCoast(original, f.Terrain.VisibleHeight, 8f);
+            var original = GeodesicLakeRiverRouting.Build(cell, f.Graph, f.Topology.CellDirections, f.Terrain, null, null, 12, 7, .35f, .000002f, true, 8f, null);
             var actual = GeodesicLakeRiverRouting.Build(cell, f.Graph, f.Topology.CellDirections, f.Terrain, f.Lakes, null, 12, 7, .35f, .000002f, true, 8f, null);
-            CollectionAssert.AreEqual(original, actual.Path);
+            CollectionAssert.AreEqual(original.Path, actual.Path);
         }
     }
     [Test]

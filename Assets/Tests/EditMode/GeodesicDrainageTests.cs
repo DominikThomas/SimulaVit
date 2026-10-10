@@ -176,6 +176,54 @@ public sealed class GeodesicDrainageTests
         Assert.That(Height(clipped[clipped.Length - 1]), Is.EqualTo(8f).Within(1e-5f));
     }
 
+    [Test]
+    public void FinalTerrainAuditFindsNarrowRidgeBetweenUniformSamples()
+    {
+        var geometry = IcosphereRenderGeometryCache.GetOrBuild(5);
+        var surface = new Vector3[geometry.VertexCount];
+        for (int i = 0; i < surface.Length; i++) surface[i] = geometry.UnitVertices[i] * 8f;
+        const int ridge = 123;
+        Vector3 center = geometry.UnitVertices[ridge];
+        surface[ridge] = center * 8.05f;
+        Vector3 tangent = Vector3.Cross(center, Vector3.up).normalized;
+        Vector3 At(float angle) => (center * Mathf.Cos(angle) + tangent * Mathf.Sin(angle)).normalized;
+        var path = new[] { At(-.045f), At(.9f) };
+        var terrain = new GeodesicRiverTerrain(geometry, surface);
+        Assert.That(GeodesicRiverPath.MaximumUphillExcursion(path, terrain.VisibleHeight), Is.LessThanOrEqualTo(.000002f));
+        Assert.That(terrain.MaximumVisibleUphillExcursion(path), Is.GreaterThan(.049f));
+    }
+
+    [Test]
+    public void RepeatedTinyRisesCannotAccumulateIntoAnAcceptedHill()
+    {
+        var path = new Vector3[21];
+        for (int i = 0; i < path.Length; i++) path[i] = new Vector3(i * .01f, 1f, 0f).normalized;
+        float Height(Vector3 d) => 8f + d.x * .0001f;
+        for (int i = 1; i < path.Length; i++)
+            Assert.That(GeodesicRiverPath.IsDownhill(path[i - 1], path[i], Height, .000002f), Is.True);
+        Assert.That(GeodesicRiverPath.IsPathDownhill(path, Height, .000002f), Is.False);
+    }
+
+    [Test]
+    public void FinalTerrainAuditPreservesDownhillSharedEndpoints()
+    {
+        var geometry = IcosphereRenderGeometryCache.GetOrBuild(3);
+        var surface = new Vector3[geometry.VertexCount];
+        for (int i = 0; i < surface.Length; i++)
+            surface[i] = geometry.UnitVertices[i] * (8f - geometry.UnitVertices[i].x * .1f);
+        var terrain = new GeodesicRiverTerrain(geometry, surface);
+        Vector3 junction = new Vector3(.25f, 1f, 0f).normalized;
+        foreach (float z in new[] { -.04f, .04f })
+        {
+            Vector3 source = new Vector3(-.25f, 1f, z).normalized;
+            var path = GeodesicRiverPath.Refine(source, junction, terrain.VisibleHeight, 12, 7, .35f, .000002f);
+            Assert.That(path.Length, Is.GreaterThan(2));
+            Assert.That(path[0], Is.EqualTo(source));
+            Assert.That(path[path.Length - 1], Is.EqualTo(junction));
+            Assert.That(terrain.MaximumVisibleUphillExcursion(path), Is.LessThanOrEqualTo(.000002f));
+        }
+    }
+
     private static bool IsNeighbor(GeodesicGridTopology topology, int a, int b)
     {
         for (int i = 0; i < topology.NeighborCounts[a]; i++) if (topology.Neighbors6[a * 6 + i] == b) return true;

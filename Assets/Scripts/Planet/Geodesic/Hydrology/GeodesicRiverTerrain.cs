@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>Queries the completed rendered icosphere, without physics or a scan of all its triangles.
@@ -50,9 +51,59 @@ public sealed class GeodesicRiverTerrain
     public float VisibleHeight(Vector3 direction) => Sample(direction, false, false);
     public float Radius(Vector3 direction) => Sample(direction, true, false);
 
-    /// <summary>Diagnostic reference only. Measures interpolation roundoff against double
-    /// barycentric arithmetic over the same stored float vertex radii and selected face.
-    /// It does not replace the height function used for any routing or rendering decision.</summary>
+    /// <summary>Check every crossed terrain triangle, including narrow ridges between
+    /// uniform samples. Barycentric altitude is monotone along a straight spherical arc
+    /// inside one triangle, so its extrema are at triangle entry/exit points.</summary>
+    public float MaximumVisibleUphillExcursion(Vector3[] path)
+    {
+        if (path == null || path.Length < 2) return float.PositiveInfinity;
+        float lowest = VisibleHeight(path[0]), rise = 0f;
+        var crossings = new List<double>(16);
+        for (int segment = 1; segment < path.Length; segment++)
+        {
+            Vector3 start = path[segment - 1], end = path[segment];
+            crossings.Clear(); crossings.Add(0d); crossings.Add(1d);
+            if (FindTriangle(start) != FindTriangle(end))
+                for (int face = 0; face < 20; face++) CrossedFaces(0, face, 0d, 1d);
+            crossings.Sort();
+            foreach (double t in crossings)
+            {
+                float height = VisibleHeight(Vector3.Lerp(start, end, (float)t).normalized);
+                if (!float.IsFinite(height)) return float.PositiveInfinity;
+                rise = Mathf.Max(rise, height - lowest); lowest = Mathf.Min(lowest, height);
+            }
+
+            void CrossedFaces(int level, int face, double enter, double exit)
+            {
+                var g = levels[level];
+                Vector3 a = g.UnitVertices[g.Triangles[face * 3]], b = g.UnitVertices[g.Triangles[face * 3 + 1]], c = g.UnitVertices[g.Triangles[face * 3 + 2]];
+                double sign = Triple(c, a, b) >= 0d ? 1d : -1d;
+                if (!Clip(a, b) || !Clip(b, c) || !Clip(c, a)) return;
+                if (level == levels.Length - 1) { crossings.Add(enter); crossings.Add(exit); return; }
+                for (int child = 0; child < 4; child++) CrossedFaces(level + 1, face * 4 + child, enter, exit);
+
+                bool Clip(Vector3 v1, Vector3 v2)
+                {
+                    double first = sign * Triple(start, v1, v2), last = sign * Triple(end, v1, v2);
+                    if (first < 0d && last < 0d) return false;
+                    if (first >= 0d && last >= 0d) return true;
+                    double intersection = first / (first - last);
+                    if (first < 0d) enter = Math.Max(enter, intersection);
+                    else exit = Math.Min(exit, intersection);
+                    return exit >= enter;
+                }
+            }
+        }
+        return rise;
+    }
+
+    private static double Triple(Vector3 d, Vector3 a, Vector3 b) =>
+        d.x * ((double)a.y * b.z - (double)a.z * b.y) +
+        d.y * ((double)a.z * b.x - (double)a.x * b.z) +
+        d.z * ((double)a.x * b.y - (double)a.y * b.x);
+
+    /// <summary>Diagnostic double-precision reference. Production sampling retains the
+    /// original 6f48085 float arithmetic so this restoration does not alter grade decisions.</summary>
     public double InterpolationReference(Vector3 direction, bool visible)
     {
         Vector3 d = direction.normalized; int face = FindTriangle(d);

@@ -1,104 +1,71 @@
-# Dedicated render-resolution Geodesic hydrology
+# Geodesic river baseline restoration
 
-## Runtime architecture
+Status: river baseline restored in code; Unity visual acceptance is still required. Lakes remain OFF. No claim is made that the full river/lake task is finished.
 
-The normal Geodesic path keeps the simulation topology unchanged and builds hydrology from the render mesh that already exists:
+## Starting state and preservation
 
-```
-simulation L6 (40,962 cells, ocean/climate authority)
-  -> existing simulation-to-render mapping
-render L7 geometry (163,842 directions, 327,680 triangles)
-  -> lightweight packed adjacency and per-vertex spherical area
-existing render L7 HydrologicalRadii
-  -> priority flood, receivers, drainage area, runoff, lakes
-hydrology L7 edge paths
-  -> lake/coast clipping and completed-terrain projection
-```
+Started on `codex/implement-geodesic-static-lakes`, HEAD `55e5cf4` (Failed attempt to fix river routing), with 12 modified tracked files and one untracked validation report. Before editing, the full HEAD archive, binary working-tree patch, copies of all 13 changed files, SHA-256 manifest, status, and an archive of `6f48085` were saved outside the repository:
 
-`GeodesicHydrologyTopology` retains one byte of degree data, six packed integer neighbor slots, and one float unit area per render vertex. `CellDirections` and `Triangles` are references to `IcosphereRenderGeometry.UnitVertices` and `Triangles`; it does not regenerate or copy them. It does not retain dual corners, transport metrics, or simulation data. The twelve degree-five vertices are validated and every other vertex must have degree six.
+`C:\Users\domin\Documents\Codex\2026-09-06\prior-conversation-with-codex-conversation-role\HydrologyBackup-20261007-203500`
 
-`PlanetGenerator` exposes the render mapping and the already evaluated `GeodesicRenderTerrainData.HydrologicalRadii` to `GeodesicRiverSystem`. The dedicated path shares the radii with both `GeodesicRiverTerrain` and `GeodesicDrainageGraph`. Fine completed terrain remains the final ribbon/lake projection surface and never changes receivers.
+The `working-files` directory plus `HEAD.zip` preserve the entire preceding L7 experiment. The previous report and documentation are also retained in `Docs/Archive`, explicitly marked as a failed experiment. L7 topology/mapping classes, tests, and the experimental visual-path helper remain in the project. There is deliberately no runtime L7 switch during baseline acceptance; the archived complete implementation can be recovered without approximating it.
 
-The authoritative L6 `OceanMask` is mapped to L7. A submerged hydrology vertex is ocean when its nearest mapped simulation cell, or one of that cell's direct L6 neighbours, belongs to the retained ocean component. L6 still owns component identity, while the completed L7 terrain determines the precise shoreline inside that component. This removes one-cell coarse coastal barriers without independently classifying an L7 ocean or restoring excluded inland seas. `[GeodesicHydrologyOceanMapping]` reports mapped ocean vertices, submerged L7 vertices, authority disagreements, coastal barriers, and filled depressions next to the mapped boundary.
+## Actual reference
 
-The raw migration used the two endpoint directions of each L7 receiver edge as the rendered centreline. Ribbon subdivision only added linear samples, so rivers exposed the icosphere edges and angular junctions directly. The corrected path keeps the receiver DAG unchanged and builds one shared visual anchor per above-threshold river cell. It tests the cell direction, then candidates 34% toward compatible one-ring neighbours; it searches compatible two-ring candidates at 22% only when the first pass remains uphill or crosses a ridge. Candidates stay out of ocean and selected lakes, retain outlet/basin identity, remain locally close to the receiver edge, and cannot introduce a ridge crossing.
+`6f48085dea26a6f46cf215f7f026e66999208717` is authoritative. Source was extracted from Git, not reconstructed from remembered behavior.
 
-Each corrected edge is then sampled by a four-segment normalized Catmull-Rom curve using the dominant upstream tributary and the receiver's receiver for tangents. Both endpoints are the shared anchors, so tributaries meet at exactly one confluence position. A corridor-deviation bound and full-visible-terrain grade comparison fall back to a subdivided snapped edge if smoothing makes the result worse. Lake shoreline correction, coast clipping, and lake crossing validation remain active.
+Restored decisions:
 
-The serialized `useLegacySimulationHydrology` field preserves the old L6 anchor/spill/corridor route for A/B inspection. `useRawDedicatedVisualPaths` preserves the original raw L7 migration for the same purpose. Neither is the default.
+- `GeodesicRiverSystem.Initialize`: existing simulation topology; large-scale terrain sampling; shared junction selection within 0.2 of a neighboring cell; three interior saddle samples per undirected edge; the original coarse drainage inputs.
+- `GeodesicRiverPath.Refine`: the historical bounded corridor search, transition costs, sample checks and numerical tolerance behavior.
+- `GeodesicRiverTerrain.Sample`: the original float barycentric arithmetic for large-scale/visible heights, and exact final-mesh ray projection. Double-precision and final-path audit helpers remain observation/experimental utilities only.
+- `GeodesicLakeRiverRouting.Build`: original ordinary-reach height source, grade gates, refinement and coast clipping. Lake routing is currently inactive.
+- `GeodesicRiverSystem.RebuildVisuals` and `AddRibbon`: the actual historical path consumption, three samples per segment, width/color calculation, and independently projected banks.
 
-`PlanetTerrainSampler.LargeScaleHeightOffset` already includes continents, domain-warped mountain masks, and the complete multi-octave ridge/mountain term. It excludes only the separately evaluated fine-detail term when that term is sufficiently small and high-frequency. The audit therefore found no missing medium-scale terrain input to restore to priority flood; visible-terrain disagreement is handled only by the local visual pass.
+The drainage graph retains its newer interface and memory/timing diagnostics. For the simulation topology its neighbor distances and algorithm match the reference; a direct subdivision-6 comparison checks receivers, parents, flood order, filled elevations, areas and runoff exactly.
 
-The configured river and major-river thresholds remain simulation-cell equivalents. Runtime resolves them as:
+Why the later versions diverged: direct L7 edges removed the historical terrain corridor decisions; the spline attempt did not restore those decisions. The subsequent uncommitted patch kept a different graph and switched anchors, drainage elevations, interpolation and all grade decisions to final visible terrain. Even its coarse fallback was not the historical algorithm. This restoration removes those behavior changes from the default path rather than adjusting them again.
 
-```
-threshold area = configured threshold * (4 pi R^2 / simulation cell count)
-```
+## Preserved systems
 
-At L6 simulation/L7 hydrology, a configured threshold of 8 is approximately 32 mean L7 cells. Per-node drainage uses actual spherical cell area. `UpdateSimulationRunoff` conservatively distributes a future simulation-cell runoff integral among mapped, non-ocean hydrology vertices by hydrology area.
+No changes to planet terrain generation, sea-level resolution, inland-sea filtering, retained OceanMask, startup Advanced Options, ocean layers, chemistry, biology or simulation resolution. The current render terrain is reused as-is. Existing grade diagnostics remain observation-only.
 
-## Memory
+A temporary explicit validation gate in `GeodesicRiverSystem` prevents lake geometry and lake receiver rewrites, even when saved options request lakes. It logs that condition and does not overwrite the saved preference. Basin diagnostics may still describe computational priority-filled components; they are NOT accepted as true lake basins.
 
-At L7, the packed topology is about 4.53 MiB. The retained drainage arrays, river strengths, and lake cell arrays bring the dedicated core estimate to about 15 MiB. The equivalent legacy core/path estimate in the seed benchmark was about 3.5 MiB, so the measured architectural increase is about 12 MiB. Existing render directions, triangles, and hydrological radii are excluded because the dedicated graph shares them.
+## Unity A/B checkpoint
 
-Priority-flood scratch is approximately 1.4 MiB (settled flags plus indexed-heap arrays). Lake projection can temporarily use roughly 10-12 MiB for render incidence, visitation, allowed-cell, queue, and touched-face arrays. Those arrays are generation-local. Receiver/order/area/runoff arrays remain available for future discharge updates. Lake direction queries retain render-face lookup arrays in both migration modes; those are outside the core delta above.
+The reference capture uses literal historical hydrology classes with only a namespace wrapper, operating on the same current terrain as the restored implementation. Terrain-generation code has not changed since the reference apart from non-generating accessors. It uses the current camera; it does not regenerate or save the scene.
 
-## Seed 123456 pure-algorithm A/B/C
+1. Run `Tools/PrepareRiverBaselineReference.ps1` if the generated reference folder is absent. It has already been prepared on this computer. Sources are generated/ignored rather than committing another copy of the entire historical subsystem; a Git blob manifest records their origin.
+2. Let Unity finish compiling. Start seed **123456**, simulation **6**, render **7**, using the recent sea-level/inland-sea settings. Rivers must be enabled. Lakes are automatically paused by the temporary gate.
+3. Position the camera like the regression screenshot.
+4. Choose **Tools > Hydrology > Capture 6f48085 A-B (current planet, lakes OFF)**.
+5. Inspect `Artifacts/HydrologyBaseline/<timestamp>/A-6f48085-lakes-OFF.png` and `B-restored-lakes-OFF.png`. The same folder contains camera/planet/river settings and `comparison.json` with exact path/anchor/receiver/mesh comparisons, counts, and generation timings.
 
-Command:
+The capture leaves the restored rivers visible. It restores the saved lake flag and does not run any simulation reset. A single local capture request may run after script import; if no initialized matching planet exists, it writes an explicit NOT VALIDATED status and does not start a planet automatically.
 
-```
-pwsh -NoProfile -File Tools/ValidateGeodesicLakes.ps1 -HydrologyAB
-```
+A and B must look equivalent, with plausible valleys and tributaries. Historical gaps are acceptable. Numeric equality alone does not approve the screenshots.
 
-The benchmark uses the same L6 simulation topology, L7 terrain, sea level, retained L6 ocean mask, physical threshold area, and terrain seed for both modes. Render topology and terrain evaluation happen once and are excluded from the two hydrology totals because they already exist when runtime hydrology starts.
+## Checks completed
 
-| Metric | GOOD_VISUAL_OLD L6 + refinement | CURRENT_HIGHRES raw L7 | Corrected L7 |
-|---|---:|---:|---:|
-| Hydrology nodes | 40,962 | 163,842 | 163,842 |
-| Additional full topology builds | 0 | 0 | 0 |
-| Resolved threshold area | 0.157071963 | 0.157071963 | 0.157071963 |
-| Candidate reaches | 5,771 | 7,157 | 6,964 |
-| Visible reaches | 5,597 | 7,157 | 6,964 |
-| Major reaches | 339 | 746 | 703 |
-| Total rendered length | 992.661 | 528.468 | 520.163 |
-| Inland visible terminations | 125 | 0 | 0 |
-| Ocean-connected chains | 749 | 697 | 673 |
-| Filled cells | 2,034 | 8,715 | 7,251 |
-| Candidate basins | 379 | 468 | 448 |
-| Visible lakes / inlets / outlets | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 |
-| River mesh vertices | 398,812 | 57,256 | 179,462 |
-| Core/path retained estimate | 3,709,740 B | 15,736,758 B | 15,979,626 B |
-| Priority flood | 1,467.1 ms | 321.4 ms | 296.3 ms |
-| Path extraction, excluding shore/coast | 13,521.3 ms | 129.8 ms | 361.1 ms |
-| Shore/coast processing | 648.7 ms | 241.5 ms | 224.5 ms |
-| Valley snap | 0 | 0 | 1,320.4 ms |
-| Spline smoothing | 0 | 0 | 205.6 ms |
-| Final-detail ribbon projection sample | 707.7 ms | 100.4 ms | 249.2 ms |
-| Total | 17,888.0 ms | 1,589.3 ms | 2,648.4 ms |
+- Unity 6000.3.19f1 compiler: runtime assembly, EditMode test assembly, and Editor A/B capture assembly compile; runtime emitted existing unused-field warnings.
+- `Tools/ValidateGeodesicLakes.ps1 -BaselineReference`: **67 passed, 0 failed**. Includes literal-reference checks at render L7 (sampling), simulation L6 (drainage), and ordinary corridor/coast planning including historical interruptions.
+- Native EditMode integration execution is pending; compiling tests does not mean they ran in Unity.
+- The obsolete `-HydrologyAB` / `-DownhillRouting` reconstruction benchmarks now refuse to present themselves as runtime/reference comparisons. Their source and earlier measurements remain archived.
 
-The corrected benchmark constructs no second `GeodesicGridTopology`. In this run its packed adjacency build took 115.7 ms and ocean mapping took 8.9 ms. The local correction adds about 1.53 seconds, while corrected total generation remains about 6.8 times faster than GOOD_VISUAL_OLD.
+## Pending lake stage and report
 
-Of 6,964 eligible shared anchors, 1,968 (28.26%) stayed at the graph vertex, 4,879 (70.06%) used a one-ring candidate, and 117 (1.68%) used a two-ring candidate. Five hundred and two (7.21%) retain a material full-visible-terrain mismatch after the bounded search. Materially uphill visible edges fell from 1,391 to 502 (63.9%); ridge crossings remained 0 before and 0 after. These remaining mismatches are reported rather than converted into lakes or allowed to widen the search.
+The giant-valley lake cause has not yet been established by an accepted reproduction. The current basin code groups connected priority-filled cells by equal filled elevation, with a sampled-saddle check when supplied. That is an audit target, not proof of the reported cause or an accepted true-basin test. No new lake algorithm has been applied before the required river visual gate.
 
-The corrected authoritative shoreline mapping reduces filled cells from 8,715 to 7,251 and candidate basins from 468 to 448. Submerged vertices outside a retained L6 ocean neighbourhood remain land/depression candidates, so excluded inland seas cannot return. Runtime diagnostics expose the remaining boundary disagreements instead of silently classifying an independent L7 ocean.
+After A/B acceptance: audit true closed basins separately from computational fill, add open-valley/closed-bowl/two-basins tests, prove ordinary river paths outside basins remain unchanged with lakes ON/OFF, and capture C. Do not enable the old lake result to make gaps disappear.
 
-Default Earthlike benchmark thresholds selected no visible lakes in either mode, so the seed run could not exercise outlet counts. A synthetic high-resolution basin test verifies an identity-mapped visible lake, a neighboring spill edge, deterministic receiver rewiring, and outlet accumulated flow greater than or equal to every incoming flow. Runtime reports unique expected/rendered/suppressed lake outlets and separates below-threshold, projection, shoreline, topology, and flow-conservation failures.
+| Required result | Current status |
+|---|---|
+| A/B screenshots and visual acceptance | Pending Unity capture/inspection |
+| Reference/restored generation times and river counts | Capture writes measured values; none invented here |
+| Priority-filled cell count | Capture reports both versions |
+| True lake-basin cells / giant-valley root cause | Not yet validated |
+| Visible lakes / largest visible area in B | 0 / 0 by the temporary generation gate |
+| Corrected C screenshot and lakes ON/OFF invariant | Pending A/B visual acceptance and lake correction |
 
-## Runtime diagnostics
-
-`GeodesicRiverSystem` emits:
-
-- `[GeodesicHydrologyTopology]`: simulation/render/hydrology subdivisions, vertex/triangle count, topology source, radii reuse, retained core bytes.
-- `[GeodesicDrainage]`: threshold area, candidate/visible reach and mesh counts, filled cells, failure/continuity categories, and ordinary versus lake corridor failures.
-- `[GeodesicHydrologyPerformance]`: adjacency, ocean mapping, priority flood, accumulation, lake topology, lake geometry, path extraction, shoreline/coast, ribbon geometry, and total generation time.
-- `[GeodesicLakeOutlets]`: unique expected/rendered/suppressed outlets with reason counts and outlet-flow violations.
-- `[GeodesicRiverVisualAudit]`: anchor-ring counts, visible grade/ridge counts before and after correction, unresolved edges, smoothing fallbacks, and correction timings.
-- `[GeodesicHydrologyOceanMapping]`: authoritative shoreline mapping and boundary-depression counts.
-- `[GeodesicRiverDensity]`: candidate/visible/major reach counts, physical threshold area, total rendered length, and mesh vertices.
-
-The remaining causes of visible mismatch are the 502 edges whose small local neighbourhood has no acceptable full-visible-terrain route, plus lake shoreline/projection rejection and intentional thresholding. The legacy and raw-L7 routes remain available for visual A/B inspection and must not be removed before that comparison is accepted.
-
-## Validation status
-
-The pure hydrology suite passes 60 tests. The runtime and EditMode C# assemblies compile against Unity 6000.3.19f1. The deterministic seed-123456 numerical A/B/C above completed. Two isolated screenshot attempts compiled successfully but Unity's licensing service refused the `com.unity.editor.headless` entitlement while the live editor and import workers were active, so no trustworthy runtime screenshots were produced. Capture the three retained modes from the same saved camera once an interactive editor is available: legacy fallback, raw dedicated fallback, and the corrected default.
+Remaining gaps retain the historical diagnostic categories: unresolved depression, corridor failure, projection mismatch and topology failure. Counts of inland terminations and ocean-connected chains are captured. Distinguishing actual mesh occlusion/coastline artifacts from threshold/headwater starts still requires the screenshots; no continuity algorithm has been added to hide them.

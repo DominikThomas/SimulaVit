@@ -1,0 +1,6 @@
+{
+    "name": "SimulaVit.HydrologyBaselineValidation",
+    "references": ["SimulaVit", "SimulaVit.HydrologyBaselineReference", "Unity.RenderPipelines.Core.Runtime", "Unity.RenderPipelines.Universal.Runtime"],
+    "includePlatforms": ["Editor"],
+    "autoReferenced": true
+}

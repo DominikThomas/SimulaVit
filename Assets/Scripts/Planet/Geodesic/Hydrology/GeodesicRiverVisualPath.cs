@@ -17,8 +17,8 @@ public sealed class GeodesicRiverVisualDiagnostics
 }
 
 /// <summary>
-/// Cheap visual correction over an authoritative drainage DAG. Shared anchors preserve confluences;
-/// receiver indices, accumulation, basin identity, and hydrological elevations are never modified.
+/// Historical visual correction retained for offline A/B diagnostics only. Runtime routing
+/// uses GeodesicRiverPath and the completed-terrain grade gate instead of this unchecked spline.
 /// </summary>
 public static class GeodesicRiverVisualPath
 {

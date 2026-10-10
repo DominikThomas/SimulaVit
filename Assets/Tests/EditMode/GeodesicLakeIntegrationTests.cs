@@ -39,7 +39,7 @@ public sealed class GeodesicLakeIntegrationTests
     }
 
     [Test]
-    public void RuntimeLakeMeshRiverBridgeAndClearPreserveThePlanet()
+    public void BaselineUsesSimulationGraphAndPausesSavedLakesWithoutChangingTerrain()
     {
         var obj = new GameObject("Lake integration fixture"); obj.SetActive(false);
         Mesh surface = null;
@@ -59,28 +59,30 @@ public sealed class GeodesicLakeIntegrationTests
             surface = new Mesh { vertices = original, triangles = geometry.Triangles };
             var rivers = obj.AddComponent<GeodesicRiverSystem>(); rivers.riverFlowThreshold = .01f;
             rivers.Initialize(planet, geometry, surface);
-            var lake = rivers.Lakes.Basins.Single(b => b.Selected);
-            Assert.That(rivers.LakeConnectedReaches, Is.GreaterThan(0));
-            Assert.That(rivers.LakeOutlets, Is.EqualTo(1));
-            Assert.That(rivers.LakeInlets, Is.GreaterThan(0));
-            Assert.That(rivers.Mouths.All(m => ocean[m.OceanCell]), Is.True);
-            Assert.That(rivers.Mouths.All(m => rivers.Lakes.BasinId[m.OceanCell] != lake.Id), Is.True);
+            Assert.That(rivers.UsesDedicatedRenderHydrology, Is.False);
+            Assert.That(rivers.HydrologySubdivision, Is.EqualTo(3));
+            Assert.That(rivers.Drainage.CellCount, Is.EqualTo(topology.CellCount));
+            Assert.That(rivers.HydrologicalLakesPausedForBaselineValidation, Is.True);
+            Assert.That(planet.generateHydrologicalLakes, Is.True, "Preserve the saved preference during the temporary validation gate.");
+            Assert.That(rivers.Lakes.Enabled, Is.False);
+            Assert.That(rivers.Lakes.LakeMask.Any(wet => wet), Is.False);
+            Assert.That(rivers.LakeGeometry, Is.Null);
+            Assert.That(obj.transform.Find("Geodesic Lakes"), Is.Null);
+            Assert.That(rivers.Mouths.All(m => rivers.Drainage.Ocean[m.OceanCell]), Is.True);
             CollectionAssert.AreEqual(original, surface.vertices);
             CollectionAssert.AreEqual(geometry.Triangles, surface.triangles);
-            var water = obj.transform.Find("Geodesic Lakes"); Assert.That(water, Is.Not.Null);
+            var receivers = (int[])rivers.Drainage.DrainageReceiver.Clone();
+            var paths = rivers.RiverPaths.ToDictionary(p => p.Key, p => (Vector3[])p.Value.Clone());
+            var lakeData = rivers.Lakes;
+            rivers.UpdateSimulationRunoff(new double[topology.CellCount]);
+            Assert.That(rivers.Lakes, Is.SameAs(lakeData));
+            planet.generateHydrologicalLakes = false;
             obj.transform.SetPositionAndRotation(new Vector3(17f, -6f, 11f), Quaternion.Euler(23f, 71f, -12f));
-            foreach (Vector3 local in water.GetComponent<MeshFilter>().sharedMesh.vertices)
-            {
-                var restored = obj.transform.InverseTransformPoint(water.TransformPoint(local));
-                Assert.That(restored.magnitude, Is.EqualTo(lake.SpillElevation).Within(.00001f));
-            }
-            var lakeData = rivers.Lakes; var geometryData = rivers.LakeGeometry;
-            rivers.UpdateRunoff(new double[topology.CellCount]);
-            Assert.That(rivers.Lakes, Is.SameAs(lakeData)); Assert.That(rivers.LakeGeometry, Is.SameAs(geometryData));
-            Assert.That(rivers.Lakes.Basins[lake.Id].CurrentSurfaceElevation, Is.EqualTo(lake.SpillElevation));
-            planet.generateHydrologicalLakes = false; rivers.Initialize(planet, geometry, surface);
+            rivers.Initialize(planet, geometry, surface);
+            CollectionAssert.AreEqual(receivers, rivers.Drainage.DrainageReceiver);
+            CollectionAssert.AreEquivalent(paths.Keys, rivers.RiverPaths.Keys);
+            foreach (var path in paths) CollectionAssert.AreEqual(path.Value, rivers.RiverPaths[path.Key]);
             Assert.That(obj.transform.Find("Geodesic Lakes"), Is.Null);
-            Assert.That(rivers.Lakes.LakeMask.Any(wet => wet), Is.False);
             CollectionAssert.AreEqual(original, surface.vertices);
             planet.ApplyStartupGrid(PlanetGridType.LegacyCubeSphere, 10, 3);
             rivers.Initialize(planet, geometry, surface);

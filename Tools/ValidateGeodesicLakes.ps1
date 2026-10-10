@@ -4,12 +4,17 @@ param(
     [switch]$Benchmarks,
     [switch]$GradeAudit,
     [switch]$HydrologyAB,
+    [switch]$DownhillRouting,
+    [switch]$BaselineReference,
     [int[]]$AuditSubdivisions = @(6, 7),
     [int]$AuditSeed = 12345,
     [switch]$AuditEarthlike
 )
 # Pure algorithm tests only. Native GameObject/JSON/shader integration tests require Unity Test Runner.
 $ErrorActionPreference = 'Stop'
+if ($HydrologyAB -or $DownhillRouting) {
+    throw 'Those reconstructed experimental benchmarks are archived and no longer represent runtime routing. Use -BaselineReference for literal 6f48085 comparison and Tools > Hydrology > Capture 6f48085 A-B in Unity for visual validation.'
+}
 $repo = Split-Path -Parent $PSScriptRoot
 $core = Join-Path $UnityData 'Managed/UnityEngine/UnityEngine.CoreModule.dll'
 $nunit = Get-ChildItem (Join-Path $repo 'Library/PackageCache/com.unity.ext.nunit*/net40/unity-custom/nunit.framework.dll') | Select-Object -First 1 -ExpandProperty FullName
@@ -18,10 +23,18 @@ Add-Type -Path $core,$nunit
 $paths = @('Assets/Scripts/Planet/Geodesic/Hydrology/IGeodesicHydrologyTopology.cs','Assets/Scripts/Planet/Geodesic/Hydrology/GeodesicHydrologyTopology.cs','Assets/Scripts/Planet/Geodesic/Hydrology/GeodesicHydrologyMapping.cs','Assets/Scripts/Planet/Geodesic/Hydrology/GeodesicRiverVisualPath.cs','Assets/Scripts/Planet/Geodesic/Grid/GeodesicGridTopology.cs','Assets/Scripts/Planet/Geodesic/Rendering/IcosphereRenderGeometry.cs','Assets/Scripts/Planet/Geodesic/Rendering/IcosphereRenderGeometryCache.cs','Assets/Scripts/Planet/Geodesic/Rendering/IcosphereRenderMeshBuilder.cs','Assets/Scripts/Planet/Geodesic/Terrain/PlanetTerrainSampler.cs','Assets/Scripts/Planet/Geodesic/Terrain/PlanetTerrainSettings.cs','Assets/Scripts/Utilities/SimpleNoise.cs','Assets/Scripts/Planet/Geodesic/Hydrology/GeodesicDrainageGraph.cs','Assets/Scripts/Planet/Geodesic/Hydrology/GeodesicRiverTerrain.cs','Assets/Scripts/Planet/Geodesic/Hydrology/GeodesicRiverPath.cs','Assets/Scripts/Planet/Geodesic/Hydrology/GeodesicRiverGradeAudit.cs','Assets/Tests/EditMode/GeodesicHydrologyTopologyTests.cs','Assets/Tests/EditMode/GeodesicLakeTests.cs','Assets/Tests/EditMode/GeodesicRiverGradeTests.cs','Assets/Tests/EditMode/GeodesicDrainageTests.cs','Assets/Tests/EditMode/GeodesicOceanConnectivityTests.cs','Assets/Scripts/Planet/Geodesic/Rendering/GeodesicMaskedOceanGeometry.cs','Assets/Scripts/Planet/Geodesic/Hydrology/GeodesicLakeBasins.cs','Assets/Scripts/Planet/Geodesic/Hydrology/GeodesicLakeGeometry.cs','Assets/Scripts/Planet/Geodesic/Hydrology/GeodesicLakeRiverRouting.cs','Assets/Scripts/Planet/Geodesic/Rendering/IcosphereDirectionMapping.cs','Assets/Scripts/Planet/Geodesic/Rendering/IcosphereDirectionMappingBuilder.cs','Assets/Scripts/Planet/Environment/Ocean/GeodesicOceanConnectivity.cs','Assets/Scripts/Planet/Environment/Ocean/GeodesicOceanLayerGrid.cs','Assets/Scripts/Planet/Environment/Ocean/GeodesicPhysicalScale.cs','Assets/Scripts/Planet/Geodesic/Grid/GeodesicTransportGraph.cs') | ForEach-Object { Join-Path $repo $_ }
 $refs = @($core, $nunit) + @(Get-ChildItem (Join-Path $PSHOME 'ref') -Filter '*.dll' | ForEach-Object FullName)
 $paths += (Join-Path $PSScriptRoot 'GeodesicLakeBenchmark.cs'), (Join-Path $PSScriptRoot 'GeodesicRiverGradeBenchmark.cs'), (Join-Path $PSScriptRoot 'GeodesicHydrologyBenchmark.cs')
+if ($BaselineReference) {
+    & (Join-Path $PSScriptRoot 'PrepareRiverBaselineReference.ps1')
+    $paths += Get-ChildItem (Join-Path $repo 'Assets/HydrologyBaselineReference/Generated') -Filter '*.cs' |
+        Where-Object Name -ne 'GeodesicRiverSystem.cs' | ForEach-Object FullName
+    $paths += Join-Path $PSScriptRoot 'GeodesicRiverBaselineTests.cs'
+}
 Add-Type -Path $paths -ReferencedAssemblies $refs
 
 $passed = 0; $failed = 0
-foreach ($type in @([GeodesicHydrologyTopologyTests], [GeodesicRiverGradeTests], [GeodesicLakeTests], [GeodesicDrainageTests], [GeodesicOceanConnectivityTests])) {
+$testTypes = @([GeodesicHydrologyTopologyTests], [GeodesicRiverGradeTests], [GeodesicLakeTests], [GeodesicDrainageTests], [GeodesicOceanConnectivityTests])
+if ($BaselineReference) { $testTypes += [GeodesicRiverBaselineTests] }
+foreach ($type in $testTypes) {
     $fixture = [Activator]::CreateInstance($type)
     foreach ($method in $type.GetMethods()) {
         if (!$method.GetCustomAttributes([NUnit.Framework.TestAttribute], $false).Length) { continue }
@@ -46,4 +59,8 @@ if ($GradeAudit) {
 
 if ($HydrologyAB) {
     [GeodesicHydrologyBenchmark]::Run(123456, 6, 7)
+}
+
+if ($DownhillRouting) {
+    [GeodesicHydrologyBenchmark]::Run(123456, 6, 7, $true)
 }

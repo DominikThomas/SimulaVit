@@ -6,6 +6,40 @@ using UnityEngine;
 /// Refuses an uphill route instead of hiding a filled basin with floating water or terrain carving.</summary>
 public static class GeodesicRiverPath
 {
+    /// <summary>Archived L7 experiment; the restored baseline never calls this method.
+    /// Move only non-junction controls off graph vertices. Every move must descend
+    /// across the actual terrain on both sides; sources, confluences, coasts and lakes stay fixed.</summary>
+    public static Vector3[] BuildTerrainAnchors(IGeodesicHydrologyTopology topology, GeodesicDrainageGraph graph,
+        GeodesicRiverTerrain terrain, GeodesicLakeBasins lakes, double threshold, float tolerance)
+    {
+        var anchors = (Vector3[])topology.CellDirections.Clone();
+        var incoming = new int[graph.CellCount]; var upstream = new int[graph.CellCount];
+        for (int cell = 0; cell < graph.CellCount; cell++)
+        {
+            int next = graph.DrainageReceiver[cell];
+            if (next < 0 || graph.Ocean[cell] || graph.AccumulatedRunoff[cell] < threshold) continue;
+            incoming[next]++; upstream[next] = cell;
+        }
+        for (int pass = 0; pass < 2; pass++)
+        {
+            var updated = (Vector3[])anchors.Clone();
+            for (int cell = 0; cell < graph.CellCount; cell++)
+            {
+                int next = graph.DrainageReceiver[cell], prior = upstream[cell];
+                if (incoming[cell] != 1 || next < 0 || graph.Ocean[cell] || graph.Ocean[next] ||
+                    Lake(cell) || Lake(prior) || Lake(next) || graph.AccumulatedRunoff[cell] < threshold) continue;
+                Vector3 candidate = (anchors[cell] * .5f + (anchors[prior] + anchors[next]) * .25f).normalized;
+                var localPath = new[] { anchors[prior], candidate, anchors[next] };
+                if (terrain.MaximumVisibleUphillExcursion(localPath) <= tolerance) updated[cell] = candidate;
+            }
+            anchors = updated;
+        }
+        return anchors;
+
+        bool Lake(int cell) => lakes != null && lakes.Enabled && lakes.BasinId[cell] >= 0 &&
+            lakes.Basins[lakes.BasinId[cell]].Selected;
+    }
+
     public static Vector3[] Refine(Vector3 source, Vector3 receiver, Func<Vector3, float> height,
         int steps, int lanes, float corridorFraction, float uphillTolerance)
     {
@@ -61,6 +95,26 @@ public static class GeodesicRiverPath
 
     public static bool IsDownhill(Vector3 a, Vector3 b, Func<Vector3, float> height, float tolerance)
         => IsDownhill(a, b, height, tolerance, height(a), height(b));
+
+    /// <summary>Validate the final centreline at a finer spacing than ribbon construction.
+    /// The tolerance is numerical only and applies to total rise from any earlier low point.</summary>
+    public static bool IsPathDownhill(Vector3[] path, Func<Vector3, float> height, float tolerance)
+        => MaximumUphillExcursion(path, height) <= Mathf.Max(0f, tolerance);
+
+    public static float MaximumUphillExcursion(Vector3[] path, Func<Vector3, float> height)
+    {
+        if (path == null || path.Length < 2) return float.PositiveInfinity;
+        float lowest = height(path[0]), rise = 0f;
+        for (int segment = 1; segment < path.Length; segment++)
+        for (int sample = 1; sample <= 8; sample++)
+        {
+            float value = height(Vector3.Lerp(path[segment - 1], path[segment], sample / 8f).normalized);
+            if (!float.IsFinite(value)) return float.PositiveInfinity;
+            rise = Mathf.Max(rise, value - lowest);
+            lowest = Mathf.Min(lowest, value);
+        }
+        return rise;
+    }
 
     private static bool IsDownhill(Vector3 a, Vector3 b, Func<Vector3, float> height, float tolerance, float start, float end)
     {
