@@ -6,6 +6,23 @@ using UnityEngine;
 public sealed class GeodesicHydrologyTopologyTests
 {
     [Test]
+    public void FilteredVisibleTerrainRemovesVertexSpikeAndKeepsBroadSlope()
+    {
+        var geometry = IcosphereRenderMeshBuilder.BuildUnitGeometry(3);
+        var topology = GeodesicHydrologyTopology.Build(geometry);
+        var surface = geometry.UnitVertices.Select(d => d * (8f + .1f * d.z)).ToArray();
+        float untouched = surface[0].magnitude;
+        surface[0] = geometry.UnitVertices[0] * (untouched + .04f);
+        var filtered = GeodesicVisibleHydrology.Filter(topology, surface, null, out double meanChange, out _);
+        Assert.That(filtered[0], Is.LessThan(surface[0].magnitude - .01f));
+        Assert.That(filtered[0], Is.GreaterThan(untouched - .01f));
+        Assert.That(meanChange, Is.LessThan(.002));
+        int north = Array.FindIndex(geometry.UnitVertices, d => d.z > .95f);
+        int south = Array.FindIndex(geometry.UnitVertices, d => d.z < -.95f);
+        Assert.That(filtered[north] - filtered[south], Is.GreaterThan(.18f));
+    }
+
+    [Test]
     public void RenderGeometryBuildsDeterministicPackedAdjacencyWithoutFullTopology()
     {
         var geometry = IcosphereRenderMeshBuilder.BuildUnitGeometry(4);

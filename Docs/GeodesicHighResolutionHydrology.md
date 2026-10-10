@@ -1,5 +1,7 @@
 # Geodesic river baseline restoration
 
+Historical diagnostic record. The restored 6f48085 result failed visual acceptance and is no longer the runtime target. Current L7 filtered-visible routing and its visual acceptance steps are described in [FilteredVisibleHydrology.md](FilteredVisibleHydrology.md).
+
 Status: river baseline restored in code; Unity visual acceptance is still required. Lakes remain OFF. No claim is made that the full river/lake task is finished.
 
 ## Starting state and preservation

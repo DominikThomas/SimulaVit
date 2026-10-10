@@ -39,7 +39,7 @@ public sealed class GeodesicLakeIntegrationTests
     }
 
     [Test]
-    public void BaselineUsesSimulationGraphAndPausesSavedLakesWithoutChangingTerrain()
+    public void FilteredRenderDrainagePausesSavedLakesWithoutChangingTerrain()
     {
         var obj = new GameObject("Lake integration fixture"); obj.SetActive(false);
         Mesh surface = null;
@@ -59,9 +59,9 @@ public sealed class GeodesicLakeIntegrationTests
             surface = new Mesh { vertices = original, triangles = geometry.Triangles };
             var rivers = obj.AddComponent<GeodesicRiverSystem>(); rivers.riverFlowThreshold = .01f;
             rivers.Initialize(planet, geometry, surface);
-            Assert.That(rivers.UsesDedicatedRenderHydrology, Is.False);
-            Assert.That(rivers.HydrologySubdivision, Is.EqualTo(3));
-            Assert.That(rivers.Drainage.CellCount, Is.EqualTo(topology.CellCount));
+            Assert.That(rivers.UsesDedicatedRenderHydrology, Is.True);
+            Assert.That(rivers.HydrologySubdivision, Is.EqualTo(4));
+            Assert.That(rivers.Drainage.CellCount, Is.EqualTo(geometry.VertexCount));
             Assert.That(rivers.HydrologicalLakesPausedForBaselineValidation, Is.True);
             Assert.That(planet.generateHydrologicalLakes, Is.True, "Preserve the saved preference during the temporary validation gate.");
             Assert.That(rivers.Lakes.Enabled, Is.False);
