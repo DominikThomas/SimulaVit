@@ -1,3 +1,5 @@
+Historical reference for commit `1a2b73a`. The active implementation and current validation status are documented in [TinHydrology.md](TinHydrology.md).
+
 # Filtered visible terrain river routing
 
 The current river runtime uses the existing subdivision 7 render vertices and triangles when the simulation is at subdivision 6. The simulation, chemistry, biology, temperature, and ocean layers remain at subdivision 6. The old corridor code remains in `GeodesicRiverSystem` for historical comparison, but is bypassed in the L6/L7 configuration.

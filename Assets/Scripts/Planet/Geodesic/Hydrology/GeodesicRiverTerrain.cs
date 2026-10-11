@@ -12,6 +12,7 @@ public sealed class GeodesicRiverTerrain
     private readonly float[] visibleRadii;
     private readonly Vector3[][] faceNormals;
     private readonly Vector3[] surfacePlanes;
+    private readonly double[] exactSurfacePlanes;
     public bool UsesSharedHydrologicalRadii { get; }
 
     public GeodesicRiverTerrain(IcosphereRenderGeometry geometry, Vector3[] renderedVertices,
@@ -39,11 +40,17 @@ public sealed class GeodesicRiverTerrain
             }
         }
         surfacePlanes = new Vector3[geometry.TriangleCount];
+        exactSurfacePlanes = new double[geometry.Triangles.Length];
         for (int t = 0; t < geometry.Triangles.Length; t += 3)
         {
             Vector3 a = vertices[geometry.Triangles[t]], b = vertices[geometry.Triangles[t + 1]], c = vertices[geometry.Triangles[t + 2]];
             Vector3 normal = Vector3.Cross(b - a, c - a);
             surfacePlanes[t / 3] = normal / Vector3.Dot(normal, a);
+            double ux = b.x - (double)a.x, uy = b.y - (double)a.y, uz = b.z - (double)a.z;
+            double vx = c.x - (double)a.x, vy = c.y - (double)a.y, vz = c.z - (double)a.z;
+            double nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+            double plane = nx * a.x + ny * a.y + nz * a.z;
+            exactSurfacePlanes[t] = nx / plane; exactSurfacePlanes[t + 1] = ny / plane; exactSurfacePlanes[t + 2] = nz / plane;
         }
     }
 
@@ -55,9 +62,25 @@ public sealed class GeodesicRiverTerrain
     /// uniform samples. Barycentric altitude is monotone along a straight spherical arc
     /// inside one triangle, so its extrema are at triangle entry/exit points.</summary>
     public float MaximumVisibleUphillExcursion(Vector3[] path)
+        => (float)MaximumUphillExcursion(path, false);
+
+    public double MaximumHydrologicalUphillExcursion(Vector3[] path)
+        => MaximumUphillExcursion(path, true);
+
+    public double MaximumCompletedVisibleUphillExcursion(Vector3[] path)
+        => MaximumUphillExcursion(path, false, true);
+
+    /// <summary>All crossed facet extrema, in double precision. This guards interpolation,
+    /// optional smoothing, and projection; endpoint-only tests can miss a narrow ridge.</summary>
+    public bool IsCentrelineValid(Vector3[] path, double epsilon, double visibleBumpTolerance) =>
+        MaximumHydrologicalUphillExcursion(path) <= epsilon &&
+        MaximumUphillExcursion(path, false) <= visibleBumpTolerance + epsilon &&
+        MaximumCompletedVisibleUphillExcursion(path) <= visibleBumpTolerance + epsilon;
+
+    private double MaximumUphillExcursion(Vector3[] path, bool hydrological, bool completedVisible = false)
     {
         if (path == null || path.Length < 2) return float.PositiveInfinity;
-        float lowest = VisibleHeight(path[0]), rise = 0f;
+        double lowest = completedVisible ? ExactRadius(path[0]) : InterpolationReference(path[0], !hydrological), rise = 0d;
         var crossings = new List<double>(16);
         for (int segment = 1; segment < path.Length; segment++)
         {
@@ -66,11 +89,34 @@ public sealed class GeodesicRiverTerrain
             if (FindTriangle(start) != FindTriangle(end))
                 for (int face = 0; face < 20; face++) CrossedFaces(0, face, 0d, 1d);
             crossings.Sort();
+            if (completedVisible)
+            {
+                // Radius of the completed facet can have a small interior minimum even
+                // when its linearly interpolated vertex altitude is flat. Include the
+                // analytic radial extremum of every crossed facet, not just uniform samples.
+                int intervals = crossings.Count - 1;
+                double sx = start.x, sy = start.y, sz = start.z;
+                double dx = end.x - sx, dy = end.y - sy, dz = end.z - sz;
+                double ss = sx * sx + sy * sy + sz * sz, sd = sx * dx + sy * dy + sz * dz, dd = dx * dx + dy * dy + dz * dz;
+                for (int i = 0; i < intervals; i++)
+                {
+                    double lo = crossings[i], hi = crossings[i + 1]; if (hi - lo < 1e-14) continue;
+                    int face = FindTriangle(Vector3.Lerp(start, end, (float)((lo + hi) * .5d))) * 3;
+                    double ns = exactSurfacePlanes[face] * sx + exactSurfacePlanes[face + 1] * sy + exactSurfacePlanes[face + 2] * sz;
+                    double nd = exactSurfacePlanes[face] * dx + exactSurfacePlanes[face + 1] * dy + exactSurfacePlanes[face + 2] * dz;
+                    double denominator = dd * ns - sd * nd;
+                    if (Math.Abs(denominator) < 1e-30) continue;
+                    double extremum = (nd * ss - sd * ns) / denominator;
+                    if (extremum > lo && extremum < hi) crossings.Add(extremum);
+                }
+                crossings.Sort();
+            }
             foreach (double t in crossings)
             {
-                float height = VisibleHeight(Vector3.Lerp(start, end, (float)t).normalized);
-                if (!float.IsFinite(height)) return float.PositiveInfinity;
-                rise = Mathf.Max(rise, height - lowest); lowest = Mathf.Min(lowest, height);
+                Vector3 sample = Vector3.Lerp(start, end, (float)t).normalized;
+                double height = completedVisible ? ExactRadius(sample) : InterpolationReference(sample, !hydrological);
+                if (double.IsNaN(height) || double.IsInfinity(height)) return double.PositiveInfinity;
+                rise = Math.Max(rise, height - lowest); lowest = Math.Min(lowest, height);
             }
 
             void CrossedFaces(int level, int face, double enter, double exit)
@@ -95,6 +141,13 @@ public sealed class GeodesicRiverTerrain
             }
         }
         return rise;
+    }
+
+    private double ExactRadius(Vector3 direction)
+    {
+        int face = FindTriangle(direction) * 3;
+        double magnitude = Math.Sqrt((double)direction.x * direction.x + (double)direction.y * direction.y + (double)direction.z * direction.z);
+        return magnitude / (exactSurfacePlanes[face] * direction.x + exactSurfacePlanes[face + 1] * direction.y + exactSurfacePlanes[face + 2] * direction.z);
     }
 
     private static double Triple(Vector3 d, Vector3 a, Vector3 b) =>

@@ -39,7 +39,7 @@ public sealed class GeodesicLakeIntegrationTests
     }
 
     [Test]
-    public void FilteredRenderDrainagePausesSavedLakesWithoutChangingTerrain()
+    public void TinRenderDrainagePausesSavedLakesWithoutChangingTerrain()
     {
         var obj = new GameObject("Lake integration fixture"); obj.SetActive(false);
         Mesh surface = null;
@@ -61,32 +61,34 @@ public sealed class GeodesicLakeIntegrationTests
             rivers.Initialize(planet, geometry, surface);
             Assert.That(rivers.UsesDedicatedRenderHydrology, Is.True);
             Assert.That(rivers.HydrologySubdivision, Is.EqualTo(4));
-            Assert.That(rivers.Drainage.CellCount, Is.EqualTo(geometry.VertexCount));
+            Assert.That(rivers.Drainage, Is.Null);
+            Assert.That(rivers.TinDrainage.TriangleCount, Is.EqualTo(geometry.TriangleCount));
+            Assert.That(rivers.drawRawTrianglePaths, Is.True);
             Assert.That(rivers.HydrologicalLakesPausedForBaselineValidation, Is.True);
             Assert.That(planet.generateHydrologicalLakes, Is.True, "Preserve the saved preference during the temporary validation gate.");
-            Assert.That(rivers.Lakes.Enabled, Is.False);
-            Assert.That(rivers.Lakes.LakeMask.Any(wet => wet), Is.False);
+            Assert.That(rivers.Lakes, Is.Null);
             Assert.That(rivers.LakeGeometry, Is.Null);
             Assert.That(obj.transform.Find("Geodesic Lakes"), Is.Null);
-            Assert.That(rivers.Mouths.All(m => rivers.Drainage.Ocean[m.OceanCell]), Is.True);
+            Assert.That(rivers.Mouths.All(m => m.OceanCell >= 0 && planet.IsGeodesicCellOcean(m.OceanCell)), Is.True);
             CollectionAssert.AreEqual(original, surface.vertices);
             CollectionAssert.AreEqual(geometry.Triangles, surface.triangles);
-            var receivers = (int[])rivers.Drainage.DrainageReceiver.Clone();
+            var receivers = (int[])rivers.TinDrainage.TriangleReceiver.Clone();
             var paths = rivers.RiverPaths.ToDictionary(p => p.Key, p => (Vector3[])p.Value.Clone());
             var lakeData = rivers.Lakes;
             rivers.UpdateSimulationRunoff(new double[topology.CellCount]);
             Assert.That(rivers.Lakes, Is.SameAs(lakeData));
+            Assert.That(rivers.TinDrainage.Networks.Count, Is.Zero);
             planet.generateHydrologicalLakes = false;
             obj.transform.SetPositionAndRotation(new Vector3(17f, -6f, 11f), Quaternion.Euler(23f, 71f, -12f));
             rivers.Initialize(planet, geometry, surface);
-            CollectionAssert.AreEqual(receivers, rivers.Drainage.DrainageReceiver);
+            CollectionAssert.AreEqual(receivers, rivers.TinDrainage.TriangleReceiver);
             CollectionAssert.AreEquivalent(paths.Keys, rivers.RiverPaths.Keys);
             foreach (var path in paths) CollectionAssert.AreEqual(path.Value, rivers.RiverPaths[path.Key]);
             Assert.That(obj.transform.Find("Geodesic Lakes"), Is.Null);
             CollectionAssert.AreEqual(original, surface.vertices);
             planet.ApplyStartupGrid(PlanetGridType.LegacyCubeSphere, 10, 3);
             rivers.Initialize(planet, geometry, surface);
-            Assert.That(rivers.Drainage, Is.Null); Assert.That(rivers.LakeConnectedReaches, Is.Zero);
+            Assert.That(rivers.Drainage, Is.Null); Assert.That(rivers.TinDrainage, Is.Null); Assert.That(rivers.LakeConnectedReaches, Is.Zero);
         }
         finally { UnityEngine.Object.DestroyImmediate(obj); if (surface != null) UnityEngine.Object.DestroyImmediate(surface); }
     }

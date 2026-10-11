@@ -80,3 +80,5 @@ crashlytics-build.properties
 /Assets/HydrologyBaselineReference/Generated.meta
 /Artifacts/HydrologyBaseline/
 /Artifacts/FilteredVisibleHydrology/
+/Artifacts/TinHydrology/
+/work/

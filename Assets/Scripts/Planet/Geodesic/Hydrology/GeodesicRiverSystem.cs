@@ -50,16 +50,27 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
     [Range(0, 30)] public int gradeBreakExampleLimit = 6;
     public GeodesicRiverGradeReport GradeDiagnostics { get; private set; }
 
-    // Temporary restoration gate: saved lake settings are retained, but no visible lakes
-    // or lake receiver rewrites run until the 6f48085 river baseline is accepted in Unity.
+    // Saved lake settings are retained, but no visible lakes or lake receiver rewrites
+    // run during continuous TIN river validation.
     public bool HydrologicalLakesPausedForBaselineValidation => true;
     public bool UsesDedicatedRenderHydrology => renderHydrology;
-    public int HydrologySubdivision => topology != null ? topology.SubdivisionLevel : -1;
+    public int HydrologySubdivision => TinDrainage != null ? TinDrainage.SubdivisionLevel : topology != null ? topology.SubdivisionLevel : -1;
     public int RiverMeshVertexCount => riverMesh != null ? riverMesh.vertexCount : 0;
     public int LakeMeshVertexCount => lakeMesh != null ? lakeMesh.vertexCount : 0;
     public int VisibleRiverReaches => visibleReaches;
     public double GenerationMilliseconds => topologyMilliseconds + visualMilliseconds;
+    // Historical vertex drainage remains available only to the preserved reference method.
     public GeodesicDrainageGraph Drainage { get; private set; }
+    public GeodesicTinHydrology TinDrainage { get; private set; }
+    public TinHydrologyDiagnostics TinDiagnostics => TinDrainage?.Diagnostics;
+    [Header("Continuous triangle drainage")]
+    [Range(0f, .1f), Tooltip("Optional weak single pass. Zero uses completed visible terrain. Automatically reduced on visible disagreement.")]
+    public float tinFilterStrength = 0f;
+    [Range(0f, .002f), Tooltip("Maximum micro bump excursion as a fraction of completed terrain relief. Never changes hydrological epsilon.")]
+    public float visibleMicroBumpFraction = .001f;
+    [Tooltip("Inspect thin raw gradient paths first. Disable only after licensed Unity visual acceptance.")]
+    public bool drawRawTrianglePaths = true;
+    private int[] tinSimulationCells;
     public GeodesicLakeBasins Lakes { get; private set; }
     public GeodesicLakeGeometry LakeGeometry { get; private set; }
     public int LakeConnectedReaches { get; private set; }
@@ -96,11 +107,8 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
     private IGeodesicHydrologyTopology topology;
     private bool renderHydrology;
     private float[] routingHeights;
-    private double filteringMilliseconds, adjacencyMilliseconds, chainMilliseconds, tracingMilliseconds;
     private int visibleRiverChains, basinTerminatedChains, unexpectedBrokenChains, confluences;
-    private int visibleDownhillSegments, visibleFlatSegments, visibleUphillSegments, ridgeCrossings;
-    private double totalChainLength;
-    private int maximumChainLength;
+    private int visibleUphillSegments, ridgeCrossings;
     private GameObject visualRoot;
     private Mesh riverMesh;
     private Material riverMaterial;
@@ -108,6 +116,16 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
     private int pathSettingsHash;
 
     public void Initialize(PlanetGenerator owner, IcosphereRenderGeometry geometry, Mesh surfaceMesh)
+    {
+        Clear();
+        if (owner == null || owner.CurrentGridType != PlanetGridType.GeodesicIcosphere ||
+            owner.GeodesicTopology == null || surfaceMesh == null) return;
+        planet = owner; topology = owner.GeodesicTopology;
+        InitializeRenderHydrology(owner, geometry, surfaceMesh.vertices, System.Diagnostics.Stopwatch.StartNew());
+    }
+
+    // Preserved, inactive reference for the historical L6 corridor experiments.
+    private void InitializeLegacyReference(PlanetGenerator owner, IcosphereRenderGeometry geometry, Mesh surfaceMesh)
     {
         Clear();
         if (owner == null || owner.CurrentGridType != PlanetGridType.GeodesicIcosphere ||
@@ -196,6 +214,14 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
     /// Recalculates discharge/widths only. Reuses receivers, areas, anchors, terrain, and refined paths.</summary>
     public void UpdateRunoff(double[] localRunoff)
     {
+        if (TinDrainage != null)
+        {
+            if (localRunoff != null && localRunoff.Length == planet.GeodesicTopology.CellCount)
+                localRunoff = MapSimulationRunoffToTriangles(localRunoff);
+            TinDrainage.Accumulate(Mathf.Max(0f, uniformRunoffPerArea), localRunoff);
+            RebuildRenderHydrologyVisuals();
+            return;
+        }
         if (Drainage == null) return;
         if (localRunoff == null)
         {
@@ -334,156 +360,224 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
         Vector3[] completedSurface, System.Diagnostics.Stopwatch watch)
     {
         renderHydrology = true;
-        var timer = System.Diagnostics.Stopwatch.StartNew();
-        topology = GeodesicHydrologyTopology.Build(geometry);
-        adjacencyMilliseconds = timer.Elapsed.TotalMilliseconds;
-        timer.Restart();
-        routingHeights = GeodesicVisibleHydrology.Filter(topology, completedSurface,
-            owner.GeodesicHydrologicalRenderRadii, out double meanFilterChange, out double meanFormerChange);
-        filteringMilliseconds = timer.Elapsed.TotalMilliseconds;
-        string featureAudit = GeodesicVisibleHydrology.FeatureAudit(topology, completedSurface, routingHeights);
-        terrain = new GeodesicRiverTerrain(geometry, completedSurface, routingHeights, true);
-        int count = topology.CellCount;
+        // This lightweight vertex adjacency is used ONLY for retained-ocean component mapping.
+        // River geometry, gradients, connectivity and runoff all use the render triangles.
+        var oceanTopology = GeodesicHydrologyTopology.Build(geometry);
         bool[] ocean = owner.enableOcean
-            ? GeodesicVisibleHydrology.MapRetainedOcean(topology, completedSurface, owner.GeodesicSeaLevelRadius,
+            ? GeodesicVisibleHydrology.MapRetainedOcean(oceanTopology, completedSurface, owner.GeodesicSeaLevelRadius,
                 owner.IsGeodesicDirectionInOceanMask, owner.GeodesicCurrentRenderMapping,
                 owner.GeodesicOceanMaskData, owner.IsGeodesicCellPotentialLakeBasin)
-            : new bool[count];
-        for (int i = 0; i < count; i++) if (!ocean[i]) landCells++;
-        ChannelAnchors = topology.CellDirections;
-        RiverStrength = new float[count];
-        // Preserve the L6 threshold's physical area when there are four times as many L7 nodes.
-        meanCellArea = 4d * Math.PI * owner.BasePlanetRadius * owner.BasePlanetRadius /
-            owner.GeodesicTopology.CellCount;
-        Drainage = GeodesicDrainageGraph.Build(topology, routingHeights, ocean,
-            owner.GeodesicSeaLevelRadius, owner.BasePlanetRadius, null, true);
-        Lakes = GeodesicLakeBasins.Build(topology, Drainage, owner.BasePlanetRadius, false,
-            owner.minimumLakeBasinAreaFraction, owner.minimumLakeDepth);
-        foreach (var basin in Lakes.Basins)
-            if (basin.SpillFromCell >= 0) basin.CatchmentArea = Drainage.DrainageArea[basin.SpillFromCell];
-        unresolvedSinks = Drainage.UnresolvedSinkCount;
-        filledCells = Drainage.FilledCellCount;
+            : new bool[geometry.VertexCount];
+        var visible = new float[geometry.VertexCount];
+        float min = float.PositiveInfinity, max = float.NegativeInfinity;
+        for (int i = 0; i < visible.Length; i++)
+        { visible[i] = completedSurface[i].magnitude; min = Mathf.Min(min, visible[i]); max = Mathf.Max(max, visible[i]); }
+        // Numerical precision only, capped independently of terrain bump allowance.
+        double epsilon = Math.Min(Math.Max(0f, uphillTolerance), Math.Min(.000002d, owner.BasePlanetRadius * .00000025d));
+        double bump = (max - (double)min) * Mathf.Clamp(visibleMicroBumpFraction, 0f, .002f);
+        meanCellArea = 4d * Math.PI * owner.BasePlanetRadius * owner.BasePlanetRadius / owner.GeodesicTopology.CellCount;
+        TinDrainage = GeodesicTinHydrology.BuildAdaptive(geometry.UnitVertices, geometry.Triangles, visible, ocean,
+            owner.GeodesicSeaLevelRadius, owner.BasePlanetRadius, epsilon, bump, tinFilterStrength,
+            ResolvedDrainageAreaThreshold, Mathf.Max(0f, uniformRunoffPerArea), geometry.SubdivisionLevel, completedSurface: completedSurface);
+        routingHeights = TinDrainage.HydrologyHeight;
+        terrain = new GeodesicRiverTerrain(geometry, completedSurface, routingHeights, true);
+        int count = TinDrainage.TriangleCount;
+        RiverStrength = new float[count]; ChannelAnchors = new Vector3[count]; tinSimulationCells = new int[count];
+        for (int t = 0; t < count; t++)
+        {
+            ChannelAnchors[t] = TinDrainage.Direction(TinDrainage.Centroid(t));
+            int seed = owner.GeodesicCurrentRenderMapping != null
+                ? owner.GeodesicCurrentRenderMapping.Samples[geometry.Triangles[t * 3]].NearestCell : 0;
+            tinSimulationCells[t] = GeodesicOceanConnectivity.FindNearestCell(owner.GeodesicTopology, ChannelAnchors[t], seed);
+            if (!TinDrainage.IsOcean(TinDrainage.Centroid(t))) landCells++;
+        }
+        // Lake generation and all lake receiver rewrites remain OFF. No filled surface is created.
         topologyMilliseconds = watch.Elapsed.TotalMilliseconds;
-        UpdateRunoff(null);
-        Debug.Log($"[GeodesicVisibleHydrology] nodes={count} filter=one-half-strength-ring " +
-            $"meanAbsFromVisible={meanFilterChange:F8} meanAbsFromFormerLargeScale={meanFormerChange:F8} {featureAudit} " +
-            $"configuredThreshold={riverFlowThreshold:F3} resolvedDrainageAreaThreshold={meanCellArea * riverFlowThreshold:G8} " +
-            $"adjacencyMs={adjacencyMilliseconds:F2} filteringMs={filteringMilliseconds:F2} " +
-            $"priorityFloodMs={Drainage.PriorityFloodMilliseconds:F2} flowAccumulationMs={Drainage.FlowAccumulationMilliseconds:F2} " +
-            $"chainExtractionMs={chainMilliseconds:F2} visualTracingMs={tracingMilliseconds:F2} " +
-            $"ribbonMs={visualMilliseconds:F2} totalMs={GenerationMilliseconds:F2} " +
-            $"candidateChannels={riverCells} visibleChannels={visibleReaches} riverSources={visibleRiverChains} " +
-            $"visibleRiverChains={visibleRiverChains} oceanTerminations={riverMouths} oceanConnectedChains={OceanConnectedChains} " +
-            $"basinTerminatedChains={basinTerminatedChains} unexpectedBrokenChains={unexpectedBrokenChains} " +
-            $"confluences={confluences} meanChainLength={(visibleRiverChains > 0 ? totalChainLength / visibleRiverChains : 0):F2} maxChainLength={maximumChainLength} " +
-            $"segmentsDownhill={visibleDownhillSegments} segmentsFlat={visibleFlatSegments} segmentsUphill={visibleUphillSegments} ridgeCrossings={ridgeCrossings} " +
-            "lakes=OFF oceanAuthority=L6-retained-components-plus-L7-submerged-connectivity", this);
+        RebuildRenderHydrologyVisuals();
+        Debug.Log($"[GeodesicTIN] simulationSubdivision={owner.GeodesicTopology.SubdivisionLevel} renderSubdivision={geometry.SubdivisionLevel} " +
+            $"vertices={geometry.VertexCount} configuredThreshold={riverFlowThreshold:G6} resolvedAreaThreshold={ResolvedDrainageAreaThreshold:G9} " +
+            $"epsilon={TinDrainage.Epsilon:G9} visibleMicroBumpThreshold={TinDrainage.VisibleBumpTolerance:G9} " +
+            "heightSource=completed-visible-L7-mesh routing=continuous-facet-gradient rawDebug=" + drawRawTrianglePaths, this);
+        Debug.Log(TinDiagnostics.Summary(), this);
+        Debug.Log("[GeodesicTIN] VISUAL ACCEPTANCE PENDING: inspect licensed Unity seed-123456 raw paths before accepting ribbons. Lakes remain OFF.", this);
+    }
+
+    private double[] MapSimulationRunoffToTriangles(double[] supplied)
+    {
+        var area = new double[supplied.Length]; var result = new double[TinDrainage.TriangleCount];
+        for (int t = 0; t < result.Length; t++)
+            if (!TinDrainage.IsOcean(TinDrainage.Centroid(t))) area[tinSimulationCells[t]] += TinDrainage.LocalArea[t];
+        for (int t = 0; t < result.Length; t++)
+        {
+            int cell = tinSimulationCells[t];
+            if (area[cell] > 0d && !TinDrainage.IsOcean(TinDrainage.Centroid(t)))
+                result[t] = supplied[cell] * TinDrainage.LocalArea[t] / area[cell];
+        }
+        return result;
     }
 
     private void RebuildRenderHydrologyVisuals()
     {
         ClearVisual(); paths.Clear(); mouths.Clear();
         visibleReaches = riverCells = riverMouths = 0;
-        visibleRiverChains = basinTerminatedChains = unexpectedBrokenChains = confluences = OceanConnectedChains = 0;
-        visibleDownhillSegments = visibleFlatSegments = visibleUphillSegments = ridgeCrossings = maximumChainLength = 0;
-        totalChainLength = 0d;
-        if (Drainage == null) return;
+        if (TinDrainage == null || planet == null) return;
+        TinDrainage.ExtractNetworks(ResolvedDrainageAreaThreshold, planet.BasePlanetRadius);
         var watch = System.Diagnostics.Stopwatch.StartNew();
-        int count = Drainage.CellCount;
-        double threshold = meanCellArea * Math.Max(.01f, riverFlowThreshold);
-        var channel = new bool[count]; var incoming = new byte[count];
-        for (int i = 0; i < count; i++)
+        double threshold = ResolvedDrainageAreaThreshold;
+        for (int t = 0; t < RiverStrength.Length; t++) RiverStrength[t] = (float)(TinDrainage.AccumulatedRunoff[t] / threshold);
+        var vertices = new List<Vector3>(); var indices = new List<int>(); var colors = new List<Color>();
+        var rendered = new bool[TinDrainage.Networks.Count];
+        for (int id = 0; id < TinDrainage.Networks.Count; id++)
         {
-            RiverStrength[i] = (float)(Drainage.AccumulatedRunoff[i] / threshold);
-            channel[i] = !Drainage.Ocean[i] && Drainage.AccumulatedRunoff[i] >= threshold;
-            if (channel[i]) riverCells++;
-        }
-        for (int i = 0; i < count; i++)
-        {
-            int receiver = Drainage.DrainageReceiver[i];
-            if (channel[i] && receiver >= 0 && channel[receiver] && incoming[receiver] < byte.MaxValue)
-                incoming[receiver]++;
-        }
-        var visited = new bool[count];
-        for (int source = 0; source < count; source++)
-        {
-            if (!channel[source] || incoming[source] != 0) continue;
-            visibleRiverChains++;
-            int cell = source, length = 0;
-            while (cell >= 0 && channel[cell] && !visited[cell])
+            var network = TinDrainage.Networks[id]; Vector3[] raw = network.Centreline;
+            if (raw.Length < 2) continue;
+            // Resample all crossed TIN facets after float conversion, interpolation and
+            // projection. Optional aesthetics must retain this validated raw fallback.
+            if (!terrain.IsCentrelineValid(raw, TinDrainage.Epsilon, TinDrainage.VisibleBumpTolerance))
             {
-                visited[cell] = true; length++;
-                if (incoming[cell] > 1) confluences++;
-                cell = Drainage.DrainageReceiver[cell];
+                TinDiagnostics.RejectedPostProcessing++; TinDiagnostics.UnexpectedBrokenNetworks++;
+                TinDiagnostics.UnexpectedInlandBreaks++; continue;
             }
-            totalChainLength += length;
-            maximumChainLength = Math.Max(maximumChainLength, length);
-            int outlet = Drainage.OutletCell[source];
-            if (outlet >= 0 && Drainage.Ocean[outlet]) OceanConnectedChains++;
-            else if (outlet >= 0 && !Drainage.Ocean[outlet]) basinTerminatedChains++;
-            else unexpectedBrokenChains++;
-        }
-        chainMilliseconds = watch.Elapsed.TotalMilliseconds;
-        var vertices = new List<Vector3>(); var triangles = new List<int>(); var colors = new List<Color>();
-        watch.Restart();
-        for (int cell = 0; cell < count; cell++)
-        {
-            if (!channel[cell]) continue;
-            int receiver = Drainage.DrainageReceiver[cell];
-            if (receiver < 0) continue;
-            Vector3[] path = GeodesicVisibleHydrology.InteriorPath(topology, terrain, routingHeights, cell, receiver);
-            if (Drainage.Ocean[receiver])
+            Vector3[] path = raw;
+            if (!drawRawTrianglePaths)
             {
-                float a = terrain.VisibleHeight(path[0]), b = terrain.VisibleHeight(path[2]);
-                float fraction = Mathf.Clamp01((a - planet.GeodesicSeaLevelRadius) / Mathf.Max(1e-7f, a - b));
-                path[2] = Vector3.Lerp(path[0], path[2], fraction).normalized;
-                path[1] = Vector3.Lerp(path[0], path[2], .5f).normalized;
-                mouths.Add(new GeodesicRiverMouth { UpstreamCell = cell, OceanCell = receiver,
-                    DrainageArea = Drainage.DrainageArea[cell], AccumulatedRunoff = Drainage.AccumulatedRunoff[cell],
-                    Strength = RiverStrength[cell], HasVisibleCoastPosition = true,
-                    LocalCoastPosition = path[2] * terrain.Radius(path[2]) });
+                var interpolated = new List<Vector3>(raw.Length * 3);
+                for (int i = 1; i < raw.Length; i++)
+                    for (int s = 0; s < 3; s++) interpolated.Add(Vector3.Lerp(raw[i - 1], raw[i], s / 3f).normalized);
+                interpolated.Add(raw[raw.Length - 1]);
+                var candidate = interpolated.ToArray();
+                if (terrain.IsCentrelineValid(candidate, TinDrainage.Epsilon, TinDrainage.VisibleBumpTolerance)) path = candidate;
+                else TinDiagnostics.RejectedPostProcessing++;
+            }
+            var projectedDirections = new Vector3[path.Length];
+            for (int i = 0; i < path.Length; i++) projectedDirections[i] =
+                (path[i] * (terrain.Radius(path[i]) + Mathf.Max(.000001f, surfaceOffset))).normalized;
+            if (!terrain.IsCentrelineValid(projectedDirections, TinDrainage.Epsilon, TinDrainage.VisibleBumpTolerance))
+            {
+                // Fall back to projection of the unsmoothed path, then fail closed if even
+                // that cannot be represented at float precision. No later reach is restarted.
+                path = raw; projectedDirections = new Vector3[raw.Length];
+                for (int i = 0; i < raw.Length; i++) projectedDirections[i] =
+                    (raw[i] * (terrain.Radius(raw[i]) + Mathf.Max(.000001f, surfaceOffset))).normalized;
+                TinDiagnostics.RejectedPostProcessing++;
+                if (!terrain.IsCentrelineValid(projectedDirections, TinDrainage.Epsilon, TinDrainage.VisibleBumpTolerance))
+                { TinDiagnostics.UnexpectedBrokenNetworks++; TinDiagnostics.UnexpectedInlandBreaks++; continue; }
+            }
+            paths[network.SourceTriangle] = path;
+            if (drawRawTrianglePaths) AddRawTinLine(path, vertices, indices, colors);
+            else AddTinRibbon(path, network.SourceTriangle, vertices, indices, colors);
+            visibleReaches++; rendered[id] = true;
+            if (network.Termination == TinTermination.Confluence && network.JunctionNetwork >= 0 && !rendered[network.JunctionNetwork])
+            {
+                TinDiagnostics.Confluences--; TinDiagnostics.UnexpectedBrokenNetworks++; TinDiagnostics.UnexpectedInlandBreaks++;
+                network.Termination = TinTermination.RoutingFailure; network.JunctionNetwork = -1;
+            }
+            if (network.Termination == TinTermination.OceanCoast)
+            {
+                int terminalTriangle = network.Samples[network.Samples.Length - 1].Triangle;
+                int cell = tinSimulationCells[terminalTriangle];
+                Vector3 coast = path[path.Length - 1];
+                int oceanCell = RetainedOceanCellAtCoast(coast, cell);
+                mouths.Add(new GeodesicRiverMouth { UpstreamCell = cell, OceanCell = oceanCell,
+                    DrainageArea = TinDrainage.DrainageArea[terminalTriangle],
+                    AccumulatedRunoff = TinDrainage.AccumulatedRunoff[terminalTriangle], Strength = RiverStrength[terminalTriangle],
+                    HasVisibleCoastPosition = true, LocalCoastPosition = coast * terrain.Radius(coast) });
                 riverMouths++;
             }
-            paths[cell] = path;
-            float prior = terrain.VisibleHeight(path[0]);
-            for (int point = 1; point < path.Length; point++)
-            {
-                float height = terrain.VisibleHeight(path[point]);
-                if (height < prior - .0005f) visibleDownhillSegments++;
-                else if (height <= prior + .0005f) visibleFlatSegments++;
-                else visibleUphillSegments++;
-                prior = height;
-            }
-            if (terrain.VisibleHeight(path[1]) > Mathf.Max(terrain.VisibleHeight(path[0]), terrain.VisibleHeight(path[2])) + .0005f)
-                ridgeCrossings++;
-        }
-        tracingMilliseconds = watch.Elapsed.TotalMilliseconds;
-        watch.Restart();
-        foreach (var pair in paths)
-        {
-            AddRibbon(pair.Value, pair.Key, vertices, triangles, colors);
-            visibleReaches++;
         }
         if (vertices.Count > 0 && planet.enableGeodesicRivers)
         {
-            riverMesh = new Mesh { name = "Geodesic River Ribbons", indexFormat = IndexFormat.UInt32 };
-            riverMesh.SetVertices(vertices); riverMesh.SetTriangles(triangles, 0); riverMesh.SetColors(colors);
-            riverMesh.RecalculateNormals(); riverMesh.RecalculateBounds();
-            visualRoot = new GameObject("Geodesic Rivers"); visualRoot.layer = gameObject.layer;
-            visualRoot.transform.SetParent(transform, false);
+            riverMesh = new Mesh { name = drawRawTrianglePaths ? "Raw TIN Gradient Rivers" : "TIN River Ribbons", indexFormat = IndexFormat.UInt32 };
+            riverMesh.SetVertices(vertices); riverMesh.SetIndices(indices.ToArray(), drawRawTrianglePaths ? MeshTopology.Lines : MeshTopology.Triangles, 0);
+            riverMesh.SetColors(colors);
+            if (!drawRawTrianglePaths) riverMesh.RecalculateNormals();
+            else riverMesh.SetNormals(vertices.ConvertAll(v => v.normalized));
+            riverMesh.RecalculateBounds();
+            visualRoot = new GameObject(drawRawTrianglePaths ? "Raw TIN Gradient Rivers" : "TIN River Ribbons");
+            visualRoot.layer = gameObject.layer; visualRoot.transform.SetParent(transform, false);
             visualRoot.AddComponent<MeshFilter>().sharedMesh = riverMesh;
             var renderer = visualRoot.AddComponent<MeshRenderer>();
             Shader shader = Shader.Find("SimulaVit/GeodesicVertexColorURP");
             if (shader != null)
             {
-                riverMaterial = new Material(shader) { name = "Geodesic Rivers (Runtime)" };
-                riverMaterial.SetFloat("_AmbientStrength", .75f); riverMaterial.SetFloat("_DiffuseStrength", .25f);
+                riverMaterial = new Material(shader) { name = "TIN Rivers (Runtime)" };
+                riverMaterial.SetFloat("_AmbientStrength", 1f); riverMaterial.SetFloat("_DiffuseStrength", 0f);
                 renderer.sharedMaterial = riverMaterial;
             }
+            else Debug.LogError("[GeodesicTIN] River shader is missing.", this);
             renderer.shadowCastingMode = ShadowCastingMode.Off;
             visualRoot.SetActive(showRivers && planet.enableGeodesicRivers && isActiveAndEnabled);
         }
-        visualMilliseconds = watch.Elapsed.TotalMilliseconds;
+        TinDiagnostics.RibbonMilliseconds = watch.Elapsed.TotalMilliseconds;
+        visualMilliseconds = TinDiagnostics.TracingMilliseconds + TinDiagnostics.RibbonMilliseconds;
+        riverCells = TinDiagnostics.RiverTriangles; visibleRiverChains = TinDiagnostics.RiverNetworks;
+        confluences = TinDiagnostics.Confluences; unexpectedBrokenChains = TinDiagnostics.UnexpectedBrokenNetworks;
+        basinTerminatedChains = TinDiagnostics.ClosedBasinTerminations; OceanConnectedChains = TinDiagnostics.OceanTerminations;
+        visibleUphillSegments = TinDiagnostics.VisibleMaterialUphillSegments; ridgeCrossings = TinDiagnostics.VisibleRidgeCrossings;
+    }
+
+    private void AddRawTinLine(Vector3[] path, List<Vector3> vertices, List<int> indices, List<Color> colors)
+    {
+        int first = vertices.Count;
+        for (int i = 0; i < path.Length; i++)
+        {
+            vertices.Add(path[i] * (terrain.Radius(path[i]) + Mathf.Max(.000001f, surfaceOffset))); colors.Add(riverColor);
+            if (i > 0) { indices.Add(first + i - 1); indices.Add(first + i); }
+        }
+    }
+
+    private void AddTinRibbon(Vector3[] path, int source, List<Vector3> vertices, List<int> indices, List<Color> colors)
+    {
+        int first = vertices.Count; float strength = RiverStrength[source];
+        for (int i = 0; i < path.Length; i++)
+        {
+            int triangle = terrain.FindTriangle(path[i]);
+            strength = Mathf.Max(strength, (float)(TinDrainage.AccumulatedRunoff[triangle] / ResolvedDrainageAreaThreshold));
+            float width = planet.BasePlanetRadius * Mathf.Max(.00001f, widthAtThreshold) *
+                Mathf.Clamp(Mathf.Sqrt(strength), 1f, Mathf.Max(1f, maximumWidthMultiplier));
+            Vector3 forward = path[Math.Min(i + 1, path.Length - 1)] - path[Math.Max(0, i - 1)];
+            Vector3 side = Vector3.Cross(path[i], forward).normalized;
+            float angle = width / Mathf.Max(.001f, terrain.Radius(path[i]));
+            Vector3 left = (path[i] - side * angle * .5f).normalized;
+            Vector3 right = (path[i] + side * angle * .5f).normalized;
+            float offset = Mathf.Max(.000001f, surfaceOffset);
+            // Three columns retain the EXACT checked centreline as mesh vertices. Projecting
+            // unequal banks must not move the river's middle onto a different routing path.
+            vertices.Add(left * (terrain.Radius(left) + offset));
+            vertices.Add(path[i] * (terrain.Radius(path[i]) + offset));
+            vertices.Add(right * (terrain.Radius(right) + offset));
+            Color color = strength * riverFlowThreshold >= Math.Max(riverFlowThreshold, majorRiverThreshold)
+                ? Color.Lerp(riverColor, Color.cyan, .3f) : riverColor;
+            colors.Add(color); colors.Add(color); colors.Add(color);
+            if (i == 0) continue;
+            int p = first + (i - 1) * 3;
+            indices.Add(p); indices.Add(p + 3); indices.Add(p + 1);
+            indices.Add(p + 1); indices.Add(p + 3); indices.Add(p + 4);
+            indices.Add(p + 1); indices.Add(p + 4); indices.Add(p + 2);
+            indices.Add(p + 2); indices.Add(p + 4); indices.Add(p + 5);
+        }
+    }
+
+    private int RetainedOceanCellAtCoast(Vector3 coast, int seed)
+    {
+        // Mouth metadata must refer to a retained simulation ocean cell even when the
+        // exact L7 shoreline is nearer an L6 land centre. This does not change the path.
+        var simulation = planet.GeodesicTopology;
+        int nearest = GeodesicOceanConnectivity.FindNearestCell(simulation, coast, seed);
+        if (planet.IsGeodesicCellOcean(nearest)) return nearest;
+        var queue = new Queue<int>(); var seen = new HashSet<int> { nearest }; queue.Enqueue(nearest);
+        while (queue.Count > 0)
+        {
+            int cell = queue.Dequeue();
+            for (int k = 0; k < simulation.NeighborCounts[cell]; k++)
+            {
+                int next = simulation.Neighbors6[cell * 6 + k];
+                if (!seen.Add(next)) continue;
+                if (planet.IsGeodesicCellOcean(next)) return next;
+                queue.Enqueue(next);
+            }
+        }
+        return -1;
     }
 
     private void BuildLakeVisual()
@@ -530,6 +624,7 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
     [ContextMenu("Log River Grade Diagnostics")]
     public void LogGradeDiagnostics()
     {
+        if (TinDiagnostics != null) { Debug.Log(TinDiagnostics.Summary(), this); return; }
         if (GradeDiagnostics == null) return;
         Debug.Log(GradeDiagnostics.Summary(), this);
         if (logGradeBreakExamples)
@@ -539,6 +634,7 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
     [ContextMenu("Audit Suppressed River Corridors (Detailed)")]
     public void AuditSuppressedRiverCorridors()
     {
+        if (TinDiagnostics != null) { Debug.Log(TinDiagnostics.Summary(), this); return; }
         if (Drainage == null || planet == null) return;
         // Explicit diagnostic action only. Replays the sampled corridor as a minimax problem;
         // no route, geometry, accumulation or production tolerance is modified.
@@ -565,7 +661,7 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
     {
         float width = planet.BasePlanetRadius * Mathf.Max(0.00001f, widthAtThreshold) *
             Mathf.Clamp(Mathf.Sqrt(RiverStrength[cell]), 1f, Mathf.Max(1f, maximumWidthMultiplier));
-        Color color = Drainage.AccumulatedRunoff[cell] >= meanCellArea * Math.Max(riverFlowThreshold, majorRiverThreshold)
+        Color color = (TinDrainage != null ? TinDrainage.AccumulatedRunoff[cell] : Drainage.AccumulatedRunoff[cell]) >= meanCellArea * Math.Max(riverFlowThreshold, majorRiverThreshold)
             ? Color.Lerp(riverColor, Color.cyan, 0.3f) : riverColor;
         int first = vertices.Count;
         // Sample visual micro-detail for placement without letting it choose drainage directions.
@@ -573,7 +669,9 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
         for (int i = 1; i < path.Length; i++)
             for (int s = 0; s < 3; s++) projected.Add(Vector3.Lerp(path[i - 1], path[i], s / 3f).normalized);
         projected.Add(path[path.Length - 1]);
-        path = projected.ToArray();
+        var candidate = projected.ToArray();
+        if (!renderHydrology || terrain.IsCentrelineValid(candidate, TinDrainage.Epsilon, TinDrainage.VisibleBumpTolerance)) path = candidate;
+        else TinDiagnostics.RejectedPostProcessing++;
         for (int i = 0; i < path.Length; i++)
         {
             Vector3 forward = path[Math.Min(i + 1, path.Length - 1)] - path[Math.Max(0, i - 1)];
@@ -595,6 +693,16 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
     [ContextMenu("Log Selected Drainage Cell")]
     private void LogSelectedCell()
     {
+        if (TinDrainage != null)
+        {
+            if (debugCell < 0 || debugCell >= TinDrainage.TriangleCount) return;
+            TinPoint point = TinDrainage.Centroid(debugCell);
+            Debug.Log($"[GeodesicTinTriangle] triangle={debugCell} receiver={TinDrainage.TriangleReceiver[debugCell]} " +
+                $"H={TinDrainage.Height(point):G9} visible={TinDrainage.Height(point, true):G9} " +
+                $"gradient={TinDrainage.DownhillGradient(debugCell)} localArea={TinDrainage.LocalArea[debugCell]:G9} " +
+                $"drainageArea={TinDrainage.DrainageArea[debugCell]:G9} runoff={TinDrainage.AccumulatedRunoff[debugCell]:G9}", this);
+            return;
+        }
         if (Drainage == null || debugCell < 0 || debugCell >= Drainage.CellCount) return;
         int i = debugCell;
         Debug.Log($"[GeodesicDrainageCell] cell={i} receiver={Drainage.DrainageReceiver[i]} outlet={Drainage.OutletCell[i]} " +
@@ -604,6 +712,15 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
 
     private void OnDrawGizmosSelected()
     {
+        if (TinDrainage != null)
+        {
+            if (!showSelectedDrainage || !paths.TryGetValue(debugCell, out var path)) return;
+            Gizmos.color = Color.yellow;
+            for (int i = 1; i < path.Length; i++)
+                Gizmos.DrawLine(transform.TransformPoint(path[i - 1] * (terrain.Radius(path[i - 1]) + surfaceOffset)),
+                    transform.TransformPoint(path[i] * (terrain.Radius(path[i]) + surfaceOffset)));
+            return;
+        }
         if (!showSelectedDrainage || Drainage == null || terrain == null || debugCell < 0 || debugCell >= Drainage.CellCount) return;
         int cell = debugCell;
         for (int steps = 0; steps < 256 && cell >= 0; steps++)
@@ -627,7 +744,7 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
         GradeDiagnostics = null;
         Lakes = null; LakeGeometry = null; reachPlans.Clear(); lakeMilliseconds = 0d;
         LakeConnectedReaches = LakeBridgedReaches = LakeInlets = LakeOutlets = SuppressedProjectionMismatch = SuppressedCorridorFailure = UnrenderedSmallDepression = TrueTopologyFailure = InlandVisibleTerminations = OceanConnectedChains = 0;
-        ClearVisual(); paths.Clear(); mouths.Clear(); Drainage = null; terrain = null; topology = null; planet = null;
+        ClearVisual(); paths.Clear(); mouths.Clear(); Drainage = null; TinDrainage = null; tinSimulationCells = null; terrain = null; topology = null; planet = null;
         ChannelAnchors = Array.Empty<Vector3>(); RiverStrength = Array.Empty<float>();
         renderHydrology = false; routingHeights = null;
         landCells = riverCells = visibleReaches = suppressedUphillReaches = riverMouths = unresolvedSinks = filledCells = majorBasinCells = 0;
