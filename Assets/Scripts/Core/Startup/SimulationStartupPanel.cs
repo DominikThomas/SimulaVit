@@ -29,6 +29,13 @@ public class SimulationStartupPanel : MonoBehaviour
     [SerializeField] private TMP_InputField ventFe2Input;
     [SerializeField] private TMP_InputField initialSpawnCountInput;
 
+    [Header("Debug Settings / River Debug")]
+    [SerializeField] private Button debugSettingsButton;
+    [SerializeField] private GameObject debugSettingsRoot;
+    [SerializeField] private Toggle showRejectedUphillRiverSegmentsToggle;
+    [SerializeField] private Toggle colourRenderedRiversByVisibleTerrainGradeToggle;
+    [SerializeField] private Toggle showRiverTerminationReasonsToggle;
+
     [Header("Advanced")]
     [SerializeField] private GameObject advancedSettingsRoot;
     [SerializeField] private Toggle excludeSmallInlandSeasToggle;
@@ -61,6 +68,7 @@ public class SimulationStartupPanel : MonoBehaviour
     private void OnEnable()
     {
         if (advancedSettingsRoot != null) advancedSettingsRoot.SetActive(false);
+        if (debugSettingsRoot != null) debugSettingsRoot.SetActive(false);
         RefreshFromConfig();
     }
 
@@ -72,6 +80,7 @@ public class SimulationStartupPanel : MonoBehaviour
         if (resetDefaultsButton != null) resetDefaultsButton.onClick.RemoveListener(ResetDefaults);
         if (backButton != null) backButton.onClick.RemoveListener(BackToMainMenu);
         if (advancedButton != null) advancedButton.onClick.RemoveListener(ToggleAdvanced);
+        if (debugSettingsButton != null) debugSettingsButton.onClick.RemoveListener(ToggleDebug);
         if (resetAdvancedDefaultsButton != null) resetAdvancedDefaultsButton.onClick.RemoveListener(ResetAdvancedDefaults);
         if (excludeSmallInlandSeasToggle != null) excludeSmallInlandSeasToggle.onValueChanged.RemoveListener(OnOceanFilterChanged);
         if (generateHydrologicalLakesToggle != null) generateHydrologicalLakesToggle.onValueChanged.RemoveListener(OnLakeFilterChanged);
@@ -87,6 +96,7 @@ public class SimulationStartupPanel : MonoBehaviour
         if (resetDefaultsButton != null) resetDefaultsButton.onClick.AddListener(ResetDefaults);
         if (backButton != null) backButton.onClick.AddListener(BackToMainMenu);
         if (advancedButton != null) advancedButton.onClick.AddListener(ToggleAdvanced);
+        if (debugSettingsButton != null) debugSettingsButton.onClick.AddListener(ToggleDebug);
         if (resetAdvancedDefaultsButton != null) resetAdvancedDefaultsButton.onClick.AddListener(ResetAdvancedDefaults);
         if (excludeSmallInlandSeasToggle != null) excludeSmallInlandSeasToggle.onValueChanged.AddListener(OnOceanFilterChanged);
         if (generateHydrologicalLakesToggle != null) generateHydrologicalLakesToggle.onValueChanged.AddListener(OnLakeFilterChanged);
@@ -102,6 +112,9 @@ public class SimulationStartupPanel : MonoBehaviour
         }
 
         SimulationStartupConfig config = controller.CurrentConfig;
+        SetToggle(showRejectedUphillRiverSegmentsToggle, config.showRejectedUphillRiverSegments);
+        SetToggle(colourRenderedRiversByVisibleTerrainGradeToggle, config.colourRenderedRiversByVisibleTerrainGrade);
+        SetToggle(showRiverTerminationReasonsToggle, config.showRiverTerminationReasons);
         SetToggle(useRandomSeedToggle, config.useRandomSeed);
         SetText(seedInput, config.planetSeed.ToString());
         if (planetGridDropdown != null) planetGridDropdown.SetValueWithoutNotify(config.gridType == PlanetGridType.GeodesicIcosphere ? 1 : 0);
@@ -144,6 +157,9 @@ public class SimulationStartupPanel : MonoBehaviour
         }
 
         SimulationStartupConfig config = controller.CurrentConfig;
+        if (showRejectedUphillRiverSegmentsToggle != null) config.showRejectedUphillRiverSegments = showRejectedUphillRiverSegmentsToggle.isOn;
+        if (colourRenderedRiversByVisibleTerrainGradeToggle != null) config.colourRenderedRiversByVisibleTerrainGrade = colourRenderedRiversByVisibleTerrainGradeToggle.isOn;
+        if (showRiverTerminationReasonsToggle != null) config.showRiverTerminationReasons = showRiverTerminationReasonsToggle.isOn;
         config.useRandomSeed = useRandomSeedToggle == null ? config.useRandomSeed : useRandomSeedToggle.isOn;
         config.planetSeed = ReadInt(seedInput, config.planetSeed);
         if (planetGridDropdown != null) config.gridType = planetGridDropdown.value == 1 ? PlanetGridType.GeodesicIcosphere : PlanetGridType.LegacyCubeSphere;
@@ -211,6 +227,11 @@ public class SimulationStartupPanel : MonoBehaviour
     private void BackToMainMenu()
     {
         controller?.BackToStartMenu();
+    }
+
+    private void ToggleDebug()
+    {
+        if (debugSettingsRoot != null) debugSettingsRoot.SetActive(!debugSettingsRoot.activeSelf);
     }
 
     private void ToggleAdvanced()

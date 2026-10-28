@@ -452,7 +452,7 @@ public sealed class GeodesicTinHydrology
         return samples.ToArray();
     }
 
-    private TinTermination TraceInto(TinPoint source, List<TinPoint> samples, List<int> candidates, int maximumSteps)
+    private TinTermination TraceInto(TinPoint source, List<TinPoint> samples, List<int> candidates, int maximumSteps, List<TinPoint[]> rejected = null)
     {
         samples.Clear(); samples.Add(source);
         TinPoint p = source;
@@ -489,7 +489,16 @@ public sealed class GeodesicTinHydrology
             if (reachedCoast && CompletedVisibleRadius(start) <= seaLevel)
                 return TrimToExactCoast(samples) ? TinTermination.OceanCoast : TinTermination.RoutingFailure;
             if (reachedCoast) next = Coast(start, next);
-            if (!AcceptStep(start, next, ref lowestH, ref lowestV, ref lowestR, true)) return TinTermination.RoutingFailure;
+            if (!AcceptStep(start, next, ref lowestH, ref lowestV, ref lowestR, true))
+            {
+                if (rejected != null && Finite(Height(start)) && Finite(Height(next)) &&
+                    Finite(CompletedVisibleRadius(start)) && Finite(CompletedVisibleRadius(next)))
+                {
+                    var failed = new List<TinPoint>(samples) { start, next };
+                    rejected.Add(failed.ToArray());
+                }
+                return TinTermination.RoutingFailure;
+            }
             if ((Position(next) - Position(start)).Length <= 1e-14) return IsOcean(next) ? TinTermination.OceanCoast : TinTermination.RoutingFailure;
             if (start.Triangle != p.Triangle) samples.Add(start);
             samples.Add(next); p = next;
@@ -534,7 +543,7 @@ public sealed class GeodesicTinHydrology
     /// <summary>Start whole streams at threshold crossings. A tributary can merge only by
     /// constructing an accepted continuous downhill segment inside the same facet to the
     /// exact existing channel point. Sharing a triangle alone never creates a connection.</summary>
-    public void ExtractNetworks(double threshold, double radius = 1d)
+    public void ExtractNetworks(double threshold, double radius = 1d, Action<int, TinPoint[]> rejectedUphill = null)
     {
         networks.Clear(); routingFailureTriangles.Clear(); threshold = Math.Max(1e-20, threshold);
         var watch = Stopwatch.StartNew();
@@ -556,9 +565,12 @@ public sealed class GeodesicTinHydrology
         sources.Sort((a, b) => { int order = AccumulatedRunoff[b].CompareTo(AccumulatedRunoff[a]); return order != 0 ? order : a.CompareTo(b); });
         Diagnostics.Sources = sources.Count;
         var samples = new List<TinPoint>(128); var candidates = new List<int>(8);
+        var rejectedPaths = rejectedUphill != null ? new List<TinPoint[]>(1) : null;
         foreach (int source in sources)
         {
-            TinTermination termination = TraceInto(Centroid(source), samples, candidates, 32768);
+            rejectedPaths?.Clear();
+            TinTermination termination = TraceInto(Centroid(source), samples, candidates, 32768,
+                rejectedPaths);
             int junction = -1;
             double lowH = Height(samples[0]), lowV = Height(samples[0], true), lowR = CompletedVisibleRadius(samples[0]);
             var accepted = new List<TinPoint>(samples.Count) { samples[0] };
@@ -584,6 +596,7 @@ public sealed class GeodesicTinHydrology
                 accepted.Add(q);
                 lowH = Math.Min(lowH, Height(q)); lowV = Math.Min(lowV, Height(q, true)); lowR = Math.Min(lowR, CompletedVisibleRadius(q));
             }
+            if (junction < 0 && rejectedPaths != null && rejectedPaths.Count > 0) rejectedUphill(source, rejectedPaths[0]);
             var network = new TinRiverNetwork { SourceTriangle = source, Samples = accepted.ToArray(), Termination = termination, JunctionNetwork = junction };
             network.Centreline = Directions(network.Samples);
             int id = networks.Count; networks.Add(network);

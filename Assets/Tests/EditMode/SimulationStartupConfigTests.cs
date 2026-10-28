@@ -2,6 +2,17 @@ using NUnit.Framework;
 
 public class SimulationStartupConfigTests
 {
+    [Test]
+    public void RiverDebugDefaultsOffAndClonesIndependentlyOfAdvancedSettings()
+    {
+        var config = new SimulationStartupConfig();
+        Assert.That(config.showRejectedUphillRiverSegments, Is.False);
+        config.showRejectedUphillRiverSegments = true;
+        Assert.That(config.Clone().showRejectedUphillRiverSegments, Is.True);
+        SimulationStartupController.CopyAdvancedSettings(new SimulationStartupConfig(), config);
+        Assert.That(config.showRejectedUphillRiverSegments, Is.True);
+    }
+
     [TestCase(float.NaN, 2f)]
     [TestCase(float.PositiveInfinity, 2f)]
     [TestCase(0f, 2f)]

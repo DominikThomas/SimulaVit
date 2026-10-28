@@ -18,7 +18,7 @@ work = root / 'work' / 'tin-validation'
 work.mkdir(parents=True, exist_ok=True)
 data = args.unity_data.resolve()
 dotnet = data / 'NetCoreRuntime' / 'dotnet'
-mono = data / 'MonoBleedingEdge' / 'bin' / 'mono'
+mono = data / 'MonoBleedingEdge' / 'bin' / ('mono.exe' if os.name == 'nt' else 'mono')
 core = data / 'Managed' / 'UnityEngine'
 nunit = data / 'Resources/PackageManager/BuiltInPackages/com.unity.ext.nunit/net40/unity-custom'
 sources = list((root / 'Assets/Scripts/Planet/Geodesic/Hydrology').glob('*.cs'))
@@ -39,6 +39,8 @@ sources += [root / p for p in [
     'Assets/Scripts/Planet/Geodesic/Terrain/PlanetTerrainSettings.cs',
     'Assets/Scripts/Utilities/SimpleNoise.cs',
     'Assets/Tests/EditMode/GeodesicTinHydrologyTests.cs',
+    'Assets/Tests/EditMode/GeodesicRiverUphillDebugTests.cs',
+    'Assets/Tests/EditMode/GeodesicRiverVisibleGradeAuditTests.cs',
     'Assets/Tests/EditMode/GeodesicTinSurfaceTests.cs',
     'Assets/Tests/EditMode/GeodesicHydrologyTopologyTests.cs',
     'Assets/Tests/EditMode/GeodesicRiverGradeTests.cs',
@@ -47,8 +49,9 @@ sources += [root / p for p in [
     'Assets/Tests/EditMode/GeodesicLakeTests.cs',
     'Tools/TinHydrologyValidation.cs',
 ]]
-refs = list((data / 'MonoBleedingEdge/lib/mono/unityjit-linux').glob('*.dll'))
-refs += [data / 'MonoBleedingEdge/lib/mono/unityjit-linux/Facades/netstandard.dll']
+framework = data / 'MonoBleedingEdge/lib/mono' / ('unityjit-win32' if os.name == 'nt' else 'unityjit-linux')
+refs = list(framework.glob('*.dll'))
+refs += [framework / 'Facades/netstandard.dll']
 refs += list(core.glob('*.dll')) + [nunit / 'nunit.framework.dll']
 response = work / 'compile.rsp'
 response.write_text('\n'.join(['/nologo', '/nostdlib+', '/langversion:latest', '/target:exe',
@@ -56,7 +59,7 @@ response.write_text('\n'.join(['/nologo', '/nostdlib+', '/langversion:latest', '
     ['/reference:"' + str(p) + '"' for p in refs] + ['"' + str(p) + '"' for p in sources]))
 subprocess.run([str(dotnet), str(data / 'DotNetSdkRoslyn/csc.dll'), '@' + str(response)], check=True, cwd=root)
 env = dict(os.environ)
-env['MONO_PATH'] = os.pathsep.join([str(core), str(nunit), str(data / 'MonoBleedingEdge/lib/mono/unityjit-linux')])
+env['MONO_PATH'] = os.pathsep.join([str(core), str(nunit), str(framework)])
 command = [str(mono), str(work / 'TinValidation.exe')]
 if args.benchmark is not None:
     command += ['--benchmark', str(args.benchmark)]

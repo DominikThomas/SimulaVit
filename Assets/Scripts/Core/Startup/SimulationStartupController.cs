@@ -34,7 +34,7 @@ public class SimulationStartupController : MonoBehaviour
     public const float GeodesicVentPhysicalMaxPerSecond = 1000f;
     private const int InitialSpawnMin = 0;
     private const int InitialSpawnMax = 10000;
-    private const int SavedStartupConfigVersion = 10;
+    private const int SavedStartupConfigVersion = 12;
     public const float NormalAtmospherePressureMaxBar = 5f;
     public const float DenseAtmospherePressureMaxBar = 600f;
     public const float DefaultApproximateThermalIntervalSeconds = 2f;
@@ -106,6 +106,7 @@ public class SimulationStartupController : MonoBehaviour
     private bool returningToMainMenu;
     private bool deferredStartupPrepared;
     private bool advancedSettingsExpanded;
+    private bool debugSettingsExpanded;
 
     public static bool IsSetupActive { get; private set; }
     public static bool IsStartupBlockingHud => IsSetupActive;
@@ -575,6 +576,15 @@ public class SimulationStartupController : MonoBehaviour
             planetGenerator.generateHydrologicalLakes = config.generateHydrologicalLakes;
             planetGenerator.minimumLakeBasinAreaFraction = GeodesicLakeBasins.NormalizeArea(config.minimumLakeBasinAreaFraction);
             planetGenerator.minimumLakeDepth = GeodesicLakeBasins.NormalizeDepth(config.minimumLakeDepth);
+            var riverDebug = planetGenerator.GetComponent<GeodesicRiverSystem>();
+            if (riverDebug == null && config.gridType == PlanetGridType.GeodesicIcosphere)
+                riverDebug = planetGenerator.gameObject.AddComponent<GeodesicRiverSystem>();
+            if (riverDebug != null)
+            {
+                riverDebug.showRejectedUphillRiverSegments = config.showRejectedUphillRiverSegments;
+                riverDebug.colourRenderedRiversByVisibleTerrainGrade = config.colourRenderedRiversByVisibleTerrainGrade;
+                riverDebug.showRiverTerminationReasons = config.showRiverTerminationReasons;
+            }
             planetGenerator.InitializeAuthoritativePlanet("New Game startup selection");
         }
 
@@ -906,6 +916,8 @@ public class SimulationStartupController : MonoBehaviour
         public int geodesicSubdivisionLevel;
         public bool excludeSmallDisconnectedSeas;
         public float minimumOceanComponentAreaFraction;
+        public bool showRejectedUphillRiverSegments;
+        public bool colourRenderedRiversByVisibleTerrainGrade, showRiverTerminationReasons;
         public bool generateHydrologicalLakes;
         public float minimumLakeBasinAreaFraction, minimumLakeDepth;
         public float axisTiltDegrees;
@@ -955,6 +967,9 @@ public class SimulationStartupController : MonoBehaviour
                 geodesicSubdivisionLevel = config.geodesicSubdivisionLevel,
                 excludeSmallDisconnectedSeas = config.excludeSmallDisconnectedSeas,
                 minimumOceanComponentAreaFraction = config.minimumOceanComponentAreaFraction,
+                showRejectedUphillRiverSegments = config.showRejectedUphillRiverSegments,
+                colourRenderedRiversByVisibleTerrainGrade = config.colourRenderedRiversByVisibleTerrainGrade,
+                showRiverTerminationReasons = config.showRiverTerminationReasons,
                 generateHydrologicalLakes = config.generateHydrologicalLakes,
                 minimumLakeBasinAreaFraction = config.minimumLakeBasinAreaFraction,
                 minimumLakeDepth = config.minimumLakeDepth,
@@ -1001,6 +1016,9 @@ public class SimulationStartupController : MonoBehaviour
             config.gridType = gridType;
             config.cubeSphereResolution = cubeSphereResolution > 0 ? cubeSphereResolution : config.cubeSphereResolution;
             config.geodesicSubdivisionLevel = geodesicSubdivisionLevel;
+            config.showRejectedUphillRiverSegments = version >= 11 && showRejectedUphillRiverSegments;
+            config.colourRenderedRiversByVisibleTerrainGrade = version >= 12 && colourRenderedRiversByVisibleTerrainGrade;
+            config.showRiverTerminationReasons = version >= 12 && showRiverTerminationReasons;
             config.generateHydrologicalLakes = version >= 10 && generateHydrologicalLakes;
             config.minimumLakeBasinAreaFraction = GeodesicLakeBasins.NormalizeArea(version >= 10 ? minimumLakeBasinAreaFraction : GeodesicLakeBasins.DefaultMinimumAreaFraction);
             config.minimumLakeDepth = GeodesicLakeBasins.NormalizeDepth(version >= 10 ? minimumLakeDepth : GeodesicLakeBasins.DefaultMinimumDepth);
@@ -1297,7 +1315,7 @@ public class SimulationStartupController : MonoBehaviour
 
         float contentWidth = Mathf.Max(1f, width - 20f);
         float advancedHeight = advancedSettingsExpanded ? 900f : 0f;
-        float contentHeight = 44f + ((line + gap) * 25f) + advancedHeight + (gap * 2f) + 42f + 30f + 82f;
+        float contentHeight = 44f + ((line + gap) * 25f) + advancedHeight + (debugSettingsExpanded ? 370f : 40f) + (gap * 2f) + 42f + 30f + 82f;
         Rect contentRect = GUILayoutUtility.GetRect(contentWidth, contentHeight, GUILayout.Width(contentWidth), GUILayout.Height(contentHeight));
         float controlX = contentRect.x;
         float y = contentRect.y;
@@ -1427,6 +1445,20 @@ public class SimulationStartupController : MonoBehaviour
             y += 30f;
             if (GUI.Button(new Rect(controlX, y, contentWidth, 30f), "Reset Advanced to Defaults", buttonStyle)) ResetAdvancedToDefaults();
             y += 38f;
+        }
+
+        if (GUI.Button(new Rect(controlX, y, contentWidth, 32f), debugSettingsExpanded ? "Debug Settings ▲" : "Debug Settings ▼", buttonStyle))
+            debugSettingsExpanded = !debugSettingsExpanded;
+        y += 40f;
+        if (debugSettingsExpanded)
+        {
+            GUI.Label(new Rect(controlX, y, contentWidth, line), "River Debug", labelStyle); y += line + gap;
+            DrawBool(new Rect(controlX, y, contentWidth, line), "Show rejected uphill river segments", ref currentConfig.showRejectedUphillRiverSegments); y += line + gap;
+            GUI.Label(new Rect(controlX, y, contentWidth, 64f), "Displays reaches omitted because they rise uphill.\nDiagnostic only; these do not become valid drainage routes.\nYellow → orange → red: increasing uphill slope (Geodesic only).", labelStyle); y += 72f;
+            DrawBool(new Rect(controlX, y, contentWidth, line), "Colour rendered rivers by visible terrain grade", ref currentConfig.colourRenderedRiversByVisibleTerrainGrade); y += line + gap;
+            GUI.Label(new Rect(controlX, y, contentWidth, 64f), "Audits every rendered segment against completed visible terrain.\nDownhill retains normal colour; uphill is yellow, orange or red.\nThis does not alter routing.", labelStyle); y += 72f;
+            DrawBool(new Rect(controlX, y, contentWidth, line), "Show river termination reasons", ref currentConfig.showRiverTerminationReasons); y += line + gap;
+            GUI.Label(new Rect(controlX, y, contentWidth, 28f), "Purple: closed basin. White: unexpected routing failure. No lakes created.", labelStyle); y += 36f;
         }
 
         float buttonWidth = (contentWidth - gap) * 0.5f;

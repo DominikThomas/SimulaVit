@@ -11,7 +11,7 @@ public static class TinHydrologyValidation
     public static int Main(string[] args)
     {
         int passed = 0, failed = 0;
-        foreach (Type fixtureType in new[] { typeof(GeodesicTinHydrologyTests), typeof(GeodesicTinSurfaceTests),
+        foreach (Type fixtureType in new[] { typeof(GeodesicTinHydrologyTests), typeof(GeodesicRiverUphillDebugTests), typeof(GeodesicRiverVisibleGradeAuditTests), typeof(GeodesicTinSurfaceTests),
             typeof(GeodesicHydrologyTopologyTests), typeof(GeodesicRiverGradeTests), typeof(GeodesicDrainageTests),
             typeof(GeodesicOceanConnectivityTests), typeof(GeodesicLakeTests) })
         foreach (var method in fixtureType.GetMethods())

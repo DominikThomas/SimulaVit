@@ -77,7 +77,26 @@ public sealed class GeodesicRiverTerrain
         MaximumUphillExcursion(path, false) <= visibleBumpTolerance + epsilon &&
         MaximumCompletedVisibleUphillExcursion(path) <= visibleBumpTolerance + epsilon;
 
-    private double MaximumUphillExcursion(Vector3[] path, bool hydrological, bool completedVisible = false)
+    public void MeasureRejectedPath(RiverUphillDebugReach reach, double radius, double epsilon)
+    {
+        var points = new List<Vector3>(); var heights = new List<double>();
+        for (int mode = 0; mode < 3; mode++)
+        {
+            points.Clear(); heights.Clear();
+            MaximumUphillExcursion(reach.Path, mode == 0, mode == 2, points, heights);
+            GeodesicRiverUphillDebug.Measure(reach, points, heights, radius, epsilon);
+            // Completed-surface facet crossings and radial extrema are the displayed path.
+            if (mode == 2) reach.Path = points.ToArray();
+        }
+    }
+
+    /// <summary>Observation only: completed facet crossings and interior radial extrema.
+    /// The caller does not consult the routing validation result.</summary>
+    public void SampleCompletedVisiblePath(Vector3[] path, List<Vector3> points, List<double> heights)
+        => MaximumUphillExcursion(path, false, true, points, heights);
+
+    private double MaximumUphillExcursion(Vector3[] path, bool hydrological, bool completedVisible = false,
+        List<Vector3> debugPoints = null, List<double> debugHeights = null)
     {
         if (path == null || path.Length < 2) return float.PositiveInfinity;
         double lowest = completedVisible ? ExactRadius(path[0]) : InterpolationReference(path[0], !hydrological), rise = 0d;
@@ -116,6 +135,8 @@ public sealed class GeodesicRiverTerrain
                 Vector3 sample = Vector3.Lerp(start, end, (float)t).normalized;
                 double height = completedVisible ? ExactRadius(sample) : InterpolationReference(sample, !hydrological);
                 if (double.IsNaN(height) || double.IsInfinity(height)) return double.PositiveInfinity;
+                if (debugPoints != null && (debugPoints.Count == 0 || !debugPoints[debugPoints.Count - 1].Equals(sample)))
+                { debugPoints.Add(sample); debugHeights.Add(height); }
                 rise = Math.Max(rise, height - lowest); lowest = Math.Min(lowest, height);
             }
 

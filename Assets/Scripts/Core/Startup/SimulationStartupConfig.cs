@@ -67,6 +67,14 @@ public class SimulationStartupConfig
     public float geodesicVentFe2PhysicalPerSecond = 0f;
     [Range(0f, 1f)] public float terrestrialVentFraction = 0.25f;
 
+    [Header("Debug Settings / River Debug")]
+    [Tooltip("Displays river reaches omitted because they rise uphill. Diagnostic only; these do not become valid drainage routes.")]
+    public bool showRejectedUphillRiverSegments;
+    [Tooltip("Audits every rendered river segment against the completed visible terrain. Downhill segments retain their normal colour; visually uphill sections are shown yellow, orange or red. This does not alter routing.")]
+    public bool colourRenderedRiversByVisibleTerrainGrade;
+    [Tooltip("Purple marks declared closed basins; white marks unexpected routing failures. Diagnostic only; no lakes are created.")]
+    public bool showRiverTerminationReasons;
+
     [Header("Population")]
     [Min(0)] public int initialSpawnCount = 100;
     public bool startPaused;
