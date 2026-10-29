@@ -81,8 +81,10 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
     public GeodesicDrainageGraph Drainage { get; private set; }
     public GeodesicTinHydrology TinDrainage { get; private set; }
     public TinHydrologyDiagnostics TinDiagnostics => TinDrainage?.Diagnostics;
+    public string HydrologyTerrainSummary { get; private set; }
+    public float[] HydrologyTerrainInputHeights { get; private set; }
     [Header("Continuous triangle drainage")]
-    [Range(0f, .1f), Tooltip("Optional weak single pass. Zero uses completed visible terrain. Automatically reduced on visible disagreement.")]
+    [Range(0f, .1f), Tooltip("Optional weak single pass over the selected drainage input. Zero uses that input unchanged. Automatically reduced on visible disagreement.")]
     public float tinFilterStrength = 0f;
     [Range(0f, .002f), Tooltip("Maximum micro bump excursion as a fraction of completed terrain relief. Never changes hydrological epsilon.")]
     public float visibleMicroBumpFraction = .001f;
@@ -394,7 +396,24 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
         double epsilon = Math.Min(Math.Max(0f, uphillTolerance), Math.Min(.000002d, owner.BasePlanetRadius * .00000025d));
         double bump = (max - (double)min) * Mathf.Clamp(visibleMicroBumpFraction, 0f, .002f);
         meanCellArea = 4d * Math.PI * owner.BasePlanetRadius * owner.BasePlanetRadius / owner.GeodesicTopology.CellCount;
-        TinDrainage = GeodesicTinHydrology.BuildAdaptive(geometry.UnitVertices, geometry.Triangles, visible, ocean,
+        var terrainSettings = owner.GetGeodesicTerrainSettings();
+        float[] hydrologyTerrainHeight = GeodesicHydrologyTerrain.Build(geometry.UnitVertices, visible, ocean,
+            owner.DerivedTerrainSeed, terrainSettings, owner.BasePlanetRadius,
+            owner.hydrologyTerrainMode, owner.enableGeodesicTerrainDisplacement,
+            owner.GeodesicHydrologicalRenderRadii, owner.GeodesicRawRenderRadii);
+        HydrologyTerrainInputHeights = hydrologyTerrainHeight;
+        HydrologyTerrainSummary = GeodesicHydrologyTerrain.Summary(visible, hydrologyTerrainHeight, geometry.Triangles,
+            owner.hydrologyTerrainMode, terrainSettings, owner.enableGeodesicTerrainDisplacement,
+            owner.hydrologyTerrainMode == HydrologyTerrainMode.FineDetailRemoved && owner.GeodesicHydrologicalRenderRadii?.Length == visible.Length
+                && owner.GeodesicRawRenderRadii?.Length == visible.Length);
+        Debug.Log(HydrologyTerrainSummary, this);
+        if (owner.hydrologyTerrainMode != HydrologyTerrainMode.Visible)
+            TinDrainage = GeodesicTinHydrology.BuildAdaptive(geometry.UnitVertices, geometry.Triangles, visible, ocean,
+                owner.GeodesicSeaLevelRadius, owner.BasePlanetRadius, epsilon, bump, tinFilterStrength,
+                ResolvedDrainageAreaThreshold, Mathf.Max(0f, uniformRunoffPerArea), geometry.SubdivisionLevel,
+                completedSurface: completedSurface, hydrologyTerrainHeights: hydrologyTerrainHeight);
+        else
+            TinDrainage = GeodesicTinHydrology.BuildAdaptive(geometry.UnitVertices, geometry.Triangles, visible, ocean,
             owner.GeodesicSeaLevelRadius, owner.BasePlanetRadius, epsilon, bump, tinFilterStrength,
             ResolvedDrainageAreaThreshold, Mathf.Max(0f, uniformRunoffPerArea), geometry.SubdivisionLevel, completedSurface: completedSurface);
         routingHeights = TinDrainage.HydrologyHeight;
@@ -415,7 +434,7 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
         Debug.Log($"[GeodesicTIN] simulationSubdivision={owner.GeodesicTopology.SubdivisionLevel} renderSubdivision={geometry.SubdivisionLevel} " +
             $"vertices={geometry.VertexCount} configuredThreshold={riverFlowThreshold:G6} resolvedAreaThreshold={ResolvedDrainageAreaThreshold:G9} " +
             $"epsilon={TinDrainage.Epsilon:G9} visibleMicroBumpThreshold={TinDrainage.VisibleBumpTolerance:G9} " +
-            "heightSource=completed-visible-L7-mesh routing=continuous-facet-gradient rawDebug=" + drawRawTrianglePaths, this);
+            $"heightSource={owner.hydrologyTerrainMode} routing=continuous-facet-gradient rawDebug=" + drawRawTrianglePaths, this);
         Debug.Log(TinDiagnostics.Summary(), this);
         Debug.Log("[GeodesicTIN] VISUAL ACCEPTANCE PENDING: inspect licensed Unity seed-123456 raw paths before accepting ribbons. Lakes remain OFF.", this);
     }
@@ -909,6 +928,7 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
         ClearVisual(); paths.Clear(); mouths.Clear(); Drainage = null; TinDrainage = null; tinSimulationCells = null; terrain = null; topology = null; planet = null;
         ChannelAnchors = Array.Empty<Vector3>(); RiverStrength = Array.Empty<float>();
         renderHydrology = false; routingHeights = null;
+        HydrologyTerrainSummary = null; HydrologyTerrainInputHeights = null;
         landCells = riverCells = visibleReaches = suppressedUphillReaches = riverMouths = unresolvedSinks = filledCells = majorBasinCells = 0;
         topologyMilliseconds = visualMilliseconds = 0d;
     }

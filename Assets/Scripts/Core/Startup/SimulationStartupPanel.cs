@@ -40,6 +40,7 @@ public class SimulationStartupPanel : MonoBehaviour
     [SerializeField] private GameObject advancedSettingsRoot;
     [SerializeField] private Toggle excludeSmallInlandSeasToggle;
     [SerializeField] private TMP_InputField minimumOceanBasinPercentInput;
+    [SerializeField] private Dropdown hydrologyTerrainModeDropdown;
     [SerializeField] private Toggle generateHydrologicalLakesToggle;
     [SerializeField] private TMP_InputField minimumLakeBasinPercentInput;
     [SerializeField] private TMP_InputField minimumLakeDepthInput;
@@ -123,6 +124,12 @@ public class SimulationStartupPanel : MonoBehaviour
         SetToggle(excludeSmallInlandSeasToggle, config.excludeSmallDisconnectedSeas);
         SetText(minimumOceanBasinPercentInput, (config.minimumOceanComponentAreaFraction * 100f).ToString("0.###"));
         OnOceanFilterChanged(config.excludeSmallDisconnectedSeas);
+        if (hydrologyTerrainModeDropdown != null)
+        {
+            hydrologyTerrainModeDropdown.ClearOptions();
+            hydrologyTerrainModeDropdown.AddOptions(new System.Collections.Generic.List<string> { "Visible", "Fine detail removed", "Reduced ridge + fine detail (reference)" });
+            hydrologyTerrainModeDropdown.SetValueWithoutNotify((int)config.hydrologyTerrainMode);
+        }
         SetToggle(generateHydrologicalLakesToggle, config.generateHydrologicalLakes);
         SetText(minimumLakeBasinPercentInput, (config.minimumLakeBasinAreaFraction * 100f).ToString("0.####"));
         SetText(minimumLakeDepthInput, config.minimumLakeDepth.ToString("0.####"));
@@ -192,6 +199,7 @@ public class SimulationStartupPanel : MonoBehaviour
         config.approximateThermalIntervalSeconds = ReadPresetDropdown(approximateThermalIntervalDropdown, config.approximateThermalIntervalSeconds, SimulationStartupController.ApproximateThermalIntervalPresets);
         config.geodesicResourceTransportIntervalSeconds = ReadPresetDropdown(resourceTransportIntervalDropdown, config.geodesicResourceTransportIntervalSeconds, SimulationStartupController.ResourceTransportIntervalPresets);
         config.chemistryTelemetryIntervalSimSeconds = ReadFloat(chemistryTelemetryIntervalInput, config.chemistryTelemetryIntervalSimSeconds);
+        if (hydrologyTerrainModeDropdown != null) config.hydrologyTerrainMode = (HydrologyTerrainMode)hydrologyTerrainModeDropdown.value;
         if (generateHydrologicalLakesToggle != null) config.generateHydrologicalLakes = generateHydrologicalLakesToggle.isOn;
         config.minimumLakeBasinAreaFraction = GeodesicLakeBasins.NormalizeArea(ReadFloat(minimumLakeBasinPercentInput, config.minimumLakeBasinAreaFraction * 100f) / 100f);
         config.minimumLakeDepth = GeodesicLakeBasins.NormalizeDepth(ReadFloat(minimumLakeDepthInput, config.minimumLakeDepth));
@@ -279,6 +287,7 @@ public class SimulationStartupPanel : MonoBehaviour
     {
         if (excludeSmallInlandSeasToggle != null) excludeSmallInlandSeasToggle.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
         if (minimumOceanBasinPercentInput != null) minimumOceanBasinPercentInput.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
+        if (hydrologyTerrainModeDropdown != null) hydrologyTerrainModeDropdown.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
         if (generateHydrologicalLakesToggle != null) generateHydrologicalLakesToggle.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
         if (minimumLakeBasinPercentInput != null) minimumLakeBasinPercentInput.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
         if (minimumLakeDepthInput != null) minimumLakeDepthInput.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);

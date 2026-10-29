@@ -122,6 +122,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         public float[] NormalizedHeights;
         public float[] MountainMasks;
     }
+    internal float[] GeodesicRawRenderRadii => geodesicCurrentRenderTerrainData.RawRadii;
     internal float[] GeodesicHydrologicalRenderRadii => geodesicCurrentRenderTerrainData.HydrologicalRadii;
     internal IcosphereDirectionMapping GeodesicCurrentRenderMapping => geodesicCurrentRenderMapping;
     public bool showGeodesicCellOutlines = true;
@@ -211,6 +212,14 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     [Header("Geodesic Rivers")]
     [Tooltip("Precompute land drainage and terrain-conforming river ribbons during generation. Configure GeodesicRiverSystem for thresholds and runoff.")]
     public bool enableGeodesicRivers = true;
+    [Tooltip("Drainage input only. FineDetailRemoved preserves all ridge octaves; ReducedRidgeAndFineDetail retains the failed reference experiment. Visible terrain and ocean authority stay unchanged.")]
+    public HydrologyTerrainMode hydrologyTerrainMode = HydrologyTerrainMode.Visible;
+    // Compatibility for the preserved first experiment and its capture/tests.
+    public bool useLowFrequencyTerrainForHydrology
+    {
+        get => hydrologyTerrainMode == HydrologyTerrainMode.ReducedRidgeAndFineDetail;
+        set => hydrologyTerrainMode = value ? HydrologyTerrainMode.ReducedRidgeAndFineDetail : HydrologyTerrainMode.Visible;
+    }
     [Header("Geodesic Static Lakes")]
     [Tooltip("Fill significant priority-flood depressions to their spill level. No lake chemistry or terrain modification.")]
     public bool generateHydrologicalLakes;
@@ -1317,7 +1326,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         return PlanetTerrainSampler.Evaluate(direction, DerivedTerrainSeed, GetGeodesicTerrainSettings());
     }
 
-    PlanetTerrainSettings GetGeodesicTerrainSettings()
+    internal PlanetTerrainSettings GetGeodesicTerrainSettings()
     {
         return new PlanetTerrainSettings
         {

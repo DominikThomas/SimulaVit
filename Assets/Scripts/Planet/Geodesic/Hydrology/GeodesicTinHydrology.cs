@@ -728,14 +728,17 @@ public sealed class GeodesicTinHydrology
     public static GeodesicTinHydrology BuildAdaptive(Vector3[] vertices, int[] triangles, float[] visible,
         bool[] retainedOcean, float sea, double radius, double epsilon, double visibleBumpTolerance,
         double filterStrength, double threshold, double runoffDensity = 1d, int subdivision = -1,
-        bool onSphere = true, bool boundaryOutflow = false, Vector3[] completedSurface = null)
+        bool onSphere = true, bool boundaryOutflow = false, Vector3[] completedSurface = null,
+        float[] hydrologyTerrainHeights = null)
     {
         double strength = Math.Max(0d, Math.Min(.1d, filterStrength)), filteringMs = 0d;
         int retries = 0;
         while (true)
         {
             var watch = Stopwatch.StartNew();
-            float[] filtered = FilterVisible(vertices, triangles, visible, strength, out double mean, out double max);
+            // A supplied drainage field remains the source even when the optional weak
+            // filter backs off. Visible geometry still controls coast and grade checks.
+            float[] filtered = FilterVisible(vertices, triangles, hydrologyTerrainHeights ?? visible, strength, out double mean, out double max);
             filteringMs += watch.Elapsed.TotalMilliseconds;
             var tin = new GeodesicTinHydrology(vertices, triangles, visible, filtered, retainedOcean, sea, radius,
                 epsilon, visibleBumpTolerance, onSphere, boundaryOutflow, subdivision, completedSurface);

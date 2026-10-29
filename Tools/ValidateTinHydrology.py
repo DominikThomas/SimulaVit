@@ -2,7 +2,7 @@
 """Run actual managed hydrology sources against Unity's assemblies, without Editor licensing.
 
 This does not replace native Unity integration tests or licensed screenshot acceptance.
-All generated compilation files live in work/tin-validation.
+Generated compilation files default to Artifacts/LowFrequencyHydrology/managed.
 """
 import argparse
 import os
@@ -12,9 +12,10 @@ import subprocess
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--unity-data', required=True, type=Path)
 parser.add_argument('--benchmark', type=int, choices=range(1, 8))
+parser.add_argument('--output', type=Path, default=Path('Artifacts/LowFrequencyHydrology/managed'))
 args = parser.parse_args()
 root = Path(__file__).resolve().parents[1]
-work = root / 'work' / 'tin-validation'
+work = (root / args.output).resolve()
 work.mkdir(parents=True, exist_ok=True)
 data = args.unity_data.resolve()
 dotnet = data / 'NetCoreRuntime' / 'dotnet'
@@ -39,6 +40,7 @@ sources += [root / p for p in [
     'Assets/Scripts/Planet/Geodesic/Terrain/PlanetTerrainSettings.cs',
     'Assets/Scripts/Utilities/SimpleNoise.cs',
     'Assets/Tests/EditMode/GeodesicTinHydrologyTests.cs',
+    'Assets/Tests/EditMode/GeodesicHydrologyTerrainTests.cs',
     'Assets/Tests/EditMode/GeodesicRiverUphillDebugTests.cs',
     'Assets/Tests/EditMode/GeodesicRiverVisibleGradeAuditTests.cs',
     'Assets/Tests/EditMode/GeodesicTinSurfaceTests.cs',

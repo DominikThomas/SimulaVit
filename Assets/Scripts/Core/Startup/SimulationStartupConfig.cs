@@ -85,6 +85,15 @@ public class SimulationStartupConfig
     [Range(0f, GeodesicOceanConnectivity.MaximumAreaFraction)]
     public float minimumOceanComponentAreaFraction = GeodesicOceanConnectivity.DefaultMinimumAreaFraction;
 
+    [Header("Advanced Geodesic Hydrology")]
+    public HydrologyTerrainMode hydrologyTerrainMode = HydrologyTerrainMode.Visible;
+    // Compatibility for the preserved first experiment and its capture/tests.
+    public bool useLowFrequencyTerrainForHydrology
+    {
+        get => hydrologyTerrainMode == HydrologyTerrainMode.ReducedRidgeAndFineDetail;
+        set => hydrologyTerrainMode = value ? HydrologyTerrainMode.ReducedRidgeAndFineDetail : HydrologyTerrainMode.Visible;
+    }
+
     [Header("Advanced Geodesic Lakes")]
     [Tooltip("Fill significant terrain depressions with static lakes at their spill elevation. Small depressions remain virtual hydrological fills.")]
     public bool generateHydrologicalLakes;

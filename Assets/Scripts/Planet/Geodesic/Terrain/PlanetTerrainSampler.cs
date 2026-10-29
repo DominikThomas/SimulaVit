@@ -12,6 +12,24 @@ public struct PlanetTerrainSample
 
 public static class PlanetTerrainSampler
 {
+    public static bool IsQualifyingFineDetail(PlanetTerrainSettings settings)
+        => settings.fineDetailScale >= 2f * Mathf.Max(settings.continentScale, settings.mountainScale)
+            && settings.fineDetailAmplitude <= 0.25f * Mathf.Max(settings.continentAmplitude, settings.mountainAmplitude);
+
+    public const int HydrologyRidgeOctaveCap = 2;
+
+    // Copy the value-type settings: continent octaves, mountain mask and broad warp
+    // remain exactly the same. Only ridge detail and the explicit fine band change.
+    public static PlanetTerrainSettings HydrologyLowFrequencySettings(PlanetTerrainSettings settings)
+    {
+        settings.octaves = Mathf.Clamp(settings.octaves, 1, HydrologyRidgeOctaveCap);
+        settings.fineDetailAmplitude = 0f;
+        return settings;
+    }
+
+    public static float EvaluateHydrologyLowFrequency(Vector3 unitDirection, int masterSeed, PlanetTerrainSettings settings)
+        => EvaluateHeight(unitDirection, masterSeed, HydrologyLowFrequencySettings(settings));
+
     private static readonly Vector3 ContinentDomain = new Vector3(17.31f, -41.77f, 83.19f);
     private static readonly Vector3 MountainDomain = new Vector3(91.7f, -37.2f, 18.4f);
     private static readonly Vector3 WarpXDomain = new Vector3(-12.3f, 48.9f, 73.5f);
@@ -56,8 +74,7 @@ public static class PlanetTerrainSampler
         height = Mathf.Sign(height) * Mathf.Pow(Mathf.Abs(height), Mathf.Max(0.25f, settings.heightContrast));
         float min = Mathf.Min(settings.minimumTerrainOffset, settings.maximumTerrainOffset);
         float max = Mathf.Max(settings.minimumTerrainOffset, settings.maximumTerrainOffset);
-        bool fineIsMicroDetail = settings.fineDetailScale >= 2f * Mathf.Max(settings.continentScale, settings.mountainScale)
-            && settings.fineDetailAmplitude <= 0.25f * Mathf.Max(settings.continentAmplitude, settings.mountainAmplitude);
+        bool fineIsMicroDetail = IsQualifyingFineDetail(settings);
         float largeScale = continentHeight + mountainHeight;
         largeScale = Mathf.Sign(largeScale) * Mathf.Pow(Mathf.Abs(largeScale), Mathf.Max(0.25f, settings.heightContrast));
         return new PlanetTerrainSample { LargeScaleHeightOffset = fineIsMicroDetail ? Mathf.Clamp(largeScale, min, max) : Mathf.Clamp(height, min, max), HeightOffset = Mathf.Clamp(height, min, max), ContinentValue = continentNoise, MountainMask = mask, RidgeValue = ridge };

@@ -34,7 +34,7 @@ public class SimulationStartupController : MonoBehaviour
     public const float GeodesicVentPhysicalMaxPerSecond = 1000f;
     private const int InitialSpawnMin = 0;
     private const int InitialSpawnMax = 10000;
-    private const int SavedStartupConfigVersion = 12;
+    private const int SavedStartupConfigVersion = 14;
     public const float NormalAtmospherePressureMaxBar = 5f;
     public const float DenseAtmospherePressureMaxBar = 600f;
     public const float DefaultApproximateThermalIntervalSeconds = 2f;
@@ -454,6 +454,7 @@ public class SimulationStartupController : MonoBehaviour
         destination.geodesicSubdivisionLevel = source.geodesicSubdivisionLevel;
         destination.excludeSmallDisconnectedSeas = source.excludeSmallDisconnectedSeas;
         destination.minimumOceanComponentAreaFraction = source.minimumOceanComponentAreaFraction;
+        destination.hydrologyTerrainMode = source.hydrologyTerrainMode;
         destination.generateHydrologicalLakes = source.generateHydrologicalLakes;
         destination.minimumLakeBasinAreaFraction = source.minimumLakeBasinAreaFraction;
         destination.minimumLakeDepth = source.minimumLakeDepth;
@@ -573,6 +574,7 @@ public class SimulationStartupController : MonoBehaviour
             }
             planetGenerator.excludeSmallDisconnectedSeas = config.excludeSmallDisconnectedSeas;
             planetGenerator.minimumOceanComponentAreaFraction = GeodesicOceanConnectivity.NormalizeThreshold(config.minimumOceanComponentAreaFraction);
+            planetGenerator.hydrologyTerrainMode = config.hydrologyTerrainMode;
             planetGenerator.generateHydrologicalLakes = config.generateHydrologicalLakes;
             planetGenerator.minimumLakeBasinAreaFraction = GeodesicLakeBasins.NormalizeArea(config.minimumLakeBasinAreaFraction);
             planetGenerator.minimumLakeDepth = GeodesicLakeBasins.NormalizeDepth(config.minimumLakeDepth);
@@ -890,6 +892,7 @@ public class SimulationStartupController : MonoBehaviour
             builder.AppendLine($"Legacy Vent Rates H2/H2S/CO2/Fe2: {config.ventH2PerTick:0.####}/{config.ventH2SPerTick:0.####}/{config.ventCO2PerTick:0.####}/{config.ventFe2PerTick:0.####} per legacy tick semantics");
         builder.AppendLine($"Terrestrial Vent Fraction: {config.terrestrialVentFraction:0.###}");
         builder.AppendLine($"Exclude small inland seas: {config.excludeSmallDisconnectedSeas}; minimum ocean basin area: {config.minimumOceanComponentAreaFraction * 100f:0.###}% of planet surface");
+        builder.AppendLine($"Hydrology terrain mode: {config.hydrologyTerrainMode}");
         builder.AppendLine($"Hydrological lakes: {config.generateHydrologicalLakes}; minimum basin area: {config.minimumLakeBasinAreaFraction * 100f:0.####}% of planet; minimum depth: {config.minimumLakeDepth:0.####} planet units");
         builder.AppendLine($"Initial Spawn Count: {config.initialSpawnCount}");
         builder.AppendLine($"Start Paused: {startPaused}");
@@ -918,6 +921,8 @@ public class SimulationStartupController : MonoBehaviour
         public float minimumOceanComponentAreaFraction;
         public bool showRejectedUphillRiverSegments;
         public bool colourRenderedRiversByVisibleTerrainGrade, showRiverTerminationReasons;
+        public bool useLowFrequencyTerrainForHydrology; // Schema 13 migration only.
+        public HydrologyTerrainMode hydrologyTerrainMode;
         public bool generateHydrologicalLakes;
         public float minimumLakeBasinAreaFraction, minimumLakeDepth;
         public float axisTiltDegrees;
@@ -970,6 +975,8 @@ public class SimulationStartupController : MonoBehaviour
                 showRejectedUphillRiverSegments = config.showRejectedUphillRiverSegments,
                 colourRenderedRiversByVisibleTerrainGrade = config.colourRenderedRiversByVisibleTerrainGrade,
                 showRiverTerminationReasons = config.showRiverTerminationReasons,
+                useLowFrequencyTerrainForHydrology = config.useLowFrequencyTerrainForHydrology,
+                hydrologyTerrainMode = config.hydrologyTerrainMode,
                 generateHydrologicalLakes = config.generateHydrologicalLakes,
                 minimumLakeBasinAreaFraction = config.minimumLakeBasinAreaFraction,
                 minimumLakeDepth = config.minimumLakeDepth,
@@ -1019,6 +1026,9 @@ public class SimulationStartupController : MonoBehaviour
             config.showRejectedUphillRiverSegments = version >= 11 && showRejectedUphillRiverSegments;
             config.colourRenderedRiversByVisibleTerrainGrade = version >= 12 && colourRenderedRiversByVisibleTerrainGrade;
             config.showRiverTerminationReasons = version >= 12 && showRiverTerminationReasons;
+            config.hydrologyTerrainMode = version >= 14 && System.Enum.IsDefined(typeof(HydrologyTerrainMode), hydrologyTerrainMode)
+                ? hydrologyTerrainMode : version == 13 && useLowFrequencyTerrainForHydrology
+                    ? HydrologyTerrainMode.ReducedRidgeAndFineDetail : HydrologyTerrainMode.Visible;
             config.generateHydrologicalLakes = version >= 10 && generateHydrologicalLakes;
             config.minimumLakeBasinAreaFraction = GeodesicLakeBasins.NormalizeArea(version >= 10 ? minimumLakeBasinAreaFraction : GeodesicLakeBasins.DefaultMinimumAreaFraction);
             config.minimumLakeDepth = GeodesicLakeBasins.NormalizeDepth(version >= 10 ? minimumLakeDepth : GeodesicLakeBasins.DefaultMinimumDepth);
@@ -1314,7 +1324,7 @@ public class SimulationStartupController : MonoBehaviour
         setupGuiScrollPosition = GUILayout.BeginScrollView(setupGuiScrollPosition, GUILayout.Width(width), GUILayout.Height(scrollHeight));
 
         float contentWidth = Mathf.Max(1f, width - 20f);
-        float advancedHeight = advancedSettingsExpanded ? 900f : 0f;
+        float advancedHeight = advancedSettingsExpanded ? 1040f : 0f;
         float contentHeight = 44f + ((line + gap) * 25f) + advancedHeight + (debugSettingsExpanded ? 370f : 40f) + (gap * 2f) + 42f + 30f + 82f;
         Rect contentRect = GUILayoutUtility.GetRect(contentWidth, contentHeight, GUILayout.Width(contentWidth), GUILayout.Height(contentHeight));
         float controlX = contentRect.x;
@@ -1394,6 +1404,12 @@ public class SimulationStartupController : MonoBehaviour
             {
                 DrawInt(new Rect(controlX, y, contentWidth, line), "Geodesic Subdivision Level", ref currentConfig.geodesicSubdivisionLevel, true, 0, GeodesicGridTopology.MaxSupportedSubdivision);
                 y += line + gap;
+                GUI.Label(new Rect(controlX, y, contentWidth, line), "Hydrology terrain input", labelStyle);
+                y += line + gap;
+                currentConfig.hydrologyTerrainMode = (HydrologyTerrainMode)GUI.SelectionGrid(
+                    new Rect(controlX, y, contentWidth, line * 3f), (int)currentConfig.hydrologyTerrainMode,
+                    new[] { "Visible terrain", "Fine detail removed (full ridges)", "Reduced ridge + fine detail (failed reference)" }, 1);
+                y += line * 3f + gap;
                 DrawBool(new Rect(controlX, y, contentWidth, line), "Exclude small inland seas", ref currentConfig.excludeSmallDisconnectedSeas);
                 y += line + gap;
                 bool oceanControlEnabled = GUI.enabled;
