@@ -11,7 +11,7 @@ public static class TinHydrologyValidation
     public static int Main(string[] args)
     {
         int passed = 0, failed = 0;
-        foreach (Type fixtureType in new[] { typeof(GeodesicTinHydrologyTests), typeof(GeodesicHydrologyTerrainTests), typeof(GeodesicRiverUphillDebugTests), typeof(GeodesicRiverVisibleGradeAuditTests), typeof(GeodesicTinSurfaceTests),
+        foreach (Type fixtureType in new[] { typeof(GeodesicTinBasinTests), typeof(GeodesicTinHydrologyTests), typeof(GeodesicHydrologyTerrainTests), typeof(GeodesicRiverUphillDebugTests), typeof(GeodesicRiverVisibleGradeAuditTests), typeof(GeodesicTinSurfaceTests),
             typeof(GeodesicHydrologyTopologyTests), typeof(GeodesicRiverGradeTests), typeof(GeodesicDrainageTests),
             typeof(GeodesicOceanConnectivityTests), typeof(GeodesicLakeTests) })
         foreach (var method in fixtureType.GetMethods())
@@ -21,9 +21,9 @@ public static class TinHydrologyValidation
             catch (Exception e) { failed++; Console.WriteLine("FAIL " + method.Name + ": " + (e.InnerException ?? e)); }
         }
         Console.WriteLine($"Managed hydrology tests: {passed} passed; {failed} failed. Native Unity integration and visual acceptance NOT RUN.");
-        if (failed != 0) return 1;
+
         if (args.Length == 2 && args[0] == "--benchmark") Benchmark(int.Parse(args[1]));
-        return 0;
+        return failed == 0 ? 0 : 1;
     }
 
     private static void Benchmark(int renderSubdivision)
@@ -61,6 +61,10 @@ public static class TinHydrologyValidation
             $"maxHydrologyExcursion={maxH:G9} maxVisibleExcursion={maxV:G9} maxCompletedVisibleExcursion={maxCompleted:G9} " +
             $"extraFullTopologyBuilds={GeodesicGridTopology.BuildInvocationCount - fullBuilds} totalMs={total.Elapsed.TotalMilliseconds:F2}");
         Console.WriteLine(tin.Diagnostics.Summary());
+        var basins = GeodesicTinBasins.Build(tin);
+        Console.WriteLine(basins.Summary());
+        foreach (var basin in basins.Basins.OrderByDescending(b => b.Area).Take(5)) Console.WriteLine(basin);
+        foreach (string match in basins.TerminationDetails()) Console.WriteLine(match);
         Console.WriteLine("VISUAL ACCEPTANCE PENDING. This managed fixture is not a licensed Unity screenshot or native scene integration test.");
     }
 }

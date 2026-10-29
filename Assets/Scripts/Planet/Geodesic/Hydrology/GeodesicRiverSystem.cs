@@ -805,6 +805,31 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
         }
     }
 
+    [Header("Optional TIN basin inspection (context actions only)")]
+    public int selectedTinBasinId;
+
+    [ContextMenu("Audit TIN Basin Topology")]
+    public void AuditTinBasins()
+    {
+        if (TinDrainage == null) return;
+        var basins = GeodesicTinBasins.Build(TinDrainage,
+            planet != null ? planet.minimumLakeBasinAreaFraction : .0001d,
+            planet != null ? planet.minimumLakeDepth : .005d);
+        Debug.Log(basins.Summary(), this);
+    }
+
+    [ContextMenu("Log Selected TIN Basin And Termination Matches")]
+    public void LogSelectedTinBasin()
+    {
+        if (TinDrainage == null) return;
+        var basins = GeodesicTinBasins.Build(TinDrainage,
+            planet != null ? planet.minimumLakeBasinAreaFraction : .0001d,
+            planet != null ? planet.minimumLakeDepth : .005d);
+        foreach (var basin in basins.Basins)
+            if (basin.Id == selectedTinBasinId) Debug.Log(basin.ToString(), this);
+        foreach (string match in basins.TerminationDetails()) Debug.Log(match, this);
+    }
+
     [ContextMenu("Log River Grade Diagnostics")]
     public void LogGradeDiagnostics()
     {

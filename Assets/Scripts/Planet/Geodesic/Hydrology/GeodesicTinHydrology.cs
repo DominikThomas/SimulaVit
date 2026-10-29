@@ -183,6 +183,20 @@ public sealed class GeodesicTinHydrology
     public Vector3 DownhillGradient(int triangle) => faces[triangle].Downhill.Vector;
     public TinPoint Centroid(int t) => new TinPoint(t, 1d / 3d, 1d / 3d, 1d / 3d);
 
+    // Read-only topology access for the optional basin audit. No drainage receivers are built here.
+    internal int BasinVertexCount => vertices.Length;
+    internal int BasinVertex(int triangle, int corner) => triangles[triangle * 3 + corner];
+    internal int BasinIncidentStart(int vertex) => incidentOffsets[vertex];
+    internal int BasinIncidentEnd(int vertex) => incidentOffsets[vertex + 1];
+    internal int BasinIncidentTriangle(int index) => incidentTriangles[index];
+    internal bool BasinBoundaryOutflow => boundaryOutflow;
+    internal float BasinSeaLevel => seaLevel;
+    internal bool BasinFaceValid(int triangle) => faces[triangle].Valid;
+    internal TinPoint BasinPoint(int triangle, int vertex) => new TinPoint(triangle,
+        triangles[triangle * 3] == vertex ? 1d : 0d,
+        triangles[triangle * 3 + 1] == vertex ? 1d : 0d,
+        triangles[triangle * 3 + 2] == vertex ? 1d : 0d);
+
     public double CompletedVisibleRadius(TinPoint p)
     {
         if (!spherical) return Height(p, true);
