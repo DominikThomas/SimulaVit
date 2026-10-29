@@ -86,6 +86,9 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
     public GeodesicTinBasins TinLakeBasins { get; private set; }
     public GeodesicTinLakeGeometry TinLakeGeometry { get; private set; }
     public GameObject TinLakeVisualRoot => renderHydrology ? lakeVisualRoot : null;
+    [Tooltip("Debug A/B switch. Uses only rendered TIN lake bodies; source detection and raw TIN accumulation are unchanged.")]
+    public bool integrateTinLakeRivers = true;
+    public GeodesicTinLakeRouting TinLakeRouting { get; private set; }
     public TinHydrologyDiagnostics TinDiagnostics => TinDrainage?.Diagnostics;
     public string HydrologyTerrainSummary { get; private set; }
     public float[] HydrologyTerrainInputHeights { get; private set; }
@@ -295,7 +298,7 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
     [ContextMenu("Refresh River Thresholds And Visuals")]
     public void RebuildVisuals()
     {
-        if (renderHydrology) { RebuildRenderHydrologyVisuals(); RefreshTinLakeVisuals(); return; }
+        if (renderHydrology) { RefreshTinLakeVisuals(); RebuildRenderHydrologyVisuals(); return; }
         ClearVisual(); mouths.Clear();
         riverCells = visibleReaches = suppressedUphillReaches = riverMouths = majorBasinCells = 0;
         LakeConnectedReaches = LakeBridgedReaches = LakeInlets = LakeOutlets = SuppressedProjectionMismatch = SuppressedCorridorFailure = UnrenderedSmallDepression = TrueTopologyFailure = InlandVisibleTerminations = OceanConnectedChains = 0;
@@ -436,14 +439,14 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
         }
         // Static lake surfaces observe the completed TIN; river routing remains independent.
         topologyMilliseconds = watch.Elapsed.TotalMilliseconds;
-        RebuildRenderHydrologyVisuals();
         RefreshTinLakeVisuals();
+        RebuildRenderHydrologyVisuals();
         Debug.Log($"[GeodesicTIN] simulationSubdivision={owner.GeodesicTopology.SubdivisionLevel} renderSubdivision={geometry.SubdivisionLevel} " +
             $"vertices={geometry.VertexCount} configuredThreshold={riverFlowThreshold:G6} resolvedAreaThreshold={ResolvedDrainageAreaThreshold:G9} " +
             $"epsilon={TinDrainage.Epsilon:G9} visibleMicroBumpThreshold={TinDrainage.VisibleBumpTolerance:G9} " +
             $"heightSource={owner.hydrologyTerrainMode} routing=continuous-facet-gradient rawDebug=" + drawRawTrianglePaths, this);
         Debug.Log(TinDiagnostics.Summary(), this);
-        Debug.Log("[GeodesicTIN] Static lake rendering is independent of river paths; river/lake integration remains disabled.", this);
+        Debug.Log("[GeodesicTIN] Rendered lake nodes use exact shoreline entries and unique TIN runoff parcels.", this);
     }
 
     private double[] MapSimulationRunoffToTriangles(double[] supplied)
@@ -460,7 +463,10 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
         return result;
     }
 
-    private void RebuildRenderHydrologyVisuals()
+    [ContextMenu("Refresh TIN Lake River Integration Only")]
+    public void RefreshTinLakeRiverIntegration() { if (renderHydrology) RebuildRenderHydrologyVisuals(true); }
+
+    private void RebuildRenderHydrologyVisuals(bool reuseRawNetworks = false)
     {
         ClearVisual(); paths.Clear(); mouths.Clear();
         visibleReaches = riverCells = riverMouths = 0;
@@ -471,8 +477,10 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
             riverTerminationPoints = new List<RiverTerminationDebugPoint>();
         }
         rejectedUphill = showRejectedUphillRiverSegments ? new List<RiverUphillDebugReach>() : null;
-        TinDrainage.ExtractNetworks(ResolvedDrainageAreaThreshold, planet.BasePlanetRadius,
+        if (!reuseRawNetworks) TinDrainage.ExtractNetworks(ResolvedDrainageAreaThreshold, planet.BasePlanetRadius,
             showRejectedUphillRiverSegments ? CaptureRejectedTinPath : (Action<int, TinPoint[]>)null);
+        TinLakeRouting = integrateTinLakeRivers && planet.generateHydrologicalLakes && TinLakeGeometry != null && TinLakeGeometry.Bodies.Count > 0
+            ? GeodesicTinLakeRouting.Build(TinDrainage, TinLakeBasins, TinLakeGeometry, ResolvedDrainageAreaThreshold) : null;
         var watch = System.Diagnostics.Stopwatch.StartNew();
         double threshold = ResolvedDrainageAreaThreshold;
         for (int t = 0; t < RiverStrength.Length; t++) RiverStrength[t] = (float)(TinDrainage.AccumulatedRunoff[t] / threshold);
@@ -481,6 +489,14 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
         for (int id = 0; id < TinDrainage.Networks.Count; id++)
         {
             var network = TinDrainage.Networks[id]; Vector3[] raw = network.Centreline;
+            var lakeReach = TinLakeRouting != null ? TinLakeRouting.RiverReaches[id] : null;
+            bool lakeAffected = lakeReach != null && (lakeReach.Changed || TinLakeRouting.HasAddedDischarge(id));
+            double[] lakeDischarge = null;
+            if (lakeAffected)
+            {
+                raw = TinLakeRouting.Directions(lakeReach.Samples);
+                lakeDischarge = DistinctLakeDischarge(lakeReach.Samples, TinLakeRouting.RawReachDischarge(id));
+            }
             if (raw.Length < 2) continue;
             // Resample all crossed TIN facets after float conversion, interpolation and
             // projection. Optional aesthetics must retain this validated raw fallback.
@@ -491,7 +507,7 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
                 CaptureRejectedPath(network.SourceTriangle, raw, RiverDebugRejection.CentrelineGrade); continue;
             }
             Vector3[] path = raw;
-            if (!drawRawTrianglePaths)
+            if (!drawRawTrianglePaths && !lakeAffected)
             {
                 var interpolated = new List<Vector3>(raw.Length * 3);
                 for (int i = 1; i < raw.Length; i++)
@@ -519,11 +535,11 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
             paths[network.SourceTriangle] = path;
             int firstVertex = vertices.Count, firstIndex = indices.Count;
             if (drawRawTrianglePaths) AddRawTinLine(path, vertices, indices, colors);
-            else AddTinRibbon(path, network.SourceTriangle, vertices, indices, colors);
+            else AddTinRibbon(path, network.SourceTriangle, vertices, indices, colors, lakeDischarge, lakeReach != null && lakeReach.ReceivingLakeId >= 0);
             VisibleGradeAudit?.ObserveEmittedPath(network.SourceTriangle, vertices, firstVertex, path.Length,
                 drawRawTrianglePaths, firstIndex, terrain, planet.BasePlanetRadius);
             visibleReaches++; rendered[id] = true;
-            if (network.Termination == TinTermination.Confluence && network.JunctionNetwork >= 0 && !rendered[network.JunctionNetwork])
+            if (!reuseRawNetworks && TinLakeRouting == null && network.Termination == TinTermination.Confluence && network.JunctionNetwork >= 0 && !rendered[network.JunctionNetwork])
             {
                 TinDiagnostics.Confluences--; TinDiagnostics.UnexpectedBrokenNetworks++; TinDiagnostics.UnexpectedInlandBreaks++;
                 network.Termination = TinTermination.RoutingFailure; network.JunctionNetwork = -1;
@@ -533,7 +549,7 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
                 int finalCentre = firstVertex + (path.Length - 1) * (drawRawTrianglePaths ? 1 : 3) + (drawRawTrianglePaths ? 0 : 1);
                 riverTerminationPoints.Add(new RiverTerminationDebugPoint(network.SourceTriangle, network.Termination, vertices[finalCentre]));
             }
-            if (network.Termination == TinTermination.OceanCoast)
+            if (network.Termination == TinTermination.OceanCoast && (lakeReach == null || lakeReach.ReceivingLakeId < 0))
             {
                 int terminalTriangle = network.Samples[network.Samples.Length - 1].Triangle;
                 int cell = tinSimulationCells[terminalTriangle];
@@ -545,6 +561,20 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
                     HasVisibleCoastPosition = true, LocalCoastPosition = coast * terrain.Radius(coast) });
                 riverMouths++;
             }
+        }
+        if (TinLakeRouting != null)
+        {
+            foreach (var lake in TinLakeRouting.Lakes)
+            {
+                if (lake.OutletReachId < 0) continue;
+                var path = TinLakeRouting.Directions(lake.OutletPath);
+                if (path.Length < 2) continue;
+                if (drawRawTrianglePaths) AddRawTinLine(path, vertices, indices, colors);
+                else AddTinRibbon(path, lake.OutletPath[0].Triangle, vertices, indices, colors,
+                    Array.ConvertAll(path, _ => lake.Discharge), lake.DownstreamLakeId >= 0 && lake.JoinNetwork < 0, true);
+                visibleReaches++;
+            }
+            Debug.Log(TinLakeRouting.Summary(), this);
         }
         if (VisibleGradeAudit != null)
         {
@@ -714,13 +744,35 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
         }
     }
 
-    private void AddTinRibbon(Vector3[] path, int source, List<Vector3> vertices, List<int> indices, List<Color> colors)
+    private double[] DistinctLakeDischarge(TinPoint[] samples, double[] discharge)
     {
-        int first = vertices.Count; float strength = RiverStrength[source];
+        var result = new List<double>(); Vector3 previous = default;
+        for (int i = 0; i < samples.Length; i++)
+        {
+            var direction = TinDrainage.Direction(samples[i]);
+            if (i == 0 || !previous.Equals(direction)) result.Add(discharge[i]);
+            else result[result.Count - 1] = Math.Max(result[result.Count - 1], discharge[i]);
+            previous = direction;
+        }
+        return result.ToArray();
+    }
+
+    private void AddTinRibbon(Vector3[] path, int source, List<Vector3> vertices, List<int> indices, List<Color> colors,
+        double[] discharge = null, bool shorelineEnd = false, bool spillStart = false)
+    {
+        // A short lake-to-lake reach needs an interior cross-section when both ends
+        // taper to exact shore points; two collapsed caps alone have zero area.
+        if (path.Length == 2 && shorelineEnd && spillStart)
+        {
+            path = new[] { path[0], (path[0] + path[1]).normalized, path[1] };
+            if (discharge != null) discharge = new[] { discharge[0], (discharge[0] + discharge[1]) * .5, discharge[1] };
+        }
+        int first = vertices.Count; float strength = discharge == null ? RiverStrength[source] : 0;
         for (int i = 0; i < path.Length; i++)
         {
             int triangle = terrain.FindTriangle(path[i]);
-            strength = Mathf.Max(strength, (float)(TinDrainage.AccumulatedRunoff[triangle] / ResolvedDrainageAreaThreshold));
+            strength = discharge != null ? Mathf.Max(strength, (float)(discharge[i] / ResolvedDrainageAreaThreshold)) :
+                Mathf.Max(strength, (float)(TinDrainage.AccumulatedRunoff[triangle] / ResolvedDrainageAreaThreshold));
             float width = planet.BasePlanetRadius * Mathf.Max(.00001f, widthAtThreshold) *
                 Mathf.Clamp(Mathf.Sqrt(strength), 1f, Mathf.Max(1f, maximumWidthMultiplier));
             Vector3 forward = path[Math.Min(i + 1, path.Length - 1)] - path[Math.Max(0, i - 1)];
@@ -728,6 +780,9 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
             float angle = width / Mathf.Max(.001f, terrain.Radius(path[i]));
             Vector3 left = (path[i] - side * angle * .5f).normalized;
             Vector3 right = (path[i] + side * angle * .5f).normalized;
+            // A zero-width cap meets the exact shoreline/spill witness; banks cannot
+            // extend past that endpoint into the water.
+            if ((shorelineEnd && i == path.Length - 1) || (spillStart && i == 0)) left = right = path[i];
             float offset = Mathf.Max(.000001f, surfaceOffset);
             // Three columns retain the EXACT checked centreline as mesh vertices. Projecting
             // unequal banks must not move the river's middle onto a different routing path.
@@ -983,7 +1038,7 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
         if (lakeVisualRoot != null) lakeVisualRoot.SetActive(false);
         Release(lakeVisualRoot); Release(lakeMesh); Release(lakeMaterial); lakeVisualRoot = null; lakeMesh = null; lakeMaterial = null;
         GradeDiagnostics = null;
-        Lakes = null; LakeGeometry = null; TinLakeBasins = null; TinLakeGeometry = null; reachPlans.Clear(); lakeMilliseconds = 0d;
+        Lakes = null; LakeGeometry = null; TinLakeBasins = null; TinLakeGeometry = null; TinLakeRouting = null; reachPlans.Clear(); lakeMilliseconds = 0d;
         LakeConnectedReaches = LakeBridgedReaches = LakeInlets = LakeOutlets = SuppressedProjectionMismatch = SuppressedCorridorFailure = UnrenderedSmallDepression = TrueTopologyFailure = InlandVisibleTerminations = OceanConnectedChains = 0;
         ClearVisual(); paths.Clear(); mouths.Clear(); Drainage = null; TinDrainage = null; tinSimulationCells = null; terrain = null; topology = null; planet = null;
         ChannelAnchors = Array.Empty<Vector3>(); RiverStrength = Array.Empty<float>();

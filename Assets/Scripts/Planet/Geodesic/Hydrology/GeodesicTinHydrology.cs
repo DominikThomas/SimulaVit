@@ -316,7 +316,8 @@ public sealed class GeodesicTinHydrology
     /// <summary>Choose steepest feasible descent in the incident facet cone, with no nudge,
     /// uphill hop or receiver jump. A valley edge is followed only when descent is constrained
     /// to that edge; at vertices the incident fan is examined for an interior continuation.</summary>
-    private bool DownhillStep(TinPoint current, List<int> candidates, out TinPoint start, out TinPoint next)
+    private bool DownhillStep(TinPoint current, List<int> candidates, out TinPoint start, out TinPoint next,
+        Func<TinPoint, TinPoint, bool> permitted = null)
     {
         TinPoint bestStart = current, bestNext = current; double bestSlope = 1e-12;
         ContainingFaces(current, candidates);
@@ -353,6 +354,7 @@ public sealed class GeodesicTinHydrology
                 double a = Math.Max(0d, p.A + time * da), b = Math.Max(0d, p.B + time * db), c = Math.Max(0d, p.C + time * dc);
                 double sum = a + b + c;
                 TinPoint q = new TinPoint(t, a / sum, b / sum, c / sum);
+                if (permitted != null && !permitted(p, q)) return;
                 double distance = (Position(q) - Position(p)).Length;
                 if (distance <= 1e-14) return;
                 double slope = (Height(p) - Height(q)) / distance;
@@ -462,7 +464,7 @@ public sealed class GeodesicTinHydrology
     }
 
     private bool AcceptStep(TinPoint start, TinPoint next, ref double lowestH, ref double lowestVisible,
-        ref double lowestRadius, bool countRejection)
+        ref double lowestRadius, bool countRejection, bool recordDisagreement = true)
     {
         // On a linear facet, H's extrema on this segment occur at its endpoints.
         // Comparing against the running minimum also prevents epsilon staircases on flats.
@@ -479,7 +481,7 @@ public sealed class GeodesicTinHydrology
             Math.Max(va, vb) > lowestVisible + VisibleBumpTolerance + Epsilon ||
             ra > lowestRadius + VisibleBumpTolerance + Epsilon || rb > radiusLow + VisibleBumpTolerance + Epsilon)
         {
-            HasVisibleDisagreement = true;
+            if (recordDisagreement) HasVisibleDisagreement = true;
             if (countRejection) Diagnostics.RejectedVisibleSteps++;
             return false;
         }
@@ -494,7 +496,8 @@ public sealed class GeodesicTinHydrology
         return samples.ToArray();
     }
 
-    private TinTermination TraceInto(TinPoint source, List<TinPoint> samples, List<int> candidates, int maximumSteps, List<TinPoint[]> rejected = null)
+    private TinTermination TraceInto(TinPoint source, List<TinPoint> samples, List<int> candidates, int maximumSteps, List<TinPoint[]> rejected = null,
+        bool observe = true, Func<TinPoint, TinPoint, bool> departure = null)
     {
         samples.Clear(); samples.Add(source);
         TinPoint p = source;
@@ -503,7 +506,7 @@ public sealed class GeodesicTinHydrology
         for (int step = 0; step < maximumSteps; step++)
         {
             if (IsOcean(p) || Boundary(p, candidates)) return TinTermination.OceanCoast;
-            if (!DownhillStep(p, candidates, out TinPoint start, out TinPoint next) && !FlatStep(p, candidates, out start, out next))
+            if (!DownhillStep(p, candidates, out TinPoint start, out TinPoint next, step == 0 ? departure : null) && !FlatStep(p, candidates, out start, out next))
             {
                 ContainingFaces(p, candidates);
                 foreach (int t in candidates) if (faces[t].Flat) return TinTermination.FlatRequiringRouting;
@@ -525,13 +528,14 @@ public sealed class GeodesicTinHydrology
                 foreach (int t in candidates) depth = Math.Min(depth, faces[t].Max - lowestH);
                 return depth <= VisibleBumpTolerance ? TinTermination.TinyNoiseDepression : TinTermination.TrueClosedBasin;
             }
+            if (step == 0 && departure != null && !departure(start, next)) return TinTermination.RoutingFailure;
             // Explicit zero-length facet handoff preserves the very same point at the edge.
             // It cannot connect to any unrelated downstream receiver.
             bool reachedCoast = IsOcean(next) || IsOcean(start);
             if (reachedCoast && CompletedVisibleRadius(start) <= seaLevel)
                 return TrimToExactCoast(samples) ? TinTermination.OceanCoast : TinTermination.RoutingFailure;
             if (reachedCoast) next = Coast(start, next);
-            if (!AcceptStep(start, next, ref lowestH, ref lowestV, ref lowestR, true))
+            if (!AcceptStep(start, next, ref lowestH, ref lowestV, ref lowestR, observe, observe))
             {
                 if (rejected != null && Finite(Height(start)) && Finite(Height(next)) &&
                     Finite(CompletedVisibleRadius(start)) && Finite(CompletedVisibleRadius(next)))
@@ -547,6 +551,44 @@ public sealed class GeodesicTinHydrology
             if (reachedCoast) return TinTermination.OceanCoast;
         }
         return TinTermination.RoutingFailure;
+    }
+
+    /// <summary>Read-only replay of the same centroid parcels used by Accumulate. The callback
+    /// must not retain the reused path list. IDs are source triangle IDs, not cumulative flow.</summary>
+    internal void VisitRunoffParcels(Action<int, double, IReadOnlyList<TinPoint>> visit)
+    {
+        var samples = new List<TinPoint>(128); var candidates = new List<int>(8);
+        for (int t = 0; t < TriangleCount; t++)
+        {
+            if (localRunoff[t] <= 0 || !faces[t].Valid || IsOcean(Centroid(t))) continue;
+            TraceInto(Centroid(t), samples, candidates, 32768, observe: false);
+            visit(t, localRunoff[t], samples);
+        }
+    }
+    internal double ParcelRunoff(int triangle) => localRunoff[triangle];
+    internal TinPoint TransferLakePoint(TinPoint point, int triangle) => Transfer(point, triangle);
+    internal TinPoint[] TraceLakeOutlet(TinPoint spill, Func<TinPoint, TinPoint, bool> departure, out TinTermination termination)
+    {
+        var samples = new List<TinPoint>(128); var candidates = new List<int>(8);
+        termination = TraceInto(spill, samples, candidates, 32768, observe: false, departure: departure);
+        return samples.ToArray();
+    }
+    internal bool ValidateLakePath(TinPoint[] path)
+    {
+        if (path == null || path.Length < 2) return false;
+        double h = Height(path[0]), v = Height(path[0], true), r = CompletedVisibleRadius(path[0]);
+        for (int i = 1; i < path.Length; i++)
+        {
+            var a = path[i - 1]; var b = path[i];
+            if (a.Triangle != b.Triangle)
+            {
+                var transferred = Transfer(a, b.Triangle);
+                if (Math.Abs(transferred.A + transferred.B + transferred.C - 1) > 1e-9 || (Position(a) - Position(b)).Length > 1e-10) return false;
+                a = b;
+            }
+            if (!AcceptStep(a, b, ref h, ref v, ref r, false, false)) return false;
+        }
+        return true;
     }
 
     /// <summary>Area parcels terminate exactly where their valid continuous path terminates.

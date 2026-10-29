@@ -35,3 +35,14 @@ Ten geometry tests cover triangular/quad clipping, full/dry facets, exact spill 
 Initial actual-scene capture: 1162 raw basins, 67 qualifying descriptors, 65 rendered water bodies after suppressing two covered children. The geometry has 7674 clipped polygons, 24697 vertices and 9349 triangles; total approximate water area 14.656768 and largest body area 1.52120728, in planet-local units. No terminal basins, 237 subsea-unclassified descriptors, no emitted ocean-intersecting facets. Depth 0.045 and area 0 were preserved. The initial capture's before/after terrain/hydrology/river hashes matched exactly.
 
 Final screenshot paths, unmatched-term explanation and visual acceptance are recorded in the task report after inspecting the final capture. The first capture exposed a capture-only deferred-destruction lookup issue; final close-up OFF/ON images use the current lake root reference rather than finding an object by name.
+
+Final static validation completed on the actual scene in `Artifacts/TinLakes/20261029-153932/` (18 PNGs and `report.txt`). The corrected OFF/ON close-ups show the water switching cleanly while the exact observed river/hydrology/terrain hash remains equal. Settings are restored. Inspection of the three largest bodies, the footprint comparison and spill close-up found level blue surfaces, shorelines cutting across TIN facets, no obvious stacked child surfaces, and unchanged rivers visible through water as expected before integration.
+
+The four unmatched terminations are a shared coastal-vertex authority case, not missing freshwater basins:
+
+| Networks | Endpoint vertex | Endpoint elevation | Incident facets classifying the same point as ocean |
+| --- | ---: | ---: | --- |
+| 756, 1030, 1373 | 103741 | 8.0871706008911133 | 166353, 166354, 166355 |
+| 2297 | 142732 | 8.0673370361328125 | 270441, 270443 |
+
+Their current trace facets classify the endpoints as dry, whereas another incident facet grants retained-ocean authority. The basin sweep correctly treats a vertex as external when any incident facet identifies it as retained ocean. Both endpoints are strict local minima (minimum neighboring elevation differences 0.00630283356 and 0.00163650513 respectively), so this is not an epsilon/noise explanation. No freshwater basin or surface should be invented there. `SharedCoastVertexCanBeDryInTraceCarrierButOceanInAnotherIncidentFacet` reproduces this classification asymmetry. Routing, ocean classification and basin detection were left unchanged.
