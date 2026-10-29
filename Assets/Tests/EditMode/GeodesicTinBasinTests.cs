@@ -113,5 +113,28 @@ public sealed class GeodesicTinBasinTests
         var tin = new GeodesicTinHydrology(f.Vertices, f.Triangles, f.Heights, slope, onSphere: false, allowBoundaryOutflow: true);
         Assert.That(GeodesicTinBasins.Build(tin).Basins.Count, Is.Zero);
     }
+
+    [Test] public void InspectionSeparatesThresholdReasonsAndUnknownTerminalLevel()
+    {
+        var tin = GeodesicTinHydrologyTests.Grid((x, y) => 2f + x * x + (y - 1f) * (y - 1f), size: 8).Tin;
+        Assert.That(GeodesicTinBasinInspection.Exclusions(GeodesicTinBasins.Build(tin, 0, 0).Basins.Single()), Is.EqualTo("none"));
+        Assert.That(GeodesicTinBasinInspection.Exclusions(GeodesicTinBasins.Build(tin, 0, 2).Basins.Single()), Is.EqualTo("depth"));
+        Assert.That(GeodesicTinBasinInspection.Exclusions(GeodesicTinBasins.Build(tin, 2, 0).Basins.Single()), Is.EqualTo("area"));
+        Assert.That(GeodesicTinBasinInspection.Exclusions(GeodesicTinBasins.Build(tin, 2, 2).Basins.Single()), Is.EqualTo("depth,area"));
+        var terminal = GeodesicTinBasins.Build(Bowl(false));
+        StringAssert.Contains("terminal/unknown-level", GeodesicTinBasinInspection.Exclusions(terminal.Basins.Single()));
+        Assert.That(GeodesicTinBasinInspection.Select(terminal, Bowl(false), TinBasinDebugSelection.Deepest, 0, 10, -1), Is.Empty);
+    }
+
+    [Test] public void InspectionSelectionReportsMissingIdsAndChecksConnectedFootprint()
+    {
+        var tin = Bowl(); var basins = GeodesicTinBasins.Build(tin); var b = basins.Basins.Single();
+        Assert.That(GeodesicTinBasinInspection.Select(basins, tin, TinBasinDebugSelection.Selected, b.Id, 1, -1).Single(), Is.SameAs(b));
+        Assert.That(GeodesicTinBasinInspection.Select(basins, tin, TinBasinDebugSelection.ClosedTermination, 0, 1, -1), Is.Empty);
+        StringAssert.Contains("not found", GeodesicTinBasinInspection.SelectedReport(basins, tin, -1));
+        StringAssert.Contains("edgeConnected=True", GeodesicTinBasinInspection.GeometryChecks(tin, b));
+        StringAssert.Contains("fullyOceanFacets=0", GeodesicTinBasinInspection.GeometryChecks(tin, b));
+        StringAssert.Contains("spillVertex=", GeodesicTinBasinInspection.Describe(tin, b));
+    }
 }
 

@@ -825,9 +825,7 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
         var basins = GeodesicTinBasins.Build(TinDrainage,
             planet != null ? planet.minimumLakeBasinAreaFraction : .0001d,
             planet != null ? planet.minimumLakeDepth : .005d);
-        foreach (var basin in basins.Basins)
-            if (basin.Id == selectedTinBasinId) Debug.Log(basin.ToString(), this);
-        foreach (string match in basins.TerminationDetails()) Debug.Log(match, this);
+        Debug.Log(GeodesicTinBasinInspection.SelectedReport(basins, TinDrainage, selectedTinBasinId), this);
     }
 
     [ContextMenu("Log River Grade Diagnostics")]
