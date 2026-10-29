@@ -37,6 +37,8 @@ public sealed class TinBasinsLiveWindow : EditorWindow
     }
     [MenuItem("Tools/Hydrology/TIN Basin Live Inspector")]
     public static void Open() => GetWindow<TinBasinsLiveWindow>("TIN Basin Debug");
+    public void ShowLakeComparison(int id) { Load(); Show(topology.Basins.Where(b => b.Id == id)); }
+    public void HideLakeComparison() => Clear();
     private void OnDisable() => Clear();
     private void OnGUI()
     {

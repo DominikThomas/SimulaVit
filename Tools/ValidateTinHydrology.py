@@ -41,6 +41,7 @@ sources += [root / p for p in [
     'Assets/Scripts/Utilities/SimpleNoise.cs',
     'Assets/Tests/EditMode/GeodesicTinHydrologyTests.cs',
     'Assets/Tests/EditMode/GeodesicTinBasinTests.cs',
+    'Assets/Tests/EditMode/GeodesicTinLakeGeometryTests.cs',
     'Assets/Tests/EditMode/GeodesicHydrologyTerrainTests.cs',
     'Assets/Tests/EditMode/GeodesicRiverUphillDebugTests.cs',
     'Assets/Tests/EditMode/GeodesicRiverVisibleGradeAuditTests.cs',

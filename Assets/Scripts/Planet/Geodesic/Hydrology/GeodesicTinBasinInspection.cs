@@ -8,6 +8,41 @@ public enum TinBasinDebugSelection { Selected, Qualifying, Largest, Deepest, Clo
 /// <summary>Read-only selection and reporting shared by editor inspection and validation.</summary>
 public static class GeodesicTinBasinInspection
 {
+    public static string UnmatchedClosedReport(GeodesicTinBasins topology, GeodesicTinHydrology tin)
+    {
+        var text = new StringBuilder("[GeodesicTinLakes] Unmatched closed termination audit\n");
+        for (int i = 0; i < tin.Networks.Count; i++)
+        {
+            var n = tin.Networks[i];
+            if (n.Termination != TinTermination.TrueClosedBasin || n.Samples == null || n.Samples.Length == 0) continue;
+            var p = n.Samples[n.Samples.Length - 1]; if (topology.Find(p) != null) continue;
+            text.AppendLine($"network={i} source={n.SourceTriangle} triangle={p.Triangle} bary=({p.A:R},{p.B:R},{p.C:R}) height={tin.Height(p):R} ocean={tin.IsOcean(p)} epsilon={tin.Epsilon:R}");
+            var nearby = new HashSet<int> { p.Triangle };
+            for (int k = 0; k < 3; k++)
+            {
+                int v = tin.BasinVertex(p.Triangle, k);
+                text.AppendLine($" corner={k} vertex={v} height={tin.HydrologyHeight[v]:R} deltaFromEndpoint={tin.HydrologyHeight[v] - tin.Height(p):R}");
+                for (int j = tin.BasinIncidentStart(v); j < tin.BasinIncidentEnd(v); j++) nearby.Add(tin.BasinIncidentTriangle(j));
+                double weight = k == 0 ? p.A : k == 1 ? p.B : p.C;
+                if (weight >= 1 - 1e-10)
+                {
+                    var oceanFaces = new List<int>(); double minimumNeighbor = double.PositiveInfinity;
+                    for (int j = tin.BasinIncidentStart(v); j < tin.BasinIncidentEnd(v); j++)
+                    {
+                        int t = tin.BasinIncidentTriangle(j);
+                        if (tin.IsOcean(tin.BasinPoint(t, v))) oceanFaces.Add(t);
+                        for (int corner = 0; corner < 3; corner++)
+                        { int u = tin.BasinVertex(t, corner); if (u != v) minimumNeighbor = Math.Min(minimumNeighbor, tin.HydrologyHeight[u]); }
+                    }
+                    text.AppendLine($" endpointVertex={v} retainedOceanIncidentFacets=[{string.Join(",", oceanFaces)}] minimumNeighborHeight={minimumNeighbor:R} minimumNeighborDelta={minimumNeighbor - tin.HydrologyHeight[v]:R}");
+                }
+            }
+            foreach (var b in topology.Basins.Where(b => b.MemberTriangles.Any(t => nearby.Contains(t))))
+                text.AppendLine($" nearbyBasin={b.Id} containsCarrier={b.MemberTriangles.Contains(p.Triangle)} floor={b.FloorElevation:R} spill={b.SpillElevation:R} deltaToSpill={tin.Height(p) - b.SpillElevation:R} terminal={b.Terminal}");
+        }
+        return text.ToString();
+    }
+
     public static string Exclusions(TinBasinDescriptor b)
     {
         var reasons = new List<string>();

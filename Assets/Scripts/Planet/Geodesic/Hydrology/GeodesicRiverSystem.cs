@@ -71,8 +71,8 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
     [Range(0, 30)] public int gradeBreakExampleLimit = 6;
     public GeodesicRiverGradeReport GradeDiagnostics { get; private set; }
 
-    // Saved lake settings are retained, but no visible lakes or lake receiver rewrites
-    // run during continuous TIN river validation.
+    // Only the historical graph-dependent lake path remains paused. TIN water surfaces
+    // use the startup setting independently and never rewrite river receivers.
     public bool HydrologicalLakesPausedForBaselineValidation => true;
     public bool UsesDedicatedRenderHydrology => renderHydrology;
     public int HydrologySubdivision => TinDrainage != null ? TinDrainage.SubdivisionLevel : topology != null ? topology.SubdivisionLevel : -1;
@@ -83,6 +83,9 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
     // Historical vertex drainage remains available only to the preserved reference method.
     public GeodesicDrainageGraph Drainage { get; private set; }
     public GeodesicTinHydrology TinDrainage { get; private set; }
+    public GeodesicTinBasins TinLakeBasins { get; private set; }
+    public GeodesicTinLakeGeometry TinLakeGeometry { get; private set; }
+    public GameObject TinLakeVisualRoot => renderHydrology ? lakeVisualRoot : null;
     public TinHydrologyDiagnostics TinDiagnostics => TinDrainage?.Diagnostics;
     public string HydrologyTerrainSummary { get; private set; }
     public float[] HydrologyTerrainInputHeights { get; private set; }
@@ -292,7 +295,7 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
     [ContextMenu("Refresh River Thresholds And Visuals")]
     public void RebuildVisuals()
     {
-        if (renderHydrology) { RebuildRenderHydrologyVisuals(); return; }
+        if (renderHydrology) { RebuildRenderHydrologyVisuals(); RefreshTinLakeVisuals(); return; }
         ClearVisual(); mouths.Clear();
         riverCells = visibleReaches = suppressedUphillReaches = riverMouths = majorBasinCells = 0;
         LakeConnectedReaches = LakeBridgedReaches = LakeInlets = LakeOutlets = SuppressedProjectionMismatch = SuppressedCorridorFailure = UnrenderedSmallDepression = TrueTopologyFailure = InlandVisibleTerminations = OceanConnectedChains = 0;
@@ -431,15 +434,16 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
             tinSimulationCells[t] = GeodesicOceanConnectivity.FindNearestCell(owner.GeodesicTopology, ChannelAnchors[t], seed);
             if (!TinDrainage.IsOcean(TinDrainage.Centroid(t))) landCells++;
         }
-        // Lake generation and all lake receiver rewrites remain OFF. No filled surface is created.
+        // Static lake surfaces observe the completed TIN; river routing remains independent.
         topologyMilliseconds = watch.Elapsed.TotalMilliseconds;
         RebuildRenderHydrologyVisuals();
+        RefreshTinLakeVisuals();
         Debug.Log($"[GeodesicTIN] simulationSubdivision={owner.GeodesicTopology.SubdivisionLevel} renderSubdivision={geometry.SubdivisionLevel} " +
             $"vertices={geometry.VertexCount} configuredThreshold={riverFlowThreshold:G6} resolvedAreaThreshold={ResolvedDrainageAreaThreshold:G9} " +
             $"epsilon={TinDrainage.Epsilon:G9} visibleMicroBumpThreshold={TinDrainage.VisibleBumpTolerance:G9} " +
             $"heightSource={owner.hydrologyTerrainMode} routing=continuous-facet-gradient rawDebug=" + drawRawTrianglePaths, this);
         Debug.Log(TinDiagnostics.Summary(), this);
-        Debug.Log("[GeodesicTIN] VISUAL ACCEPTANCE PENDING: inspect licensed Unity seed-123456 raw paths before accepting ribbons. Lakes remain OFF.", this);
+        Debug.Log("[GeodesicTIN] Static lake rendering is independent of river paths; river/lake integration remains disabled.", this);
     }
 
     private double[] MapSimulationRunoffToTriangles(double[] supplied)
@@ -764,6 +768,36 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
         return -1;
     }
 
+    [ContextMenu("Refresh TIN Lake Surfaces Only")]
+    public void RefreshTinLakeVisuals()
+    {
+        if (!renderHydrology || TinDrainage == null || planet == null) return;
+        if (lakeVisualRoot != null) lakeVisualRoot.SetActive(false);
+        Release(lakeVisualRoot); Release(lakeMesh); Release(lakeMaterial);
+        lakeVisualRoot = null; lakeMesh = null; lakeMaterial = null;
+        TinLakeBasins = null; TinLakeGeometry = null;
+        if (!planet.generateHydrologicalLakes) return;
+        TinLakeBasins = GeodesicTinBasins.Build(TinDrainage, planet.minimumLakeBasinAreaFraction, planet.minimumLakeDepth);
+        TinLakeGeometry = GeodesicTinLakeGeometry.Build(TinDrainage, TinLakeBasins);
+        Debug.Log(TinLakeGeometry.Summary(), this);
+        if (TinLakeGeometry.Triangles.Length == 0) return;
+        lakeMesh = new Mesh { name = "Geodesic TIN Lake Surfaces", indexFormat = IndexFormat.UInt32 };
+        lakeMesh.vertices = TinLakeGeometry.Vertices; lakeMesh.triangles = TinLakeGeometry.Triangles;
+        var normals = new Vector3[TinLakeGeometry.Vertices.Length];
+        for (int i = 0; i < normals.Length; i++) normals[i] = TinLakeGeometry.Vertices[i].normalized;
+        lakeMesh.normals = normals; lakeMesh.RecalculateBounds();
+        lakeVisualRoot = new GameObject("Geodesic TIN Lakes"); lakeVisualRoot.layer = gameObject.layer;
+        lakeVisualRoot.transform.SetParent(transform, false);
+        lakeVisualRoot.AddComponent<MeshFilter>().sharedMesh = lakeMesh;
+        var renderer = lakeVisualRoot.AddComponent<MeshRenderer>();
+        Shader shader = Resources.Load<Shader>("GeodesicLakeURP");
+        if (shader != null)
+        { lakeMaterial = new Material(shader) { name = "Geodesic TIN Lakes (Runtime)" }; renderer.sharedMaterial = lakeMaterial; }
+        else Debug.LogError("[GeodesicTinLakes] Lake shader is missing.", this);
+        renderer.shadowCastingMode = ShadowCastingMode.Off; renderer.receiveShadows = false;
+        lakeVisualRoot.SetActive(isActiveAndEnabled);
+    }
+
     private void BuildLakeVisual()
     {
         if (LakeGeometry == null || LakeGeometry.Triangles.Length == 0) return;
@@ -949,7 +983,7 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
         if (lakeVisualRoot != null) lakeVisualRoot.SetActive(false);
         Release(lakeVisualRoot); Release(lakeMesh); Release(lakeMaterial); lakeVisualRoot = null; lakeMesh = null; lakeMaterial = null;
         GradeDiagnostics = null;
-        Lakes = null; LakeGeometry = null; reachPlans.Clear(); lakeMilliseconds = 0d;
+        Lakes = null; LakeGeometry = null; TinLakeBasins = null; TinLakeGeometry = null; reachPlans.Clear(); lakeMilliseconds = 0d;
         LakeConnectedReaches = LakeBridgedReaches = LakeInlets = LakeOutlets = SuppressedProjectionMismatch = SuppressedCorridorFailure = UnrenderedSmallDepression = TrueTopologyFailure = InlandVisibleTerminations = OceanConnectedChains = 0;
         ClearVisual(); paths.Clear(); mouths.Clear(); Drainage = null; TinDrainage = null; tinSimulationCells = null; terrain = null; topology = null; planet = null;
         ChannelAnchors = Array.Empty<Vector3>(); RiverStrength = Array.Empty<float>();

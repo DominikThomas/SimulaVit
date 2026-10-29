@@ -55,7 +55,7 @@ public sealed class TinHydrologyDiagnostics
         $"maxFilterChange={MaxFilterChange:G6} filteringMs={FilteringMilliseconds:F2} adjacencyMs={AdjacencyMilliseconds:F2} " +
         $"triangleGradientMs={GradientMilliseconds:F2} flowTopologyMs={TopologyMilliseconds:F2} " +
         $"accumulationMs={AccumulationMilliseconds:F2} streamlineTracingMs={TracingMilliseconds:F2} " +
-        $"ribbonMs={RibbonMilliseconds:F2} lakes=OFF";
+        $"ribbonMs={RibbonMilliseconds:F2} lakeRouting=OFF";
 }
 
 /// <summary>
@@ -185,6 +185,34 @@ public sealed class GeodesicTinHydrology
 
     // Read-only topology access for the optional basin audit. No drainage receivers are built here.
     internal int BasinVertexCount => vertices.Length;
+    internal bool BasinOnSphere => spherical;
+
+    // Exact minimum radius of the completed facet (vertices, edges, and interior).
+    // Rejecting a facet that intersects retained ocean is conservative at the coast;
+    // it cannot emit freshwater across a sub-triangle ocean patch.
+    internal bool BasinFacetIntersectsOcean(int t)
+    {
+        if (!faces[t].RetainedOcean) return false;
+        if (!spherical) return Math.Min(Height(t, 0, true), Math.Min(Height(t, 1, true), Height(t, 2, true))) <= seaLevel;
+        D3 a = RenderVertex(t, 0), b = RenderVertex(t, 1), c = RenderVertex(t, 2);
+        double minimum = Math.Min(a.Length, Math.Min(b.Length, c.Length));
+        D3[] points = { a, b, c };
+        for (int k = 0; k < 3; k++)
+        {
+            D3 p = points[k], d = points[(k + 1) % 3] - p;
+            double dd = D3.Dot(d, d);
+            if (dd > 0) minimum = Math.Min(minimum, (p + d * Math.Max(0, Math.Min(1, -D3.Dot(p, d) / dd))).Length);
+        }
+        D3 e = b - a, f = c - a;
+        double ee = D3.Dot(e, e), ef = D3.Dot(e, f), ff = D3.Dot(f, f), ae = D3.Dot(a, e), af = D3.Dot(a, f);
+        double det = ee * ff - ef * ef;
+        if (det > 0)
+        {
+            double u = (ef * af - ff * ae) / det, v = (ef * ae - ee * af) / det;
+            if (u >= 0 && v >= 0 && u + v <= 1) minimum = Math.Min(minimum, (a + e * u + f * v).Length);
+        }
+        return minimum <= seaLevel;
+    }
     internal int BasinVertex(int triangle, int corner) => triangles[triangle * 3 + corner];
     internal int BasinIncidentStart(int vertex) => incidentOffsets[vertex];
     internal int BasinIncidentEnd(int vertex) => incidentOffsets[vertex + 1];
