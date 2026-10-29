@@ -40,6 +40,9 @@ public class SimulationStartupPanel : MonoBehaviour
     [SerializeField] private GameObject advancedSettingsRoot;
     [SerializeField] private TMP_InputField riverFlowThresholdInput;
     [SerializeField] private TMP_InputField majorRiverThresholdInput;
+    [Tooltip(GeodesicInlandUplift.Help)]
+    [SerializeField] private TMP_InputField inlandElevationMagnitudeInput;
+    [SerializeField] private TMP_Text inlandElevationHelpText;
     [SerializeField] private Toggle excludeSmallInlandSeasToggle;
     [SerializeField] private TMP_InputField minimumOceanBasinPercentInput;
     [SerializeField] private Dropdown hydrologyTerrainModeDropdown;
@@ -117,6 +120,8 @@ public class SimulationStartupPanel : MonoBehaviour
         SimulationStartupConfig config = controller.CurrentConfig;
         SetText(riverFlowThresholdInput, config.riverFlowThreshold.ToString("G9"));
         SetText(majorRiverThresholdInput, config.majorRiverThreshold.ToString("G9"));
+        SetText(inlandElevationMagnitudeInput, config.inlandElevationMagnitude.ToString("G9"));
+        if (inlandElevationHelpText != null) inlandElevationHelpText.text = GeodesicInlandUplift.Help;
         SetToggle(showRejectedUphillRiverSegmentsToggle, config.showRejectedUphillRiverSegments);
         SetToggle(colourRenderedRiversByVisibleTerrainGradeToggle, config.colourRenderedRiversByVisibleTerrainGrade);
         SetToggle(showRiverTerminationReasonsToggle, config.showRiverTerminationReasons);
@@ -175,6 +180,7 @@ public class SimulationStartupPanel : MonoBehaviour
         config.planetSeed = ReadInt(seedInput, config.planetSeed);
         config.riverFlowThreshold = SimulationStartupController.NormalizeRiverThreshold(ReadFloat(riverFlowThresholdInput, config.riverFlowThreshold), GeodesicRiverSystem.DefaultRiverFlowThreshold);
         config.majorRiverThreshold = SimulationStartupController.NormalizeRiverThreshold(ReadFloat(majorRiverThresholdInput, config.majorRiverThreshold), GeodesicRiverSystem.DefaultMajorRiverThreshold);
+        config.inlandElevationMagnitude = GeodesicInlandUplift.NormalizeMagnitude(ReadFloat(inlandElevationMagnitudeInput, config.inlandElevationMagnitude));
         if (planetGridDropdown != null) config.gridType = planetGridDropdown.value == 1 ? PlanetGridType.GeodesicIcosphere : PlanetGridType.LegacyCubeSphere;
         config.cubeSphereResolution = Mathf.Clamp(ReadInt(cubeSphereResolutionInput, config.cubeSphereResolution), 3, 240);
         config.geodesicSubdivisionLevel = Mathf.Clamp(ReadInt(geodesicSubdivisionInput, config.geodesicSubdivisionLevel), 0, GeodesicGridTopology.MaxSupportedSubdivision);
@@ -296,6 +302,8 @@ public class SimulationStartupPanel : MonoBehaviour
         if (hydrologyTerrainModeDropdown != null) hydrologyTerrainModeDropdown.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
         if (riverFlowThresholdInput != null) riverFlowThresholdInput.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
         if (majorRiverThresholdInput != null) majorRiverThresholdInput.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
+        if (inlandElevationMagnitudeInput != null) inlandElevationMagnitudeInput.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
+        if (inlandElevationHelpText != null) inlandElevationHelpText.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
         if (generateHydrologicalLakesToggle != null) generateHydrologicalLakesToggle.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
         if (minimumLakeBasinPercentInput != null) minimumLakeBasinPercentInput.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
         if (minimumLakeDepthInput != null) minimumLakeDepthInput.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);

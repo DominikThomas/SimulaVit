@@ -86,6 +86,9 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     private double geodesicSurfaceRadiusQueryMilliseconds;
     private Dictionary<GeodesicDebugDirectionKey, float> geodesicDebugSurfaceRadiusCache;
     private GeodesicRenderTerrainData geodesicCurrentRenderTerrainData;
+    private GeodesicInlandUplift geodesicInlandUplift;
+    // Runtime copy of the startup configuration; intentionally not a second serialized setting.
+    public float inlandElevationMagnitude { get; set; }
     private IcosphereDirectionMapping geodesicCurrentRenderMapping;
     private Vector3[] geodesicVisibleSeafloorPositionByCell;
     private Vector3[] geodesicVisibleSeafloorNormalByCell;
@@ -115,6 +118,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
     private struct GeodesicRenderTerrainData
     {
+        public GeodesicInlandUplift.Diagnostics InlandDiagnostics;
         public float[] RawRadii;
         public float[] HydrologicalRadii;
         public float[] SurfaceRadii;
@@ -664,6 +668,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         geodesicBaseWaterDepth = null;
         geodesicWaterDepth = null;
         geodesicDistanceToShore = null;
+        geodesicInlandUplift = null;
         geodesicBasinNoiseContribution = null;
         geodesicBathymetryRegion = null;
         geodesicOceanMask = null;
@@ -874,6 +879,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
         stage = System.Diagnostics.Stopwatch.StartNew();
         geodesicCurrentRenderTerrainData = ApplyGeodesicTerrainDisplacement(mesh, renderGeometry, renderMapping, false, false, true);
+        Debug.Log(geodesicCurrentRenderTerrainData.InlandDiagnostics.Describe(inlandElevationMagnitude,
+            GeodesicInlandUplift.DefaultScaleDegrees * Mathf.Deg2Rad, geodesicInlandUplift != null && geodesicInlandUplift.HasCoast), this);
         maximumGeneratedOpaqueSurfaceRadius = Mathf.Max(BasePlanetRadius, MaxRadiusFromTerrainData(geodesicCurrentRenderTerrainData));
         LogStage("terrain displacement", stage);
         stage = System.Diagnostics.Stopwatch.StartNew();
@@ -1024,7 +1031,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
             int c = GeodesicTopology.Triangles[triangleIndex * 3 + 2];
             Vector3 direction = (GeodesicTopology.CellDirections[a] + GeodesicTopology.CellDirections[b] + GeodesicTopology.CellDirections[c]).normalized;
             int nearest = FindNearestDebugCandidate(direction, a, b, c);
-            geodesicDebugSurfaceRadiusCache[GeodesicDebugDirectionKey.From(direction)] = SampleGeodesicSurfaceRadiusFromNearestCell(direction, nearest);
+            geodesicDebugSurfaceRadiusCache[GeodesicDebugDirectionKey.From(direction)] = GeodesicInlandUplift.Add(
+                SampleGeodesicSurfaceRadiusFromNearestCell(direction, nearest), SampleGeodesicInlandOffset(direction, nearest));
         }
     }
 
@@ -1185,7 +1193,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     {
         if (CurrentGridType == PlanetGridType.GeodesicIcosphere)
         {
-            return EvaluateGeodesicTerrainHeight(direction);
+            return GeodesicInlandUplift.Add(EvaluateGeodesicTerrainHeight(direction), SampleGeodesicInlandOffset(direction));
         }
 
         return GetSurfaceRadius(direction) - BasePlanetRadius;
@@ -1213,7 +1221,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     {
         if (geodesicTerrainHeightByCell != null && geodesicCellIndex >= 0 && geodesicCellIndex < geodesicTerrainHeightByCell.Length)
         {
-            return geodesicTerrainHeightByCell[geodesicCellIndex];
+            return GeodesicInlandUplift.Add(geodesicTerrainHeightByCell[geodesicCellIndex], GeodesicCellInlandOffset(geodesicCellIndex));
         }
 
         return GeodesicTopology != null && geodesicCellIndex >= 0 && geodesicCellIndex < GeodesicTopology.CellCount
@@ -1231,14 +1239,15 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         float min = GetGeodesicMinimumTerrainOffset();
         float max = GetGeodesicMaximumTerrainOffset();
         if (max <= min) return 0.5f;
-        return Mathf.InverseLerp(min, max, EvaluateGeodesicTerrainHeight(direction));
+        return Mathf.InverseLerp(min, max, GetTerrainHeightAtDirection(direction));
     }
 
     public float GetCellNormalizedTerrainHeight(int geodesicCellIndex)
     {
         if (geodesicNormalizedTerrainByCell != null && geodesicCellIndex >= 0 && geodesicCellIndex < geodesicNormalizedTerrainByCell.Length)
         {
-            return geodesicNormalizedTerrainByCell[geodesicCellIndex];
+            if (GeodesicCellInlandOffset(geodesicCellIndex) == 0f) return geodesicNormalizedTerrainByCell[geodesicCellIndex];
+            return Mathf.InverseLerp(GetGeodesicMinimumTerrainOffset(), GetGeodesicMaximumTerrainOffset(), GetCellTerrainHeight(geodesicCellIndex));
         }
 
         return GeodesicTopology != null && geodesicCellIndex >= 0 && geodesicCellIndex < GeodesicTopology.CellCount
@@ -1397,6 +1406,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         Vector3[] vertices = targetMesh.vertices;
         if (captureTerrainData)
         {
+            data.InlandDiagnostics = new GeodesicInlandUplift.Diagnostics();
             data.HydrologicalRadii = new float[vertices.Length]; data.RawRadii = new float[vertices.Length]; data.SurfaceRadii = new float[vertices.Length]; data.Heights = new float[vertices.Length]; data.NormalizedHeights = new float[vertices.Length]; data.MountainMasks = new float[vertices.Length];
         }
         bool hasGeometryDirections = geometry.UnitVertices != null;
@@ -1410,10 +1420,20 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
             geodesicRenderVertexTerrainEvaluationCount++;
             float height = enableGeodesicTerrainDisplacement ? sample.HeightOffset : 0f;
             float raw = BasePlanetRadius + height;
-            float surface = SampleGeodesicSurfaceRadiusMappedWithRaw(direction, i, mapping, raw);
+            float baselineSurface = SampleGeodesicBaselineSurfaceRadiusMappedWithRaw(direction, i, mapping, raw);
+            int nearest = mapping != null && i < mapping.SampleCount ? mapping.Samples[i].NearestCell : -1;
+            float inlandDistance = geodesicInlandUplift != null ? geodesicInlandUplift.SampleDistanceRadians(direction, nearest) : 0f;
+            float uplift = enableGeodesicTerrainDisplacement ? GeodesicInlandUplift.Offset(inlandDistance,
+                inlandElevationMagnitude, GeodesicInlandUplift.DefaultScaleDegrees * Mathf.Deg2Rad) : 0f;
+            float surface = GeodesicInlandUplift.Add(baselineSurface, uplift);
             vertices[i] = direction * surface;
             if (captureTerrainData)
             {
+                bool ocean = nearest >= 0 ? geodesicOceanMask != null && geodesicOceanMask[nearest] : IsGeodesicDirectionInOceanMask(direction);
+                data.InlandDiagnostics.Add(ocean, inlandDistance, baselineSurface, surface);
+                height = GeodesicInlandUplift.Add(height, uplift);
+                // Preserve the original paired raw samples: hydrology's existing fine-detail
+                // difference is applied to the completed surface, which already includes uplift.
                 data.HydrologicalRadii[i] = BasePlanetRadius + sample.LargeScaleHeightOffset;
                 data.RawRadii[i] = raw; data.SurfaceRadii[i] = surface; data.Heights[i] = height; data.NormalizedHeights[i] = max > min ? Mathf.InverseLerp(min, max, height) : 0.5f; data.MountainMasks[i] = sample.MountainMask;
             }
@@ -1471,6 +1491,13 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     }
 
     float SampleGeodesicSurfaceRadiusMappedWithRaw(Vector3 d, int sampleIndex, IcosphereDirectionMapping mapping, float raw)
+    {
+        int nearest = mapping != null && sampleIndex >= 0 && sampleIndex < mapping.SampleCount ? mapping.Samples[sampleIndex].NearestCell : -1;
+        return GeodesicInlandUplift.Add(SampleGeodesicBaselineSurfaceRadiusMappedWithRaw(d, sampleIndex, mapping, raw),
+            SampleGeodesicInlandOffset(d, nearest));
+    }
+
+    float SampleGeodesicBaselineSurfaceRadiusMappedWithRaw(Vector3 d, int sampleIndex, IcosphereDirectionMapping mapping, float raw)
     {
         geodesicSurfaceRadiusQueryCount++;
         if (CurrentGridType != PlanetGridType.GeodesicIcosphere || mapping == null)
@@ -1547,7 +1574,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
     public float GetGeodesicCellSeafloorRadius(int cellIndex)
     {
-        if (geodesicSeafloorRadius != null && cellIndex >= 0 && cellIndex < geodesicSeafloorRadius.Length) return geodesicSeafloorRadius[cellIndex];
+        if (geodesicSeafloorRadius != null && cellIndex >= 0 && cellIndex < geodesicSeafloorRadius.Length)
+            return GeodesicInlandUplift.Add(geodesicSeafloorRadius[cellIndex], GeodesicCellInlandOffset(cellIndex));
         return GetGeodesicCellRawTerrainRadius(cellIndex);
     }
 
@@ -1590,7 +1618,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         if (enableGeodesicTerrainDisplacement) geodesicTerrainNoiseEvaluationCount++;
         Vector3 d = direction.sqrMagnitude > 1e-10f ? direction.normalized : Vector3.up;
         float raw = EvaluateRawGeodesicTerrainRadiusUncounted(d);
-        return GetGeodesicSeafloorRadiusAtDirectionUnprofiled(d, raw);
+        return GeodesicInlandUplift.Add(GetGeodesicSeafloorRadiusAtDirectionUnprofiled(d, raw), SampleGeodesicInlandOffset(d));
     }
 
     float GetGeodesicSeafloorRadiusAtDirectionUnprofiled(Vector3 d, float raw)
@@ -1776,6 +1804,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
     void RebuildGeodesicOceanClassification()
     {
+        geodesicInlandUplift = null;
+        geodesicDebugSurfaceRadiusCache = null;
         if (GeodesicTopology == null)
         {
             geodesicRawTerrainRadius = null; geodesicSeafloorRadius = null; geodesicBaseWaterDepth = null; geodesicWaterDepth = null; geodesicDistanceToShore = null; geodesicBasinNoiseContribution = null; geodesicBathymetryRegion = null; geodesicOceanMask = null; geodesicOceanNeighborCounts = null; geodesicCoastlineMask = null; geodesicTerrainBathymetryMask = null; OceanConnectivity = null;
@@ -1864,7 +1894,16 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         connectivityWatch.Stop();
         Debug.Log($"{OceanConnectivity.Describe()}, classificationMs={connectivityWatch.Elapsed.TotalMilliseconds:F3}", this);
         LogGeodesicBathymetryDiagnostics(OceanConnectivity.RetainedCells);
+        // Resolve ocean, sea level and bathymetry from the unchanged baseline, then overlay land only.
+        geodesicInlandUplift = new GeodesicInlandUplift(GeodesicTopology, geodesicOceanMask);
     }
+
+    private float SampleGeodesicInlandOffset(Vector3 direction, int nearest = -1) =>
+        enableGeodesicTerrainDisplacement && geodesicInlandUplift != null
+            ? geodesicInlandUplift.SampleOffset(direction, inlandElevationMagnitude, nearest) : 0f;
+
+    private float GeodesicCellInlandOffset(int cell) => enableGeodesicTerrainDisplacement && geodesicInlandUplift != null
+        ? geodesicInlandUplift.CellOffset(cell, inlandElevationMagnitude) : 0f;
 
 
     void ApplyGeodesicRetainedOceanClassification()

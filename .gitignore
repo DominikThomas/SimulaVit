@@ -85,6 +85,7 @@ crashlytics-build.properties
 /Artifacts/RiverUphillDebug/
 /Artifacts/LowFrequencyHydrology/
 /Artifacts/FineDetailHydrology/
+/Artifacts/InlandUplift/
 /Artifacts/HydrologyBaseline/
 /Artifacts/LakeAudit/
 /Artifacts/TinBasins/

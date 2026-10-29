@@ -85,6 +85,10 @@ public class SimulationStartupConfig
     [Range(0f, GeodesicOceanConnectivity.MaximumAreaFraction)]
     public float minimumOceanComponentAreaFraction = GeodesicOceanConnectivity.DefaultMinimumAreaFraction;
 
+    [Header("Advanced Geodesic Terrain")]
+    [Tooltip(GeodesicInlandUplift.Help)]
+    [Range(0f, GeodesicInlandUplift.MaximumMagnitude)] public float inlandElevationMagnitude = 0f;
+
     [Header("Advanced Geodesic Hydrology")]
     [Min(0.01f)] public float riverFlowThreshold = GeodesicRiverSystem.DefaultRiverFlowThreshold;
     [Min(0.01f)] public float majorRiverThreshold = GeodesicRiverSystem.DefaultMajorRiverThreshold;
