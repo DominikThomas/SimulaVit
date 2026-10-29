@@ -3,6 +3,41 @@ using NUnit.Framework;
 public class SimulationStartupConfigTests
 {
     [Test]
+    public void RiverThresholdDefaultsMigrationAndSaveLoad()
+    {
+        var defaults = new SimulationStartupConfig();
+        Assert.That(defaults.riverFlowThreshold, Is.EqualTo(8f));
+        Assert.That(defaults.majorRiverThreshold, Is.EqualTo(64f));
+        var custom = new SimulationStartupConfig { riverFlowThreshold = 2.5f, majorRiverThreshold = 90.25f };
+        foreach (string json in new[] { "{}", "{\"version\":14}", "{\"version\":15}" })
+        {
+            var migrated = SimulationStartupController.DeserializeSavedConfig(json, custom);
+            Assert.That(migrated.riverFlowThreshold, Is.EqualTo(8f));
+            Assert.That(migrated.majorRiverThreshold, Is.EqualTo(64f));
+        }
+        var type = typeof(SimulationStartupController).GetNestedType("SavedStartupConfig", System.Reflection.BindingFlags.NonPublic);
+        var saved = type.GetMethod("FromConfig").Invoke(null, new object[] { custom });
+        var loaded = SimulationStartupController.DeserializeSavedConfig(UnityEngine.JsonUtility.ToJson(saved), defaults);
+        Assert.That(loaded.riverFlowThreshold, Is.EqualTo(custom.riverFlowThreshold));
+        Assert.That(loaded.majorRiverThreshold, Is.EqualTo(custom.majorRiverThreshold));
+        Assert.That(loaded.Clone().riverFlowThreshold, Is.EqualTo(custom.riverFlowThreshold));
+        var invalid = SimulationStartupController.DeserializeSavedConfig("{\"version\":15,\"riverFlowThreshold\":0,\"majorRiverThreshold\":-1}", defaults);
+        Assert.That(invalid.riverFlowThreshold, Is.EqualTo(8f));
+        Assert.That(invalid.majorRiverThreshold, Is.EqualTo(64f));
+    }
+
+    [TestCase(0f)]
+    [TestCase(-1f)]
+    [TestCase(float.NaN)]
+    [TestCase(float.PositiveInfinity)]
+    [TestCase(float.NegativeInfinity)]
+    public void RiverThresholdRejectsNonPositiveOrNonFiniteValues(float value)
+    {
+        Assert.That(SimulationStartupController.NormalizeRiverThreshold(value, 8f), Is.EqualTo(8f));
+        Assert.That(SimulationStartupController.NormalizeRiverThreshold(value, 64f), Is.EqualTo(64f));
+    }
+
+    [Test]
     public void RiverDebugDefaultsOffAndClonesIndependentlyOfAdvancedSettings()
     {
         var config = new SimulationStartupConfig();
@@ -190,6 +225,7 @@ public class SimulationStartupConfigTests
             geodesicVentH2PhysicalPerSecond = 10.25f, geodesicVentH2SPhysicalPerSecond = 0.25f,
             geodesicVentCO2PhysicalPerSecond = 2f, geodesicVentFe2PhysicalPerSecond = 1f,
             geodesicSubdivisionLevel = 5, baseTempKelvin = 310f, terrestrialVentFraction = 0.7f,
+            riverFlowThreshold = 3.5f, majorRiverThreshold = 120f,
             allowDenseAtmosphere = true, atmosphereInventoryPerBar = 4321f,
             airSeaExchangeHalfLifeSeconds = 17f, approximateThermalIntervalSeconds = 5f,
             geodesicResourceTransportIntervalSeconds = 10f, chemistryTelemetryIntervalSimSeconds = 19f,
@@ -219,6 +255,8 @@ public class SimulationStartupConfigTests
 
     private static void AssertAdvancedSettingsEqual(SimulationStartupConfig expected, SimulationStartupConfig actual)
     {
+            Assert.That(actual.riverFlowThreshold, Is.EqualTo(expected.riverFlowThreshold));
+            Assert.That(actual.majorRiverThreshold, Is.EqualTo(expected.majorRiverThreshold));
             Assert.That(actual.geodesicSubdivisionLevel, Is.EqualTo(expected.geodesicSubdivisionLevel)); Assert.That(actual.baseTempKelvin, Is.EqualTo(expected.baseTempKelvin));
             Assert.That(actual.terrestrialVentFraction, Is.EqualTo(expected.terrestrialVentFraction)); Assert.That(actual.allowDenseAtmosphere, Is.EqualTo(expected.allowDenseAtmosphere));
             Assert.That(actual.atmosphereInventoryPerBar, Is.EqualTo(expected.atmosphereInventoryPerBar)); Assert.That(actual.airSeaExchangeHalfLifeSeconds, Is.EqualTo(expected.airSeaExchangeHalfLifeSeconds));

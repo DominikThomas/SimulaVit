@@ -86,6 +86,8 @@ public class SimulationStartupConfig
     public float minimumOceanComponentAreaFraction = GeodesicOceanConnectivity.DefaultMinimumAreaFraction;
 
     [Header("Advanced Geodesic Hydrology")]
+    [Min(0.01f)] public float riverFlowThreshold = GeodesicRiverSystem.DefaultRiverFlowThreshold;
+    [Min(0.01f)] public float majorRiverThreshold = GeodesicRiverSystem.DefaultMajorRiverThreshold;
     public HydrologyTerrainMode hydrologyTerrainMode = HydrologyTerrainMode.Visible;
     // Compatibility for the preserved first experiment and its capture/tests.
     public bool useLowFrequencyTerrainForHydrology

@@ -20,8 +20,11 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
 {
     [Header("Discharge (unit runoff per unit land area by default)")]
     [Min(0.01f), Tooltip("Discharge threshold in mean-cell-area equivalents at unit runoff density.")]
-    public float riverFlowThreshold = 8f;
-    [Min(0.01f)] public float majorRiverThreshold = 64f;
+    public float riverFlowThreshold = DefaultRiverFlowThreshold;
+    [Min(0.01f)] public float majorRiverThreshold = DefaultMajorRiverThreshold;
+
+    public const float DefaultRiverFlowThreshold = 8f;
+    public const float DefaultMajorRiverThreshold = 64f;
     [Min(0f)] public float uniformRunoffPerArea = 1f;
     [Header("Terrain corridor refinement")]
     [Range(4, 32)] public int refinementSteps = 12;

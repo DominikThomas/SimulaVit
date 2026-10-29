@@ -34,7 +34,7 @@ public class SimulationStartupController : MonoBehaviour
     public const float GeodesicVentPhysicalMaxPerSecond = 1000f;
     private const int InitialSpawnMin = 0;
     private const int InitialSpawnMax = 10000;
-    private const int SavedStartupConfigVersion = 14;
+    private const int SavedStartupConfigVersion = 15;
     public const float NormalAtmospherePressureMaxBar = 5f;
     public const float DenseAtmospherePressureMaxBar = 600f;
     public const float DefaultApproximateThermalIntervalSeconds = 2f;
@@ -88,6 +88,7 @@ public class SimulationStartupController : MonoBehaviour
     private enum StartupUiState { MainMenu, ConfigScreen, SavePicker }
 
     private Vector2 setupGuiScrollPosition;
+    private readonly Dictionary<string, (float value, string text)> riverThresholdEdits = new();
     private Vector2 savePickerScrollPosition;
     private StartupUiState startupUiState;
     private IReadOnlyList<SimulationSaveLoadService.SaveFileInfo> cachedSaveFiles = Array.Empty<SimulationSaveLoadService.SaveFileInfo>();
@@ -455,6 +456,8 @@ public class SimulationStartupController : MonoBehaviour
         destination.excludeSmallDisconnectedSeas = source.excludeSmallDisconnectedSeas;
         destination.minimumOceanComponentAreaFraction = source.minimumOceanComponentAreaFraction;
         destination.hydrologyTerrainMode = source.hydrologyTerrainMode;
+        destination.riverFlowThreshold = source.riverFlowThreshold;
+        destination.majorRiverThreshold = source.majorRiverThreshold;
         destination.generateHydrologicalLakes = source.generateHydrologicalLakes;
         destination.minimumLakeBasinAreaFraction = source.minimumLakeBasinAreaFraction;
         destination.minimumLakeDepth = source.minimumLakeDepth;
@@ -583,6 +586,8 @@ public class SimulationStartupController : MonoBehaviour
                 riverDebug = planetGenerator.gameObject.AddComponent<GeodesicRiverSystem>();
             if (riverDebug != null)
             {
+                riverDebug.riverFlowThreshold = NormalizeRiverThreshold(config.riverFlowThreshold, GeodesicRiverSystem.DefaultRiverFlowThreshold);
+                riverDebug.majorRiverThreshold = NormalizeRiverThreshold(config.majorRiverThreshold, GeodesicRiverSystem.DefaultMajorRiverThreshold);
                 riverDebug.showRejectedUphillRiverSegments = config.showRejectedUphillRiverSegments;
                 riverDebug.colourRenderedRiversByVisibleTerrainGrade = config.colourRenderedRiversByVisibleTerrainGrade;
                 riverDebug.showRiverTerminationReasons = config.showRiverTerminationReasons;
@@ -776,11 +781,19 @@ public class SimulationStartupController : MonoBehaviour
         config.minimumOceanComponentAreaFraction = GeodesicOceanConnectivity.NormalizeThreshold(config.minimumOceanComponentAreaFraction);
         config.minimumLakeBasinAreaFraction = GeodesicLakeBasins.NormalizeArea(config.minimumLakeBasinAreaFraction);
         config.minimumLakeDepth = GeodesicLakeBasins.NormalizeDepth(config.minimumLakeDepth);
+        config.riverFlowThreshold = NormalizeRiverThreshold(config.riverFlowThreshold, GeodesicRiverSystem.DefaultRiverFlowThreshold);
+        config.majorRiverThreshold = NormalizeRiverThreshold(config.majorRiverThreshold, GeodesicRiverSystem.DefaultMajorRiverThreshold);
         config.cubeSphereResolution = Mathf.Clamp(config.cubeSphereResolution, 3, 240);
         config.geodesicSubdivisionLevel = Mathf.Clamp(config.geodesicSubdivisionLevel, 0, GeodesicGridTopology.MaxSupportedSubdivision);
         config.approximateThermalIntervalSeconds = NormalizeToPreset(config.approximateThermalIntervalSeconds, ApproximateThermalIntervalPresets, DefaultApproximateThermalIntervalSeconds);
         config.geodesicResourceTransportIntervalSeconds = NormalizeToPreset(config.geodesicResourceTransportIntervalSeconds, ResourceTransportIntervalPresets, DefaultResourceTransportIntervalSeconds);
         if (float.IsNaN(config.chemistryTelemetryIntervalSimSeconds) || float.IsInfinity(config.chemistryTelemetryIntervalSimSeconds)) config.chemistryTelemetryIntervalSimSeconds = DefaultChemistryTelemetryIntervalSimSeconds;
+    }
+
+    public static float NormalizeRiverThreshold(float value, float fallback)
+    {
+        return float.IsNaN(value) || float.IsInfinity(value) || value <= 0f
+            ? fallback : Mathf.Max(0.01f, value);
     }
 
     public static float NormalizeToPreset(float value, float[] presets, float fallback)
@@ -904,6 +917,9 @@ public class SimulationStartupController : MonoBehaviour
     {
         SimulationStartupConfig authoritativeFallback = fallback ?? new SimulationStartupConfig();
         SavedStartupConfig saved = SavedStartupConfig.FromDefaults(authoritativeFallback);
+        // Missing fields use the historical river defaults even with customized scene defaults.
+        saved.riverFlowThreshold = GeodesicRiverSystem.DefaultRiverFlowThreshold;
+        saved.majorRiverThreshold = GeodesicRiverSystem.DefaultMajorRiverThreshold;
         if (!string.IsNullOrWhiteSpace(json)) JsonUtility.FromJsonOverwrite(json, saved);
         return saved.ToConfig(authoritativeFallback);
     }
@@ -923,6 +939,8 @@ public class SimulationStartupController : MonoBehaviour
         public bool colourRenderedRiversByVisibleTerrainGrade, showRiverTerminationReasons;
         public bool useLowFrequencyTerrainForHydrology; // Schema 13 migration only.
         public HydrologyTerrainMode hydrologyTerrainMode;
+        public float riverFlowThreshold = GeodesicRiverSystem.DefaultRiverFlowThreshold;
+        public float majorRiverThreshold = GeodesicRiverSystem.DefaultMajorRiverThreshold;
         public bool generateHydrologicalLakes;
         public float minimumLakeBasinAreaFraction, minimumLakeDepth;
         public float axisTiltDegrees;
@@ -977,6 +995,8 @@ public class SimulationStartupController : MonoBehaviour
                 showRiverTerminationReasons = config.showRiverTerminationReasons,
                 useLowFrequencyTerrainForHydrology = config.useLowFrequencyTerrainForHydrology,
                 hydrologyTerrainMode = config.hydrologyTerrainMode,
+                riverFlowThreshold = config.riverFlowThreshold,
+                majorRiverThreshold = config.majorRiverThreshold,
                 generateHydrologicalLakes = config.generateHydrologicalLakes,
                 minimumLakeBasinAreaFraction = config.minimumLakeBasinAreaFraction,
                 minimumLakeDepth = config.minimumLakeDepth,
@@ -1023,6 +1043,8 @@ public class SimulationStartupController : MonoBehaviour
             config.gridType = gridType;
             config.cubeSphereResolution = cubeSphereResolution > 0 ? cubeSphereResolution : config.cubeSphereResolution;
             config.geodesicSubdivisionLevel = geodesicSubdivisionLevel;
+            config.riverFlowThreshold = NormalizeRiverThreshold(version >= 15 ? riverFlowThreshold : GeodesicRiverSystem.DefaultRiverFlowThreshold, GeodesicRiverSystem.DefaultRiverFlowThreshold);
+            config.majorRiverThreshold = NormalizeRiverThreshold(version >= 15 ? majorRiverThreshold : GeodesicRiverSystem.DefaultMajorRiverThreshold, GeodesicRiverSystem.DefaultMajorRiverThreshold);
             config.showRejectedUphillRiverSegments = version >= 11 && showRejectedUphillRiverSegments;
             config.colourRenderedRiversByVisibleTerrainGrade = version >= 12 && colourRenderedRiversByVisibleTerrainGrade;
             config.showRiverTerminationReasons = version >= 12 && showRiverTerminationReasons;
@@ -1324,7 +1346,7 @@ public class SimulationStartupController : MonoBehaviour
         setupGuiScrollPosition = GUILayout.BeginScrollView(setupGuiScrollPosition, GUILayout.Width(width), GUILayout.Height(scrollHeight));
 
         float contentWidth = Mathf.Max(1f, width - 20f);
-        float advancedHeight = advancedSettingsExpanded ? 1040f : 0f;
+        float advancedHeight = advancedSettingsExpanded ? 1292f : 0f;
         float contentHeight = 44f + ((line + gap) * 25f) + advancedHeight + (debugSettingsExpanded ? 370f : 40f) + (gap * 2f) + 42f + 30f + 82f;
         Rect contentRect = GUILayoutUtility.GetRect(contentWidth, contentHeight, GUILayout.Width(contentWidth), GUILayout.Height(contentHeight));
         float controlX = contentRect.x;
@@ -1404,6 +1426,16 @@ public class SimulationStartupController : MonoBehaviour
             {
                 DrawInt(new Rect(controlX, y, contentWidth, line), "Geodesic Subdivision Level", ref currentConfig.geodesicSubdivisionLevel, true, 0, GeodesicGridTopology.MaxSupportedSubdivision);
                 y += line + gap;
+                GUI.Label(new Rect(controlX, y, contentWidth, line), "Rivers / Hydrology", labelStyle);
+                y += line + gap;
+                DrawRiverThreshold(new Rect(controlX, y, contentWidth, line), "River flow threshold", ref currentConfig.riverFlowThreshold, GeodesicRiverSystem.DefaultRiverFlowThreshold);
+                y += line + gap;
+                GUI.Label(new Rect(controlX, y, contentWidth, 88f), "Minimum accumulated runoff required for a visible river.\nLower values create more small streams; higher values retain only larger drainage networks.\nExpressed in mean-cell-area equivalents at unit runoff.", new GUIStyle(labelStyle) { wordWrap = true });
+                y += 94f;
+                DrawRiverThreshold(new Rect(controlX, y, contentWidth, line), "Major river threshold", ref currentConfig.majorRiverThreshold, GeodesicRiverSystem.DefaultMajorRiverThreshold);
+                y += line + gap;
+                GUI.Label(new Rect(controlX, y, contentWidth, 44f), "Accumulated runoff threshold used to classify/scale major rivers.", new GUIStyle(labelStyle) { wordWrap = true });
+                y += 50f;
                 GUI.Label(new Rect(controlX, y, contentWidth, line), "Hydrology terrain input", labelStyle);
                 y += line + gap;
                 currentConfig.hydrologyTerrainMode = (HydrologyTerrainMode)GUI.SelectionGrid(
@@ -1550,6 +1582,20 @@ public class SimulationStartupController : MonoBehaviour
         int selected = currentConfig.gridType == PlanetGridType.GeodesicIcosphere ? 1 : 0;
         selected = GUI.SelectionGrid(new Rect(rect.x + rect.width * 0.44f, rect.y, rect.width * 0.56f, rect.height), selected, labels, 2);
         currentConfig.gridType = selected == 1 ? PlanetGridType.GeodesicIcosphere : PlanetGridType.LegacyCubeSphere;
+    }
+
+    private void DrawRiverThreshold(Rect rect, string label, ref float value, float fallback)
+    {
+        value = NormalizeRiverThreshold(value, fallback);
+        GUI.Label(new Rect(rect.x, rect.y, rect.width * 0.75f, rect.height), label, labelStyle);
+        // Preserve partial decimal input while typing; only finite positive values enter the config.
+        string text = riverThresholdEdits.TryGetValue(label, out var edit) && edit.value == value
+            && GUI.GetNameOfFocusedControl() == label ? edit.text : value.ToString("G9");
+        GUI.SetNextControlName(label);
+        string next = GUI.TextField(new Rect(rect.x + rect.width * 0.80f, rect.y, rect.width * 0.20f, rect.height), text);
+        if (float.TryParse(next, out float parsed) && parsed > 0f && !float.IsInfinity(parsed))
+            value = NormalizeRiverThreshold(parsed, fallback);
+        riverThresholdEdits[label] = (value, next);
     }
 
     private void DrawFloat(Rect rect, string label, ref float value, float min, float max, bool labelAbove = false)
