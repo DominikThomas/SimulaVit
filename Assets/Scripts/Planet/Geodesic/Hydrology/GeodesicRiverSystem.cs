@@ -168,7 +168,7 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
             TinLakeGeometry, TinLakeRouting, owner.BasePlanetRadius, owner.GeodesicSeaLevelRadius,
             GeodesicValleyCarving.Normalize(owner.maximumValleyCarveDepth, GeodesicValleyCarving.DefaultDepth, 1f),
             meanCellArea * GeodesicValleyCarving.Normalize(owner.minimumValleyCarveRunoff, GeodesicValleyCarving.DefaultRunoff, 1000000f),
-            GeodesicValleyCarving.Normalize(owner.valleyCarveWidth, GeodesicValleyCarving.DefaultWidth, 1f));
+            GeodesicValleyCarving.Normalize(owner.valleyCarveWidth, GeodesicValleyCarving.DefaultWidth, 1f), TinLakeBasins);
         if (result.AffectedVertices > 0)
         {
             var frozenOcean = retainedCarvingOcean;
