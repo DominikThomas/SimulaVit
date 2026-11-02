@@ -87,6 +87,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     private Dictionary<GeodesicDebugDirectionKey, float> geodesicDebugSurfaceRadiusCache;
     private GeodesicRenderTerrainData geodesicCurrentRenderTerrainData;
     private GeodesicInlandUplift geodesicInlandUplift;
+    private GeodesicRiverTerrain geodesicCarvedSurface;
+    internal bool GeodesicValleyCarvingAttempted { get; set; }
     // Runtime copy of the startup configuration; intentionally not a second serialized setting.
     public float inlandElevationMagnitude { get; set; }
     private IcosphereDirectionMapping geodesicCurrentRenderMapping;
@@ -218,6 +220,12 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     public bool enableGeodesicRivers = true;
     [Tooltip("Drainage input only. FineDetailRemoved preserves all ridge octaves; ReducedRidgeAndFineDetail retains the failed reference experiment. Visible terrain and ocean authority stay unchanged.")]
     public HydrologyTerrainMode hydrologyTerrainMode = HydrologyTerrainMode.Visible;
+    [Header("Advanced Terrain / Hydrology: termination valleys")]
+    [Tooltip(GeodesicValleyCarving.Help)] public bool enableTerminationValleyCarving;
+    [Range(0f, 1f)] public float maximumValleyCarveDepth = GeodesicValleyCarving.DefaultDepth;
+    [Min(0f)] public float minimumValleyCarveRunoff = GeodesicValleyCarving.DefaultRunoff;
+    [Range(0f, 1f)] public float valleyCarveWidth = GeodesicValleyCarving.DefaultWidth;
+    public bool showValleyCarvingDebug;
     // Compatibility for the preserved first experiment and its capture/tests.
     public bool useLowFrequencyTerrainForHydrology
     {
@@ -679,6 +687,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         geodesicCoastlineMask = null;
         geodesicDebugSurfaceRadiusCache = null;
         geodesicCurrentRenderTerrainData = default;
+        geodesicCarvedSurface = null;
+        GeodesicValleyCarvingAttempted = false;
         geodesicCurrentRenderMapping = null;
         geodesicVisibleSeafloorPositionByCell = null;
         geodesicVisibleSeafloorNormalByCell = null;
@@ -769,6 +779,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
     private void GenerateGeodesicPrototype()
     {
+        geodesicCarvedSurface = null;
+        GeodesicValleyCarvingAttempted = false;
         var total = System.Diagnostics.Stopwatch.StartNew();
         ResetGeodesicQueryDiagnostics();
         void LogStage(string stage, System.Diagnostics.Stopwatch stageWatch)
@@ -900,7 +912,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         LogStage("terrain mesh assignment/upload", stage);
 
         stage = System.Diagnostics.Stopwatch.StartNew();
-        if (enableGeodesicRivers || generateHydrologicalLakes)
+        if (enableGeodesicRivers || generateHydrologicalLakes || enableTerminationValleyCarving)
             GetOrAddComponent<GeodesicRiverSystem>(gameObject).Initialize(this, renderGeometry, mesh);
         else GetComponent<GeodesicRiverSystem>()?.Clear();
         LogStage("river drainage and ribbons", stage);
@@ -911,10 +923,12 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         ventVisualizer.Initialize(experiencedTemperatureField, this);
 
         stage = System.Diagnostics.Stopwatch.StartNew();
+        // The opt-in carved terrain needs the same facets for visible surface, queries and collision.
+        if (geodesicCarvedSurface != null) colliderSubdivision = renderSubdivision;
         IcosphereRenderGeometry colliderGeometry = IcosphereRenderGeometryCache.GetOrBuild(colliderSubdivision);
         IcosphereDirectionMapping colliderMapping = GetOrBuildDirectionMapping(colliderGeometry);
-        Mesh colliderMesh = IcosphereRenderMeshBuilder.BuildSurfaceMesh(colliderGeometry, BasePlanetRadius, $"Geodesic Terrain Collider L{colliderSubdivision}");
-        GeodesicRenderTerrainData colliderTerrainData = ApplyGeodesicTerrainDisplacement(colliderMesh, colliderGeometry, colliderMapping, true, true, geodesicSeaLevelControlMode == GeodesicSeaLevelControlMode.OceanWorld);
+        Mesh colliderMesh = geodesicCarvedSurface != null ? Instantiate(mesh) : IcosphereRenderMeshBuilder.BuildSurfaceMesh(colliderGeometry, BasePlanetRadius, $"Geodesic Terrain Collider L{colliderSubdivision}");
+        GeodesicRenderTerrainData colliderTerrainData = geodesicCarvedSurface != null ? geodesicCurrentRenderTerrainData : ApplyGeodesicTerrainDisplacement(colliderMesh, colliderGeometry, colliderMapping, true, true, geodesicSeaLevelControlMode == GeodesicSeaLevelControlMode.OceanWorld);
         if (geodesicSeaLevelControlMode == GeodesicSeaLevelControlMode.OceanWorld) ValidateOceanWorldGeometryCoverage(geodesicCurrentRenderTerrainData, colliderTerrainData);
         MeshCollider meshCollider = GetOrAddComponent<MeshCollider>(gameObject);
         meshCollider.sharedMesh = null;
@@ -1004,6 +1018,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     Vector3 SampleGeodesicDebugSurfacePosition(Vector3 direction)
     {
         Vector3 unit = direction.sqrMagnitude > 1e-10f ? direction.normalized : Vector3.up;
+        if (geodesicCarvedSurface != null) return unit * geodesicCarvedSurface.Radius(unit);
         if (geodesicDebugSurfaceRadiusCache == null) BuildGeodesicDebugSurfaceRadiusCache();
         if (geodesicDebugSurfaceRadiusCache != null && geodesicDebugSurfaceRadiusCache.TryGetValue(GeodesicDebugDirectionKey.From(unit), out float cachedRadius))
         {
@@ -1193,6 +1208,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     {
         if (CurrentGridType == PlanetGridType.GeodesicIcosphere)
         {
+            if (geodesicCarvedSurface != null) return geodesicCarvedSurface.Radius(direction) - BasePlanetRadius;
             return GeodesicInlandUplift.Add(EvaluateGeodesicTerrainHeight(direction), SampleGeodesicInlandOffset(direction));
         }
 
@@ -1219,6 +1235,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
     public float GetCellTerrainHeight(int geodesicCellIndex)
     {
+        if (geodesicCarvedSurface != null && GeodesicTopology != null && geodesicCellIndex >= 0 && geodesicCellIndex < GeodesicTopology.CellCount)
+            return geodesicCarvedSurface.Radius(GeodesicTopology.CellDirections[geodesicCellIndex]) - BasePlanetRadius;
         if (geodesicTerrainHeightByCell != null && geodesicCellIndex >= 0 && geodesicCellIndex < geodesicTerrainHeightByCell.Length)
         {
             return GeodesicInlandUplift.Add(geodesicTerrainHeightByCell[geodesicCellIndex], GeodesicCellInlandOffset(geodesicCellIndex));
@@ -1244,6 +1262,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
     public float GetCellNormalizedTerrainHeight(int geodesicCellIndex)
     {
+        if (geodesicCarvedSurface != null)
+            return Mathf.InverseLerp(GetGeodesicMinimumTerrainOffset(), GetGeodesicMaximumTerrainOffset(), GetCellTerrainHeight(geodesicCellIndex));
         if (geodesicNormalizedTerrainByCell != null && geodesicCellIndex >= 0 && geodesicCellIndex < geodesicNormalizedTerrainByCell.Length)
         {
             if (GeodesicCellInlandOffset(geodesicCellIndex) == 0f) return geodesicNormalizedTerrainByCell[geodesicCellIndex];
@@ -1399,6 +1419,32 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
     void ApplyGeodesicTerrainDisplacement(Mesh targetMesh) => ApplyGeodesicTerrainDisplacement(targetMesh, default(IcosphereRenderGeometry), null, true, true, false);
 
+    internal void ApplyGeodesicValleySurface(IcosphereRenderGeometry geometry, Mesh targetMesh, float[] heights)
+    {
+        var positions = targetMesh.vertices;
+        float min = GetGeodesicMinimumTerrainOffset(), max = GetGeodesicMaximumTerrainOffset();
+        for (int i = 0; i < positions.Length; i++)
+        {
+            float originalRadius = positions[i].magnitude;
+            if (heights[i] >= originalRadius) continue;
+            float cut = originalRadius - heights[i];
+            positions[i] = positions[i].normalized * heights[i];
+            geodesicCurrentRenderTerrainData.SurfaceRadii[i] = positions[i].magnitude;
+            geodesicCurrentRenderTerrainData.Heights[i] -= cut;
+            geodesicCurrentRenderTerrainData.NormalizedHeights[i] = Mathf.InverseLerp(min, max, geodesicCurrentRenderTerrainData.Heights[i]);
+            // Keep the paired raw/large-scale difference consistent for any later query.
+            geodesicCurrentRenderTerrainData.RawRadii[i] -= cut;
+            geodesicCurrentRenderTerrainData.HydrologicalRadii[i] -= cut;
+        }
+        targetMesh.vertices = positions;
+        targetMesh.RecalculateNormals(); targetMesh.RecalculateBounds();
+        ApplyGeodesicSurfaceColours(targetMesh, geodesicCurrentRenderTerrainData);
+        geodesicCarvedSurface = new GeodesicRiverTerrain(geometry, positions);
+        geodesicDebugSurfaceRadiusCache = null;
+        CacheVisibleGeodesicSeafloorAnchors(targetMesh, geometry, geodesicCurrentRenderMapping);
+        maximumGeneratedOpaqueSurfaceRadius = Mathf.Max(BasePlanetRadius, MaxRadiusFromTerrainData(geodesicCurrentRenderTerrainData));
+    }
+
     GeodesicRenderTerrainData ApplyGeodesicTerrainDisplacement(Mesh targetMesh, IcosphereRenderGeometry geometry, IcosphereDirectionMapping mapping, bool recalculateNormals, bool recalculateBounds, bool captureTerrainData)
     {
         GeodesicRenderTerrainData data = default;
@@ -1484,6 +1530,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
     float SampleGeodesicSurfaceRadiusMapped(Vector3 direction, int sampleIndex, IcosphereDirectionMapping mapping)
     {
+        if (geodesicCarvedSurface != null) return geodesicCarvedSurface.Radius(direction);
         if (enableGeodesicTerrainDisplacement) geodesicTerrainNoiseEvaluationCount++;
         Vector3 d = direction.sqrMagnitude > 1e-10f ? direction.normalized : Vector3.up;
         float raw = EvaluateRawGeodesicTerrainRadiusUncounted(d);
@@ -1574,6 +1621,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
     public float GetGeodesicCellSeafloorRadius(int cellIndex)
     {
+        if (geodesicCarvedSurface != null && GeodesicTopology != null && cellIndex >= 0 && cellIndex < GeodesicTopology.CellCount)
+            return geodesicCarvedSurface.Radius(GeodesicTopology.CellDirections[cellIndex]);
         if (geodesicSeafloorRadius != null && cellIndex >= 0 && cellIndex < geodesicSeafloorRadius.Length)
             return GeodesicInlandUplift.Add(geodesicSeafloorRadius[cellIndex], GeodesicCellInlandOffset(cellIndex));
         return GetGeodesicCellRawTerrainRadius(cellIndex);
@@ -1615,6 +1664,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
     public float GetGeodesicSeafloorRadiusAtDirection(Vector3 direction)
     {
+        if (geodesicCarvedSurface != null) return geodesicCarvedSurface.Radius(direction);
         if (enableGeodesicTerrainDisplacement) geodesicTerrainNoiseEvaluationCount++;
         Vector3 d = direction.sqrMagnitude > 1e-10f ? direction.normalized : Vector3.up;
         float raw = EvaluateRawGeodesicTerrainRadiusUncounted(d);

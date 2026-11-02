@@ -90,6 +90,11 @@ public class SimulationStartupConfig
     [Range(0f, GeodesicInlandUplift.MaximumMagnitude)] public float inlandElevationMagnitude = 0f;
 
     [Header("Advanced Geodesic Hydrology")]
+    [Tooltip(GeodesicValleyCarving.Help)] public bool enableTerminationValleyCarving;
+    [Range(0f, 1f)] public float maximumValleyCarveDepth = GeodesicValleyCarving.DefaultDepth;
+    [Min(0f)] public float minimumValleyCarveRunoff = GeodesicValleyCarving.DefaultRunoff;
+    [Range(0f, 1f)] public float valleyCarveWidth = GeodesicValleyCarving.DefaultWidth;
+    public bool showValleyCarvingDebug;
     [Min(0.01f)] public float riverFlowThreshold = GeodesicRiverSystem.DefaultRiverFlowThreshold;
     [Min(0.01f)] public float majorRiverThreshold = GeodesicRiverSystem.DefaultMajorRiverThreshold;
     public HydrologyTerrainMode hydrologyTerrainMode = HydrologyTerrainMode.Visible;

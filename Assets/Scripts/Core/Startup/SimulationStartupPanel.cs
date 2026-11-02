@@ -42,6 +42,8 @@ public class SimulationStartupPanel : MonoBehaviour
     [SerializeField] private TMP_InputField majorRiverThresholdInput;
     [Tooltip(GeodesicInlandUplift.Help)]
     [SerializeField] private TMP_InputField inlandElevationMagnitudeInput;
+    [SerializeField] private Toggle terminationValleyCarvingToggle, valleyCarvingDebugToggle;
+    [SerializeField] private TMP_InputField maximumValleyCarveDepthInput, minimumValleyCarveRunoffInput, valleyCarveWidthInput;
     [SerializeField] private TMP_Text inlandElevationHelpText;
     [SerializeField] private Toggle excludeSmallInlandSeasToggle;
     [SerializeField] private TMP_InputField minimumOceanBasinPercentInput;
@@ -121,6 +123,11 @@ public class SimulationStartupPanel : MonoBehaviour
         SetText(riverFlowThresholdInput, config.riverFlowThreshold.ToString("G9"));
         SetText(majorRiverThresholdInput, config.majorRiverThreshold.ToString("G9"));
         SetText(inlandElevationMagnitudeInput, config.inlandElevationMagnitude.ToString("G9"));
+        SetToggle(terminationValleyCarvingToggle, config.enableTerminationValleyCarving);
+        SetToggle(valleyCarvingDebugToggle, config.showValleyCarvingDebug);
+        SetText(maximumValleyCarveDepthInput, config.maximumValleyCarveDepth.ToString("G9"));
+        SetText(minimumValleyCarveRunoffInput, config.minimumValleyCarveRunoff.ToString("G9"));
+        SetText(valleyCarveWidthInput, config.valleyCarveWidth.ToString("G9"));
         if (inlandElevationHelpText != null) inlandElevationHelpText.text = GeodesicInlandUplift.Help;
         SetToggle(showRejectedUphillRiverSegmentsToggle, config.showRejectedUphillRiverSegments);
         SetToggle(colourRenderedRiversByVisibleTerrainGradeToggle, config.colourRenderedRiversByVisibleTerrainGrade);
@@ -181,6 +188,11 @@ public class SimulationStartupPanel : MonoBehaviour
         config.riverFlowThreshold = SimulationStartupController.NormalizeRiverThreshold(ReadFloat(riverFlowThresholdInput, config.riverFlowThreshold), GeodesicRiverSystem.DefaultRiverFlowThreshold);
         config.majorRiverThreshold = SimulationStartupController.NormalizeRiverThreshold(ReadFloat(majorRiverThresholdInput, config.majorRiverThreshold), GeodesicRiverSystem.DefaultMajorRiverThreshold);
         config.inlandElevationMagnitude = GeodesicInlandUplift.NormalizeMagnitude(ReadFloat(inlandElevationMagnitudeInput, config.inlandElevationMagnitude));
+        if (terminationValleyCarvingToggle != null) config.enableTerminationValleyCarving = terminationValleyCarvingToggle.isOn;
+        if (valleyCarvingDebugToggle != null) config.showValleyCarvingDebug = valleyCarvingDebugToggle.isOn;
+        config.maximumValleyCarveDepth = GeodesicValleyCarving.Normalize(ReadFloat(maximumValleyCarveDepthInput, config.maximumValleyCarveDepth), GeodesicValleyCarving.DefaultDepth, 1f);
+        config.minimumValleyCarveRunoff = GeodesicValleyCarving.Normalize(ReadFloat(minimumValleyCarveRunoffInput, config.minimumValleyCarveRunoff), GeodesicValleyCarving.DefaultRunoff, 1000000f);
+        config.valleyCarveWidth = GeodesicValleyCarving.Normalize(ReadFloat(valleyCarveWidthInput, config.valleyCarveWidth), GeodesicValleyCarving.DefaultWidth, 1f);
         if (planetGridDropdown != null) config.gridType = planetGridDropdown.value == 1 ? PlanetGridType.GeodesicIcosphere : PlanetGridType.LegacyCubeSphere;
         config.cubeSphereResolution = Mathf.Clamp(ReadInt(cubeSphereResolutionInput, config.cubeSphereResolution), 3, 240);
         config.geodesicSubdivisionLevel = Mathf.Clamp(ReadInt(geodesicSubdivisionInput, config.geodesicSubdivisionLevel), 0, GeodesicGridTopology.MaxSupportedSubdivision);
@@ -303,6 +315,11 @@ public class SimulationStartupPanel : MonoBehaviour
         if (riverFlowThresholdInput != null) riverFlowThresholdInput.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
         if (majorRiverThresholdInput != null) majorRiverThresholdInput.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
         if (inlandElevationMagnitudeInput != null) inlandElevationMagnitudeInput.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
+        if (terminationValleyCarvingToggle != null) terminationValleyCarvingToggle.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
+        if (valleyCarvingDebugToggle != null) valleyCarvingDebugToggle.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
+        if (maximumValleyCarveDepthInput != null) maximumValleyCarveDepthInput.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
+        if (minimumValleyCarveRunoffInput != null) minimumValleyCarveRunoffInput.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
+        if (valleyCarveWidthInput != null) valleyCarveWidthInput.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
         if (inlandElevationHelpText != null) inlandElevationHelpText.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
         if (generateHydrologicalLakesToggle != null) generateHydrologicalLakesToggle.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
         if (minimumLakeBasinPercentInput != null) minimumLakeBasinPercentInput.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);

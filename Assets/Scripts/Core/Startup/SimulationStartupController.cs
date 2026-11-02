@@ -34,7 +34,7 @@ public class SimulationStartupController : MonoBehaviour
     public const float GeodesicVentPhysicalMaxPerSecond = 1000f;
     private const int InitialSpawnMin = 0;
     private const int InitialSpawnMax = 10000;
-    private const int SavedStartupConfigVersion = 16;
+    private const int SavedStartupConfigVersion = 17;
     public const float NormalAtmospherePressureMaxBar = 5f;
     public const float DenseAtmospherePressureMaxBar = 600f;
     public const float DefaultApproximateThermalIntervalSeconds = 2f;
@@ -457,6 +457,11 @@ public class SimulationStartupController : MonoBehaviour
         destination.minimumOceanComponentAreaFraction = source.minimumOceanComponentAreaFraction;
         destination.hydrologyTerrainMode = source.hydrologyTerrainMode;
         destination.inlandElevationMagnitude = source.inlandElevationMagnitude;
+        destination.enableTerminationValleyCarving = source.enableTerminationValleyCarving;
+        destination.maximumValleyCarveDepth = source.maximumValleyCarveDepth;
+        destination.minimumValleyCarveRunoff = source.minimumValleyCarveRunoff;
+        destination.valleyCarveWidth = source.valleyCarveWidth;
+        destination.showValleyCarvingDebug = source.showValleyCarvingDebug;
         destination.riverFlowThreshold = source.riverFlowThreshold;
         destination.majorRiverThreshold = source.majorRiverThreshold;
         destination.generateHydrologicalLakes = source.generateHydrologicalLakes;
@@ -580,6 +585,11 @@ public class SimulationStartupController : MonoBehaviour
             planetGenerator.minimumOceanComponentAreaFraction = GeodesicOceanConnectivity.NormalizeThreshold(config.minimumOceanComponentAreaFraction);
             planetGenerator.hydrologyTerrainMode = config.hydrologyTerrainMode;
             planetGenerator.inlandElevationMagnitude = GeodesicInlandUplift.NormalizeMagnitude(config.inlandElevationMagnitude);
+            planetGenerator.enableTerminationValleyCarving = config.enableTerminationValleyCarving;
+            planetGenerator.maximumValleyCarveDepth = config.maximumValleyCarveDepth;
+            planetGenerator.minimumValleyCarveRunoff = config.minimumValleyCarveRunoff;
+            planetGenerator.valleyCarveWidth = config.valleyCarveWidth;
+            planetGenerator.showValleyCarvingDebug = config.showValleyCarvingDebug;
             planetGenerator.generateHydrologicalLakes = config.generateHydrologicalLakes;
             planetGenerator.minimumLakeBasinAreaFraction = GeodesicLakeBasins.NormalizeArea(config.minimumLakeBasinAreaFraction);
             planetGenerator.minimumLakeDepth = GeodesicLakeBasins.NormalizeDepth(config.minimumLakeDepth);
@@ -785,6 +795,9 @@ public class SimulationStartupController : MonoBehaviour
         config.minimumLakeDepth = GeodesicLakeBasins.NormalizeDepth(config.minimumLakeDepth);
         config.riverFlowThreshold = NormalizeRiverThreshold(config.riverFlowThreshold, GeodesicRiverSystem.DefaultRiverFlowThreshold);
         config.inlandElevationMagnitude = GeodesicInlandUplift.NormalizeMagnitude(config.inlandElevationMagnitude);
+        config.maximumValleyCarveDepth = GeodesicValleyCarving.Normalize(config.maximumValleyCarveDepth, GeodesicValleyCarving.DefaultDepth, 1f);
+        config.minimumValleyCarveRunoff = GeodesicValleyCarving.Normalize(config.minimumValleyCarveRunoff, GeodesicValleyCarving.DefaultRunoff, 1000000f);
+        config.valleyCarveWidth = GeodesicValleyCarving.Normalize(config.valleyCarveWidth, GeodesicValleyCarving.DefaultWidth, 1f);
         config.majorRiverThreshold = NormalizeRiverThreshold(config.majorRiverThreshold, GeodesicRiverSystem.DefaultMajorRiverThreshold);
         config.cubeSphereResolution = Mathf.Clamp(config.cubeSphereResolution, 3, 240);
         config.geodesicSubdivisionLevel = Mathf.Clamp(config.geodesicSubdivisionLevel, 0, GeodesicGridTopology.MaxSupportedSubdivision);
@@ -910,6 +923,7 @@ public class SimulationStartupController : MonoBehaviour
         builder.AppendLine($"Exclude small inland seas: {config.excludeSmallDisconnectedSeas}; minimum ocean basin area: {config.minimumOceanComponentAreaFraction * 100f:0.###}% of planet surface");
         builder.AppendLine($"Hydrology terrain mode: {config.hydrologyTerrainMode}");
         builder.AppendLine($"Inland elevation magnitude: {config.inlandElevationMagnitude:G9}");
+        builder.AppendLine($"Termination valley carving: {config.enableTerminationValleyCarving}; maximum cut: {config.maximumValleyCarveDepth:G6}; minimum runoff: {config.minimumValleyCarveRunoff:G6}; width: {config.valleyCarveWidth:G6}; Scene debug: {config.showValleyCarvingDebug}");
         builder.AppendLine($"Hydrological lakes: {config.generateHydrologicalLakes}; minimum basin area: {config.minimumLakeBasinAreaFraction * 100f:0.####}% of planet; minimum depth: {config.minimumLakeDepth:0.####} planet units");
         builder.AppendLine($"Initial Spawn Count: {config.initialSpawnCount}");
         builder.AppendLine($"Start Paused: {startPaused}");
@@ -925,6 +939,11 @@ public class SimulationStartupController : MonoBehaviour
         saved.riverFlowThreshold = GeodesicRiverSystem.DefaultRiverFlowThreshold;
         saved.majorRiverThreshold = GeodesicRiverSystem.DefaultMajorRiverThreshold;
         saved.inlandElevationMagnitude = 0f;
+        saved.enableTerminationValleyCarving = false;
+        saved.showValleyCarvingDebug = false;
+        saved.maximumValleyCarveDepth = GeodesicValleyCarving.DefaultDepth;
+        saved.minimumValleyCarveRunoff = GeodesicValleyCarving.DefaultRunoff;
+        saved.valleyCarveWidth = GeodesicValleyCarving.DefaultWidth;
         if (!string.IsNullOrWhiteSpace(json)) JsonUtility.FromJsonOverwrite(json, saved);
         return saved.ToConfig(authoritativeFallback);
     }
@@ -945,6 +964,10 @@ public class SimulationStartupController : MonoBehaviour
         public bool useLowFrequencyTerrainForHydrology; // Schema 13 migration only.
         public HydrologyTerrainMode hydrologyTerrainMode;
         public float inlandElevationMagnitude;
+        public bool enableTerminationValleyCarving, showValleyCarvingDebug;
+        public float maximumValleyCarveDepth = GeodesicValleyCarving.DefaultDepth;
+        public float minimumValleyCarveRunoff = GeodesicValleyCarving.DefaultRunoff;
+        public float valleyCarveWidth = GeodesicValleyCarving.DefaultWidth;
         public float riverFlowThreshold = GeodesicRiverSystem.DefaultRiverFlowThreshold;
         public float majorRiverThreshold = GeodesicRiverSystem.DefaultMajorRiverThreshold;
         public bool generateHydrologicalLakes;
@@ -1002,6 +1025,11 @@ public class SimulationStartupController : MonoBehaviour
                 useLowFrequencyTerrainForHydrology = config.useLowFrequencyTerrainForHydrology,
                 hydrologyTerrainMode = config.hydrologyTerrainMode,
                 inlandElevationMagnitude = config.inlandElevationMagnitude,
+                enableTerminationValleyCarving = config.enableTerminationValleyCarving,
+                showValleyCarvingDebug = config.showValleyCarvingDebug,
+                maximumValleyCarveDepth = config.maximumValleyCarveDepth,
+                minimumValleyCarveRunoff = config.minimumValleyCarveRunoff,
+                valleyCarveWidth = config.valleyCarveWidth,
                 riverFlowThreshold = config.riverFlowThreshold,
                 majorRiverThreshold = config.majorRiverThreshold,
                 generateHydrologicalLakes = config.generateHydrologicalLakes,
@@ -1052,6 +1080,11 @@ public class SimulationStartupController : MonoBehaviour
             config.geodesicSubdivisionLevel = geodesicSubdivisionLevel;
             config.riverFlowThreshold = NormalizeRiverThreshold(version >= 15 ? riverFlowThreshold : GeodesicRiverSystem.DefaultRiverFlowThreshold, GeodesicRiverSystem.DefaultRiverFlowThreshold);
             config.inlandElevationMagnitude = version >= 16 ? GeodesicInlandUplift.NormalizeMagnitude(inlandElevationMagnitude) : 0f;
+            config.enableTerminationValleyCarving = version >= 17 && enableTerminationValleyCarving;
+            config.showValleyCarvingDebug = version >= 17 && showValleyCarvingDebug;
+            config.maximumValleyCarveDepth = GeodesicValleyCarving.Normalize(version >= 17 ? maximumValleyCarveDepth : GeodesicValleyCarving.DefaultDepth, GeodesicValleyCarving.DefaultDepth, 1f);
+            config.minimumValleyCarveRunoff = GeodesicValleyCarving.Normalize(version >= 17 ? minimumValleyCarveRunoff : GeodesicValleyCarving.DefaultRunoff, GeodesicValleyCarving.DefaultRunoff, 1000000f);
+            config.valleyCarveWidth = GeodesicValleyCarving.Normalize(version >= 17 ? valleyCarveWidth : GeodesicValleyCarving.DefaultWidth, GeodesicValleyCarving.DefaultWidth, 1f);
             config.majorRiverThreshold = NormalizeRiverThreshold(version >= 15 ? majorRiverThreshold : GeodesicRiverSystem.DefaultMajorRiverThreshold, GeodesicRiverSystem.DefaultMajorRiverThreshold);
             config.showRejectedUphillRiverSegments = version >= 11 && showRejectedUphillRiverSegments;
             config.colourRenderedRiversByVisibleTerrainGrade = version >= 12 && colourRenderedRiversByVisibleTerrainGrade;
@@ -1354,7 +1387,7 @@ public class SimulationStartupController : MonoBehaviour
         setupGuiScrollPosition = GUILayout.BeginScrollView(setupGuiScrollPosition, GUILayout.Width(width), GUILayout.Height(scrollHeight));
 
         float contentWidth = Mathf.Max(1f, width - 20f);
-        float advancedHeight = advancedSettingsExpanded ? 1436f : 0f;
+        float advancedHeight = advancedSettingsExpanded ? 1876f : 0f;
         float contentHeight = 44f + ((line + gap) * 25f) + advancedHeight + (debugSettingsExpanded ? 370f : 40f) + (gap * 2f) + 42f + 30f + 82f;
         Rect contentRect = GUILayoutUtility.GetRect(contentWidth, contentHeight, GUILayout.Width(contentWidth), GUILayout.Height(contentHeight));
         float controlX = contentRect.x;
@@ -1438,7 +1471,7 @@ public class SimulationStartupController : MonoBehaviour
                 y += line + gap;
                 GUI.Label(new Rect(controlX, y, contentWidth, 100f), GeodesicInlandUplift.Help, new GUIStyle(labelStyle) { wordWrap = true });
                 y += 106f;
-                GUI.Label(new Rect(controlX, y, contentWidth, line), "Rivers / Hydrology", labelStyle);
+                GUI.Label(new Rect(controlX, y, contentWidth, line), "Terrain / Hydrology", labelStyle);
                 y += line + gap;
                 DrawRiverThreshold(new Rect(controlX, y, contentWidth, line), "River flow threshold", ref currentConfig.riverFlowThreshold, GeodesicRiverSystem.DefaultRiverFlowThreshold);
                 y += line + gap;
@@ -1454,6 +1487,18 @@ public class SimulationStartupController : MonoBehaviour
                     new Rect(controlX, y, contentWidth, line * 3f), (int)currentConfig.hydrologyTerrainMode,
                     new[] { "Visible terrain", "Fine detail removed (full ridges)", "Reduced ridge + fine detail (failed reference)" }, 1);
                 y += line * 3f + gap;
+                currentConfig.enableTerminationValleyCarving = GUI.Toggle(new Rect(controlX, y, contentWidth, line), currentConfig.enableTerminationValleyCarving, "Enable termination valley carving");
+                y += line + gap;
+                DrawValleyParameter(new Rect(controlX, y, contentWidth, line), "Maximum carve depth (planet units)", ref currentConfig.maximumValleyCarveDepth, GeodesicValleyCarving.DefaultDepth, 1f);
+                y += line + gap;
+                DrawValleyParameter(new Rect(controlX, y, contentWidth, line), "Minimum river runoff for carving", ref currentConfig.minimumValleyCarveRunoff, GeodesicValleyCarving.DefaultRunoff, 1000000f);
+                y += line + gap;
+                DrawValleyParameter(new Rect(controlX, y, contentWidth, line), "Carve width (planet units)", ref currentConfig.valleyCarveWidth, GeodesicValleyCarving.DefaultWidth, 1f);
+                y += line + gap;
+                currentConfig.showValleyCarvingDebug = GUI.Toggle(new Rect(controlX, y, contentWidth, line), currentConfig.showValleyCarvingDebug, "Show valley carving debug (Scene gizmos)");
+                y += line + gap;
+                GUI.Label(new Rect(controlX, y, contentWidth, 150f), GeodesicValleyCarving.Help, new GUIStyle(labelStyle) { wordWrap = true });
+                y += 156f;
                 DrawBool(new Rect(controlX, y, contentWidth, line), "Exclude small inland seas", ref currentConfig.excludeSmallDisconnectedSeas);
                 y += line + gap;
                 bool oceanControlEnabled = GUI.enabled;
@@ -1594,6 +1639,19 @@ public class SimulationStartupController : MonoBehaviour
         int selected = currentConfig.gridType == PlanetGridType.GeodesicIcosphere ? 1 : 0;
         selected = GUI.SelectionGrid(new Rect(rect.x + rect.width * 0.44f, rect.y, rect.width * 0.56f, rect.height), selected, labels, 2);
         currentConfig.gridType = selected == 1 ? PlanetGridType.GeodesicIcosphere : PlanetGridType.LegacyCubeSphere;
+    }
+
+    private void DrawValleyParameter(Rect rect, string label, ref float value, float fallback, float maximum)
+    {
+        value = GeodesicValleyCarving.Normalize(value, fallback, maximum);
+        string text = riverThresholdEdits.TryGetValue(label, out var edit) && edit.value == value
+            && GUI.GetNameOfFocusedControl() == label ? edit.text : value.ToString("G9");
+        GUI.Label(new Rect(rect.x, rect.y, rect.width * .78f, rect.height), label, labelStyle);
+        GUI.SetNextControlName(label);
+        string next = GUI.TextField(new Rect(rect.x + rect.width * .8f, rect.y, rect.width * .2f, rect.height), text);
+        if (float.TryParse(next, out float parsed) && !float.IsNaN(parsed) && !float.IsInfinity(parsed))
+            value = GeodesicValleyCarving.Normalize(parsed, fallback, maximum);
+        riverThresholdEdits[label] = (value, next);
     }
 
     private void DrawRiverThreshold(Rect rect, string label, ref float value, float fallback)
