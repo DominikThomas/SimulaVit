@@ -1097,7 +1097,7 @@ MonoBehaviour:
   usePlanetSeedForTerrain: 1
   customTerrainSeed: 67890
   deprecatedGeodesicBaseRadius: 1
-  geodesicContinentAmplitude: 0.2
+  geodesicContinentAmplitude: 0.3
   geodesicContinentNoiseScale: 0.85
   geodesicContinentBias: -0.08
   geodesicMountainAmplitude: 0.45
@@ -1109,7 +1109,7 @@ MonoBehaviour:
   geodesicDomainWarpStrength: 0.28
   geodesicFineDetailScale: 18
   geodesicFineDetailAmplitude: 0.018
-  geodesicTerrainOctaves: 6
+  geodesicTerrainOctaves: 7
   geodesicTerrainPersistence: 0.48
   geodesicTerrainLacunarity: 2
   geodesicTerrainHeightContrast: 4
