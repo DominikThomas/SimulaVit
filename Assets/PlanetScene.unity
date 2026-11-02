@@ -194,6 +194,12 @@ MonoBehaviour:
     excludeSmallDisconnectedSeas: 0
     minimumOceanComponentAreaFraction: 0.001
     inlandElevationMagnitude: 0
+    enableTerminationValleyCarving: 0
+    valleyCarvingPasses: 1
+    maximumValleyCarveDepth: 0.005
+    minimumValleyCarveRunoff: 64
+    valleyCarveWidth: 0.02
+    showValleyCarvingDebug: 0
     riverFlowThreshold: 8
     majorRiverThreshold: 64
     hydrologyTerrainMode: 0
@@ -252,6 +258,12 @@ MonoBehaviour:
     excludeSmallDisconnectedSeas: 0
     minimumOceanComponentAreaFraction: 0.001
     inlandElevationMagnitude: 0
+    enableTerminationValleyCarving: 0
+    valleyCarvingPasses: 1
+    maximumValleyCarveDepth: 0.005
+    minimumValleyCarveRunoff: 64
+    valleyCarveWidth: 0.02
+    showValleyCarvingDebug: 0
     riverFlowThreshold: 8
     majorRiverThreshold: 64
     hydrologyTerrainMode: 0
@@ -1070,6 +1082,12 @@ MonoBehaviour:
   deprecatedGeodesicOceanSmoothness: 0.82
   enableGeodesicRivers: 1
   hydrologyTerrainMode: 0
+  enableTerminationValleyCarving: 0
+  valleyCarvingPasses: 1
+  maximumValleyCarveDepth: 0.005
+  minimumValleyCarveRunoff: 64
+  valleyCarveWidth: 0.02
+  showValleyCarvingDebug: 0
   generateHydrologicalLakes: 0
   minimumLakeBasinAreaFraction: 0.0001
   minimumLakeDepth: 0.005
@@ -1079,14 +1097,14 @@ MonoBehaviour:
   usePlanetSeedForTerrain: 1
   customTerrainSeed: 67890
   deprecatedGeodesicBaseRadius: 1
-  geodesicContinentAmplitude: 0.09
+  geodesicContinentAmplitude: 0.2
   geodesicContinentNoiseScale: 0.85
   geodesicContinentBias: -0.08
   geodesicMountainAmplitude: 0.45
   geodesicMountainNoiseScale: 12
-  geodesicMountainCoverageThreshold: 0.15
+  geodesicMountainCoverageThreshold: 0.059
   geodesicMountainMaskSoftness: 0.08
-  geodesicRidgeSharpness: 1.8
+  geodesicRidgeSharpness: 2
   geodesicDomainWarpScale: 1.35
   geodesicDomainWarpStrength: 0.28
   geodesicFineDetailScale: 18
@@ -1095,7 +1113,7 @@ MonoBehaviour:
   geodesicTerrainPersistence: 0.48
   geodesicTerrainLacunarity: 2
   geodesicTerrainHeightContrast: 4
-  geodesicMinimumTerrainOffset: -0.937
+  geodesicMinimumTerrainOffset: 0
   geodesicMaximumTerrainOffset: 0.941
   geodesicSeaLevelControlMode: 1
   excludeSmallDisconnectedSeas: 0
