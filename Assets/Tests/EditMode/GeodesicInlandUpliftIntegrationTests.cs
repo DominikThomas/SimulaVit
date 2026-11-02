@@ -69,6 +69,7 @@ public sealed class GeodesicInlandUpliftIntegrationTests
             var bathymetryMask = Field<bool[]>(p, "geodesicTerrainBathymetryMask").ToArray();
             float sea = p.GeodesicSeaLevelRadius;
             var original = baseline.vertices;
+            var baselineQueries = g.UnitVertices.Select(p.GetSurfaceRadiusAtDirection).ToArray();
             // Literal previous render calculation: raw procedural radius -> unchanged bathymetry -> direction * radius.
             for (int i = 0; i < g.VertexCount; i++)
             {
@@ -100,7 +101,9 @@ public sealed class GeodesicInlandUpliftIntegrationTests
                 if (offset == 0f) Assert.That(raisedVertices[i], Is.EqualTo(original[i]));
                 float expectedBaseline = mapping.SampleSeafloorRadius(i, d, p.EvaluateRawGeodesicTerrainRadius(d), sea, bathymetryMask, floor);
                 Assert.That(raisedVertices[i], Is.EqualTo(d * GeodesicInlandUplift.Add(expectedBaseline, offset)));
-                Assert.That(raisedVertices[i].magnitude, Is.EqualTo(p.GetSurfaceRadiusAtDirection(d)).Within(3e-6f));
+                // Existing mapped/unmapped bathymetry can differ at coarse cell boundaries.
+                // Verify both receive exactly the same additive field without changing either baseline.
+                Assert.That(p.GetSurfaceRadiusAtDirection(d), Is.EqualTo(GeodesicInlandUplift.Add(baselineQueries[i], offset)).Within(1e-6f));
             }
             Assert.That(affected, Is.GreaterThan(0));
             var cg = IcosphereRenderGeometryCache.GetOrBuild(3); var cm = IcosphereDirectionMappingBuilder.Build(t, cg);

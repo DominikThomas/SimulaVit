@@ -7,8 +7,8 @@ using UnityEngine;
 /// The post-filter retained ocean mask is the only coastline authority.</summary>
 public sealed class GeodesicInlandUplift
 {
-    public const float MaximumMagnitude = .05f;
-    public const float DefaultScaleDegrees = 30f;
+    public const float MaximumMagnitude = 5f;
+    public const float DefaultScaleDegrees = 60f;
     public const string Help = "Adds a broad continental-scale elevation bias that increases with distance from the retained-ocean coastline. Higher values raise continental interiors relative to coasts. Experimental.";
     public const string CoastlineAuthority = "post-filter retained-ocean mask; coastal land cell centres";
     private readonly GeodesicGridTopology topology;

@@ -181,9 +181,25 @@ MonoBehaviour:
     ventH2SPerTick: 0.004
     ventCO2PerTick: 0.02
     ventFe2PerTick: 0.002
+    geodesicVentH2PhysicalPerSecond: 10
+    geodesicVentH2SPhysicalPerSecond: 0
+    geodesicVentCO2PhysicalPerSecond: 0
+    geodesicVentFe2PhysicalPerSecond: 0
     terrestrialVentFraction: 0.25
+    showRejectedUphillRiverSegments: 0
+    colourRenderedRiversByVisibleTerrainGrade: 0
+    showRiverTerminationReasons: 0
     initialSpawnCount: 100
     startPaused: 0
+    excludeSmallDisconnectedSeas: 0
+    minimumOceanComponentAreaFraction: 0.001
+    inlandElevationMagnitude: 0
+    riverFlowThreshold: 8
+    majorRiverThreshold: 64
+    hydrologyTerrainMode: 0
+    generateHydrologicalLakes: 0
+    minimumLakeBasinAreaFraction: 0.0001
+    minimumLakeDepth: 0.005
     approximateThermalIntervalSeconds: 2
     geodesicResourceTransportIntervalSeconds: 5
     chemistryTelemetryIntervalSimSeconds: 60
@@ -223,9 +239,25 @@ MonoBehaviour:
     ventH2SPerTick: 0.004
     ventCO2PerTick: 0.02
     ventFe2PerTick: 0.002
+    geodesicVentH2PhysicalPerSecond: 10
+    geodesicVentH2SPhysicalPerSecond: 0
+    geodesicVentCO2PhysicalPerSecond: 0
+    geodesicVentFe2PhysicalPerSecond: 0
     terrestrialVentFraction: 0.25
+    showRejectedUphillRiverSegments: 0
+    colourRenderedRiversByVisibleTerrainGrade: 0
+    showRiverTerminationReasons: 0
     initialSpawnCount: 100
     startPaused: 0
+    excludeSmallDisconnectedSeas: 0
+    minimumOceanComponentAreaFraction: 0.001
+    inlandElevationMagnitude: 0
+    riverFlowThreshold: 8
+    majorRiverThreshold: 64
+    hydrologyTerrainMode: 0
+    generateHydrologicalLakes: 0
+    minimumLakeBasinAreaFraction: 0.0001
+    minimumLakeDepth: 0.005
     approximateThermalIntervalSeconds: 2
     geodesicResourceTransportIntervalSeconds: 5
     chemistryTelemetryIntervalSimSeconds: 60
@@ -1036,6 +1068,11 @@ MonoBehaviour:
   deprecatedGeodesicOceanShallowTint: {r: 0.1, g: 0.55, b: 0.75, a: 0.42}
   deprecatedGeodesicOceanOpacity: 0.42
   deprecatedGeodesicOceanSmoothness: 0.82
+  enableGeodesicRivers: 1
+  hydrologyTerrainMode: 0
+  generateHydrologicalLakes: 0
+  minimumLakeBasinAreaFraction: 0.0001
+  minimumLakeDepth: 0.005
   geodesicSurfaceAmbientStrength: 0.08
   geodesicSurfaceDiffuseStrength: 1
   enableGeodesicTerrainDisplacement: 1
@@ -1045,22 +1082,24 @@ MonoBehaviour:
   geodesicContinentAmplitude: 0.09
   geodesicContinentNoiseScale: 0.85
   geodesicContinentBias: -0.08
-  geodesicMountainAmplitude: 0.8
-  geodesicMountainNoiseScale: 4.25
-  geodesicMountainCoverageThreshold: 0.248
-  geodesicMountainMaskSoftness: 0.18
-  geodesicRidgeSharpness: 1.25
+  geodesicMountainAmplitude: 0.45
+  geodesicMountainNoiseScale: 12
+  geodesicMountainCoverageThreshold: 0.15
+  geodesicMountainMaskSoftness: 0.08
+  geodesicRidgeSharpness: 1.8
   geodesicDomainWarpScale: 1.35
   geodesicDomainWarpStrength: 0.28
   geodesicFineDetailScale: 18
   geodesicFineDetailAmplitude: 0.018
-  geodesicTerrainOctaves: 5
+  geodesicTerrainOctaves: 6
   geodesicTerrainPersistence: 0.48
   geodesicTerrainLacunarity: 2
-  geodesicTerrainHeightContrast: 3.78
+  geodesicTerrainHeightContrast: 4
   geodesicMinimumTerrainOffset: -0.937
   geodesicMaximumTerrainOffset: 0.941
   geodesicSeaLevelControlMode: 1
+  excludeSmallDisconnectedSeas: 0
+  minimumOceanComponentAreaFraction: 0.001
   geodesicSeaLevelOffset: 0.181
   geodesicTargetOceanCoveragePercent: 70
   geodesicOceanWorldMinimumDepth: 0.06
@@ -1229,6 +1268,16 @@ MonoBehaviour:
   terrestrialVentThermalInfluence: 0.06
   debugTemperatureVisualization: 0
   enableProfilingDiagnostics: 0
+  pressureReferenceBar: 1
+  minimumPressureInertiaMultiplier: 0.25
+  maximumPressureInertiaMultiplier: 4
+  co2GreenhouseReferenceBar: 0.1
+  co2GreenhouseSensitivityKelvin: 2
+  co2MaximumWarmingKelvin: 30
+  ch4GreenhouseReferenceBar: 0.01
+  ch4GreenhouseSensitivityKelvin: 0.75
+  ch4MaximumWarmingKelvin: 8
+  combinedMaximumGreenhouseWarmingKelvin: 30
   initialized: 0
   runtimeCellCount: 0
   minimumTemperatureKelvin: 0
@@ -1266,6 +1315,12 @@ MonoBehaviour:
   hasActiveThermalModel: 0
   surfaceCellsUpdatedLastTick: 0
   horizontalEdgesProcessedLastTick: 0
+  atmosphereTotalPressureBar: 0
+  pressureInertiaMultiplier: 1
+  co2GreenhouseDeltaKelvin: 0
+  ch4GreenhouseDeltaKelvin: 0
+  totalGreenhouseDeltaKelvin: 0
+  effectiveClimateBaseTargetKelvin: 0
 --- !u!114 &382753107
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1321,6 +1376,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: SimulaVit::GeodesicOceanTemperatureField
   enableGeodesicOceanTemperature: 1
   abyssalBaselineTemperatureC: 1.5
+  climateReferenceBaseKelvin: 273.15
   abyssalClimateCoupling: 0.25
   shallowResponseTimescaleSeconds: 80
   deepResponseTimescaleSeconds: 1200
@@ -1432,10 +1488,6 @@ MonoBehaviour:
   ventClustering: 0.65
   geothermalPatchiness: 0.8
   terrestrialVentFraction: 0.25
-  ventH2PerTick: 0.006
-  ventH2SPerTick: 0.004
-  ventCO2PerTick: 0.02
-  ventFe2PerTick: 0.002
   maximumOutletsPerSystem: 5
   outletSelectionRadiusDegrees: 3.5
   initialized: 0
@@ -1461,6 +1513,12 @@ MonoBehaviour:
   submarineVentCount: 0
   terrestrialVentCount: 0
   normalizedSubmarineWeightSum: 0
+  submarineGasProductionFraction: 0
+  terrestrialGasProductionFraction: 0
+  physicalVentH2InventoryRatePerSecond: 10
+  physicalVentH2SInventoryRatePerSecond: 0
+  physicalVentCO2InventoryRatePerSecond: 0
+  physicalVentFe2InventoryRatePerSecond: 0
   transportIntegrationCursorTime: 0
   unconsumedTransportRemainderSeconds: 0
   completedTransportTicks: 0
@@ -1923,6 +1981,7 @@ MonoBehaviour:
   planetGenerator: {fileID: 382753102}
   planetResourceMap: {fileID: 1222684993}
   initialSpawnCount: 0
+  geodesicBiologySpawnDelaySeconds: 0
   maxPopulation: 30000
   autoStartOnSceneLoad: 1
   baseAgentColor: {r: 1, g: 0.968804, b: 0.6084906, a: 1}
