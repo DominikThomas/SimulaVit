@@ -9,7 +9,7 @@ using UnityEngine;
 public sealed class GeodesicValleyCarving
 {
     public const float DefaultDepth = .005f, DefaultRunoff = 64f, DefaultWidth = .02f;
-    public const string Help = "One generation pass on visible, unfiltered TIN terrain. Uses the matched basin's natural spill and a short downstream breach; unmatched/invalid spills use bounded fallback search. Depth and width are planet-local units; runoff uses mean-cell-area equivalents. Width controls lateral falloff only. Green: accepted; red: rejected; yellow: original termination; cyan: target (Scene gizmos).";
+    public const string Help = "1–5 passes on visible, unfiltered TIN terrain; flow and basins rebuild after each pass. Uses natural basin spills with bounded fallback search. Depth is the maximum cut per pass; depth and width use planet-local units. Runoff uses mean-cell-area equivalents. Width controls lateral falloff. Scene gizmos: green accepted, red rejected, yellow termination, cyan target.";
     private const int MaximumLabels = 8192, MaximumTargetProbes = 128, MaximumAffectedVertices = 8192;
     private const int MaximumAffectedFacets = MaximumAffectedVertices * 6;
     private enum Target { River, LakeOutlet, OceanDrainage, Coastline, DownstreamBasin, None }
@@ -42,7 +42,7 @@ public sealed class GeodesicValleyCarving
         public int AffectedVertices, AffectedFacets;
         public double MaximumCut, MeanCut, PathLength;
         public int Accepted => Candidates.Count(c => c.Accepted);
-        public string Summary() => $"[GeodesicValleyCarving] enabled=True eligible={Eligible} matched-to-basin={MatchedToBasin} searched={Searched} " +
+        public string Summary(int pass = 1, int passes = 1) => $"[GeodesicValleyCarving] enabled=True pass={pass}/{passes} eligible={Eligible} matched-to-basin={MatchedToBasin} searched={Searched} " +
             $"spill-directed={SpillDirected} fallback-searched={FallbackSearched} accepted-spill-carves={Candidates.Count(c => c.Accepted && c.SpillDirected)} accepted-fallback-carves={Candidates.Count(c => c.Accepted && !c.SpillDirected)} accepted={Accepted} " +
             $"rejected-invalid-spill={InvalidSpills} invalid-spill-action=fallback fallback-unmatched={FallbackSearched - InvalidSpills} rejected-lake-protected={SkippedLake + Rejected("lake")} " +
             $"rejected-spill({Reasons(true)}) rejected-fallback({Reasons(false)}) " +
@@ -50,7 +50,7 @@ public sealed class GeodesicValleyCarving
             $"pathLength={PathLength:G6} affectedVertices={AffectedVertices} affectedFacets={AffectedFacets} maximumActualCut={MaximumCut:G6} meanActualCut={MeanCut:G6} " +
             $"connectedTargets(river/lake-outlet/ocean-drainage/coastline/downstream-basin)={Connected(0)}/{Connected(1)}/{Connected(2)}/{Connected(3)}/{Connected(4)} " +
             SpillStatistics() +
-            "connections=planned-not-post-rebuild-confirmed passes=1";
+            "connections=planned-not-post-rebuild-confirmed";
         private string Reasons(bool spill) => string.Join(" ", new[] { "too-deep", "below-sea-level", "invalid-spill", "no-downstream-side", "lake", "conflict", "no-target", "search-distance-limit", "footprint-limit", "search-budget" }
             .Select(reason => $"{(reason == "lake" ? "lake-protected" : !spill && reason == "search-budget" ? "fallback-search-budget" : reason)}={Candidates.Count(c => c.SpillDirected == spill && c.Rejection == reason)}"));
         private string SpillStatistics()

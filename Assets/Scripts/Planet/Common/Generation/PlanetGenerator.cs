@@ -222,6 +222,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     public HydrologyTerrainMode hydrologyTerrainMode = HydrologyTerrainMode.Visible;
     [Header("Advanced Terrain / Hydrology: termination valleys")]
     [Tooltip(GeodesicValleyCarving.Help)] public bool enableTerminationValleyCarving;
+    [Range(1, 5)] public int valleyCarvingPasses = 1;
     [Range(0f, 1f)] public float maximumValleyCarveDepth = GeodesicValleyCarving.DefaultDepth;
     [Min(0f)] public float minimumValleyCarveRunoff = GeodesicValleyCarving.DefaultRunoff;
     [Range(0f, 1f)] public float valleyCarveWidth = GeodesicValleyCarving.DefaultWidth;

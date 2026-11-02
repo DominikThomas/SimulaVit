@@ -44,6 +44,7 @@ public class SimulationStartupPanel : MonoBehaviour
     [SerializeField] private TMP_InputField inlandElevationMagnitudeInput;
     [SerializeField] private Toggle terminationValleyCarvingToggle, valleyCarvingDebugToggle;
     [SerializeField] private TMP_InputField maximumValleyCarveDepthInput, minimumValleyCarveRunoffInput, valleyCarveWidthInput;
+    [SerializeField] private TMP_InputField valleyCarvingPassesInput;
     [SerializeField] private TMP_Text inlandElevationHelpText;
     [SerializeField] private Toggle excludeSmallInlandSeasToggle;
     [SerializeField] private TMP_InputField minimumOceanBasinPercentInput;
@@ -124,6 +125,7 @@ public class SimulationStartupPanel : MonoBehaviour
         SetText(majorRiverThresholdInput, config.majorRiverThreshold.ToString("G9"));
         SetText(inlandElevationMagnitudeInput, config.inlandElevationMagnitude.ToString("G9"));
         SetToggle(terminationValleyCarvingToggle, config.enableTerminationValleyCarving);
+        SetText(valleyCarvingPassesInput, config.valleyCarvingPasses.ToString());
         SetToggle(valleyCarvingDebugToggle, config.showValleyCarvingDebug);
         SetText(maximumValleyCarveDepthInput, config.maximumValleyCarveDepth.ToString("G9"));
         SetText(minimumValleyCarveRunoffInput, config.minimumValleyCarveRunoff.ToString("G9"));
@@ -189,6 +191,7 @@ public class SimulationStartupPanel : MonoBehaviour
         config.majorRiverThreshold = SimulationStartupController.NormalizeRiverThreshold(ReadFloat(majorRiverThresholdInput, config.majorRiverThreshold), GeodesicRiverSystem.DefaultMajorRiverThreshold);
         config.inlandElevationMagnitude = GeodesicInlandUplift.NormalizeMagnitude(ReadFloat(inlandElevationMagnitudeInput, config.inlandElevationMagnitude));
         if (terminationValleyCarvingToggle != null) config.enableTerminationValleyCarving = terminationValleyCarvingToggle.isOn;
+        config.valleyCarvingPasses = Mathf.Clamp(ReadInt(valleyCarvingPassesInput, config.valleyCarvingPasses), 1, 5);
         if (valleyCarvingDebugToggle != null) config.showValleyCarvingDebug = valleyCarvingDebugToggle.isOn;
         config.maximumValleyCarveDepth = GeodesicValleyCarving.Normalize(ReadFloat(maximumValleyCarveDepthInput, config.maximumValleyCarveDepth), GeodesicValleyCarving.DefaultDepth, 1f);
         config.minimumValleyCarveRunoff = GeodesicValleyCarving.Normalize(ReadFloat(minimumValleyCarveRunoffInput, config.minimumValleyCarveRunoff), GeodesicValleyCarving.DefaultRunoff, 1000000f);
@@ -316,6 +319,7 @@ public class SimulationStartupPanel : MonoBehaviour
         if (majorRiverThresholdInput != null) majorRiverThresholdInput.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
         if (inlandElevationMagnitudeInput != null) inlandElevationMagnitudeInput.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
         if (terminationValleyCarvingToggle != null) terminationValleyCarvingToggle.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
+        if (valleyCarvingPassesInput != null) valleyCarvingPassesInput.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
         if (valleyCarvingDebugToggle != null) valleyCarvingDebugToggle.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
         if (maximumValleyCarveDepthInput != null) maximumValleyCarveDepthInput.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
         if (minimumValleyCarveRunoffInput != null) minimumValleyCarveRunoffInput.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);

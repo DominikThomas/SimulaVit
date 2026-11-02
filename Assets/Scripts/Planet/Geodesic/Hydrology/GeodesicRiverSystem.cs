@@ -146,6 +146,7 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
     private bool[] retainedCarvingOcean;
     private GeodesicHydrologyTopology carvingTopology;
     public GeodesicValleyCarving.Result ValleyCarving { get; private set; }
+    public IReadOnlyList<GeodesicValleyCarving.Result> ValleyCarvingResults { get; private set; } = Array.Empty<GeodesicValleyCarving.Result>();
 
     public void Initialize(PlanetGenerator owner, IcosphereRenderGeometry geometry, Mesh surfaceMesh)
     {
@@ -163,24 +164,31 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
             Debug.LogWarning("[GeodesicValleyCarving] enabled=True skipped=requires-visible-terrain-and-zero-TIN-filter terrainChanged=False", this);
             return;
         }
-        LogCarvingHydrology("before");
-        var result = GeodesicValleyCarving.Plan(TinDrainage, carvingTopology, retainedCarvingOcean,
-            TinLakeGeometry, TinLakeRouting, owner.BasePlanetRadius, owner.GeodesicSeaLevelRadius,
-            GeodesicValleyCarving.Normalize(owner.maximumValleyCarveDepth, GeodesicValleyCarving.DefaultDepth, 1f),
-            meanCellArea * GeodesicValleyCarving.Normalize(owner.minimumValleyCarveRunoff, GeodesicValleyCarving.DefaultRunoff, 1000000f),
-            GeodesicValleyCarving.Normalize(owner.valleyCarveWidth, GeodesicValleyCarving.DefaultWidth, 1f), TinLakeBasins);
-        if (result.AffectedVertices > 0)
+        int passes = Mathf.Clamp(owner.valleyCarvingPasses, 1, 5);
+        var results = new List<GeodesicValleyCarving.Result>(passes);
+        var frozenOcean = retainedCarvingOcean;
+        var basins = TinLakeBasins ?? GeodesicTinBasins.Build(TinDrainage, owner.minimumLakeBasinAreaFraction, owner.minimumLakeDepth);
+        for (int pass = 1; pass <= passes; pass++)
         {
-            var frozenOcean = retainedCarvingOcean;
-            owner.ApplyGeodesicValleySurface(geometry, surfaceMesh, result.Heights);
+            LogCarvingHydrology($"pass-{pass}-of-{passes}-before");
+            var result = GeodesicValleyCarving.Plan(TinDrainage, carvingTopology, frozenOcean,
+                TinLakeGeometry, TinLakeRouting, owner.BasePlanetRadius, owner.GeodesicSeaLevelRadius,
+                GeodesicValleyCarving.Normalize(owner.maximumValleyCarveDepth, GeodesicValleyCarving.DefaultDepth, 1f),
+                meanCellArea * GeodesicValleyCarving.Normalize(owner.minimumValleyCarveRunoff, GeodesicValleyCarving.DefaultRunoff, 1000000f),
+                GeodesicValleyCarving.Normalize(owner.valleyCarveWidth, GeodesicValleyCarving.DefaultWidth, 1f), basins);
+            if (result.AffectedVertices > 0) owner.ApplyGeodesicValleySurface(geometry, surfaceMesh, result.Heights);
+            // Rebuild even when no cuts were accepted. The next plan must observe fresh
+            // TIN flow, accumulation, networks, basin descriptors and active lake routing.
             Clear(); planet = owner; topology = owner.GeodesicTopology;
-            // Deliberately call the build directly, not Initialize: no second carving pass.
             InitializeRenderHydrology(owner, geometry, surfaceMesh.vertices, System.Diagnostics.Stopwatch.StartNew(), frozenOcean);
+            basins = TinLakeBasins ?? GeodesicTinBasins.Build(TinDrainage, owner.minimumLakeBasinAreaFraction, owner.minimumLakeDepth);
+            results.Add(result);
+            Debug.Log(result.Summary(pass, passes), this);
+            LogCarvingHydrology($"pass-{pass}-of-{passes}-after");
         }
-        ValleyCarving = result;
+        ValleyCarvingResults = results.AsReadOnly();
+        ValleyCarving = results[results.Count - 1];
         retainedCarvingOcean = null; carvingTopology = null;
-        Debug.Log(result.Summary(), this);
-        LogCarvingHydrology(result.AffectedVertices > 0 ? "after" : "after-unchanged");
     }
 
     private void LogCarvingHydrology(string stage)
@@ -1051,7 +1059,8 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
         float offset = Mathf.Max(surfaceOffset * 3, planet.BasePlanetRadius * .0005f);
         Vector3 Project(Vector3 p) => transform.TransformPoint(p.normalized * (terrain.Radius(p.normalized) + offset));
         float marker = planet.BasePlanetRadius * .0015f * transform.lossyScale.x;
-        foreach (var c in ValleyCarving.Candidates)
+        foreach (var result in ValleyCarvingResults)
+        foreach (var c in result.Candidates)
         {
             Gizmos.color = Color.yellow; Gizmos.DrawWireSphere(transform.TransformPoint(c.Origin), marker);
             if (c.Path.Length == 0) { Gizmos.color = Color.red; Gizmos.DrawWireSphere(Project(c.Origin), marker * 1.4f); continue; }
@@ -1091,6 +1100,7 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
     public void Clear()
     {
         ValleyCarving = null; retainedCarvingOcean = null; carvingTopology = null;
+        ValleyCarvingResults = Array.Empty<GeodesicValleyCarving.Result>();
         if (lakeVisualRoot != null) lakeVisualRoot.SetActive(false);
         Release(lakeVisualRoot); Release(lakeMesh); Release(lakeMaterial); lakeVisualRoot = null; lakeMesh = null; lakeMaterial = null;
         GradeDiagnostics = null;
