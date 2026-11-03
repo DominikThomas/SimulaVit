@@ -180,7 +180,8 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
                 null, null, owner.BasePlanetRadius, owner.GeodesicSeaLevelRadius,
                 GeodesicValleyCarving.Normalize(owner.maximumValleyCarveDepth, GeodesicValleyCarving.DefaultDepth, 1f),
                 meanCellArea * GeodesicValleyCarving.Normalize(owner.minimumValleyCarveRunoff, GeodesicValleyCarving.DefaultRunoff, 1000000f),
-                GeodesicValleyCarving.Normalize(owner.valleyCarveWidth, GeodesicValleyCarving.DefaultWidth, 1f), TinLakeBasins);
+                GeodesicValleyCarving.Normalize(owner.valleyCarveWidth, GeodesicValleyCarving.DefaultWidth, 1f),
+                TinLakeBasins, surfaceMesh.vertices, visibleMicroBumpFraction);
             if (result.AffectedVertices > 0) owner.ApplyGeodesicValleySurface(geometry, surfaceMesh, result.Heights);
             results.Add(result);
             Debug.Log(result.Summary(pass, passes), this);
@@ -191,6 +192,7 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
             InitializeRenderHydrology(owner, geometry, surfaceMesh.vertices, System.Diagnostics.Stopwatch.StartNew(),
                 frozenOcean, intermediateCarving: pass < passes);
             LogCarvingHydrology($"pass-{pass}-of-{passes}-after");
+            Debug.Log(result.CoastalRebuildSummary(TinDrainage, pass, passes), this);
         }
         ValleyCarvingResults = results.AsReadOnly();
         ValleyCarving = results[results.Count - 1];

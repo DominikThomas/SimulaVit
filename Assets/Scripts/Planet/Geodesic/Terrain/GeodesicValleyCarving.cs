@@ -9,9 +9,10 @@ using UnityEngine;
 public sealed class GeodesicValleyCarving
 {
     public const float DefaultDepth = .005f, DefaultRunoff = 64f, DefaultWidth = .02f;
-    public const string Help = "1–5 passes on visible, unfiltered TIN terrain; flow and basins rebuild after each pass. Uses natural basin spills with bounded fallback search. Depth is the maximum cut per pass; depth and width use planet-local units. Runoff uses mean-cell-area equivalents. Width controls lateral falloff. Scene gizmos: green accepted, red rejected, yellow termination, cyan target.";
+    public const string Help = "1–5 passes on visible, unfiltered TIN terrain; flow and basins rebuild after each pass. Uses natural basin spills with bounded fallback search. Depth is the maximum cut per pass; depth and width use planet-local units. Coastal spill breaches require proven retained-ocean drainage, stay within eight local edge lengths and submerge by at most min(depth, 0.005). Runoff uses mean-cell-area equivalents. Width controls lateral falloff. Scene gizmos: green accepted, red rejected, yellow termination, cyan target.";
     private const int MaximumLabels = 8192, MaximumTargetProbes = 128, MaximumAffectedVertices = 8192;
     private const int MaximumAffectedFacets = MaximumAffectedVertices * 6;
+    private const int MaximumCoastalEdges = 8;
     private enum Target { River, LakeOutlet, OceanDrainage, Coastline, DownstreamBasin, None }
 
     public sealed class Candidate
@@ -26,6 +27,8 @@ public sealed class GeodesicValleyCarving
         public int BasinId = -1;
         public double OriginalSpillBarrier;
         public string FallbackReason;
+        public bool CoastalAttempt;
+        public double CoastalLengthLimit;
         internal int[] Vertices;
         internal Dictionary<int, float> Surface;
         internal TinPoint[] Continuation;
@@ -41,6 +44,7 @@ public sealed class GeodesicValleyCarving
         public int MatchedToBasin, SpillDirected, FallbackSearched, InvalidSpills;
         public int AffectedVertices, AffectedFacets;
         public double MaximumCut, MeanCut, PathLength;
+        public double CoastalSubmergenceLimit;
         public int Accepted => Candidates.Count(c => c.Accepted);
         public string Summary(int pass = 1, int passes = 1) => $"[GeodesicValleyCarving] enabled=True pass={pass}/{passes} eligible={Eligible} matched-to-basin={MatchedToBasin} searched={Searched} " +
             $"spill-directed={SpillDirected} fallback-searched={FallbackSearched} accepted-spill-carves={Candidates.Count(c => c.Accepted && c.SpillDirected)} accepted-fallback-carves={Candidates.Count(c => c.Accepted && !c.SpillDirected)} accepted={Accepted} " +
@@ -50,8 +54,10 @@ public sealed class GeodesicValleyCarving
             $"pathLength={PathLength:G6} affectedVertices={AffectedVertices} affectedFacets={AffectedFacets} maximumActualCut={MaximumCut:G6} meanActualCut={MeanCut:G6} " +
             $"connectedTargets(river/lake-outlet/ocean-drainage/coastline/downstream-basin)={Connected(0)}/{Connected(1)}/{Connected(2)}/{Connected(3)}/{Connected(4)} " +
             SpillStatistics() +
+            $"coastalAttempted={Candidates.Count(c => c.CoastalAttempt)} coastalAccepted={Candidates.Count(c => c.CoastalAttempt && c.Accepted)} " +
+            $"coastalRejectedNoOceanConnection={Rejected("coastal-no-ocean-connection")} coastalRejectedDepthOrDistance={Rejected("coastal-depth-limit") + Rejected("coastal-distance-limit")} coastalMaxSubmergence={CoastalSubmergenceLimit:G6} " +
             "connections=planned-not-post-rebuild-confirmed";
-        private string Reasons(bool spill) => string.Join(" ", new[] { "too-deep", "below-sea-level", "invalid-spill", "no-downstream-side", "lake", "conflict", "no-target", "search-distance-limit", "footprint-limit", "search-budget" }
+        private string Reasons(bool spill) => string.Join(" ", new[] { "too-deep", "below-sea-level", "coastal-no-ocean-connection", "coastal-depth-limit", "coastal-distance-limit", "invalid-spill", "no-downstream-side", "lake", "conflict", "no-target", "search-distance-limit", "footprint-limit", "search-budget" }
             .Select(reason => $"{(reason == "lake" ? "lake-protected" : !spill && reason == "search-budget" ? "fallback-search-budget" : reason)}={Candidates.Count(c => c.SpillDirected == spill && c.Rejection == reason)}"));
         private string SpillStatistics()
         {
@@ -62,6 +68,23 @@ public sealed class GeodesicValleyCarving
         }
         private int Rejected(string reason) => Candidates.Count(c => c.Rejection == reason);
         private int Connected(int kind) => Candidates.Count(c => c.Accepted && c.TargetKind == kind);
+
+        public string CoastalRebuildSummary(GeodesicTinHydrology rebuilt, int pass, int passes)
+        {
+            int resolved = 0, checkedTerminations = 0;
+            var sources = new HashSet<int>();
+            foreach (var c in Candidates.Where(c => c.CoastalAttempt && c.Accepted))
+                foreach (var incoming in c.Incoming)
+                {
+                    if (!sources.Add(incoming[0].Triangle)) continue;
+                    checkedTerminations++;
+                    rebuilt.TraceLakeOutlet(incoming[0], null, out var termination);
+                    if (termination == TinTermination.OceanCoast) resolved++;
+                }
+            return $"[GeodesicValleyCarving] coastalVerification=authoritative-rebuild pass={pass}/{passes} " +
+                $"closedBasinTerminationsChecked={checkedTerminations} closedBasinTerminationsResolvedToRetainedOcean={resolved} " +
+                $"unresolved={checkedTerminations - resolved} frozenOcean=unchanged";
+        }
     }
 
     private sealed class Label
@@ -90,18 +113,24 @@ public sealed class GeodesicValleyCarving
     private readonly GeodesicTinLakeRouting lakes;
     private readonly GeodesicTinBasins basins;
     private readonly float[] original;
+    private readonly Vector3[] completedSurface;
+    private readonly int[] coastalHops;
     private readonly bool[] ocean, protectedLake, protectedSubsea;
     private readonly HashSet<int> riverFacets = new HashSet<int>();
     private readonly Dictionary<int, TinLakeFlowNode> lakeNodes = new Dictionary<int, TinLakeFlowNode>();
     private readonly Dictionary<int, Escape> escapes = new Dictionary<int, Escape>();
     private readonly double radius, depth, width, seaFloor, step, maxLength, maxRadius;
+    private readonly double seaLevel, coastalFloor, coastalSubmergence;
+    private readonly float microBumpFraction;
 
     private GeodesicValleyCarving(GeodesicTinHydrology drainage, GeodesicHydrologyTopology topology,
         bool[] retainedOcean, GeodesicTinBasins basinTopology, GeodesicTinLakeGeometry geometry, GeodesicTinLakeRouting routing,
-        double planetRadius, double seaLevel, float maximumDepth, float carveWidth)
+        double planetRadius, double seaLevel, float maximumDepth, float carveWidth, Vector3[] renderedSurface, float visibleMicroBumpFraction)
     {
         tin = drainage; graph = topology; basins = basinTopology; lakes = routing; ocean = retainedOcean;
         original = tin.VisibleHeight; radius = planetRadius; depth = maximumDepth; width = carveWidth;
+        this.seaLevel = seaLevel; completedSurface = renderedSurface;
+        microBumpFraction = Mathf.Clamp(visibleMicroBumpFraction, 0f, .002f);
         step = Math.Max(tin.Epsilon * 8, radius * .000001);
         // Include the spherical facet sagitta: vertices above sea alone do not protect facet interiors.
         double maxEdge = 0;
@@ -109,13 +138,30 @@ public sealed class GeodesicValleyCarving
             for (int k = 0; k < graph.NeighborCounts[v]; k++)
                 maxEdge = Math.Max(maxEdge, Angle(v, graph.Neighbors6[v * 6 + k]));
         seaFloor = (seaLevel + step * 2) / Math.Cos(maxEdge);
+        // Reuse the existing incision setting, with the existing default depth as a hard
+        // shallow-water ceiling. This absolute floor cannot ratchet down across passes.
+        coastalSubmergence = Math.Min(depth, DefaultDepth);
+        coastalFloor = (seaLevel - coastalSubmergence + step * 2) / Math.Cos(maxEdge);
         maxRadius = radius * 8 * Math.PI / 180; maxLength = radius * 12 * Math.PI / 180;
         protectedLake = new bool[graph.CellCount];
         protectedSubsea = new bool[graph.CellCount];
+        // Proximity only bounds the exception's search; it is NEVER ocean-connectivity proof.
+        coastalHops = new int[graph.CellCount]; Array.Fill(coastalHops, -1);
+        var coastalQueue = new Queue<int>();
+        for (int v = 0; v < graph.CellCount; v++) if (ocean[v]) { coastalHops[v] = 0; coastalQueue.Enqueue(v); }
+        while (coastalQueue.Count > 0)
+        {
+            int v = coastalQueue.Dequeue(); if (coastalHops[v] >= MaximumCoastalEdges) continue;
+            for (int k = 0; k < graph.NeighborCounts[v]; k++)
+            {
+                int next = graph.Neighbors6[v * 6 + k]; if (coastalHops[next] >= 0) continue;
+                coastalHops[next] = coastalHops[v] + 1; coastalQueue.Enqueue(next);
+            }
+        }
         for (int v = 0; v < graph.CellCount; v++)
         {
-            // Do not lower a facet adjoining an excluded inland sea. Protect its entire
-            // one-ring, since keeping only the edited vertex above sea is insufficient.
+            // The ordinary path protects excluded inland seas and their one-ring. Only
+            // a bounded coastal retry with proposed-TIN ocean proof may relax this mask.
             if (ocean[v] || original[v] >= seaFloor) continue;
             protectedSubsea[v] = true;
             for (int k = 0; k < graph.NeighborCounts[v]; k++) protectedSubsea[graph.Neighbors6[v * 6 + k]] = true;
@@ -133,17 +179,18 @@ public sealed class GeodesicValleyCarving
 
     public static Result Plan(GeodesicTinHydrology tin, GeodesicHydrologyTopology graph, bool[] retainedOcean,
         GeodesicTinLakeGeometry geometry, GeodesicTinLakeRouting routing, double radius, double seaLevel,
-        float maximumDepth, double minimumRunoff, float width, GeodesicTinBasins basinTopology = null)
+        float maximumDepth, double minimumRunoff, float width, GeodesicTinBasins basinTopology = null,
+        Vector3[] completedSurface = null, float visibleMicroBumpFraction = .001f)
     {
         // Generation supplies raw basin topology from the active TIN, with no lake geometry
         // or routing until all carving passes finish. The fallback only observes topology.
-        var planner = new GeodesicValleyCarving(tin, graph, retainedOcean, basinTopology ?? GeodesicTinBasins.Build(tin), geometry, routing, radius, seaLevel, maximumDepth, width);
+        var planner = new GeodesicValleyCarving(tin, graph, retainedOcean, basinTopology ?? GeodesicTinBasins.Build(tin), geometry, routing, radius, seaLevel, maximumDepth, width, completedSurface, visibleMicroBumpFraction);
         return planner.Build(minimumRunoff);
     }
 
     private Result Build(double minimumRunoff)
     {
-        var result = new Result { Heights = (float[])original.Clone() };
+        var result = new Result { Heights = (float[])original.Clone(), CoastalSubmergenceLimit = coastalSubmergence };
         var starts = new SortedDictionary<int, TinPoint>();
         var incoming = new Dictionary<int, List<TinPoint[]>>();
         var matched = new Dictionary<int, TinBasinDescriptor>();
@@ -178,6 +225,13 @@ public sealed class GeodesicValleyCarving
             {
                 result.SpillDirected++;
                 c = PlanSpill(pair.Key, basin, spill);
+                if (c.Rejection == "below-sea-level")
+                {
+                    c = PlanSpill(pair.Key, basin, spill, coastal: true);
+                    if (c.Rejection == "too-deep" || c.Rejection == "below-sea-level") c.Rejection = "coastal-depth-limit";
+                    else if (c.Rejection == "search-distance-limit") c.Rejection = "coastal-distance-limit";
+                    else if (c.Rejection == "no-downstream-side" || c.Rejection == "no-target") c.Rejection = "coastal-no-ocean-connection";
+                }
             }
             else
             {
@@ -202,6 +256,9 @@ public sealed class GeodesicValleyCarving
                 if (!ProfileValid(proposed[i], proposed[j].Surface) || !ProfileValid(proposed[j], proposed[i].Surface))
                 { conflicts.Add(proposed[i]); conflicts.Add(proposed[j]); }
         foreach (var c in conflicts) c.Rejection = "conflict";
+        // Check the actual combined proposal with the SAME TIN tracer before committing.
+        // No accumulation, receiver substitution or ocean-mask expansion is performed.
+        VerifyCoastalProposals(result);
         var edges = new HashSet<ulong>();
         foreach (var c in result.Candidates.Where(c => c.Accepted))
         {
@@ -239,14 +296,18 @@ public sealed class GeodesicValleyCarving
             && Math.Abs(tin.Height(p) - basin.SpillElevation) <= tin.Epsilon;
     }
 
-    private Candidate PlanSpill(int start, TinBasinDescriptor basin, int spill)
+    private Candidate PlanSpill(int start, TinBasinDescriptor basin, int spill, bool coastal = false)
     {
         var c = new Candidate {
             SpillDirected = true, BasinId = basin.Id, OriginalSpillBarrier = Math.Max(0, basin.SpillElevation - original[start]),
             Origin = graph.CellDirections[start] * original[start], TargetPoint = tin.Direction(basin.Spill.Value) * original[spill],
-            TargetKind = (int)Target.DownstreamBasin
+            TargetKind = (int)Target.DownstreamBasin, CoastalAttempt = coastal,
+            CoastalLengthLimit = Math.Min(maxLength, MaximumCoastalEdges * LocalEdgeLength(start))
         };
-        if (original[start] <= seaFloor + step || basin.SpillElevation < seaFloor)
+        if (coastal && (coastalHops[start] < 0 || completedSurface == null))
+        { c.Rejection = "coastal-no-ocean-connection"; return c; }
+        double minimumFloor = coastal ? coastalFloor : seaFloor;
+        if (original[start] <= minimumFloor + step || basin.SpillElevation < minimumFloor)
         { c.Rejection = "below-sea-level"; return c; }
         if (c.OriginalSpillBarrier > depth) { c.Rejection = "too-deep"; return c; }
         if (protectedLake[start] || protectedLake[spill]) { c.Rejection = "lake"; return c; }
@@ -270,17 +331,19 @@ public sealed class GeodesicValleyCarving
             }
         interior.Remove(side); interior.Add(start); interior.Add(spill);
         var first = new Label { Vertex = start, Floor = original[start] };
-        var saddle = RouteGeometry(first, spill, interior, start, maxLength, false, out string reason);
+        double lengthLimit = coastal ? c.CoastalLengthLimit : maxLength;
+        var saddle = RouteGeometry(first, spill, interior, start, lengthLimit, false, out string reason, coastal);
         if (saddle == null) { c.Rejection = reason; return c; }
         SetPath(c, saddle);
 
-        var witness = Extend(saddle, side, start, maxLength, out reason);
+        var witness = Extend(saddle, side, start, lengthLimit, out reason, coastal);
         if (witness == null) { c.Rejection = reason; return c; }
         SetPath(c, witness);
 
         // Observe only a short existing TIN descent from the exact downstream witness.
         // The corridor stops after eight local edge lengths; the tracer is also step-bounded.
-        // A lower closed parent/downstream basin is a valid endpoint; no ocean proof is needed.
+        // A lower closed parent/downstream basin is valid for ordinary carving. Coastal
+        // retries must additionally pass VerifyCoastalProposals before any edit is committed.
         double downstreamLimit = Angle(spill, side) * radius * 8;
         var trace = tin.TraceLakeOutlet(tin.BasinPoint(triangle, side), null, out _, maximumSteps: 64);
         var corridor = new HashSet<int> { side };
@@ -296,7 +359,7 @@ public sealed class GeodesicValleyCarving
             }
         }
         foreach (int v in c.Vertices) if (v != side) corridor.Remove(v);
-        var end = RouteGeometry(witness, -1, corridor, start, Math.Min(maxLength, saddle.Length + downstreamLimit), true, out reason);
+        var end = RouteGeometry(witness, -1, corridor, start, Math.Min(lengthLimit, saddle.Length + downstreamLimit), true, out reason, coastal);
         if (end == null) { c.Rejection = reason; return c; }
         var chain = SetPath(c, end);
         // Preserve the local existing continuation; reaching another basin is intentionally OK.
@@ -321,7 +384,7 @@ public sealed class GeodesicValleyCarving
     // Geometric A* to the descriptor's spill, or a short descent inside its downstream
     // TIN trace corridor. These temporary labels never become drainage receivers.
     private Label RouteGeometry(Label first, int goal, HashSet<int> allowed, int origin,
-        double lengthLimit, bool descendingSide, out string rejection)
+        double lengthLimit, bool descendingSide, out string rejection, bool coastal = false)
     {
         var frontier = new SortedSet<Label>(new LabelOrder());
         var best = new Dictionary<int, Label> { [first.Vertex] = first };
@@ -338,7 +401,7 @@ public sealed class GeodesicValleyCarving
             {
                 int v = graph.Neighbors6[current.Vertex * 6 + k];
                 if (!allowed.Contains(v) || (descendingSide && original[v] >= original[current.Vertex])) continue;
-                var next = Extend(current, v, origin, lengthLimit, out string reason);
+                var next = Extend(current, v, origin, lengthLimit, out string reason, coastal);
                 if (next == null)
                 {
                     tooDeep |= reason == "too-deep"; subsea |= reason == "below-sea-level";
@@ -354,15 +417,18 @@ public sealed class GeodesicValleyCarving
         return null;
     }
 
-    private Label Extend(Label previous, int vertex, int origin, double lengthLimit, out string rejection)
+    private Label Extend(Label previous, int vertex, int origin, double lengthLimit, out string rejection, bool coastal = false)
     {
         rejection = null;
         double angle = Angle(previous.Vertex, vertex), length = previous.Length + angle * radius;
-        if (length > lengthLimit || Angle(origin, vertex) * radius > maxRadius)
+        if (length > lengthLimit || Angle(origin, vertex) * radius > maxRadius || (coastal && coastalHops[vertex] < 0))
         { rejection = "search-distance-limit"; return null; }
         double floor = Math.Min(original[vertex], previous.Floor * Math.Cos(angle) - step);
         double cut = original[vertex] - floor;
-        if (ocean[vertex] || floor < seaFloor || (protectedSubsea[vertex] && cut > 0))
+        // Retained ocean can only be an UNEDITED endpoint. Shallow coastal land receives
+        // a provisional exception, subject to complete proposed-TIN ocean verification.
+        if ((ocean[vertex] && (!coastal || cut > 0)) ||
+            (!ocean[vertex] && (floor < (coastal ? coastalFloor : seaFloor) || (!coastal && protectedSubsea[vertex] && cut > 0))))
         { rejection = "below-sea-level"; return null; }
         if (cut > depth) { rejection = "too-deep"; return null; }
         if (protectedLake[vertex] && cut > 0) { rejection = "lake"; return null; }
@@ -500,12 +566,15 @@ public sealed class GeodesicValleyCarving
                     if (cut > step * .01)
                     {
                         if (protectedLake[v]) { c.Rejection = "lake"; return; }
-                        // Retained water and already-subsea land are never lowered, even at valley margins.
+                        // Never lower retained ocean. Coastal margins obey the same shallow
+                        // floor and short footprint limit as the provisional centreline.
                         if (!ocean[v])
                         {
-                            if (protectedSubsea[v]) { c.Rejection = "below-sea-level"; return; }
+                            if (!c.CoastalAttempt && protectedSubsea[v]) { c.Rejection = "below-sea-level"; return; }
                             float h = (float)(original[v] - cut);
-                            if (h < seaFloor) { c.Rejection = "below-sea-level"; return; }
+                            if (h < (c.CoastalAttempt ? coastalFloor : seaFloor)) { c.Rejection = "below-sea-level"; return; }
+                            if (c.CoastalAttempt && (coastalHops[v] < 0 || Angle(c.Vertices[0], v) * radius > c.CoastalLengthLimit))
+                            { c.Rejection = "search-distance-limit"; return; }
                             if (!c.Surface.TryGetValue(v, out float old) || h < old) c.Surface[v] = h;
                             if (c.Surface.Count > MaximumAffectedVertices) { c.Rejection = "footprint-limit"; return; }
                         }
@@ -527,7 +596,7 @@ public sealed class GeodesicValleyCarving
         }
         c.AffectedVertices = c.Surface.Count; c.AffectedFacets = facets.Count; c.MeanCut = sum / Math.Max(1, c.AffectedVertices);
         if (c.MaximumCut > depth || c.MeanCut > depth) { c.Rejection = "too-deep"; return; }
-        if (c.Length > maxLength) { c.Rejection = "search-distance-limit"; return; }
+        if (c.Length > (c.CoastalAttempt ? c.CoastalLengthLimit : maxLength)) { c.Rejection = "search-distance-limit"; return; }
         if (c.AffectedVertices > MaximumAffectedVertices || c.AffectedFacets > MaximumAffectedFacets)
         { c.Rejection = "footprint-limit"; return; }
         if (c.AffectedVertices == 0) { c.Rejection = "no-target"; return; }
@@ -562,6 +631,59 @@ public sealed class GeodesicValleyCarving
         if (c.Continuation != null && !Descent(c.Continuation)) return false;
         if (c.Incoming != null && c.Incoming.Any(path => !Descent(path))) return false;
         return true;
+    }
+
+    private void VerifyCoastalProposals(Result result)
+    {
+        while (true)
+        {
+            Array.Copy(original, result.Heights, original.Length);
+            foreach (var c in result.Candidates.Where(c => c.Accepted))
+                foreach (var cut in c.Surface) result.Heights[cut.Key] = Math.Min(result.Heights[cut.Key], cut.Value);
+            var coastal = result.Candidates.Where(c => c.Accepted && c.CoastalAttempt).ToArray();
+            if (coastal.Length == 0) return;
+
+            // Match ApplyGeodesicValleySurface's float projection, then the authoritative
+            // rebuild's magnitude sampling. Reuse untouched completed vertices exactly.
+            var positions = (Vector3[])completedSurface.Clone(); var heights = new float[positions.Length];
+            float min = float.PositiveInfinity, max = float.NegativeInfinity;
+            for (int v = 0; v < positions.Length; v++)
+            {
+                if (result.Heights[v] < original[v]) positions[v] = positions[v].normalized * result.Heights[v];
+                heights[v] = positions[v].magnitude;
+                min = Math.Min(min, heights[v]); max = Math.Max(max, heights[v]);
+            }
+            double bump = (max - (double)min) * microBumpFraction;
+            var proposed = new GeodesicTinHydrology(graph.CellDirections, graph.Triangles, heights, heights,
+                ocean, (float)seaLevel, radius, tin.Epsilon, bump,
+                onSphere: true, allowBoundaryOutflow: false, subdivisionLevel: tin.SubdivisionLevel, completedSurface: positions);
+            bool removed = false;
+            foreach (var c in coastal)
+            {
+                bool connected = true;
+                // These exact sources previously terminated in the candidate's closed basin.
+                // Below sea alone is not sufficient: OceanCoast on this closed sphere can
+                // only be reported after the tracer encounters the frozen retained mask.
+                foreach (var incoming in c.Incoming)
+                {
+                    proposed.TraceLakeOutlet(incoming[0], null, out var termination);
+                    if (termination != TinTermination.OceanCoast) { connected = false; break; }
+                }
+                if (!connected) { c.Rejection = "coastal-no-ocean-connection"; removed = true; }
+                else c.TargetKind = (int)Target.Coastline;
+            }
+            if (!removed) return;
+            // Removing a failed proposal may remove support for another. Recheck the
+            // remaining combined surface; each repeat permanently rejects at least one.
+        }
+    }
+
+    private double LocalEdgeLength(int vertex)
+    {
+        double length = 0;
+        for (int k = 0; k < graph.NeighborCounts[vertex]; k++)
+            length = Math.Max(length, Angle(vertex, graph.Neighbors6[vertex * 6 + k]) * radius);
+        return length;
     }
 
     private double Angle(int a, int b)
