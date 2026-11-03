@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Text;
 using UnityEngine;
 
 public sealed class TinLakeFlowNode
@@ -17,6 +18,7 @@ public sealed class TinLakeFlowNode
     public readonly HashSet<int> ContributingParcels = new HashSet<int>();
     public readonly List<double> InletDischarges = new List<double>();
     public double Discharge { get; internal set; }
+    internal string CycleContext;
     public double StrongestInlet => InletDischarges.DefaultIfEmpty(0).Max();
     public TinLakeFlowNode(int basinId) { BasinId = basinId; }
 }
@@ -45,6 +47,7 @@ public sealed class GeodesicTinLakeRouting
     private readonly GeodesicTinHydrology tin;
     private readonly Dictionary<int, List<TinLakeFlowNode>> wetFacets = new Dictionary<int, List<TinLakeFlowNode>>();
     private readonly Dictionary<int, TinLakeFlowNode> nodes;
+    private readonly Dictionary<int, TinBasinDescriptor> descriptors;
     public IReadOnlyList<TinLakeFlowNode> Lakes { get; }
     public IReadOnlyList<TinLakeAdjustedReach> RiverReaches { get; private set; }
     public int DuplicateParcelSuppression { get; private set; }
@@ -56,7 +59,7 @@ public sealed class GeodesicTinLakeRouting
     private GeodesicTinLakeRouting(GeodesicTinHydrology source, GeodesicTinBasins basins, GeodesicTinLakeGeometry geometry)
     {
         tin = source; nodes = new Dictionary<int, TinLakeFlowNode>();
-        var descriptors = basins.Basins.ToDictionary(b => b.Id);
+        descriptors = basins.Basins.ToDictionary(b => b.Id);
         foreach (var body in geometry.Bodies.OrderBy(b => b.BasinId))
         {
             var node = new TinLakeFlowNode(body.BasinId) { Basin = descriptors[body.BasinId] }; nodes.Add(node.BasinId, node);
@@ -157,7 +160,6 @@ public sealed class GeodesicTinLakeRouting
             var path = tin.TraceLakeOutlet(spill, Departure, out var termination);
             if (result.FirstEntry(path, out var hit))
             {
-                if (hit.BasinId == node.BasinId) throw new InvalidOperationException("Lake outlet reentered its own water body.");
                 path = ClipAtEntry(path, hit); node.DownstreamLakeId = hit.BasinId;
             }
             // Reuse an existing dry channel by an exact same-facet, validated join. Its
@@ -193,6 +195,7 @@ public sealed class GeodesicTinLakeRouting
             foreach (var p in path) if (result.rawContributors.TryGetValue(p.Triangle, out var contributors)) contributors.Add(id);
             if (result.FirstEntry(path, out var hit)) result.nodes[hit.BasinId].DirectParcels.Add(id);
         });
+        foreach (var node in result.Lakes) node.CycleContext = result.DescribeOutlet(node);
         result.DuplicateParcelSuppression = ResolveDischarge(result.Lakes, id => tin.ParcelRunoff(id));
         int outletId = reaches.Count;
         foreach (var node in result.Lakes)
@@ -223,7 +226,7 @@ public sealed class GeodesicTinLakeRouting
 
     /// <summary>Deterministic DAG transport of unique original parcels. Public for focused
     /// conservation tests, including future rendered terminal nodes with no downstream edge.</summary>
-    public static int ResolveDischarge(IEnumerable<TinLakeFlowNode> source, Func<int, double> runoff)
+    public static int ResolveDischarge(IEnumerable<TinLakeFlowNode> source, Func<int, double> runoff, Action<string> cycleLog = null)
     {
         var nodes = source.ToDictionary(n => n.BasinId); var indegree = nodes.Keys.ToDictionary(id => id, id => 0);
         foreach (var n in nodes.Values)
@@ -241,8 +244,73 @@ public sealed class GeodesicTinLakeRouting
             foreach (int parcel in n.ContributingParcels) if (!downstream.ContributingParcels.Add(parcel)) duplicates++;
             if (--indegree[downstream.BasinId] == 0) ready.Add(downstream.BasinId);
         }
-        if (processed != nodes.Count) throw new InvalidOperationException("Cycle in rendered lake routing; refusing nonconservative outlets.");
+        if (processed != nodes.Count)
+        {
+            string report = DescribeCycles(nodes);
+            if (cycleLog != null) cycleLog(report); else UnityEngine.Debug.LogError(report);
+            throw new InvalidOperationException("Cycle in rendered lake routing; refusing nonconservative outlets.\n" + report);
+        }
         return duplicates;
+    }
+
+    private bool IsAncestor(int ancestor, int child)
+    {
+        var seen = new HashSet<int>();
+        while (descriptors.TryGetValue(child, out var basin) && seen.Add(child))
+        { child = basin.ParentBasinId; if (child == ancestor) return true; }
+        return false;
+    }
+
+    private string DescribeOutlet(TinLakeFlowNode node)
+    {
+        var b = node.Basin;
+        string Point(TinPoint p) => FormattableString.Invariant($"facet={p.Triangle} bary=({p.A:R},{p.B:R},{p.C:R}) height={tin.Height(p):R}");
+        int spillVertex = -1;
+        if (b.Spill.HasValue)
+        {
+            var p = b.Spill.Value;
+            if (p.A == 1) spillVertex = tin.BasinVertex(p.Triangle, 0);
+            else if (p.B == 1) spillVertex = tin.BasinVertex(p.Triangle, 1);
+            else if (p.C == 1) spillVertex = tin.BasinVertex(p.Triangle, 2);
+        }
+        TinPoint? downstream = null;
+        for (int i = 1; i < node.OutletPath.Length; i++)
+            if (node.OutletPath[i - 1].Triangle == node.OutletPath[i].Triangle && !node.OutletPath[i - 1].Equals(node.OutletPath[i]))
+            { downstream = Mix(node.OutletPath[i - 1], node.OutletPath[i], .5); break; }
+        var owners = downstream.HasValue ? Lakes.Where(n => Inside(downstream.Value, n.BasinId)).Select(n => n.BasinId).ToArray() : Array.Empty<int>();
+        string Classify(int id) => id == b.Id ? "same" : IsAncestor(id, b.Id) ? "ancestor" : IsAncestor(b.Id, id) ? "descendant" : "unrelated";
+        var suppressed = descriptors.Values.Where(d => d.QualifiesForVisibleLake && !nodes.ContainsKey(d.Id) &&
+            IsAncestor(b.Id, d.Id) && b.SpillElevation >= d.SpillElevation).Select(d => d.Id).OrderBy(id => id);
+        string target = node.DownstreamLakeId >= 0 ? "rendered-lake" : node.JoinNetwork >= 0 ? "ordinary-TIN-channel" : node.OutletTermination.ToString();
+        return FormattableString.Invariant($"lake={node.BasinId} basin={b.Id} parent={b.ParentBasinId} floor={b.FloorElevation:R} spill={b.SpillElevation:R} ") +
+            $"spillVertex={spillVertex} spillPoint=[{(b.Spill.HasValue ? Point(b.Spill.Value) : "none")}] " +
+            $"outletTargetType={target} targetLake={node.DownstreamLakeId} targetBasin={node.DownstreamLakeId} joinNetwork={node.JoinNetwork} " +
+            $"topologyDownstreamFacet={b.DownstreamTriangle} topologyDownstreamVertex={b.DownstreamVertex} downstreamSample=[{(downstream.HasValue ? Point(downstream.Value) : "none")}] " +
+            $"insideSame={owners.Contains(b.Id)} insideAncestor={owners.Any(id => IsAncestor(id, b.Id))} insideDescendant={owners.Any(id => IsAncestor(b.Id, id))} " +
+            $"insideUnrelated={owners.Any(id => Classify(id) == "unrelated")} owners=[{string.Join(",", owners.Select(id => id + ":" + Classify(id)))}] " +
+            $"survivedHierarchySuppression=True suppressedSourceBasins=[{string.Join(",", suppressed)}] terminal={node.Terminal}";
+    }
+
+    private static string DescribeCycles(Dictionary<int, TinLakeFlowNode> graph)
+    {
+        var report = new StringBuilder("[GeodesicTinLakeRouting] cycle failure (rendered lake IDs are basin IDs)");
+        var visited = new HashSet<int>();
+        foreach (int start in graph.Keys.OrderBy(id => id))
+        {
+            var positions = new Dictionary<int, int>(); var path = new List<int>(); int current = start;
+            while (graph.ContainsKey(current) && !visited.Contains(current) && !positions.ContainsKey(current))
+            { positions.Add(current, path.Count); path.Add(current); current = graph[current].DownstreamLakeId; }
+            if (positions.TryGetValue(current, out int first))
+            {
+                var cycle = path.Skip(first).ToArray();
+                string Label(int id) => $"Lake {id} / Basin {graph[id].Basin?.Id ?? id}";
+                report.AppendLine().Append("type=").Append(cycle.Length == 1 ? "self-cycle" : cycle.Length == 2 ? "2-node-cycle" : "longer-cycle")
+                    .Append(" length=").Append(cycle.Length).Append(" ").Append(string.Join(" -> ", cycle.Concat(new[] { current }).Select(Label)));
+                foreach (int id in cycle) report.AppendLine().Append(graph[id].CycleContext ?? $"lake={id} basin={id} targetLake={graph[id].DownstreamLakeId} topology=unavailable (synthetic node)");
+            }
+            visited.UnionWith(path);
+        }
+        return report.ToString();
     }
     public double[] RawReachDischarge(int network)
     {

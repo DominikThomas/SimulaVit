@@ -145,6 +145,7 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
     private int pathSettingsHash;
     private bool[] retainedCarvingOcean;
     private GeodesicHydrologyTopology carvingTopology;
+    private bool intermediateTinCarving;
     public GeodesicValleyCarving.Result ValleyCarving { get; private set; }
     public IReadOnlyList<GeodesicValleyCarving.Result> ValleyCarvingResults { get; private set; } = Array.Empty<GeodesicValleyCarving.Result>();
 
@@ -154,7 +155,10 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
         if (owner == null || owner.CurrentGridType != PlanetGridType.GeodesicIcosphere ||
             owner.GeodesicTopology == null || surfaceMesh == null) return;
         planet = owner; topology = owner.GeodesicTopology;
-        InitializeRenderHydrology(owner, geometry, surfaceMesh.vertices, System.Diagnostics.Stopwatch.StartNew());
+        bool willCarve = owner.enableTerminationValleyCarving && !owner.GeodesicValleyCarvingAttempted &&
+            owner.hydrologyTerrainMode == HydrologyTerrainMode.Visible && tinFilterStrength == 0f;
+        InitializeRenderHydrology(owner, geometry, surfaceMesh.vertices, System.Diagnostics.Stopwatch.StartNew(),
+            intermediateCarving: willCarve);
         if (!owner.enableTerminationValleyCarving)
         { retainedCarvingOcean = null; carvingTopology = null; Debug.Log("[GeodesicValleyCarving] enabled=False terrainChanged=False", this); return; }
         if (owner.GeodesicValleyCarvingAttempted) return;
@@ -167,23 +171,25 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
         int passes = Mathf.Clamp(owner.valleyCarvingPasses, 1, 5);
         var results = new List<GeodesicValleyCarving.Result>(passes);
         var frozenOcean = retainedCarvingOcean;
-        var basins = TinLakeBasins ?? GeodesicTinBasins.Build(TinDrainage, owner.minimumLakeBasinAreaFraction, owner.minimumLakeDepth);
         for (int pass = 1; pass <= passes; pass++)
         {
             LogCarvingHydrology($"pass-{pass}-of-{passes}-before");
+            // Only raw basin topology guides erosion. Future lake eligibility must not
+            // supply protected footprints, lake entries or lake-outlet targets.
             var result = GeodesicValleyCarving.Plan(TinDrainage, carvingTopology, frozenOcean,
-                TinLakeGeometry, TinLakeRouting, owner.BasePlanetRadius, owner.GeodesicSeaLevelRadius,
+                null, null, owner.BasePlanetRadius, owner.GeodesicSeaLevelRadius,
                 GeodesicValleyCarving.Normalize(owner.maximumValleyCarveDepth, GeodesicValleyCarving.DefaultDepth, 1f),
                 meanCellArea * GeodesicValleyCarving.Normalize(owner.minimumValleyCarveRunoff, GeodesicValleyCarving.DefaultRunoff, 1000000f),
-                GeodesicValleyCarving.Normalize(owner.valleyCarveWidth, GeodesicValleyCarving.DefaultWidth, 1f), basins);
+                GeodesicValleyCarving.Normalize(owner.valleyCarveWidth, GeodesicValleyCarving.DefaultWidth, 1f), TinLakeBasins);
             if (result.AffectedVertices > 0) owner.ApplyGeodesicValleySurface(geometry, surfaceMesh, result.Heights);
-            // Rebuild even when no cuts were accepted. The next plan must observe fresh
-            // TIN flow, accumulation, networks, basin descriptors and active lake routing.
-            Clear(); planet = owner; topology = owner.GeodesicTopology;
-            InitializeRenderHydrology(owner, geometry, surfaceMesh.vertices, System.Diagnostics.Stopwatch.StartNew(), frozenOcean);
-            basins = TinLakeBasins ?? GeodesicTinBasins.Build(TinDrainage, owner.minimumLakeBasinAreaFraction, owner.minimumLakeDepth);
             results.Add(result);
             Debug.Log(result.Summary(pass, passes), this);
+            // Rebuild even when no cuts were accepted. The next plan must observe fresh
+            // TIN flow, accumulation, networks and raw basin descriptors. Only the rebuild
+            // after the last carve qualifies lakes, integrates them and creates visuals.
+            Clear(); planet = owner; topology = owner.GeodesicTopology;
+            InitializeRenderHydrology(owner, geometry, surfaceMesh.vertices, System.Diagnostics.Stopwatch.StartNew(),
+                frozenOcean, intermediateCarving: pass < passes);
             LogCarvingHydrology($"pass-{pass}-of-{passes}-after");
         }
         ValleyCarvingResults = results.AsReadOnly();
@@ -196,7 +202,8 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
         var d = TinDiagnostics;
         Debug.Log($"[GeodesicValleyCarving] hydrology={stage} networks={d.RiverNetworks} oceanTerminations={d.OceanTerminations} closedBasinTerminations={d.ClosedBasinTerminations} " +
             $"meanLength={d.MeanNetworkLength:G6} maxLength={d.MaxNetworkLength:G6} confluences={d.Confluences} unexpectedBroken={d.UnexpectedBrokenNetworks} " +
-            $"unexpectedInland={d.UnexpectedInlandBreaks} renderedLakes={TinLakeGeometry?.Bodies.Count ?? 0}", this);
+            $"unexpectedInland={d.UnexpectedInlandBreaks} rawBasins={TinLakeBasins?.Basins.Count ?? 0} " +
+            $"basinTopology={(intermediateTinCarving ? "intermediate-carving" : "final")} renderedLakes={TinLakeGeometry?.Bodies.Count ?? 0}", this);
     }
 
     // Preserved, inactive reference for the historical L6 corridor experiments.
@@ -432,9 +439,10 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
     public int LakeAtDirection(Vector3 localDirection) => LakeGeometry != null ? LakeGeometry.BasinAtDirection(localDirection) : -1;
 
     private void InitializeRenderHydrology(PlanetGenerator owner, IcosphereRenderGeometry geometry,
-        Vector3[] completedSurface, System.Diagnostics.Stopwatch watch, bool[] frozenOcean = null)
+        Vector3[] completedSurface, System.Diagnostics.Stopwatch watch, bool[] frozenOcean = null, bool intermediateCarving = false)
     {
         renderHydrology = true;
+        intermediateTinCarving = intermediateCarving;
         // This lightweight vertex adjacency is used ONLY for retained-ocean component mapping.
         // River geometry, gradients, connectivity and runoff all use the render triangles.
         var oceanTopology = GeodesicHydrologyTopology.Build(geometry);
@@ -484,16 +492,27 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
             tinSimulationCells[t] = GeodesicOceanConnectivity.FindNearestCell(owner.GeodesicTopology, ChannelAnchors[t], seed);
             if (!TinDrainage.IsOcean(TinDrainage.Centroid(t))) landCells++;
         }
-        // Static lake surfaces observe the completed TIN; river routing remains independent.
+        // BuildAdaptive already computes raw flow, accumulation and networks. Intermediate
+        // passes need that data and basin topology, but no shoreline routing or ribbon meshes.
         topologyMilliseconds = watch.Elapsed.TotalMilliseconds;
-        RefreshTinLakeVisuals();
-        RebuildRenderHydrologyVisuals();
+        if (intermediateTinCarving)
+        {
+            TinLakeBasins = BuildUnqualifiedTinBasins();
+            Debug.Log("[GeodesicTIN] basinTopology=intermediate-carving lakeConstruction=deferred lakeRouting=deferred riverVisuals=deferred " +
+                TinLakeBasins.Summary(), this);
+        }
+        else
+        {
+            RefreshTinLakeVisuals();
+            RebuildRenderHydrologyVisuals();
+        }
         Debug.Log($"[GeodesicTIN] simulationSubdivision={owner.GeodesicTopology.SubdivisionLevel} renderSubdivision={geometry.SubdivisionLevel} " +
             $"vertices={geometry.VertexCount} configuredThreshold={riverFlowThreshold:G6} resolvedAreaThreshold={ResolvedDrainageAreaThreshold:G9} " +
             $"epsilon={TinDrainage.Epsilon:G9} visibleMicroBumpThreshold={TinDrainage.VisibleBumpTolerance:G9} " +
             $"heightSource={owner.hydrologyTerrainMode} routing=continuous-facet-gradient rawDebug=" + drawRawTrianglePaths, this);
         Debug.Log(TinDiagnostics.Summary(), this);
-        Debug.Log("[GeodesicTIN] Rendered lake nodes use exact shoreline entries and unique TIN runoff parcels.", this);
+        if (!intermediateTinCarving)
+            Debug.Log("[GeodesicTIN] Rendered lake nodes use exact shoreline entries and unique TIN runoff parcels.", this);
     }
 
     private double[] MapSimulationRunoffToTriangles(double[] supplied)
@@ -515,6 +534,7 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
 
     private void RebuildRenderHydrologyVisuals(bool reuseRawNetworks = false)
     {
+        if (intermediateTinCarving) return;
         ClearVisual(); paths.Clear(); mouths.Clear();
         visibleReaches = riverCells = riverMouths = 0;
         if (TinDrainage == null || planet == null) return;
@@ -870,18 +890,30 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
         return -1;
     }
 
+    // The detector retains every raw depression regardless of its thresholds. A finite
+    // unreachable depth defers all lake eligibility without changing basin detection or
+    // reading the configured lake thresholds. Floor/spill/parent/downstream data is intact.
+    private GeodesicTinBasins BuildUnqualifiedTinBasins() =>
+        GeodesicTinBasins.Build(TinDrainage, minimumAreaFraction: 0d, minimumDepth: double.MaxValue);
+
     [ContextMenu("Refresh TIN Lake Surfaces Only")]
     public void RefreshTinLakeVisuals()
     {
-        if (!renderHydrology || TinDrainage == null || planet == null) return;
+        if (intermediateTinCarving || !renderHydrology || TinDrainage == null || planet == null) return;
         if (lakeVisualRoot != null) lakeVisualRoot.SetActive(false);
         Release(lakeVisualRoot); Release(lakeMesh); Release(lakeMaterial);
         lakeVisualRoot = null; lakeMesh = null; lakeMaterial = null;
-        TinLakeBasins = null; TinLakeGeometry = null;
-        if (!planet.generateHydrologicalLakes) return;
+        TinLakeBasins = null; TinLakeGeometry = null; TinLakeRouting = null;
+        if (!planet.generateHydrologicalLakes)
+        {
+            TinLakeBasins = BuildUnqualifiedTinBasins();
+            Debug.Log("[GeodesicTIN] basinTopology=final lakeConstruction=disabled " + TinLakeBasins.Summary(), this);
+            return;
+        }
         TinLakeBasins = GeodesicTinBasins.Build(TinDrainage, planet.minimumLakeBasinAreaFraction, planet.minimumLakeDepth);
+        Debug.Log("[GeodesicTIN] basinTopology=final lakeConstruction=final " + TinLakeBasins.Summary(), this);
         TinLakeGeometry = GeodesicTinLakeGeometry.Build(TinDrainage, TinLakeBasins);
-        Debug.Log(TinLakeGeometry.Summary(), this);
+        Debug.Log(TinLakeGeometry.Summary() + " lakeConstruction=final", this);
         if (TinLakeGeometry.Triangles.Length == 0) return;
         lakeMesh = new Mesh { name = "Geodesic TIN Lake Surfaces", indexFormat = IndexFormat.UInt32 };
         lakeMesh.vertices = TinLakeGeometry.Vertices; lakeMesh.triangles = TinLakeGeometry.Triangles;
@@ -1108,7 +1140,7 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
         LakeConnectedReaches = LakeBridgedReaches = LakeInlets = LakeOutlets = SuppressedProjectionMismatch = SuppressedCorridorFailure = UnrenderedSmallDepression = TrueTopologyFailure = InlandVisibleTerminations = OceanConnectedChains = 0;
         ClearVisual(); paths.Clear(); mouths.Clear(); Drainage = null; TinDrainage = null; tinSimulationCells = null; terrain = null; topology = null; planet = null;
         ChannelAnchors = Array.Empty<Vector3>(); RiverStrength = Array.Empty<float>();
-        renderHydrology = false; routingHeights = null;
+        renderHydrology = false; intermediateTinCarving = false; routingHeights = null;
         HydrologyTerrainSummary = null; HydrologyTerrainInputHeights = null;
         landCells = riverCells = visibleReaches = suppressedUphillReaches = riverMouths = unresolvedSinks = filledCells = majorBasinCells = 0;
         topologyMilliseconds = visualMilliseconds = 0d;

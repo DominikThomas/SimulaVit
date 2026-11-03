@@ -135,8 +135,8 @@ public sealed class GeodesicValleyCarving
         GeodesicTinLakeGeometry geometry, GeodesicTinLakeRouting routing, double radius, double seaLevel,
         float maximumDepth, double minimumRunoff, float width, GeodesicTinBasins basinTopology = null)
     {
-        // Reuse rendered-lake topology, or observe the same active TIN when lakes are disabled.
-        // This does not create lake geometry or replace any drainage receivers.
+        // Generation supplies raw basin topology from the active TIN, with no lake geometry
+        // or routing until all carving passes finish. The fallback only observes topology.
         var planner = new GeodesicValleyCarving(tin, graph, retainedOcean, basinTopology ?? GeodesicTinBasins.Build(tin), geometry, routing, radius, seaLevel, maximumDepth, width);
         return planner.Build(minimumRunoff);
     }
