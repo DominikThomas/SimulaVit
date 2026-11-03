@@ -13,7 +13,10 @@ public sealed class TinLakeFlowNode
     public TinPoint[] OutletPath { get; internal set; } = Array.Empty<TinPoint>();
     public TinTermination OutletTermination { get; internal set; }
     public int JoinNetwork { get; internal set; } = -1;
-    public bool Terminal => OutletPath.Length < 2;
+    // A shared shoreline can transfer discharge without a dry, visible outlet segment.
+    public bool Terminal => DownstreamLakeId < 0 && !ExitsAtSpill && OutletPath.Length < 2;
+    public TinPoint? DownstreamSample { get; internal set; }
+    public bool ExitsAtSpill { get; internal set; }
     public readonly HashSet<int> DirectParcels = new HashSet<int>();
     public readonly HashSet<int> ContributingParcels = new HashSet<int>();
     public readonly List<double> InletDischarges = new List<double>();
@@ -52,6 +55,9 @@ public sealed class GeodesicTinLakeRouting
     public IReadOnlyList<TinLakeAdjustedReach> RiverReaches { get; private set; }
     public int DuplicateParcelSuppression { get; private set; }
     public int FlowConservationErrors { get; private set; }
+    public int SharedSaddleLakes { get; private set; }
+    public double ConservationInput { get; private set; }
+    public double ConservationOutput { get; private set; }
     public double BuildMilliseconds { get; private set; }
     private readonly Dictionary<int, HashSet<int>> rawContributors = new Dictionary<int, HashSet<int>>();
     private readonly Dictionary<int, List<(int Start, HashSet<int> Parcels)>> addedToNetwork = new Dictionary<int, List<(int, HashSet<int>)>>();
@@ -72,9 +78,60 @@ public sealed class GeodesicTinLakeRouting
             }
         }
         Lakes = nodes.Values.OrderBy(n => n.BasinId).ToArray();
+        SharedSaddleLakes = Lakes.Where(n => n.Basin.HasEscape).GroupBy(n => SpillVertex(n.Basin))
+            .Where(g => g.Key >= 0 && g.Count() > 1).Sum(g => g.Count());
     }
     private static TinPoint Mix(TinPoint a, TinPoint b, double f) => new TinPoint(a.Triangle, a.A + (b.A - a.A) * f, a.B + (b.B - a.B) * f, a.C + (b.C - a.C) * f);
     private bool Inside(TinPoint p, int id) => wetFacets.TryGetValue(p.Triangle, out var owners) && owners.Any(n => n.BasinId == id && tin.Height(p) < n.Basin.SpillElevation);
+
+    private int SpillVertex(TinBasinDescriptor basin)
+    {
+        if (!basin.Spill.HasValue) return -1;
+        var p = basin.Spill.Value;
+        return p.A == 1 ? tin.BasinVertex(p.Triangle, 0) : p.B == 1 ? tin.BasinVertex(p.Triangle, 1) :
+            p.C == 1 ? tin.BasinVertex(p.Triangle, 2) : -1;
+    }
+
+    private static TinPoint? FirstDownstreamSample(IReadOnlyList<TinPoint> path)
+    {
+        for (int i = 1; i < path.Count; i++)
+            if (path[i - 1].Triangle == path[i].Triangle && !path[i - 1].Equals(path[i]))
+                return Mix(path[i - 1], path[i], .5);
+        return null;
+    }
+
+    private TinPoint[] TraceSpillOutlet(TinLakeFlowNode node, out TinTermination termination)
+    {
+        var basin = node.Basin; var spill = basin.Spill.Value;
+        int facet = basin.DownstreamTriangle, vertex = basin.DownstreamVertex;
+        bool hasWitness = facet >= 0 && facet < tin.TriangleCount && vertex >= 0 && vertex < tin.BasinVertexCount;
+        if (hasWitness)
+        {
+            var start = tin.TransferLakePoint(spill, facet); var witness = tin.BasinPoint(facet, vertex);
+            hasWitness = tin.BasinFaceValid(facet) && Math.Abs(start.A + start.B + start.C - 1) <= 1e-9 &&
+                witness.A + witness.B + witness.C == 1 && vertex != SpillVertex(basin) &&
+                Math.Abs(tin.Height(start) - basin.SpillElevation) <= tin.Epsilon && tin.Height(witness) <= basin.SpillElevation;
+        }
+        // The lower-star sweep recorded this facet on the winning side BEFORE merging
+        // the source basin. Other incident facets may descend into upstream sibling lakes
+        // sharing the saddle. Being outside this lake alone does not make them downstream.
+        // Keep the existing continuous tracer; restrict only its first descent cone.
+        bool Departure(TinPoint a, TinPoint b) => hasWitness && a.Triangle == facet &&
+            !Inside(Mix(a, b, .5), basin.Id);
+        var path = tin.TraceLakeOutlet(spill, Departure, out termination);
+        node.OutletTermination = termination;
+        node.DownstreamSample = FirstDownstreamSample(path);
+        node.ExitsAtSpill = !node.DownstreamSample.HasValue && termination == TinTermination.OceanCoast;
+        if (node.ExitsAtSpill) return path; // An exact ocean/boundary spill needs no invented dry segment.
+        if (!hasWitness || !node.DownstreamSample.HasValue || Inside(node.DownstreamSample.Value, basin.Id))
+        {
+            string report = "[GeodesicTinLakeRouting] unresolved overflowing outlet; refusing invented terminal storage. " +
+                $"validSpillWitness={hasWitness} traceTermination={termination} " + DescribeOutlet(node);
+            UnityEngine.Debug.LogError(report);
+            throw new InvalidOperationException(report);
+        }
+        return path;
+    }
 
     public bool FirstEntry(IReadOnlyList<TinPoint> path, out TinLakeEntry entry)
     {
@@ -149,15 +206,13 @@ public sealed class GeodesicTinLakeRouting
             if (!channelEnds.TryGetValue(t, out var list)) channelEnds.Add(t, list = new List<(int, int)>());
             list.Add((r.RawNetworkId, j));
         }
-        // Outlet geometry is traced with the SAME continuous field. Only its initial saddle
-        // descent is restricted to the side outside its own wet polygon; there is no nudge.
+        // The first departure uses the recorded downstream spill facet, not whichever
+        // adjacent depression has the steepest descent. There is no shoreline/height nudge.
         foreach (var node in result.Lakes)
         {
             var basin = node.Basin;
             if (!basin.HasEscape) continue;
-            var spill = basin.Spill.Value;
-            bool Departure(TinPoint a, TinPoint b) => !result.Inside(Mix(a, b, .5), basin.Id);
-            var path = tin.TraceLakeOutlet(spill, Departure, out var termination);
+            var path = result.TraceSpillOutlet(node, out var termination);
             if (result.FirstEntry(path, out var hit))
             {
                 path = ClipAtEntry(path, hit); node.DownstreamLakeId = hit.BasinId;
@@ -165,7 +220,7 @@ public sealed class GeodesicTinLakeRouting
             // Reuse an existing dry channel by an exact same-facet, validated join. Its
             // downstream lake destination is followed through the existing raw junctions.
             bool joined = false;
-            for (int i = 1; i < path.Length && !joined; i++)
+            for (int i = 1; i < path.Length && !joined && node.DownstreamLakeId != node.BasinId; i++)
             {
                 if (path[i - 1].Triangle != path[i].Triangle) continue;
                 if (!channelEnds.TryGetValue(path[i].Triangle, out var ends)) continue;
@@ -176,13 +231,19 @@ public sealed class GeodesicTinLakeRouting
                         var target = r.Samples[j];
                         if (r.Samples[j - 1].Triangle != target.Triangle || target.Triangle != path[i].Triangle || tin.Height(target) > tin.Height(path[i - 1])) continue;
                         var candidate = path.Take(i).Concat(new[] { target }).ToArray();
+                        // A dry-channel join must retain an actual departure from the
+                        // saddle; a coincident rim point cannot override its witnessed side.
+                        if (result.Directions(candidate).Length < 2) continue;
                         if (!tin.ValidateLakePath(candidate.Concat(r.Samples.Skip(j + 1)).ToArray()) || result.FirstEntry(candidate, out _)) continue;
                         path = candidate; node.JoinNetwork = r.RawNetworkId; termination = TinTermination.Confluence;
+                        node.DownstreamSample = FirstDownstreamSample(path);
                         node.DownstreamLakeId = destinations[r.RawNetworkId]; joined = true;
                         break;
                 }
             }
             node.OutletPath = path; node.OutletTermination = termination;
+            // Retain the proven downstream sample and logical lake edge even when exact
+            // shoreline clipping leaves no dry ribbon between equal-level touching lakes.
             if (result.Directions(path).Length < 2) node.OutletPath = Array.Empty<TinPoint>();
         }
 
@@ -200,7 +261,7 @@ public sealed class GeodesicTinLakeRouting
         int outletId = reaches.Count;
         foreach (var node in result.Lakes)
         {
-            if (!node.Terminal && node.Discharge > 0 && node.Discharge >= minimumVisibleDischarge) node.OutletReachId = outletId++;
+            if (node.OutletPath.Length >= 2 && node.Discharge > 0 && node.Discharge >= minimumVisibleDischarge) node.OutletReachId = outletId++;
             if (node.JoinNetwork < 0 || node.Discharge <= 0) continue;
             int network = node.JoinNetwork; TinPoint join = node.OutletPath.Last(); var seen = new HashSet<int>();
             while (network >= 0 && seen.Add(network))
@@ -221,6 +282,9 @@ public sealed class GeodesicTinLakeRouting
         double direct = result.Lakes.Sum(n => n.DirectParcels.Sum(id => tin.ParcelRunoff(id)));
         double deliveredOrHeld = result.Lakes.Where(n => n.DownstreamLakeId < 0).Sum(n => n.Discharge);
         if (Math.Abs(direct - deliveredOrHeld) > Math.Max(1e-9, direct * 1e-9)) result.FlowConservationErrors++;
+        result.ConservationInput = direct; result.ConservationOutput = deliveredOrHeld;
+        if (result.FlowConservationErrors > 0 || result.DuplicateParcelSuppression > 0)
+            throw new InvalidOperationException("Rendered lake routing did not conserve unique runoff parcels. " + result.Summary());
         result.BuildMilliseconds = watch.Elapsed.TotalMilliseconds; return result;
     }
 
@@ -265,18 +329,8 @@ public sealed class GeodesicTinLakeRouting
     {
         var b = node.Basin;
         string Point(TinPoint p) => FormattableString.Invariant($"facet={p.Triangle} bary=({p.A:R},{p.B:R},{p.C:R}) height={tin.Height(p):R}");
-        int spillVertex = -1;
-        if (b.Spill.HasValue)
-        {
-            var p = b.Spill.Value;
-            if (p.A == 1) spillVertex = tin.BasinVertex(p.Triangle, 0);
-            else if (p.B == 1) spillVertex = tin.BasinVertex(p.Triangle, 1);
-            else if (p.C == 1) spillVertex = tin.BasinVertex(p.Triangle, 2);
-        }
-        TinPoint? downstream = null;
-        for (int i = 1; i < node.OutletPath.Length; i++)
-            if (node.OutletPath[i - 1].Triangle == node.OutletPath[i].Triangle && !node.OutletPath[i - 1].Equals(node.OutletPath[i]))
-            { downstream = Mix(node.OutletPath[i - 1], node.OutletPath[i], .5); break; }
+        int spillVertex = SpillVertex(b);
+        TinPoint? downstream = node.DownstreamSample;
         var owners = downstream.HasValue ? Lakes.Where(n => Inside(downstream.Value, n.BasinId)).Select(n => n.BasinId).ToArray() : Array.Empty<int>();
         string Classify(int id) => id == b.Id ? "same" : IsAncestor(id, b.Id) ? "ancestor" : IsAncestor(b.Id, id) ? "descendant" : "unrelated";
         var suppressed = descriptors.Values.Where(d => d.QualifiesForVisibleLake && !nodes.ContainsKey(d.Id) &&
@@ -288,7 +342,8 @@ public sealed class GeodesicTinLakeRouting
             $"topologyDownstreamFacet={b.DownstreamTriangle} topologyDownstreamVertex={b.DownstreamVertex} downstreamSample=[{(downstream.HasValue ? Point(downstream.Value) : "none")}] " +
             $"insideSame={owners.Contains(b.Id)} insideAncestor={owners.Any(id => IsAncestor(id, b.Id))} insideDescendant={owners.Any(id => IsAncestor(b.Id, id))} " +
             $"insideUnrelated={owners.Any(id => Classify(id) == "unrelated")} owners=[{string.Join(",", owners.Select(id => id + ":" + Classify(id)))}] " +
-            $"survivedHierarchySuppression=True suppressedSourceBasins=[{string.Join(",", suppressed)}] terminal={node.Terminal}";
+            $"survivedHierarchySuppression=True suppressedSourceBasins=[{string.Join(",", suppressed)}] " +
+            $"topologyTerminal={b.Terminal} terminalOrBlocked={node.Terminal} exitsAtSpill={node.ExitsAtSpill} visibleOutletSamples={node.OutletPath.Length}";
     }
 
     private static string DescribeCycles(Dictionary<int, TinLakeFlowNode> graph)
@@ -327,6 +382,7 @@ public sealed class GeodesicTinLakeRouting
         return output;
     }
     public bool HasAddedDischarge(int network) => addedToNetwork.ContainsKey(network);
-    public string Summary() => $"[GeodesicTinLakeRouting] active={Lakes.Count} receivingRivers={Lakes.Count(n => n.InletDischarges.Count > 0)} inlets={Lakes.Sum(n => n.InletDischarges.Count)} multipleInlets={Lakes.Count(n => n.InletDischarges.Count > 1)} outlets={Lakes.Count(n => n.OutletReachId >= 0)} terminalOrBlocked={Lakes.Count(n => n.Terminal)} cascades={Lakes.Count(n => n.DownstreamLakeId >= 0)} clipped={RiverReaches.Count(r => r.Changed)} duplicateParcelSuppression={DuplicateParcelSuppression} conservationErrors={FlowConservationErrors} buildMs={BuildMilliseconds:F2}";
+    public string Summary() => $"[GeodesicTinLakeRouting] active={Lakes.Count} receivingRivers={Lakes.Count(n => n.InletDischarges.Count > 0)} inlets={Lakes.Sum(n => n.InletDischarges.Count)} multipleInlets={Lakes.Count(n => n.InletDischarges.Count > 1)} outlets={Lakes.Count(n => n.OutletReachId >= 0)} terminalOrBlocked={Lakes.Count(n => n.Terminal)} cascades={Lakes.Count(n => n.DownstreamLakeId >= 0)} clipped={RiverReaches.Count(r => r.Changed)} duplicateParcelSuppression={DuplicateParcelSuppression} conservationErrors={FlowConservationErrors} " +
+        $"sharedSaddleLakes={SharedSaddleLakes} witnessedOutlets={Lakes.Count(n => n.DownstreamSample.HasValue)} edges={Lakes.Count(n => n.DownstreamLakeId >= 0)} selfLoops=0 cycles=0 conservationInput={ConservationInput:R} conservationOutput={ConservationOutput:R} buildMs={BuildMilliseconds:F2}";
     public IEnumerable<string> Details() => Lakes.Select(n => $"[GeodesicTinLakeRouting] basin={n.BasinId} inlets={n.InletDischarges.Count} inletValues=[{string.Join(",", n.InletDischarges.Select(x => x.ToString("R")))}] strongest={n.StrongestInlet:R} uniqueParcels={n.ContributingParcels.Count} directParcels={n.DirectParcels.Count} discharge={n.Discharge:R} spillTriangle={n.Basin.Spill?.Triangle} outlet={n.OutletReachId} downstreamLake={n.DownstreamLakeId} joinNetwork={n.JoinNetwork} result={n.OutletTermination} terminalOrBlocked={n.Terminal}");
 }
