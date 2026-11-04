@@ -599,6 +599,12 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
     public void InitializeAuthoritativePlanet(string reason = null)
     {
+        foreach (var progress in InitializeAuthoritativePlanetStages(reason)) { }
+    }
+
+    public IEnumerable<PlanetGenerationProgress> InitializeAuthoritativePlanetStages(string reason = null)
+    {
+        yield return new PlanetGenerationProgress(PlanetGenerationStage.BuildingPlanet);
         Debug.Log($"[StartupLifecycle] Final planet initialization requested. Reason: {reason ?? "unspecified"}, mode={generationMode}, seed={randomSeed}", this);
         if (randomizeOnStart)
         {
@@ -608,7 +614,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         ClearGeneratedPlanetRuntime();
         if (generationMode == PlanetGenerationMode.GeodesicPrototype)
         {
-            GenerateGeodesicPrototype();
+            foreach (var progress in GenerateGeodesicPrototypeStages()) yield return progress;
         }
         else
         {
@@ -778,7 +784,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         Debug.Log($"[PlanetGenerator] Selected grid type={gridType}, cubeSphereResolution={resolution}, geodesicSimulationSubdivision={geodesicSimulationSubdivisionLevel}, geodesicRenderSubdivision={geodesicRenderSubdivisionLevel}, expectedCellCount={expected}", this);
     }
 
-    private void GenerateGeodesicPrototype()
+    private IEnumerable<PlanetGenerationProgress> GenerateGeodesicPrototypeStages()
     {
         geodesicCarvedSurface = null;
         GeodesicValleyCarvingAttempted = false;
@@ -807,7 +813,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         {
             Debug.LogError($"[GeodesicPrototype] Validation failed: {validation}", this);
             ClearGeneratedPlanetRuntime();
-            return;
+            throw new System.InvalidOperationException($"Geodesic topology validation failed: {validation}");
         }
 
         stage = System.Diagnostics.Stopwatch.StartNew();
@@ -820,18 +826,23 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         geodesicTransportGraphApproximateMemoryBytes = geodesicTransportGraph.ApproximateMemoryBytes;
         Debug.Log($"[GeodesicTransportGraph] subdivision={simulationSubdivision}, cells={geodesicTransportGraphCellCount}, uniqueEdges={geodesicTransportGraphEdgeCount}, buildMs={geodesicTransportGraphBuildMilliseconds:F2}, approximateMemory={geodesicTransportGraphApproximateMemoryBytes} bytes", this);
 
+        if (enableGeodesicTerrainDisplacement && geodesicMountainAmplitude > 0f)
+            yield return new PlanetGenerationProgress(PlanetGenerationStage.GrowingMountains);
         stage = System.Diagnostics.Stopwatch.StartNew();
         RebuildGeodesicCellTerrainCache();
         LogStage("simulation-cell terrain cache", stage);
         stage = System.Diagnostics.Stopwatch.StartNew();
-        RebuildGeodesicOceanClassification();
+        foreach (var progress in RebuildGeodesicOceanClassificationStages()) yield return progress;
         LogStage("bathymetry sampling/interpolation", stage);
 
+        if (enableOcean)
+            yield return new PlanetGenerationProgress(PlanetGenerationStage.MixingOceans);
         stage = System.Diagnostics.Stopwatch.StartNew();
         var oceanLayerDomain = GetComponent<GeodesicOceanLayerDomain>();
         if (oceanLayerDomain == null)
         {
             Debug.LogError("[GeodesicOceanLayers] Planet Generator is missing its required scene-owned GeodesicOceanLayerDomain component; layered-ocean initialization was skipped.", this);
+            throw new System.InvalidOperationException("Required layered-ocean domain is missing.");
         }
         else
         {
@@ -845,6 +856,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         if (oceanResourceField == null)
         {
             Debug.LogError("[GeodesicOceanResource] Planet Generator is missing its required scene-owned GeodesicOceanResourceField component; dissolved resource initialization was skipped.", this);
+            throw new System.InvalidOperationException("Required ocean resource field is missing.");
         }
         else
         {
@@ -853,6 +865,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
             if (!resourcesInitialized || !oceanResourceField.IsInitialized)
             {
                 Debug.LogError($"[GeodesicOceanResource] PlanetGenerator observed resource initialization failure: {oceanResourceField.LastInitializationFailure}; {oceanResourceField.LastInitializationFailureMessage}", this);
+                throw new System.InvalidOperationException("Ocean resource initialization failed. See the preceding diagnostic.");
             }
         }
         LogStage("ocean-resource initialization", stage);
@@ -862,6 +875,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         if (temperatureField == null)
         {
             Debug.LogError("[GeodesicTemperature] Planet Generator is missing its required GeodesicSurfaceTemperatureField component; temperature initialization was skipped.", this);
+            throw new System.InvalidOperationException("Required surface temperature field is missing.");
         }
         else
         {
@@ -875,6 +889,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         if (oceanTemperatureField == null)
         {
             Debug.LogError("[GeodesicOceanTemperature] Planet Generator is missing its required scene-owned GeodesicOceanTemperatureField component; subsurface temperature initialization was skipped.", this);
+            throw new System.InvalidOperationException("Required ocean temperature field is missing.");
         }
         else
         {
@@ -883,6 +898,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         }
         LogStage("ocean-temperature initialization", stage);
 
+        yield return new PlanetGenerationProgress(PlanetGenerationStage.PreparingSurface);
         stage = System.Diagnostics.Stopwatch.StartNew();
         IcosphereRenderGeometry renderGeometry = IcosphereRenderGeometryCache.GetOrBuild(renderSubdivision);
         IcosphereDirectionMapping renderMapping = GetOrBuildDirectionMapping(renderGeometry);
@@ -914,10 +930,14 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
         stage = System.Diagnostics.Stopwatch.StartNew();
         if (enableGeodesicRivers || generateHydrologicalLakes || enableTerminationValleyCarving)
-            GetOrAddComponent<GeodesicRiverSystem>(gameObject).Initialize(this, renderGeometry, mesh);
+        {
+            foreach (var progress in GetOrAddComponent<GeodesicRiverSystem>(gameObject).InitializeStages(this, renderGeometry, mesh))
+                yield return progress;
+        }
         else GetComponent<GeodesicRiverSystem>()?.Clear();
         LogStage("river drainage and ribbons", stage);
 
+        yield return new PlanetGenerationProgress(PlanetGenerationStage.PreparingSurface);
         var experiencedTemperatureField = GetOrAddComponent<GeodesicExperiencedTemperatureField>(gameObject);
         experiencedTemperatureField.Initialize(oceanResourceField, this);
         var ventVisualizer = GetOrAddComponent<GeodesicVentVisualizer>(gameObject);
@@ -945,6 +965,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
         stage = System.Diagnostics.Stopwatch.StartNew();
         IcosphereDirectionMapping oceanMapping = BuildGeodesicOceanVisual();
+        if (enableAtmosphere)
+            yield return new PlanetGenerationProgress(PlanetGenerationStage.PreparingAtmosphere);
         BuildGeodesicAtmosphereVisual();
         GetOrAddComponent<GeodesicOceanFe2Visual>(gameObject).Initialize(
             this, oceanResourceField, geodesicOceanMesh, geodesicOceanMeshRenderer, oceanMapping);
@@ -1855,12 +1877,17 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
     void RebuildGeodesicOceanClassification()
     {
+        foreach (var progress in RebuildGeodesicOceanClassificationStages()) { }
+    }
+
+    private IEnumerable<PlanetGenerationProgress> RebuildGeodesicOceanClassificationStages()
+    {
         geodesicInlandUplift = null;
         geodesicDebugSurfaceRadiusCache = null;
         if (GeodesicTopology == null)
         {
             geodesicRawTerrainRadius = null; geodesicSeafloorRadius = null; geodesicBaseWaterDepth = null; geodesicWaterDepth = null; geodesicDistanceToShore = null; geodesicBasinNoiseContribution = null; geodesicBathymetryRegion = null; geodesicOceanMask = null; geodesicOceanNeighborCounts = null; geodesicCoastlineMask = null; geodesicTerrainBathymetryMask = null; OceanConnectivity = null;
-            return;
+            yield break;
         }
 
         int count = GeodesicTopology.CellCount;
@@ -1868,6 +1895,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         geodesicContinentalInfluenceByCell = new float[count]; geodesicLandComponentIdByCell = new int[count]; geodesicContinentalShelfInfluenceByCell = new float[count]; geodesicLocalShelfWidthMultiplierByCell = new float[count]; geodesicLocalShelfDepthByCell = new float[count]; geodesicOceanicIslandShelfInfluenceByCell = new float[count]; geodesicContinentalProfileShelfWidthByCell = new float[count]; geodesicFinalShelfWidthByCell = new float[count]; geodesicApproxCellSpacingDegreesByCell = new float[count]; geodesicCoastTypeByCell = new GeodesicCoastType[count]; geodesicShelfProfileTypeByCell = new GeodesicShelfProfileType[count];
         for (int i = 0; i < count; i++) { geodesicLandComponentIdByCell[i] = -1; geodesicDistanceToShore[i] = GeodesicNoShoreDistance; }
 
+        if (enableOcean)
+            yield return new PlanetGenerationProgress(PlanetGenerationStage.ShapingSeafloor);
         var reliefWatch = System.Diagnostics.Stopwatch.StartNew();
         GenerateGeodesicOceanicRelief();
         reliefWatch.Stop(); geodesicLastOceanicReliefMilliseconds = reliefWatch.Elapsed.TotalMilliseconds;
@@ -1883,6 +1912,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
             geodesicSeafloorRadius[i] = geodesicRawTerrainRadius[i];
         }
 
+        if (enableOcean)
+            yield return new PlanetGenerationProgress(PlanetGenerationStage.FindingOceans);
         ResolveGeodesicSeaLevelRadius();
 
         for (int i = 0; i < count; i++)
@@ -1906,6 +1937,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
             if (geodesicCoastlineMask[i]) geodesicDistanceToShore[i] = 0f;
         }
 
+        if (enableOcean)
+            yield return new PlanetGenerationProgress(PlanetGenerationStage.ShapingSeafloor);
         if (geodesicSeaLevelControlMode == GeodesicSeaLevelControlMode.OceanWorld)
         {
             geodesicLastLandComponentMilliseconds = 0d;
@@ -1946,6 +1979,9 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         Debug.Log($"{OceanConnectivity.Describe()}, classificationMs={connectivityWatch.Elapsed.TotalMilliseconds:F3}", this);
         LogGeodesicBathymetryDiagnostics(OceanConnectivity.RetainedCells);
         // Resolve ocean, sea level and bathymetry from the unchanged baseline, then overlay land only.
+        if (enableGeodesicTerrainDisplacement && inlandElevationMagnitude > 0f &&
+            OceanConnectivity.RetainedCells > 0 && OceanConnectivity.RetainedCells < count)
+            yield return new PlanetGenerationProgress(PlanetGenerationStage.BulgingContinents);
         geodesicInlandUplift = new GeodesicInlandUplift(GeodesicTopology, geodesicOceanMask);
     }
 

@@ -9,9 +9,16 @@ public class StartupFadeOverlay : MonoBehaviour
     [SerializeField, Min(0f)] private float defaultFadeSeconds = 0.5f;
     [SerializeField] private bool blockRaycastsDuringLoading = true;
 
+    [Header("Planet Generation Screen")]
+    [Tooltip("Optional artwork. Displayed full screen using aspect-preserving cover/crop.")]
+    [SerializeField] private Sprite loadingBackground;
+    [SerializeField] private Color loadingBackgroundColor = new Color(0.018f, 0.028f, 0.042f, 1f);
+    [SerializeField] private Color loadingTextBackingColor = new Color(0f, 0f, 0f, 0.78f);
+    private PlanetGenerationLoadingView generationView;
+
     private Coroutine fadeRoutine;
 
-    public bool IsVisible => canvasGroup != null && canvasGroup.alpha > 0.001f;
+    public bool IsVisible => (generationView != null && generationView.IsVisible) || (canvasGroup != null && canvasGroup.alpha > 0.001f);
 
     private void Awake()
     {
@@ -28,12 +35,26 @@ public class StartupFadeOverlay : MonoBehaviour
 
     public void ShowSetupCurtain(string message = "Planet Simulation Setup")
     {
+        generationView?.Hide();
         Show(message, false, false);
     }
 
     public void ShowLoading(string message = "Generating planet...")
     {
         Show(message, true, blockRaycastsDuringLoading);
+        generationView ??= new PlanetGenerationLoadingView(loadingBackgroundColor, loadingTextBackingColor);
+        generationView.Show(loadingBackground);
+    }
+
+    public void ShowGenerationProgress(PlanetGenerationProgress progress) => generationView?.Report(progress);
+    public void ShowFailure(System.Action returnToMenu) => generationView?.ShowFailure(returnToMenu);
+
+    private void OnDisable() => HideImmediate();
+
+    private void OnDestroy()
+    {
+        generationView?.Dispose();
+        generationView = null;
     }
 
     private void Show(string message, bool interactable, bool blocksRaycasts)
@@ -59,6 +80,7 @@ public class StartupFadeOverlay : MonoBehaviour
 
     public void HideImmediate()
     {
+        generationView?.Hide();
         if (fadeRoutine != null)
         {
             StopCoroutine(fadeRoutine);
@@ -75,6 +97,7 @@ public class StartupFadeOverlay : MonoBehaviour
 
     public void FadeOut(float fadeSeconds = -1f)
     {
+        generationView?.Hide();
         if (canvasGroup == null)
         {
             return;

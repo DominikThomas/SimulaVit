@@ -564,6 +564,9 @@ MonoBehaviour:
   messageText: {fileID: 0}
   defaultFadeSeconds: 5
   blockRaycastsDuringLoading: 1
+  loadingBackground: {fileID: 21300000, guid: b367073022482534b8f8381d72192564, type: 3}
+  loadingBackgroundColor: {r: 0.018, g: 0.028, b: 0.042, a: 1}
+  loadingTextBackingColor: {r: 0, g: 0, b: 0, a: 0.78}
 --- !u!225 &209742447
 CanvasGroup:
   m_ObjectHideFlags: 0

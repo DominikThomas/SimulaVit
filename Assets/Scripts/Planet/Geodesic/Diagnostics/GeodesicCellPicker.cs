@@ -190,6 +190,8 @@ public class GeodesicCellPicker : MonoBehaviour
 
     private void Update()
     {
+        if (SimulationStartupController.IsStartupBlockingHud) return;
+
         if (temperatureDisplayRefreshRequested)
         {
             temperatureDisplayRefreshRequested = false;

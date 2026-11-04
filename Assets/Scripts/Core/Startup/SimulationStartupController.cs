@@ -96,6 +96,11 @@ public class SimulationStartupController : MonoBehaviour
     private int resumeStepsPerFrame = 1;
     private bool startupComplete;
     private bool applyingConfig;
+    private bool generationFailed;
+    private Coroutine startupRoutine;
+    private IEnumerator<PlanetGenerationProgress> startupStages;
+    private bool startupSunSuspended;
+    private bool startupSunWasEnabled;
     private GUIStyle titleStyle;
     private GUIStyle labelStyle;
     private GUIStyle boxStyle;
@@ -140,6 +145,7 @@ public class SimulationStartupController : MonoBehaviour
 
     private void OnDisable()
     {
+        CancelStartupLoading();
         RestoreWorldRoots();
         RestoreRuntimeHud();
 
@@ -159,6 +165,8 @@ public class SimulationStartupController : MonoBehaviour
         simulationPipeline ??= FindFirstObjectByType<ReplicatorSimulationPipeline>();
         saveLoadService ??= FindFirstObjectByType<SimulationSaveLoadService>();
         loadingOverlay ??= FindFirstObjectByType<StartupFadeOverlay>();
+        if (loadingOverlay == null && setupCurtainOrOverlay == null)
+            loadingOverlay = gameObject.AddComponent<StartupFadeOverlay>();
         setupCurtainOrOverlay ??= loadingOverlay;
         loadingOverlay ??= setupCurtainOrOverlay;
     }
@@ -289,6 +297,7 @@ public class SimulationStartupController : MonoBehaviour
 
     public void ExitToMainMenu()
     {
+        CancelStartupLoading();
         ResolveReferences();
         returningToMainMenu = true;
         startupComplete = false;
@@ -481,29 +490,89 @@ public class SimulationStartupController : MonoBehaviour
 
     public void StartSimulation()
     {
+        if (applyingConfig || generationFailed) return;
         currentConfig.startPaused = false;
-        StartCoroutine(ApplyAndStartRoutine(false));
+        startupRoutine = StartCoroutine(ApplyAndStartRoutine(false));
     }
 
     public void StartSimulationPaused()
     {
+        if (applyingConfig || generationFailed) return;
         currentConfig.startPaused = true;
-        StartCoroutine(ApplyAndStartRoutine(true));
+        startupRoutine = StartCoroutine(ApplyAndStartRoutine(true));
     }
 
     private IEnumerator ApplyAndStartRoutine(bool keepPaused)
     {
-        if (applyingConfig)
-        {
-            yield break;
-        }
-
+        if (applyingConfig) yield break;
         applyingConfig = true;
+        generationFailed = false;
+        startupComplete = false;
+        replicatorManager?.SetSimulationTiming(0);
+        simulationPipeline?.SetSimulationStepsPerFrame(0);
+        if (sunSkyRotator != null)
+        {
+            startupSunWasEnabled = sunSkyRotator.enabled;
+            startupSunSuspended = true;
+            sunSkyRotator.enabled = false;
+        }
         ShowSetupScreen(false);
-        loadingOverlay?.ShowLoading("Generating planet...");
+        loadingOverlay.ShowLoading();
 
+        // StartSimulation may run from OnGUI, after this frame's coroutine phase.
+        // Two null yields guarantee a complete render opportunity before the first work.
+        yield return null;
+        yield return null;
+
+        startupStages = ApplyStartupStages(keepPaused).GetEnumerator();
+        try
+        {
+            while (true)
+            {
+                bool hasNext;
+                try
+                {
+                    hasNext = startupStages.MoveNext();
+                    if (hasNext) loadingOverlay.ShowGenerationProgress(startupStages.Current);
+                }
+                catch (Exception exception)
+                {
+                    ShowGenerationFailure(exception);
+                    yield break;
+                }
+                if (!hasNext) break;
+                // Report first, then repaint, then execute the next synchronous stage.
+                yield return null;
+            }
+        }
+        finally
+        {
+            startupStages?.Dispose();
+            startupStages = null;
+            startupRoutine = null;
+        }
+    }
+
+    private void CompleteGeneratedStartup(bool keepPaused)
+    {
+        int targetSteps = keepPaused ? 0 : Mathf.Max(1, resumeStepsPerFrame);
+        replicatorManager?.SetSimulationTiming(targetSteps);
+        simulationPipeline?.SetSimulationStepsPerFrame(targetSteps);
+        FindFirstObjectByType<SimulationSpeedController>()?.RefreshFromSimulationTiming();
+        startupComplete = true;
+        returningToMainMenu = false;
+        applyingConfig = false;
+        RestoreStartupSun();
+        IsSetupActive = false;
+        setupCurtainOrOverlay?.HideImmediate();
+        loadingOverlay.HideImmediate();
+        Debug.Log("[StartupLifecycle] Simulation started.", this);
+    }
+
+    private IEnumerable<PlanetGenerationProgress> ApplyStartupStages(bool keepPaused)
+    {
         ClampLoadedConfig(currentConfig);
-        ApplyConfig(currentConfig);
+        foreach (var progress in ApplyConfigStages(currentConfig)) yield return progress;
 
         if (saveStartupConfigOnStart)
         {
@@ -515,42 +584,77 @@ public class SimulationStartupController : MonoBehaviour
             LogStartupConfigApplied(currentConfig, keepPaused);
         }
 
+        yield return new PlanetGenerationProgress(PlanetGenerationStage.PreparingPrimordialWorld);
         if (currentConfig.gridType == PlanetGridType.LegacyCubeSphere && replicatorManager != null)
         {
             if (replicatorManager.InitializeForSimulation(false))
             {
                 replicatorManager.SpawnInitialPopulation();
             }
+            else throw new InvalidOperationException("Legacy biology initialization failed.");
         }
         else if (currentConfig.gridType == PlanetGridType.GeodesicIcosphere)
         {
             if (replicatorManager != null && !replicatorManager.InitializeForSimulation(true))
             {
-                Debug.LogError("[StartupLifecycle] Geodesic biology initialization failed.", this);
+                throw new InvalidOperationException("Geodesic biology initialization failed.");
             }
         }
 
-        // Simulation timing remains the shared authoritative clock for either biology mode.
-        int targetSteps = keepPaused ? 0 : Mathf.Max(1, resumeStepsPerFrame);
-        replicatorManager?.SetSimulationTiming(targetSteps);
-        simulationPipeline?.SetSimulationStepsPerFrame(targetSteps);
-        FindFirstObjectByType<SimulationSpeedController>()?.RefreshFromSimulationTiming();
-
-        startupComplete = true;
-        returningToMainMenu = false;
-        applyingConfig = false;
+        yield return new PlanetGenerationProgress(PlanetGenerationStage.AlmostReady);
+        // Restore hidden roots under the opaque screen, then let their OnEnable/Start
+        // and canvas layout settle for a rendered frame before revealing the simulation.
         RestoreWorldRoots();
         RestoreRuntimeHud();
-        IsSetupActive = false;
-        loadingOverlay?.FadeOut(0.5f);
-        Debug.Log("[StartupLifecycle] Simulation started.", this);
+        yield return new PlanetGenerationProgress(PlanetGenerationStage.AlmostReady);
+        CompleteGeneratedStartup(keepPaused);
     }
 
-    private void ApplyConfig(SimulationStartupConfig config)
+    private void ShowGenerationFailure(Exception exception)
+    {
+        // Keep the original exception and stack; the screen deliberately shows concise copy.
+        Debug.LogException(exception, this);
+        startupComplete = false;
+        generationFailed = true;
+        applyingConfig = false;
+        IsSetupActive = true;
+        replicatorManager?.SetSimulationTiming(0);
+        simulationPipeline?.SetSimulationStepsPerFrame(0);
+        HideRuntimeHudForSetup();
+        loadingOverlay.ShowFailure(ReturnToConfigurationAfterFailure);
+    }
+
+    private void RestoreStartupSun()
+    {
+        if (!startupSunSuspended) return;
+        if (sunSkyRotator != null) sunSkyRotator.enabled = startupSunWasEnabled;
+        startupSunSuspended = false;
+    }
+
+    private void CancelStartupLoading()
+    {
+        if (startupRoutine != null) StopCoroutine(startupRoutine);
+        startupRoutine = null;
+        startupStages?.Dispose();
+        startupStages = null;
+        applyingConfig = false;
+        generationFailed = false;
+        RestoreStartupSun();
+        loadingOverlay?.HideImmediate();
+    }
+
+    private void ReturnToConfigurationAfterFailure()
+    {
+        // Reuse the normal menu teardown; never dispose shared terrain caches or assets.
+        ExitToMainMenu();
+        ShowConfigScreenFromMainMenu();
+    }
+
+    private IEnumerable<PlanetGenerationProgress> ApplyConfigStages(SimulationStartupConfig config)
     {
         if (config == null)
         {
-            return;
+            yield break;
         }
 
         bool requestedRandomSeed = config.useRandomSeed;
@@ -606,14 +710,19 @@ public class SimulationStartupController : MonoBehaviour
                 riverDebug.colourRenderedRiversByVisibleTerrainGrade = config.colourRenderedRiversByVisibleTerrainGrade;
                 riverDebug.showRiverTerminationReasons = config.showRiverTerminationReasons;
             }
-            planetGenerator.InitializeAuthoritativePlanet("New Game startup selection");
+            foreach (var progress in planetGenerator.InitializeAuthoritativePlanetStages("New Game startup selection"))
+                yield return progress;
         }
+
+        if (planetGenerator == null || !planetGenerator.IsPlanetInitialized)
+            throw new InvalidOperationException("Planet initialization did not complete.");
 
         if (requestedRandomSeed)
         {
             config.useRandomSeed = false;
         }
 
+        yield return new PlanetGenerationProgress(PlanetGenerationStage.PreparingPrimordialWorld);
         if (config.gridType == PlanetGridType.LegacyCubeSphere && planetResourceMap != null)
         {
             planetResourceMap.baseTempKelvin = config.baseTempKelvin;
@@ -1335,7 +1444,7 @@ public class SimulationStartupController : MonoBehaviour
 
     private void OnGUI()
     {
-        if ((startupComplete && !returningToMainMenu) || applyingConfig || !useBuiltInSetupGui)
+        if ((startupComplete && !returningToMainMenu) || applyingConfig || generationFailed || !useBuiltInSetupGui)
         {
             return;
         }
