@@ -1,0 +1,226 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Globalization;
+using System.Linq;
+
+public readonly struct TinParcelDestination
+{
+    public readonly TinPoint Point;
+    public readonly TinTermination Termination;
+    public TinParcelDestination(TinPoint point, TinTermination termination) { Point = point; Termination = termination; }
+}
+
+/// <summary>Observation only. Parcels are the original facet inputs, never accumulated reach
+/// discharge. Lake membership comes from the router's existing first-entry parcel sets.
+/// Graph traversal follows only published directed edges; it never chooses a terrain route.</summary>
+public sealed class GeodesicDrainageDelivery
+{
+    public enum Destination { DirectOcean, OceanViaLakes, InlandClosed, Unresolved }
+    public sealed class Outcome
+    {
+        public Destination Destination;
+        public string TerminalId, Type;
+        public TinPoint? Point;
+        public TinBasinDescriptor Basin;
+        public bool ViaLake;
+        internal Outcome ThroughLake() => new Outcome { Destination = Destination == Destination.DirectOcean ? Destination.OceanViaLakes : Destination,
+            TerminalId = TerminalId, Type = Type, Point = Point, Basin = Basin, ViaLake = true };
+    }
+    public sealed class Catchment
+    {
+        public Outcome Terminal;
+        public double Runoff, Area;
+        public int Parcels, SourcePaths;
+        public bool ViaLake;
+    }
+    private sealed class Link { public string Next; public Outcome End; public bool Lake; }
+    private Dictionary<string, Link> links = new Dictionary<string, Link>(StringComparer.Ordinal);
+    private Dictionary<string, Outcome> resolved = new Dictionary<string, Outcome>(StringComparer.Ordinal);
+    private readonly Dictionary<string, Catchment> catchments = new Dictionary<string, Catchment>(StringComparer.Ordinal);
+    private readonly Dictionary<string, double> terminalRunoff = new Dictionary<string, double>(StringComparer.Ordinal);
+    private Dictionary<(int, double, double, double, TinTermination), Outcome> terminalCache =
+        new Dictionary<(int, double, double, double, TinTermination), Outcome>();
+    private readonly GeodesicTinHydrology tin;
+    private readonly GeodesicTinBasins basins;
+    private readonly Outcome[] networkOutcomes;
+    public double TotalRunoff, DirectOcean, ViaLakesOcean, InlandClosed, Unresolved, TotalArea;
+    public int IndependentParcels, DuplicateMemberships, InvalidMemberships, CycleNodes;
+    public int LogicalDisconnected, VisualOnlyBreaks, UnknownBreaks, ExtractionAmbiguities;
+    public int LakeBoundaryGaps, ShortUnrenderedLinks, ThresholdClipped, CentrelineRejected, ProjectionRejected, MissingTrunkRibbons;
+    public int InitialUnexpectedBrokenNetworks;
+    public double AnalysisMilliseconds { get; private set; }
+    public long ApproximateMemoryBytes { get; private set; }
+    public double Residual => TotalRunoff - DirectOcean - ViaLakesOcean - InlandClosed - Unresolved;
+    public double Tolerance => Math.Max(1e-9, TotalRunoff * 1e-9);
+    public IEnumerable<Catchment> LargestDisconnected => catchments.Values.OrderByDescending(c => c.Runoff).ThenBy(c => c.Terminal.TerminalId, StringComparer.Ordinal).Take(20);
+    private GeodesicDrainageDelivery(GeodesicTinHydrology source, GeodesicTinBasins topology)
+    { tin = source; basins = topology; networkOutcomes = new Outcome[tin.Networks.Count]; }
+
+    private static Outcome Unknown(string id, string reason) => new Outcome { Destination = Destination.Unresolved, TerminalId = id, Type = reason };
+    private bool Valid(TinPoint p) => p.Triangle >= 0 && p.Triangle < tin.TriangleCount &&
+        !double.IsNaN(p.A + p.B + p.C) && Math.Abs(p.A + p.B + p.C - 1) <= 1e-9 && p.A >= -1e-9 && p.B >= -1e-9 && p.C >= -1e-9;
+
+    private Outcome Terminal(TinTermination type, TinPoint? point, string fallback)
+    {
+        if (!point.HasValue || !Valid(point.Value)) return Unknown(fallback, "MissingOrInvalidTerminalPoint");
+        var p = point.Value;
+        var cacheKey = (p.Triangle, p.A, p.B, p.C, type);
+        if (terminalCache.TryGetValue(cacheKey, out var cached)) return cached;
+        bool ocean = type == TinTermination.OceanCoast && tin.IsRetainedOceanBoundary(p);
+        bool closed = type == TinTermination.TrueClosedBasin || type == TinTermination.TinyNoiseDepression;
+        var basin = closed ? basins?.Find(p) : null;
+        // Floor vertex IDs identify basin catchments. Without a basin, use an exact canonical
+        // mesh point (shared vertex/edge terminals do not depend on their carrier triangle).
+        string key = basin != null ? "basin:" + basin.Id : PointId(p);
+        var result = new Outcome { Destination = ocean ? Destination.DirectOcean : closed ? Destination.InlandClosed : Destination.Unresolved,
+            TerminalId = type + ":" + key, Type = type == TinTermination.OceanCoast && !ocean ? "OceanCoastWithoutRetainedBoundary" : type.ToString(),
+            Point = p, Basin = basin };
+        terminalCache.Add(cacheKey, result); return result;
+    }
+    private string PointId(TinPoint p)
+    {
+        if (p.A == 1) return "vertex:" + tin.BasinVertex(p.Triangle, 0);
+        if (p.B == 1) return "vertex:" + tin.BasinVertex(p.Triangle, 1);
+        if (p.C == 1) return "vertex:" + tin.BasinVertex(p.Triangle, 2);
+        if (p.A == 0 || p.B == 0 || p.C == 0)
+        {
+            int a = p.A == 0 ? 1 : 0, b = p.C == 0 ? 1 : 2;
+            int va = tin.BasinVertex(p.Triangle, a), vb = tin.BasinVertex(p.Triangle, b);
+            double weight = va < vb ? (a == 0 ? p.A : p.B) : (b == 1 ? p.B : p.C);
+            return FormattableString.Invariant($"edge:{Math.Min(va, vb)}:{Math.Max(va, vb)}:{weight:R}");
+        }
+        return FormattableString.Invariant($"facet:{p.Triangle}:{p.A:R}:{p.B:R}:{p.C:R}");
+    }
+    private Outcome Resolve(string start)
+    {
+        if (resolved.TryGetValue(start, out var result)) return result;
+        var path = new List<string>(); var seen = new HashSet<string>(StringComparer.Ordinal); string id = start;
+        while (!resolved.TryGetValue(id, out result))
+        {
+            if (!links.TryGetValue(id, out var link)) { result = Unknown(id, "MissingDirectedConnection"); break; }
+            if (!seen.Add(id))
+            {
+                int first = path.IndexOf(id); CycleNodes += path.Count - first;
+                result = Unknown("cycle:" + path.Skip(first).OrderBy(x => x, StringComparer.Ordinal).First(), "DirectedCycle"); break;
+            }
+            path.Add(id);
+            if (link.Next == null) { result = link.End; break; }
+            id = link.Next;
+        }
+        for (int i = path.Count - 1; i >= 0; i--)
+        { if (links[path[i]].Lake) result = result.ThroughLake(); resolved[path[i]] = result; }
+        return result;
+    }
+    private static TinPoint? End(IReadOnlyList<TinPoint> path) => path != null && path.Count > 0 ? path[path.Count - 1] : (TinPoint?)null;
+
+    public static GeodesicDrainageDelivery Analyze(GeodesicTinHydrology tin, GeodesicTinBasins basins = null,
+        IReadOnlyList<TinLakeFlowNode> lakes = null, IReadOnlyList<TinLakeAdjustedReach> reaches = null, bool renderedLakesWithoutRouting = false)
+    {
+        var watch = Stopwatch.StartNew(); var r = new GeodesicDrainageDelivery(tin, basins);
+        lakes = lakes ?? Array.Empty<TinLakeFlowNode>();
+        for (int i = 0; i < tin.Networks.Count; i++)
+        {
+            var n = tin.Networks[i]; var reach = reaches != null && i < reaches.Count ? reaches[i] : null;
+            int lake = reach?.ReceivingLakeId ?? -1, join = reach?.JunctionNetwork ?? n.JunctionNetwork;
+            var type = reach?.Termination ?? n.Termination; string id = "network:" + i;
+            r.links.Add(id, new Link { Next = lake >= 0 ? "lake:" + lake : type == TinTermination.Confluence && join >= 0 ? "network:" + join : null,
+                End = r.Terminal(type, End(reach?.Samples ?? n.Samples), id) });
+        }
+        var owners = new int[tin.TriangleCount]; Array.Fill(owners, -1);
+        foreach (var lake in lakes)
+        {
+            string id = "lake:" + lake.BasinId;
+            Outcome end = lake.Basin != null && !lake.Basin.HasEscape
+                ? r.Terminal(TinTermination.TrueClosedBasin, lake.Basin.Floor, id)
+                : r.Terminal(lake.OutletTermination, End(lake.OutletPath) ?? (lake.ExitsAtSpill ? lake.Basin?.Spill : null), id);
+            r.links.Add(id, new Link { Lake = true, End = end,
+                Next = lake.DownstreamLakeId >= 0 ? "lake:" + lake.DownstreamLakeId : lake.JoinNetwork >= 0 ? "network:" + lake.JoinNetwork : null });
+            foreach (int parcel in lake.DirectParcels)
+            {
+                if (parcel < 0 || parcel >= owners.Length) { r.InvalidMemberships++; continue; }
+                if (owners[parcel] != -1) { r.DuplicateMemberships++; owners[parcel] = -2; }
+                else owners[parcel] = lake.BasinId;
+            }
+            if (lake.DownstreamLakeId >= 0 && lake.OutletPath.Length < 2) r.LakeBoundaryGaps++;
+            else if (lake.OutletPath.Length >= 2 && lake.Discharge > 0 && lake.OutletReachId < 0) r.ThresholdClipped++;
+        }
+        // Audit even zero-discharge lake edges. Existing router exceptions remain untouched.
+        foreach (var id in r.links.Keys) r.Resolve(id);
+        for (int t = 0; t < tin.TriangleCount; t++)
+        {
+            double amount = tin.ParcelRunoff(t); if (amount <= 0) continue;
+            r.TotalRunoff += amount; r.TotalArea += tin.LocalArea[t]; r.IndependentParcels++;
+            Outcome end;
+            if (renderedLakesWithoutRouting) end = Unknown("unintegrated-rendered-lakes", "RenderedLakeTraversalUnavailable");
+            else if (owners[t] == -2) end = Unknown("parcel:" + t, "DuplicateFirstLakeOwnership");
+            else if (owners[t] >= 0) end = r.Resolve("lake:" + owners[t]);
+            else if (tin.ParcelDestinations == null) end = Unknown("parcel:" + t, "ParcelEndpointNotCaptured");
+            else { var p = tin.ParcelDestinations[t]; end = r.Terminal(p.Termination, p.Point, "parcel:" + t); }
+            switch (end.Destination)
+            {
+                case Destination.DirectOcean: r.DirectOcean += amount; break;
+                case Destination.OceanViaLakes: r.ViaLakesOcean += amount; break;
+                case Destination.InlandClosed: r.InlandClosed += amount; break;
+                default: r.Unresolved += amount; break;
+            }
+            r.terminalRunoff.TryGetValue(end.Type, out double previous); r.terminalRunoff[end.Type] = previous + amount;
+            if (end.Destination == Destination.DirectOcean || end.Destination == Destination.OceanViaLakes) continue;
+            if (!r.catchments.TryGetValue(end.TerminalId, out var catchment))
+                r.catchments.Add(end.TerminalId, catchment = new Catchment { Terminal = end });
+            catchment.Runoff += amount; catchment.Area += tin.LocalArea[t]; catchment.Parcels++; catchment.ViaLake |= end.ViaLake;
+        }
+        int rawFailures = 0;
+        for (int i = 0; i < tin.Networks.Count; i++)
+        {
+            var end = r.networkOutcomes[i] = r.Resolve("network:" + i);
+            if (r.catchments.TryGetValue(end.TerminalId, out var c)) c.SourcePaths++;
+            if (tin.Networks[i].Termination != TinTermination.RoutingFailure) continue;
+            rawFailures++; r.CountBreak(end);
+        }
+        r.InitialUnexpectedBrokenNetworks = tin.Diagnostics.UnexpectedBrokenNetworks;
+        r.ExtractionAmbiguities = Math.Max(0, r.InitialUnexpectedBrokenNetworks - rawFailures);
+        r.UnknownBreaks += r.ExtractionAmbiguities;
+        // Estimate managed storage, not process RSS: endpoints (40 B/triangle), owners,
+        // graph entries, dictionaries/strings and catchments. Runtime object headers vary.
+        r.ApproximateMemoryBytes = (tin.ParcelDestinations == null ? 0L : 40L * tin.TriangleCount) +
+            4L * tin.TriangleCount + 400L * r.links.Count + r.terminalCache.Values.Sum(o => 240L + 2L * o.TerminalId.Length) +
+            r.catchments.Values.Sum(c => 320L + 2L * c.Terminal.TerminalId.Length);
+        r.links = null; r.resolved = null; r.terminalCache = null; // Scratch only; reports retain their own outcomes.
+        r.AnalysisMilliseconds = watch.Elapsed.TotalMilliseconds; return r;
+    }
+    private void CountBreak(Outcome end)
+    {
+        if (end.Destination != Destination.Unresolved) VisualOnlyBreaks++;
+        else if (end.Type == "RoutingFailure" || end.Type == "MissingDirectedConnection" || end.Type == "DirectedCycle") LogicalDisconnected++;
+        else UnknownBreaks++;
+    }
+    // Called exactly where the old visual code increments unexpectedBrokenNetworks.
+    public void ObserveVisualBreak(int network, string cause)
+    {
+        CountBreak(networkOutcomes[network]);
+        if (cause == "centreline") CentrelineRejected++;
+        else if (cause == "projection") ProjectionRejected++;
+        else if (cause == "missing-trunk") MissingTrunkRibbons++;
+    }
+    public void ObserveShortLink(bool lakeBoundary)
+    { if (lakeBoundary) LakeBoundaryGaps++; else ShortUnrenderedLinks++; }
+    private double Percent(double value) => TotalRunoff > 0 ? 100 * value / TotalRunoff : double.NaN;
+    public string Summary() => FormattableString.Invariant($"[GeodesicDrainageDelivery] totalRunoff={TotalRunoff:R} directOcean={DirectOcean:R} viaLakesOcean={ViaLakesOcean:R} inlandClosed={InlandClosed:R} unresolved={Unresolved:R} oceanPercent={Percent(DirectOcean + ViaLakesOcean):F6} inlandPercent={Percent(InlandClosed):F6} unresolvedPercent={Percent(Unresolved):F6} independentParcels={IndependentParcels} contributingArea={TotalArea:R} accountingResidual={Residual:R} tolerance={Tolerance:R} accountingPass={Math.Abs(Residual) <= Tolerance} duplicateFirstLakeMemberships={DuplicateMemberships} invalidMemberships={InvalidMemberships} directedCycleNodes={CycleNodes} analysisMs={AnalysisMilliseconds:F3} approximatePeakBytes={ApproximateMemoryBytes} units=existing-TIN-local-runoff terminalRunoff=[{string.Join(",", terminalRunoff.OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => p.Key + ":" + p.Value.ToString("R", CultureInfo.InvariantCulture)))}]");
+    public string Connectivity(int finalUnexpected) => $"[GeodesicDrainageConnectivity] unexpectedBrokenNetworks={finalUnexpected} logicalDisconnected={LogicalDisconnected} visualOnlyBreaks={VisualOnlyBreaks} unknown={UnknownBreaks} classifiedBreakEvents={LogicalDisconnected + VisualOnlyBreaks + UnknownBreaks} extractionAmbiguities={ExtractionAmbiguities} centrelineRejected={CentrelineRejected} projectionRejected={ProjectionRejected} missingTrunkRibbons={MissingTrunkRibbons} lakeBoundaryGaps={LakeBoundaryGaps} shortUnrenderedLinks={ShortUnrenderedLinks} thresholdClippedLakeOutlets={ThresholdClipped} gapCountsAreSeparate=True meshCracks=not-observed representativeReceiverIsNotParcelRoute=True";
+    public IEnumerable<string> CatchmentLogs(Func<TinBasinDescriptor, string> carvingEvidence = null)
+    {
+        int rank = 0;
+        foreach (var c in LargestDisconnected)
+        {
+            var end = c.Terminal; var b = end.Basin;
+            string position = end.Point.HasValue ? PointPosition(end.Point.Value) : "unknown";
+            yield return FormattableString.Invariant($"[GeodesicDrainageClosedCatchment] rank={++rank} terminalId={end.TerminalId} terminalType={end.Type} destination={end.Destination} position={position} runoff={c.Runoff:R} area={c.Area:R} independentParcels={c.Parcels} contributingSourcePaths={c.SourcePaths} passesRenderedLakes={c.ViaLake} spillWitness={(b == null ? "unknown" : (b.HasEscape && b.DownstreamTriangle >= 0 && b.DownstreamVertex >= 0).ToString())} spillElevation={(b != null && b.HasEscape ? b.SpillElevation.ToString("R", CultureInfo.InvariantCulture) : "unknown")} floorToSpillBarrier={(b != null && b.HasEscape ? b.MaximumDepth.ToString("R", CultureInfo.InvariantCulture) : "unknown")} requiredIncision=unknown carvingEvidence={carvingEvidence?.Invoke(b) ?? "unavailable"} closedDoesNotImplyMustDrain=True");
+        }
+    }
+    private string PointPosition(TinPoint p)
+    {
+        var d = tin.Direction(p); double height = tin.Height(p, true);
+        return FormattableString.Invariant($"(facet:{p.Triangle},bary:{p.A:R}/{p.B:R}/{p.C:R},direction:{d.x:R}/{d.y:R}/{d.z:R},height:{height:R})");
+    }
+}

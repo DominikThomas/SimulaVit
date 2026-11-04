@@ -11,18 +11,19 @@ public static class TinHydrologyValidation
     public static int Main(string[] args)
     {
         int passed = 0, failed = 0;
-        foreach (Type fixtureType in new[] { typeof(GeodesicTinLakeRoutingTests), typeof(GeodesicTinLakeGeometryTests), typeof(GeodesicTinBasinTests), typeof(GeodesicTinHydrologyTests), typeof(GeodesicHydrologyTerrainTests), typeof(GeodesicRiverUphillDebugTests), typeof(GeodesicRiverVisibleGradeAuditTests), typeof(GeodesicTinSurfaceTests),
+        foreach (Type fixtureType in new[] { typeof(GeodesicDrainageDeliveryTests), typeof(GeodesicTinLakeRoutingTests), typeof(GeodesicTinLakeGeometryTests), typeof(GeodesicTinBasinTests), typeof(GeodesicTinHydrologyTests), typeof(GeodesicHydrologyTerrainTests), typeof(GeodesicRiverUphillDebugTests), typeof(GeodesicRiverVisibleGradeAuditTests), typeof(GeodesicTinSurfaceTests),
             typeof(GeodesicHydrologyTopologyTests), typeof(GeodesicRiverGradeTests), typeof(GeodesicDrainageTests),
             typeof(GeodesicOceanConnectivityTests), typeof(GeodesicLakeTests) })
         foreach (var method in fixtureType.GetMethods())
         {
+            if (args.Contains("--delivery-only") && fixtureType != typeof(GeodesicDrainageDeliveryTests)) continue;
             if (method.GetCustomAttributes(typeof(TestAttribute), false).Length == 0) continue;
             try { method.Invoke(Activator.CreateInstance(fixtureType), null); passed++; Console.WriteLine("PASS " + method.Name); }
             catch (Exception e) { failed++; Console.WriteLine("FAIL " + method.Name + ": " + (e.InnerException ?? e)); }
         }
         Console.WriteLine($"Managed hydrology tests: {passed} passed; {failed} failed. Native Unity integration and visual acceptance NOT RUN.");
 
-        if (args.Length == 2 && args[0] == "--benchmark") Benchmark(int.Parse(args[1]));
+        if (args.Length >= 2 && args[0] == "--benchmark") Benchmark(int.Parse(args[1]));
         return failed == 0 ? 0 : 1;
     }
 
@@ -42,7 +43,8 @@ public static class TinHydrologyValidation
         double bump = (visible.Max() - (double)visible.Min()) * .001d;
         int fullBuilds = GeodesicGridTopology.BuildInvocationCount;
         var tin = GeodesicTinHydrology.BuildAdaptive(geometry.UnitVertices, geometry.Triangles, visible,
-            components.OceanMask, sea, radius, .000002d, bump, 0d, threshold, subdivision: renderSubdivision, completedSurface: surface);
+            components.OceanMask, sea, radius, .000002d, bump, 0d, threshold, subdivision: renderSubdivision, completedSurface: surface,
+            captureParcelDestinations: true);
         var terrain = new GeodesicRiverTerrain(geometry, surface, tin.HydrologyHeight, true);
         int rawValid = 0, projectedValid = 0; double maxH = 0d, maxV = 0d, maxCompleted = 0d;
         foreach (var network in tin.Networks)
@@ -65,6 +67,16 @@ public static class TinHydrologyValidation
         Console.WriteLine(basins.Summary());
         foreach (var basin in basins.Basins.OrderByDescending(b => b.Area).Take(5)) Console.WriteLine(basin);
         foreach (string match in basins.TerminationDetails()) Console.WriteLine(match);
+        var lakeGeometry = GeodesicTinLakeGeometry.Build(tin, basins);
+        var lakeRouting = GeodesicTinLakeRouting.Build(tin, basins, lakeGeometry, threshold);
+        var delivery = GeodesicDrainageDelivery.Analyze(tin, basins, lakeRouting.Lakes, lakeRouting.RiverReaches);
+        Console.WriteLine(delivery.Summary());
+        Console.WriteLine(FormattableString.Invariant($"[GeodesicDrainageDelivery] captureMs={tin.ParcelCaptureMilliseconds:F3} diagnosticWorkMs={tin.ParcelCaptureMilliseconds + delivery.AnalysisMilliseconds:F3} scope=capture+analysis-excludes-hashing-and-logging"));
+        Console.WriteLine(delivery.Connectivity(tin.Diagnostics.UnexpectedBrokenNetworks));
+        foreach (string line in delivery.CatchmentLogs()) Console.WriteLine(line);
+        var fingerprintWatch = Stopwatch.StartNew();
+        string pre = GeodesicGenerationFingerprint.Heights(visible), mask = GeodesicGenerationFingerprint.Mask(components.OceanMask);
+        Console.WriteLine($"[GeodesicGenerationFingerprint] reconstructed=True seed={seed} preCarveTerrainHash={pre} postCarveTerrainHash={pre} retainedOceanMaskHash={mask} hashingMs={fingerprintWatch.Elapsed.TotalMilliseconds:F3}");
         Console.WriteLine("VISUAL ACCEPTANCE PENDING. This managed fixture is not a licensed Unity screenshot or native scene integration test.");
     }
 }

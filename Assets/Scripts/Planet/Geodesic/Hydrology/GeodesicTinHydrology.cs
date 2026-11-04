@@ -76,6 +76,11 @@ public sealed class GeodesicTinHydrology
     private readonly int[] incidentOffsets, incidentTriangles, flatNextEdge, flatDistance;
     private readonly Face[] faces;
     private readonly double[] localRunoff;
+    // Optional observation of the existing accumulation trace, never a second route.
+    public bool CaptureParcelDestinations { get; set; }
+    public TinParcelDestination[] ParcelDestinations { get; private set; }
+    public double ParcelCaptureMilliseconds { get; private set; }
+    internal void ReleaseParcelDestinations() { ParcelDestinations = null; CaptureParcelDestinations = false; }
     public readonly float[] VisibleHeight, HydrologyHeight;
     public readonly int[] Neighbors, TriangleReceiver;
     public readonly double[] LocalArea, DrainageArea, AccumulatedRunoff;
@@ -283,6 +288,10 @@ public sealed class GeodesicTinHydrology
     }
 
     public bool IsOcean(TinPoint p) => faces[p.Triangle].RetainedOcean && CompletedVisibleRadius(p) <= seaLevel;
+    // Coast() bisects the actual retained-ocean boundary. Allow only double roundoff,
+    // not the routing epsilon or a proximity-to-ocean heuristic, when auditing its endpoint.
+    internal bool IsRetainedOceanBoundary(TinPoint p) => p.Triangle >= 0 && p.Triangle < TriangleCount &&
+        faces[p.Triangle].RetainedOcean && CompletedVisibleRadius(p) <= seaLevel + Math.Max(1e-10, Math.Abs(seaLevel) * 1e-12);
     private static bool Finite(double x) => !double.IsNaN(x) && !double.IsInfinity(x);
     private static double Weight(TinPoint p, int k) => k == 0 ? p.A : k == 1 ? p.B : p.C;
     private static TinPoint Mix(TinPoint a, TinPoint b, double fraction) => new TinPoint(a.Triangle,
@@ -601,14 +610,29 @@ public sealed class GeodesicTinHydrology
             foreach (double value in triangleLocalRunoff) if (!Finite(value) || value < 0d) throw new ArgumentException("Runoff must be finite and nonnegative.");
         Array.Clear(DrainageArea, 0, TriangleCount); Array.Clear(AccumulatedRunoff, 0, TriangleCount);
         Array.Fill(TriangleReceiver, -1);
+        long captureTicks = 0, captureStart = CaptureParcelDestinations ? Stopwatch.GetTimestamp() : 0;
+        ParcelDestinations = CaptureParcelDestinations ? new TinParcelDestination[TriangleCount] : null;
+        if (CaptureParcelDestinations) captureTicks += Stopwatch.GetTimestamp() - captureStart;
         var watch = Stopwatch.StartNew(); var samples = new List<TinPoint>(128); var candidates = new List<int>(8);
         var stamps = new int[TriangleCount];
         for (int t = 0; t < TriangleCount; t++)
         {
             TinPoint source = Centroid(t);
             localRunoff[t] = IsOcean(source) ? 0d : triangleLocalRunoff == null ? LocalArea[t] * Math.Max(0d, uniformRunoffPerArea) : Math.Max(0d, triangleLocalRunoff[t]);
+            if (ParcelDestinations != null)
+            {
+                captureStart = Stopwatch.GetTimestamp();
+                ParcelDestinations[t] = new TinParcelDestination(source, TinTermination.RoutingFailure);
+                captureTicks += Stopwatch.GetTimestamp() - captureStart;
+            }
             if (IsOcean(source) || !faces[t].Valid) continue;
-            TraceInto(source, samples, candidates, 32768);
+            var parcelTermination = TraceInto(source, samples, candidates, 32768);
+            if (ParcelDestinations != null)
+            {
+                captureStart = Stopwatch.GetTimestamp();
+                ParcelDestinations[t] = new TinParcelDestination(samples[samples.Count - 1], parcelTermination);
+                captureTicks += Stopwatch.GetTimestamp() - captureStart;
+            }
             int previous = t;
             foreach (TinPoint p in samples)
             {
@@ -620,6 +644,7 @@ public sealed class GeodesicTinHydrology
             }
         }
         Diagnostics.AccumulationMilliseconds = watch.Elapsed.TotalMilliseconds;
+        ParcelCaptureMilliseconds = captureTicks * 1000d / Stopwatch.Frequency;
     }
 
     private struct ChannelSegment { public int Network; public TinPoint Start, End; }
@@ -813,9 +838,9 @@ public sealed class GeodesicTinHydrology
         bool[] retainedOcean, float sea, double radius, double epsilon, double visibleBumpTolerance,
         double filterStrength, double threshold, double runoffDensity = 1d, int subdivision = -1,
         bool onSphere = true, bool boundaryOutflow = false, Vector3[] completedSurface = null,
-        float[] hydrologyTerrainHeights = null)
+        float[] hydrologyTerrainHeights = null, bool captureParcelDestinations = false)
     {
-        double strength = Math.Max(0d, Math.Min(.1d, filterStrength)), filteringMs = 0d;
+        double strength = Math.Max(0d, Math.Min(.1d, filterStrength)), filteringMs = 0d, captureMs = 0d;
         int retries = 0;
         while (true)
         {
@@ -826,11 +851,13 @@ public sealed class GeodesicTinHydrology
             filteringMs += watch.Elapsed.TotalMilliseconds;
             var tin = new GeodesicTinHydrology(vertices, triangles, visible, filtered, retainedOcean, sea, radius,
                 epsilon, visibleBumpTolerance, onSphere, boundaryOutflow, subdivision, completedSurface);
+            tin.CaptureParcelDestinations = captureParcelDestinations;
             tin.Accumulate(runoffDensity); tin.ExtractNetworks(threshold, radius);
+            captureMs += tin.ParcelCaptureMilliseconds;
             tin.Diagnostics.FilterStrength = strength; tin.Diagnostics.MeanFilterChange = mean;
             tin.Diagnostics.MaxFilterChange = max; tin.Diagnostics.FilterRetries = retries;
             tin.Diagnostics.FilteringMilliseconds = filteringMs;
-            if (!tin.HasVisibleDisagreement || strength == 0d) return tin;
+            if (!tin.HasVisibleDisagreement || strength == 0d) { tin.ParcelCaptureMilliseconds = captureMs; return tin; }
             strength = strength <= .00625d ? 0d : strength * .5d; retries++;
         }
     }
