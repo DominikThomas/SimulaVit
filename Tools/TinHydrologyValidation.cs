@@ -11,12 +11,13 @@ public static class TinHydrologyValidation
     public static int Main(string[] args)
     {
         int passed = 0, failed = 0;
-        foreach (Type fixtureType in new[] { typeof(GeodesicDrainageDeliveryTests), typeof(GeodesicTinLakeRoutingTests), typeof(GeodesicTinLakeGeometryTests), typeof(GeodesicTinBasinTests), typeof(GeodesicTinHydrologyTests), typeof(GeodesicHydrologyTerrainTests), typeof(GeodesicRiverUphillDebugTests), typeof(GeodesicRiverVisibleGradeAuditTests), typeof(GeodesicTinSurfaceTests),
+        foreach (Type fixtureType in new[] { typeof(GeodesicOceanDrainagePlanTests), typeof(GeodesicDrainageDeliveryTests), typeof(GeodesicTinLakeRoutingTests), typeof(GeodesicTinLakeGeometryTests), typeof(GeodesicTinBasinTests), typeof(GeodesicTinHydrologyTests), typeof(GeodesicHydrologyTerrainTests), typeof(GeodesicRiverUphillDebugTests), typeof(GeodesicRiverVisibleGradeAuditTests), typeof(GeodesicTinSurfaceTests),
             typeof(GeodesicHydrologyTopologyTests), typeof(GeodesicRiverGradeTests), typeof(GeodesicDrainageTests),
             typeof(GeodesicOceanConnectivityTests), typeof(GeodesicLakeTests) })
         foreach (var method in fixtureType.GetMethods())
         {
             if (args.Contains("--delivery-only") && fixtureType != typeof(GeodesicDrainageDeliveryTests)) continue;
+            if (args.Contains("--ocean-plan-only") && fixtureType != typeof(GeodesicOceanDrainagePlanTests)) continue;
             if (method.GetCustomAttributes(typeof(TestAttribute), false).Length == 0) continue;
             try { method.Invoke(Activator.CreateInstance(fixtureType), null); passed++; Console.WriteLine("PASS " + method.Name); }
             catch (Exception e) { failed++; Console.WriteLine("FAIL " + method.Name + ": " + (e.InnerException ?? e)); }

@@ -179,6 +179,7 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
             fingerprint.Add("effective.visualSeed", owner.DerivedVisualSeed);
             fingerprint.Add("effective.bathymetrySeed", owner.DerivedBathymetrySeed);
             fingerprint.Add("effective.generationVersion", PlanetGenerator.GenerationVersion);
+            fingerprint.Add("effective.oceanConnectivityPlanVersion", GeodesicOceanDrainagePlan.Version);
             foreach (PlanetSeedDomain domain in Enum.GetValues(typeof(PlanetSeedDomain)))
                 fingerprint.Add("derivedDomains." + domain, PlanetSeedUtility.DeriveSeed(owner.randomSeed, domain, PlanetGenerator.GenerationVersion));
             fingerprint.Add("effective.carvingAlreadyAttempted", owner.GeodesicValleyCarvingAttempted);
@@ -202,7 +203,7 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
         collectDelivery = enabled;
         try { foreach (var progress in InitializeCoreStages(owner, geometry, surfaceMesh)) yield return progress; }
         finally { collectDelivery = false; }
-        if (!enabled || DrainageDelivery == null) yield break;
+        if (!enabled || DrainageDelivery == null) { TinDrainage?.ReleaseParcelDestinations(); yield break; }
         watch.Restart();
         fingerprint.Add("effective.epsilon", TinDrainage.Epsilon);
         fingerprint.Add("effective.visibleBumpTolerance", TinDrainage.VisibleBumpTolerance);
@@ -260,6 +261,10 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
         int passes = Mathf.Clamp(owner.valleyCarvingPasses, 1, 5);
         var results = new List<GeodesicValleyCarving.Result>(passes);
         var frozenOcean = retainedCarvingOcean;
+        var initialHeights = (float[])TinDrainage.VisibleHeight.Clone();
+        var initialCatchments = collectDelivery ? GeodesicOceanDrainagePlan.CaptureCatchments(TinDrainage, TinLakeBasins) : null;
+        float carveDepth = GeodesicValleyCarving.Normalize(owner.maximumValleyCarveDepth, GeodesicValleyCarving.DefaultDepth, 1f);
+        double carveRunoff = meanCellArea * GeodesicValleyCarving.Normalize(owner.minimumValleyCarveRunoff, GeodesicValleyCarving.DefaultRunoff, 1000000f);
         for (int pass = 1; pass <= passes; pass++)
         {
             yield return new PlanetGenerationProgress(PlanetGenerationStage.CarvingValleys, pass, passes);
@@ -268,10 +273,14 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
             // supply protected footprints, lake entries or lake-outlet targets.
             var result = GeodesicValleyCarving.Plan(TinDrainage, carvingTopology, frozenOcean,
                 null, null, owner.BasePlanetRadius, owner.GeodesicSeaLevelRadius,
-                GeodesicValleyCarving.Normalize(owner.maximumValleyCarveDepth, GeodesicValleyCarving.DefaultDepth, 1f),
-                meanCellArea * GeodesicValleyCarving.Normalize(owner.minimumValleyCarveRunoff, GeodesicValleyCarving.DefaultRunoff, 1000000f),
+                carveDepth, carveRunoff,
                 GeodesicValleyCarving.Normalize(owner.valleyCarveWidth, GeodesicValleyCarving.DefaultWidth, 1f),
                 TinLakeBasins, surfaceMesh.vertices, visibleMicroBumpFraction);
+            // Existing incision setting is per pass. Its cumulative limit is the original
+            // completed surface minus pass * depth; no new excavation allowance is added.
+            for (int v = 0; v < result.Heights.Length; v++)
+                if (initialHeights[v] - (double)result.Heights[v] > pass * (double)carveDepth + pass * TinDrainage.Epsilon)
+                    throw new InvalidOperationException("Cumulative valley excavation limit exceeded.");
             if (result.AffectedVertices > 0) owner.ApplyGeodesicValleySurface(geometry, surfaceMesh, result.Heights);
             results.Add(result);
             Debug.Log(result.Summary(pass, passes), this);
@@ -283,9 +292,12 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
                 frozenOcean, intermediateCarving: pass < passes)) yield return progress;
             LogCarvingHydrology($"pass-{pass}-of-{passes}-after");
             Debug.Log(result.CoastalRebuildSummary(TinDrainage, pass, passes), this);
+            Debug.Log(result.OceanRebuildSummary(TinDrainage, pass, passes), this);
         }
         ValleyCarvingResults = results.AsReadOnly();
         ValleyCarving = results[results.Count - 1];
+        if (initialCatchments != null && DrainageDelivery != null)
+            Debug.Log(GeodesicOceanDrainagePlan.FinalCatchmentSummary(initialCatchments, TinDrainage, DrainageDelivery, carveRunoff), this);
         retainedCarvingOcean = null; carvingTopology = null;
     }
 
@@ -580,12 +592,12 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
                 owner.GeodesicSeaLevelRadius, owner.BasePlanetRadius, epsilon, bump, tinFilterStrength,
                 ResolvedDrainageAreaThreshold, Mathf.Max(0f, uniformRunoffPerArea), geometry.SubdivisionLevel,
                 completedSurface: completedSurface, hydrologyTerrainHeights: hydrologyTerrainHeight,
-                captureParcelDestinations: collectDelivery && !intermediateCarving);
+                captureParcelDestinations: CaptureGenerationParcels(owner, intermediateCarving));
         else
             TinDrainage = GeodesicTinHydrology.BuildAdaptive(geometry.UnitVertices, geometry.Triangles, visible, ocean,
             owner.GeodesicSeaLevelRadius, owner.BasePlanetRadius, epsilon, bump, tinFilterStrength,
             ResolvedDrainageAreaThreshold, Mathf.Max(0f, uniformRunoffPerArea), geometry.SubdivisionLevel, completedSurface: completedSurface,
-            captureParcelDestinations: collectDelivery && !intermediateCarving);
+            captureParcelDestinations: CaptureGenerationParcels(owner, intermediateCarving));
         routingHeights = TinDrainage.HydrologyHeight;
         terrain = new GeodesicRiverTerrain(geometry, completedSurface, routingHeights, true);
         int count = TinDrainage.TriangleCount;
@@ -622,6 +634,10 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
         if (!intermediateTinCarving)
             Debug.Log("[GeodesicTIN] Rendered lake nodes use exact shoreline entries and unique TIN runoff parcels.", this);
     }
+
+    private bool CaptureGenerationParcels(PlanetGenerator owner, bool intermediate) =>
+        intermediate || collectDelivery || (owner.enableTerminationValleyCarving &&
+            owner.hydrologyTerrainMode == HydrologyTerrainMode.Visible && tinFilterStrength == 0f);
 
     private double[] MapSimulationRunoffToTriangles(double[] supplied)
     {

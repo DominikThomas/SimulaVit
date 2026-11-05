@@ -1,5 +1,10 @@
 # TIN valley carving and final lakes
 
+The current ocean-rooted candidate selection and combined-TIN verification are documented
+in [Ocean-directed drainage planning](OceanDirectedDrainagePlanning.md). That change
+supersedes the local-success/fallback selection described below while retaining the
+pass lifecycle, deferred lake construction and coastal bounds.
+
 Generation builds initial TIN drainage and raw basin topology, then repeats carving and
 drainage/topology rebuilding for the configured number of passes. Even a pass accepting
 no cuts is followed by a rebuild. Only the rebuild after the final carving pass applies
