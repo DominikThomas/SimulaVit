@@ -2555,6 +2555,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         atmosphereMeshRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
         atmosphereMeshRenderer.receiveShadows = false;
 
+        ConfigureAtmosphereScattering(shellRadius);
+
         Debug.Log($"[GeodesicAtmosphereVisual] geometry=icosphere, subdivision={atmosphereSubdivision}, radius={shellRadius:F6}, visibleOuterRadius={CurrentVisibleOuterRadius:F6}, radiusMultiplier={atmosphereRadiusMultiplier:F4}, material={(atmosphereMaterial != null ? atmosphereMaterial.name : "<missing>")}, authority=visual-only", this);
     }
 
@@ -2814,6 +2816,21 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         // Draw atmosphere after planet/ocean if transparency sorting gets awkward.
         atmosphereMeshRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
         atmosphereMeshRenderer.receiveShadows = false;
+    }
+
+    // Visual-only local radii. The object transform and URP Main Light are read by
+    // the shader, so orbiting/moving the planet or Sun needs no per-frame CPU work.
+    void ConfigureAtmosphereScattering(float shellRadius)
+    {
+        if (atmosphereMeshRenderer == null) return;
+        float groundRadius = enableOcean
+            ? (CurrentGridType == PlanetGridType.GeodesicIcosphere ? GeodesicSeaLevelRadius : GetOceanRadius())
+            : MinimumSurfaceRadius;
+        var properties = new MaterialPropertyBlock();
+        atmosphereMeshRenderer.GetPropertyBlock(properties);
+        properties.SetFloat("_PlanetRadius", Mathf.Min(groundRadius, shellRadius * 0.9999f));
+        properties.SetFloat("_AtmosphereRadius", shellRadius);
+        atmosphereMeshRenderer.SetPropertyBlock(properties);
     }
 
     void GeneratePlanet()
@@ -3223,6 +3240,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         atmosphereMesh.triangles = triangles;
         atmosphereMesh.RecalculateBounds();
         atmosphereMesh.RecalculateNormals();
+
+        ConfigureAtmosphereScattering((enableOcean ? seaRadius : radius) * atmosphereRadiusMultiplier);
 
         if (atmosphereMeshFilter != null)
         {
