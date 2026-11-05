@@ -1,5 +1,9 @@
 # Ocean-directed drainage planning
 
+The complete-package selection and corrected basin-target diagnostics in planner revision 3
+are documented in [Complete multi-basin drainage chains](MultiBasinDrainageChains.md).
+That report supersedes the selection details below and records the remaining validation limits.
+
 Implemented 2026-11-05. Planet-scale acceptance is pending a manual Unity generation. No full planet-generation run, benchmark, parameter sweep or large automated test suite was run for this change.
 
 ## Outcome and scope

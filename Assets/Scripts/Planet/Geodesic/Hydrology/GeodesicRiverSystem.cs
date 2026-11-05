@@ -297,7 +297,12 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
         ValleyCarvingResults = results.AsReadOnly();
         ValleyCarving = results[results.Count - 1];
         if (initialCatchments != null && DrainageDelivery != null)
+        {
             Debug.Log(GeodesicOceanDrainagePlan.FinalCatchmentSummary(initialCatchments, TinDrainage, DrainageDelivery, carveRunoff), this);
+            var chainParcels = new HashSet<int>();
+            foreach (var result in results) chainParcels.UnionWith(result.CompleteMultiChainParcels());
+            Debug.Log(GeodesicOceanDrainagePlan.FinalChainSummary(chainParcels, TinDrainage, DrainageDelivery), this);
+        }
         retainedCarvingOcean = null; carvingTopology = null;
     }
 

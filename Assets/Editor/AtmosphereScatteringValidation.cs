@@ -191,7 +191,7 @@ public static class AtmosphereScatteringValidation
         }
     }
 
-    private static Texture2D Render(Camera camera)
+    internal static Texture2D Render(Camera camera)
     {
         var target = new RenderTexture(960, 720, 24, RenderTextureFormat.ARGB32);
         var previous = RenderTexture.active;

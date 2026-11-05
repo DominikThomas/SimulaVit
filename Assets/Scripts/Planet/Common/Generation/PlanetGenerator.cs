@@ -386,8 +386,10 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
     [Header("Atmosphere")]
     public bool enableAtmosphere = true;
-    [Tooltip("Atmosphere shell radius multiplier relative to planet radius.")]
+    [Tooltip("Visual atmosphere thickness above the terrain-clear inner radius. 1.01 adds 1% of the maximum visible radius.")]
     [Range(1.001f, 1.2f)] public float atmosphereRadiusMultiplier = 1.04f;
+    [Tooltip("Visual-only inner atmosphere clearance above the tallest terrain/water, as a fraction of base planet radius.")]
+    [Range(0.0001f, 0.01f)] public float atmosphereTerrainClearance = 0.001f;
     [Range(0, GeodesicGridTopology.MaxSupportedSubdivision)]
     [Tooltip("Visual-only Geodesic atmosphere shell subdivision. This is intentionally independent of terrain and simulation resolution.")]
     public int geodesicAtmosphereRenderSubdivisionLevel = 4;
@@ -2538,7 +2540,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
             geodesicAtmosphereRenderSubdivisionLevel,
             0,
             GeodesicGridTopology.MaxSupportedSubdivision);
-        float shellRadius = CurrentVisibleOuterRadius * atmosphereRadiusMultiplier;
+        float shellRadius = GetAtmosphereOuterRadius();
         IcosphereRenderGeometry atmosphereGeometry =
             IcosphereRenderGeometryCache.GetOrBuild(atmosphereSubdivision);
 
@@ -2829,9 +2831,16 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         var properties = new MaterialPropertyBlock();
         atmosphereMeshRenderer.GetPropertyBlock(properties);
         properties.SetFloat("_PlanetRadius", Mathf.Min(groundRadius, shellRadius * 0.9999f));
+        properties.SetFloat("_AtmosphereInnerRadius", GetAtmosphereInnerRadius());
         properties.SetFloat("_AtmosphereRadius", shellRadius);
         atmosphereMeshRenderer.SetPropertyBlock(properties);
     }
+
+    float GetAtmosphereInnerRadius()
+        => CurrentVisibleOuterRadius + BasePlanetRadius * Mathf.Clamp(atmosphereTerrainClearance, 0.0001f, 0.01f);
+
+    float GetAtmosphereOuterRadius()
+        => GetAtmosphereInnerRadius() + CurrentVisibleOuterRadius * Mathf.Max(0.001f, atmosphereRadiusMultiplier - 1f);
 
     void GeneratePlanet()
     {
@@ -3178,13 +3187,15 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         for (int i = 0; i < cellCount; i++)
         {
             Vector3 dir = unitVertices[i];
-            float shellBaseRadius = enableOcean ? seaRadius : radius;
-            float atmosphereRadius = shellBaseRadius * atmosphereRadiusMultiplier;
             terrainVertices[i] = dir * finalTerrainRadii[i];
             maximumGeneratedOpaqueSurfaceRadius = Mathf.Max(maximumGeneratedOpaqueSurfaceRadius, finalTerrainRadii[i]);
             oceanVertices[i] = dir * seaRadius;
-            atmosphereVertices[i] = dir * atmosphereRadius;
         }
+
+        // Atmosphere visuals only: resolve clearance after the complete terrain
+        // radius inventory is known, without changing terrain or water vertices.
+        float atmosphereOuterRadius = GetAtmosphereOuterRadius();
+        for (int i = 0; i < cellCount; i++) atmosphereVertices[i] = unitVertices[i] * atmosphereOuterRadius;
 
         mesh.Clear();
         RestoreLegacyTerrainMaterial();
@@ -3241,7 +3252,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         atmosphereMesh.RecalculateBounds();
         atmosphereMesh.RecalculateNormals();
 
-        ConfigureAtmosphereScattering((enableOcean ? seaRadius : radius) * atmosphereRadiusMultiplier);
+        ConfigureAtmosphereScattering(atmosphereOuterRadius);
 
         if (atmosphereMeshFilter != null)
         {

@@ -1,64 +1,93 @@
-# Directional atmospheric lighting
+# Planetary lighting refinement
 
-Implemented 2026-11-05 for Unity 6000.3.19f1 / URP 17.3.0.
+Unity 6000.3.19f1 / URP 17.3.0. Refined 2026-11-05.
 
-## Existing setup and scope
+## Atmosphere
 
-`PlanetGenerator` builds the existing `Atmosphere Layer` mesh: an icosphere in geodesic mode and a sphere using the legacy grid in legacy mode. Geodesic shell radius remains `CurrentVisibleOuterRadius * atmosphereRadiusMultiplier`; the scene's multiplier remains 1.01 and subdivision remains 4. Because that radius includes mountain peaks, the atmospheric volume above sea level can be considerably thicker than 1%.
+The existing Atmosphere Layer mesh and Atmosphere_Fresnel_Mat asset remain in use. AtmosphereScatteringURP reads the actual URP Main Light, including its Forward+ variant. It uses analytic sphere intersections, three fixed density samples, Rayleigh-like scattering, a bounded forward lobe and smooth planetary self-shadowing. No additional gameplay cameras, full-screen passes, textures, or per-frame CPU updates were added.
 
-`Atmosphere_Fresnel_Mat.mat` now uses `SimulaVit/AtmosphereScatteringURP`. Its asset GUID and scene reference are preserved. The previous `Atmosphere_Fresnel.shadergraph` remains available for comparison. `SunSkyRotator` already aligns the directional Main Light with its planet-to-Sun direction and assigns `RenderSettings.sun`. The shader consumes that light through URP `GetMainLight()`, including the `_CLUSTER_LIGHT_LOOP` variant required by the desktop Forward+ renderer. The Sun's orbit and rotation code are unchanged.
+Warm colour now uses local solar elevation around the true geometric terminator, a narrow Gaussian twilight mask, and a squared limb mask. Warm light is suppressed beyond 0.4 times the twilight width on the dark side. Sunset Strength controls the brightness of this local contribution. Cool scattered light and the independently adjustable night residual remain.
 
-Terrain remains opaque. The geodesic ocean remains transparent with depth writes disabled. The atmosphere draws after ordinary transparent water and clips its integration at the analytic sea-level sphere. It supplies the volume's analytic entry depth to the normal depth test, so foreground objects can occlude it even though the mesh rasterizes exit faces. Inside the atmosphere, the entry depth becomes the near plane. The shader does not sample a camera depth texture and works with either project's renderer. No pipeline assets, terrain/ocean shaders, background material, simulation, or hydrology code were changed.
+Face-on haze defaults to only 0.015 of the limb response. The outer halo tapers relative to the physical sea/ground sphere, preventing a luminous detached ring at the global tallest-peak bound. The scattering volume itself remains above the terrain. Shadowing uses the physical planet radius independently of atmospheric clearance.
 
-## Approximation and cost
+### Radius adjustment
 
-The mesh rasterizes exit faces, including from inside the shell. Each fragment intersects the camera ray with the atmosphere and planet spheres in local coordinates and evaluates three fixed Gaussian quadrature samples. This is a small, fixed-cost integration, with no marching loop, lookup textures, extra camera, full-screen pass, or texture updates in gameplay. Analytic fragment depth can reduce early-depth optimization, so target-device GPU profiling is still useful.
+PlanetGenerator changes are restricted to atmosphere visuals. Terrain vertices, generation inputs/cache keys, water geometry, hydrology, simulation, and Sun rotation are unchanged.
 
-Density falls exponentially with altitude and smoothly reaches zero at the outer boundary. A Rayleigh phase approximation supplies the blue/cyan limb; a bounded forward lobe supplies a small Mie-like contribution. Long Sun paths blend through cyan and gold to orange, with the warm response suppressed when looking away from the Sun. The apparent planetary horizon at each sample supplies smooth curved self-shadowing. Premultiplied transparency and bounded optical opacity preserve surface/background detail. The night residual is independently adjustable.
+Let R = CurrentVisibleOuterRadius (maximum generated terrain or visible water), and B = BasePlanetRadius:
 
-`PlanetGenerator.ConfigureAtmosphereScattering()` supplies the local atmosphere and sea/ground radii through a per-renderer property block when geometry is built, for both generation modes. Planet transforms and light direction are read on the GPU. There is no additional per-frame CPU update or camera callback.
+- Inner scattering radius = R + B * atmosphereTerrainClearance.
+- Outer shell radius = inner radius + R * (atmosphereRadiusMultiplier - 1).
+- Clearance defaults to 0.001 of the base radius, clamped to [0.0001, 0.01].
 
-## Material controls
+For the scene's geodesic multiplier of 1.01, the outer mesh moves outward only by the small clearance margin. The effective scattering layer becomes approximately 1% thick above the tallest terrain instead of extending down to sea level. With base radius 8, the default margin is 0.008 local units. The legacy visual builder resolves this bound after the complete existing terrain maximum is known. Both modes bind planet, inner, and outer radii per renderer.
 
-| Property | Default | Purpose |
+The shader uses the analytic volume entry for its ordinary depth test, with depth writes disabled. It does not sample camera depth. Inside the inner boundary, rays see atmosphere only if they exit the cavity before hitting the physical planet.
+
+### Atmosphere tuning
+
+On the atmosphere material:
+
+| Control | Default | Effect |
 | --- | --- | --- |
-| Scattering Intensity | 1.15 | Overall scattered light and optical opacity |
-| Rayleigh Colour | (0.12, 0.42, 1) | Blue base colour; cyan transition is derived from it |
-| Sunset Colour | (1, 0.24, 0.035) | Orange endpoint; gold transition is derived from it |
-| Sunset Strength | 1 | Warm long-path response; zero disables warming |
-| Forward Scattering | 0.08 | Bounded glow toward the Sun |
-| Optical Density | 0.65 | Column opacity; zero disables atmosphere |
-| Density Falloff / Rim Thinness | 4.5 | Larger values concentrate scattering nearer the ground |
-| Day Night Softness | 0.035 | Angular softness of the planet-shadow edge |
-| Night Residual Glow | 0.003 | Faint remaining blue; zero disables it |
+| Scattering Intensity | 1.15 | Overall light and optical opacity |
+| Rayleigh Colour | (0.12, 0.42, 1) | Blue base and derived cyan |
+| Sunset Colour | (1, 0.24, 0.035) | Local warm endpoint |
+| Sunset Strength | 0.4 | Warm brightness; previously 1 |
+| Twilight Angular Width | 0.055 | Solar-elevation width, about 3.2 degrees |
+| Limb Width | 0.12 | Silhouette transition and outer halo taper |
+| Atmosphere Over Surface | 0.015 | Residual face-on haze |
+| Forward Scattering | 0.08 | Bounded Sun-facing lobe |
+| Optical Density | 0.65 | Optical column strength |
+| Density Falloff | 4.5 | Concentration toward the inner boundary |
+| Day Night Softness | 0.035 | Curved planet-shadow transition |
+| Night Residual Glow | 0.012 | Faint cool residual, compensated for the thinner layer |
 
-For the current mountainous world, adjust Density Falloff first if the atmosphere feels too broad, then Optical Density or Scattering Intensity. The geometry and multiplier do not need to change.
+In the Planet Generator Inspector, Atmosphere Terrain Clearance controls the safety margin and Atmosphere Radius Multiplier controls thickness. These apply when the existing atmosphere mesh is built; no continuous rebuilding was added.
+
+## Water
+
+GeodesicOceanURP and Resources/GeodesicLakeURP share PlanetWaterLighting.hlsl. They now use view-dependent Fresnel reflection, the existing environment cubemap and a Main-Light specular Sun glint. Smoothness controls highlight width; positive normal/light alignment and Main Light shadow attenuation suppress night-side glints. Both shaders include the Forward+ variant.
+
+Environment reflection is bounded and tinted to prevent an HDR sky washing water white. A restrained sky fill supports views without a usable probe. Grazing reflection raises water opacity. Existing ocean chemistry/depth colours and their binder remain unchanged. Lake runtime materials pick up the improved shader defaults automatically; no hydrology code or lake geometry was changed.
+
+| Water control | Ocean default | Lake default |
+| --- | --- | --- |
+| Smoothness | Existing authoring value (scene: 0.876) | 0.92 |
+| Fresnel Strength | Existing authoring value (0.18) | 0.22 |
+| Fresnel Power | Existing authoring value (3) | 5 |
+| Environment Reflection Strength | 0.85 | 0.85 |
+| Sun Glint Strength | 4 | 4 |
+| Sky Reflection Fill | (0.3, 0.5, 0.7) | (0.3, 0.5, 0.7) |
+| Ambient Strength | Existing ocean value (0.08) | 0.08 |
+
+These are shader/material controls. Existing renderers construct ocean/lake materials at runtime; new controls use shader defaults. No persistent ocean/lake material asset or binding script changed. Legacy URP/Lit ocean rendering remains as before.
+
+## Land
+
+GeodesicVertexColorURP preserves vertex colours, normal-based slope contrast and shadows. New controls are Sunlight Readability (1.25), Cool Ambient Tint (0.55, 0.7, 1), Night Ambient Multiplier (0.5), Twilight Light Tint (1, 0.8, 0.6), and Twilight Warmth (0.1). Existing generator Ambient/Diffuse Strength controls still apply. Diagnostic/river materials with Diffuse Strength = 0 keep their unlit ambient colour behaviour.
+
+Controls are available on the runtime geodesic surface material. The legacy surface/ice shader is outside this geodesic refinement.
 
 ## Verification
 
-Run **Tools > Atmosphere > Validate and Capture** in Unity, or call `AtmosphereScatteringValidation.Capture` with `-executeMethod` in an isolated batch project. It creates an unsaved preview scene, restores temporary light/render-pipeline settings, and writes PNGs plus `validation.txt` into `Artifacts/AtmosphereScattering/`. This output directory is ignored by Git.
+Run Tools > Atmosphere > Validate Lighting Refinement, or batch-execute PlanetLightingRefinementValidation.Capture. Output goes to the ignored Artifacts/AtmosphereRefinement directory. The original atmosphere tool remains available and shares its render helper.
 
-The harness uses synthetic spherical terrain and the project's actual terrain shader, old/new atmosphere shaders, material defaults, and desktop/mobile renderers. These are controlled GPU comparisons, not screenshots of the running simulation or a match to the unprovided reference image. No post-processing is applied.
+Controlled synthetic terrain includes a tall mountain near the limb, water and a lake cap. Tests use the actual shaders, renderer property blocks and Main Light without generating a gameplay world or saving scenes. Optional BeforeRefinement shader/material snapshots in the ignored validation copy provide comparisons to the preceding implementation; the menu also works without those snapshots.
 
-Checked on Direct3D11:
+Verified on desktop Direct3D11:
 
-- Runtime scripts and validation harness compile; the atmosphere shader renders without shader errors.
-- Automated atmospheric light signal checks on a black surface for desktop Forward+ and mobile Forward, using renderer property blocks. These catch a missing Main Light shader variant even when shader compilation succeeds.
-- Sun behind the camera: subtle blue limb and transparent daytime scattering.
-- Sun near the horizon: localized gold/orange twilight with cyan/blue transitions.
-- Sun behind the planet: greatly reduced atmospheric illumination.
-- Full camera orbit in 30-degree steps, including matching start/end views.
-- Distant, close, inside-shell, below-surface, and orthographic views.
-- Narrow (1.01) and mountain-spanning (1.104) outer radii.
-- Raised terrain with approximate sea-level integration, and mobile forward rendering with camera depth disabled.
+- Runtime/editor compilation and GPU rendering of all four shaders without shader errors.
+- Before/after day, sunrise/sunset, backlit/night, and prominent mountain-limb views.
+- Full 360-degree orbit at 30-degree intervals and a close horizon view.
+- Inner radius above the maximum test terrain, with a 0.001 margin.
+- Central-disc atmospheric signal on black terrain reduced from about 0.101 to 0.0033, approximately 97% less overlay.
+- Automated ocean/lake glint-versus-disabled checks and no added night-side glint.
+- Displacing the Sun visibly displaces the water highlight.
+- Desktop Forward+ and mobile Forward renderer configurations; the latter with camera depth disabled.
 
-Final PNGs show a blue daytime rim, localized warm twilight, and faint night atmosphere. Close and inside-shell captures show a continuous horizon fade. Compare `orbit-000.png` with `orbit-360.png` to inspect the orbit wrap. The harness supplies radii through the same per-renderer property mechanism used by gameplay.
+The PNGs and validation.txt are controlled GPU captures, not screenshots of the user's running world. No mobile-device build or GPU timing benchmark was performed.
 
-## Limits and separate next steps
+## Limits
 
-- This is an artistic single-scattering approximation, not spectral atmospheric transport. Three samples can smooth fine shadow/density variations. No GPU timing benchmark or mobile-device build was performed.
-- Planet shadows and scattering endpoints are spherical. They do not include individual mountains or clouds. Raised terrain receives an approximate atmospheric veil rather than exact depth-dependent integration. Water clipping uses sea level because transparent water does not write depth.
-- Spherical planets with uniform transform scale are the intended configuration. A nonuniform scale produces an ellipsoidal approximation rather than physical scattering distances.
-- Inside-shell rendering relies on its exit geometry remaining within the camera far plane. It does not add a special near-camera full-screen path.
-- Existing terrain/ocean ambient light can keep the night surface visible independently of the atmosphere. Surface exposure, ocean highlights, and star/background exposure are separate potential follow-ups if the cinematic target requires them.
-- Final visual approval on a generated gameplay planet and Vulkan/GLES/device validation remain useful; controlled Direct3D11 captures do not replace those checks.
+Clearance, shadowing and scattering endpoints are spherical rather than per-mountain ray tracing. Unusually tall isolated peaks can suppress their local halo. Mirror-like water uses existing cubemaps and an analytical Sun highlight; no dynamic terrain/screen reflections were added. Analytic fragment depth can reduce early depth optimization, so device profiling remains useful. The atmosphere shell's exit geometry must remain within the camera far plane.

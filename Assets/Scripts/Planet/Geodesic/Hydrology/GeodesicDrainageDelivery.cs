@@ -44,8 +44,9 @@ public sealed class GeodesicDrainageDelivery
     private readonly GeodesicTinHydrology tin;
     private readonly GeodesicTinBasins basins;
     private readonly Outcome[] networkOutcomes;
-    private readonly bool[] confirmedOceanParcels;
-    public bool IsConfirmedOceanParcel(int id) => id >= 0 && id < confirmedOceanParcels.Length && confirmedOceanParcels[id];
+    private readonly byte[] confirmedOceanParcels;
+    public bool IsConfirmedOceanParcel(int id) => id >= 0 && id < confirmedOceanParcels.Length && confirmedOceanParcels[id] != 0;
+    public bool IsOceanViaLakesParcel(int id) => id >= 0 && id < confirmedOceanParcels.Length && confirmedOceanParcels[id] == 2;
     public double TotalRunoff, DirectOcean, ViaLakesOcean, InlandClosed, Unresolved, TotalArea;
     public int IndependentParcels, DuplicateMemberships, InvalidMemberships, CycleNodes;
     public int LogicalDisconnected, VisualOnlyBreaks, UnknownBreaks, ExtractionAmbiguities;
@@ -57,7 +58,7 @@ public sealed class GeodesicDrainageDelivery
     public double Tolerance => Math.Max(1e-9, TotalRunoff * 1e-9);
     public IEnumerable<Catchment> LargestDisconnected => catchments.Values.OrderByDescending(c => c.Runoff).ThenBy(c => c.Terminal.TerminalId, StringComparer.Ordinal).Take(20);
     private GeodesicDrainageDelivery(GeodesicTinHydrology source, GeodesicTinBasins topology)
-    { tin = source; basins = topology; networkOutcomes = new Outcome[tin.Networks.Count]; confirmedOceanParcels = new bool[tin.TriangleCount]; }
+    { tin = source; basins = topology; networkOutcomes = new Outcome[tin.Networks.Count]; confirmedOceanParcels = new byte[tin.TriangleCount]; }
 
     private static Outcome Unknown(string id, string reason) => new Outcome { Destination = Destination.Unresolved, TerminalId = id, Type = reason };
     private bool Valid(TinPoint p) => p.Triangle >= 0 && p.Triangle < tin.TriangleCount &&
@@ -166,7 +167,7 @@ public sealed class GeodesicDrainageDelivery
                 case Destination.InlandClosed: r.InlandClosed += amount; break;
                 default: r.Unresolved += amount; break;
             }
-            r.confirmedOceanParcels[t] = end.Destination == Destination.DirectOcean || end.Destination == Destination.OceanViaLakes;
+            r.confirmedOceanParcels[t] = end.Destination == Destination.DirectOcean ? (byte)1 : end.Destination == Destination.OceanViaLakes ? (byte)2 : (byte)0;
             r.terminalRunoff.TryGetValue(end.Type, out double previous); r.terminalRunoff[end.Type] = previous + amount;
             if (end.Destination == Destination.DirectOcean || end.Destination == Destination.OceanViaLakes) continue;
             if (!r.catchments.TryGetValue(end.TerminalId, out var catchment))

@@ -22,6 +22,7 @@ public sealed class GeodesicValleyCarving
         public string Rejection;
         public string ProfileFailure;
         public bool RequiresRetrace;
+        public bool RequiresCollectiveTrace;
         public string VerificationFailure;
         public bool Accepted => Rejection == null;
         public double Length, MaximumCut, MeanCut;
@@ -53,6 +54,18 @@ public sealed class GeodesicValleyCarving
         public double MaximumCut, MeanCut, PathLength;
         public double CoastalSubmergenceLimit;
         public int OceanRooted, Unrooted, SelectionConflicts, CandidateBudgetSkipped, VerificationBuilds;
+        public int UnrootedMissing, UnrootedMissingPhysical, UnrootedMissingBudget, UnrootedCycles, UnrootedUnknown, ChainBudgetRejected, PhysicalInvalidEdges;
+        public readonly List<GeodesicOceanDrainagePlan.Chain> Chains = new List<GeodesicOceanDrainagePlan.Chain>();
+        public IEnumerable<GeodesicOceanDrainagePlan.Chain> CompleteChains
+        {
+            get { var accepted = new HashSet<int>(Candidates.Where(c => c.Accepted).Select(c => c.BasinId));
+                return Chains.Where(chain => chain.Edges.All(accepted.Contains)); }
+        }
+        public IEnumerable<int> CompleteMultiChainParcels()
+        {
+            var ids = new HashSet<int>(CompleteChains.Where(c => c.Edges.Length > 1).SelectMany(c => c.Edges));
+            return Candidates.Where(c => c.Accepted && ids.Contains(c.BasinId)).SelectMany(c => c.ParcelIds);
+        }
         public double EligibleIndependentRunoff, EligibleTinyNoiseRunoff;
         public int Accepted => Candidates.Count(c => c.Accepted);
         public string Summary(int pass = 1, int passes = 1) => $"[GeodesicValleyCarving] enabled=True pass={pass}/{passes} eligible={Eligible} matched-to-basin={MatchedToBasin} searched={Searched} " +
@@ -68,7 +81,12 @@ public sealed class GeodesicValleyCarving
             $"oceanPlanVersion={GeodesicOceanDrainagePlan.Version} oceanRooted={OceanRooted} unrooted={Unrooted} selectionConflicts={SelectionConflicts} " +
             $"candidateBudgetSkipped={CandidateBudgetSkipped} verificationBuilds={VerificationBuilds} independentRunoff={EligibleIndependentRunoff:R} tinyNoiseRunoff={EligibleTinyNoiseRunoff:R} " +
             $"acceptedRetracedConnections={Candidates.Count(c => c.Accepted && c.RequiresRetrace)} " +
+            $"acceptedCollectiveJoins={Candidates.Count(c => c.Accepted && c.RequiresCollectiveTrace)} " +
             $"unverifiedOcean={Rejected("proposed-no-ocean-connection")} selectionRejected={Rejected("selection-conflict-or-runoff")} downstreamRejected={Rejected("downstream-proposal-rejected")} verificationBudgetRejected={Rejected("verification-budget")} protectedOceanRejected={Rejected("existing-ocean-route-changed")} " +
+            $"unverifiedBoundary={Candidates.Count(c => c.VerificationFailure?.Contains(":OceanCoast:") == true)} unverifiedClosed={Candidates.Count(c => c.VerificationFailure?.Contains(":TrueClosedBasin:") == true || c.VerificationFailure?.Contains(":TinyNoiseDepression:") == true)} unverifiedRoutingFailure={Candidates.Count(c => c.VerificationFailure?.Contains(":RoutingFailure:") == true)} " +
+            $"directTargetCuts={Candidates.Count(c => c.Accepted && c.DownstreamBasinId == GeodesicOceanDrainagePlan.Ocean)} intermediateBasinCuts={Candidates.Count(c => c.Accepted && c.DownstreamBasinId >= 0)} " +
+            $"multiChainsProposed={Chains.Count(c => c.Edges.Length > 1)} multiChainsAccepted={CompleteChains.Count(c => c.Edges.Length > 1)} multiChainsVerificationRejected={Chains.Count(c => c.Edges.Length > 1) - CompleteChains.Count(c => c.Edges.Length > 1)} " +
+            $"unrootedMissing={UnrootedMissing} unrootedMissingPhysical={UnrootedMissingPhysical} unrootedMissingBudget={UnrootedMissingBudget} unrootedCycles={UnrootedCycles} unrootedUnknown={UnrootedUnknown} chainBudgetRejected={ChainBudgetRejected} physicalInvalidEdges={PhysicalInvalidEdges} " +
             "connections=proposed-TIN-verified-final-delivery-authoritative";
         private string Reasons(bool spill) => string.Join(" ", new[] { "too-deep", "below-sea-level", "coastal-no-ocean-connection", "coastal-depth-limit", "coastal-distance-limit", "invalid-spill", "no-downstream-side", "lake", "conflict", "no-target", "search-distance-limit", "footprint-limit", "search-budget" }
             .Select(reason => $"{(reason == "lake" ? "lake-protected" : !spill && reason == "search-budget" ? "fallback-search-budget" : reason)}={Candidates.Count(c => c.SpillDirected == spill && c.Rejection == reason)}"));
@@ -84,7 +102,8 @@ public sealed class GeodesicValleyCarving
 
         public string OceanRebuildSummary(GeodesicTinHydrology rebuilt, int pass, int passes)
         {
-            int full = 0, partial = 0; double input = 0, delivered = 0;
+            int full = 0, partial = 0; double input = 0, delivered = 0, chainOcean = 0, reroutedClosed = 0;
+            var chainIds = new HashSet<int>(CompleteChains.Where(c => c.Edges.Length > 1).SelectMany(c => c.Edges));
             foreach (var c in Candidates.Where(c => c.Accepted && c.ParcelIds.Length > 0))
             {
                 double total = 0, ocean = 0;
@@ -92,11 +111,23 @@ public sealed class GeodesicValleyCarving
                 {
                     double amount = rebuilt.ParcelRunoff(id); total += amount;
                     if (rebuilt.ParcelDestinations != null && GeodesicOceanDrainagePlan.ConfirmedOcean(rebuilt, rebuilt.ParcelDestinations[id])) ocean += amount;
+                    if (rebuilt.ParcelDestinations != null && chainIds.Contains(c.BasinId))
+                    {
+                        var end = rebuilt.ParcelDestinations[id];
+                        if (GeodesicOceanDrainagePlan.ConfirmedOcean(rebuilt, end)) chainOcean += amount;
+                        else if (GeodesicOceanDrainagePlan.Closed(end.Termination))
+                        {
+                            var p = end.Point;
+                            int floor = p.A == 1 ? rebuilt.BasinVertex(p.Triangle, 0) : p.B == 1 ? rebuilt.BasinVertex(p.Triangle, 1) :
+                                p.C == 1 ? rebuilt.BasinVertex(p.Triangle, 2) : -1;
+                            if (floor >= 0 && floor != c.BasinId) reroutedClosed += amount;
+                        }
+                    }
                 }
                 input += total; delivered += ocean;
                 if (total > 0 && ocean == total) full++; else if (ocean > 0) partial++;
             }
-            return FormattableString.Invariant($"[GeodesicOceanDrainagePlan] pass={pass}/{passes} authoritativeRawFullyConnectedCatchments={full} partialCatchments={partial} selectedIndependentRunoff={input:R} confirmedDirectOceanRunoff={delivered:R} scope=selected-pre-pass-parcels excludesLakeOverflow=True finalDeliveryAuthoritative=True");
+            return FormattableString.Invariant($"[GeodesicOceanDrainagePlan] pass={pass}/{passes} authoritativeRawFullyConnectedCatchments={full} partialCatchments={partial} selectedIndependentRunoff={input:R} confirmedDirectOceanRunoff={delivered:R} newlyDirectOceanThroughChains={chainOcean:R} reroutedToStillClosedBasin={reroutedClosed:R} scope=selected-pre-pass-parcels excludesLakeOverflow=True finalDeliveryAuthoritative=True");
         }
 
         public string CoastalRebuildSummary(GeodesicTinHydrology rebuilt, int pass, int passes)
@@ -235,16 +266,18 @@ public sealed class GeodesicValleyCarving
         // Include low-runoff downstream connectors: their upstream benefit is known only
         // after the witnessed graph has been rooted at the ocean. Never use footprint area
         // or summed cumulative channel discharge as independent catchment runoff.
-        var candidates = basins.Basins.OrderByDescending(b => byId.TryGetValue(b.Id, out var c) ? c.Runoff : 0d)
-            .ThenBy(b => b.Id).Take(GeodesicOceanDrainagePlan.MaximumCandidates).ToArray();
-        result.CandidateBudgetSkipped = Math.Max(0, basins.Basins.Count - candidates.Length);
-        foreach (var basin in candidates)
+        var descriptors = basins.Basins.ToDictionary(b => b.Id);
+        var built = new Dictionary<int, Candidate>();
+        int BuildDependency(int id)
         {
+            if (built.TryGetValue(id, out var cached)) return cached.Accepted ? cached.DownstreamBasinId : GeodesicOceanDrainagePlan.Unresolved;
+            if (!descriptors.TryGetValue(id, out var basin)) return GeodesicOceanDrainagePlan.Unresolved;
             int start = basin.Id;
-            if (ocean[start] || protectedLake[start]) { result.SkippedLake++; continue; }
             result.Searched++;
             Candidate c;
-            if (TrySpillVertex(basin, out int spill))
+            if (ocean[start] || protectedLake[start])
+            { result.SkippedLake++; c = new Candidate { BasinId = id, Rejection = "lake" }; }
+            else if (TrySpillVertex(basin, out int spill))
             {
                 result.SpillDirected++;
                 c = PlanSpill(start, basin, spill);
@@ -278,8 +311,13 @@ public sealed class GeodesicValleyCarving
             }
             c.Origin = tin.Direction(basin.Floor) * (float)tin.CompletedVisibleRadius(basin.Floor);
             if (c.Accepted) c.DownstreamBasinId = ResolveDownstream(c);
-            result.Candidates.Add(c);
+            result.Candidates.Add(c); built.Add(id, c);
+            return c.Accepted ? c.DownstreamBasinId : GeodesicOceanDrainagePlan.Unresolved;
         }
+        GeodesicOceanDrainagePlan.ExpandDependencies(basins.Basins
+            .OrderByDescending(b => byId.TryGetValue(b.Id, out var c) ? c.Runoff : 0d).ThenBy(b => b.Id).Select(b => b.Id), BuildDependency);
+        result.CandidateBudgetSkipped = Math.Max(0, basins.Basins.Count - built.Count);
+        result.PhysicalInvalidEdges = built.Values.Count(c => !c.Accepted);
 
         SelectOceanConnections(result, minimumRunoff);
         VerifyOceanProposals(result);
@@ -321,21 +359,38 @@ public sealed class GeodesicValleyCarving
     {
         var proposals = result.Candidates.Where(c => c.Accepted).ToDictionary(c => c.BasinId);
         var combined = new Dictionary<int, float>();
-        var selection = GeodesicOceanDrainagePlan.Select(proposals.Values.Select(c => new GeodesicOceanDrainagePlan.Connection {
+        var selection = GeodesicOceanDrainagePlan.SelectChains(proposals.Values.Select(c => new GeodesicOceanDrainagePlan.Connection {
             Id = c.BasinId, Downstream = c.DownstreamBasinId, LocalRunoff = c.IndependentRunoff,
             Cost = Math.Max(step, c.Length) * (1 + 4 * c.MaximumCut / Math.Max(depth, step)) *
-                (1 + c.AffectedFacets / 64d) }), minimumRunoff, (id, selected) =>
+                (1 + c.AffectedFacets / 64d) }), minimumRunoff, (package, selected) =>
         {
-            var c = proposals[id]; var merged = new Dictionary<int, float>(combined);
-            foreach (var cut in c.Surface) merged[cut.Key] = merged.TryGetValue(cut.Key, out float h) ? Math.Min(h, cut.Value) : cut.Value;
-            // Carved centre profiles still must descend. A cut may intercept an OLD
-            // incoming path or continuation: permit rerouting only provisionally, then
-            // prove EVERY existing incoming source on the combined continuous TIN.
-            if (!ProfileValid(c, merged, false) || selected.Any(other => !ProfileValid(proposals[other], merged, false))) return false;
+            var merged = new Dictionary<int, float>(combined);
+            foreach (int id in package)
+                foreach (var cut in proposals[id].Surface) merged[cut.Key] = merged.TryGetValue(cut.Key, out float h) ? Math.Min(h, cut.Value) : cut.Value;
+            int Root(int id) { while (proposals[id].DownstreamBasinId >= 0) id = proposals[id].DownstreamBasinId; return id; }
+            int root = Root(package[0]);
+            // Independently descending profiles can join the same downstream trunk by a
+            // different route after combining cuts. Defer those profiles to actual TIN
+            // proof of the COMPLETE package; retain strict checks for unrelated trunks.
+            foreach (int id in selected.Concat(package))
+                if (Root(id) != root && !ProfileValid(proposals[id], merged, false)) return false;
+            foreach (int id in selected.Concat(package).Where(id => Root(id) == root))
+                if (!ProfileValid(proposals[id], merged, false)) proposals[id].RequiresCollectiveTrace = true;
             combined = merged; return true;
         });
         result.OceanRooted = selection.PotentialRunoff.Count; result.Unrooted = selection.Unrooted;
+        result.UnrootedMissing = selection.MissingDownstream; result.UnrootedCycles = selection.Cyclic;
+        result.UnrootedUnknown = selection.UnknownDestination; result.ChainBudgetRejected = selection.OverBudget;
+        var allCandidates = result.Candidates.ToDictionary(c => c.BasinId);
+        foreach (var rejection in selection.Rejections.Where(r => r.Value == "missing-downstream"))
+        {
+            int id = rejection.Key;
+            while (proposals.TryGetValue(id, out var edge)) id = edge.DownstreamBasinId;
+            if (allCandidates.TryGetValue(id, out var invalid) && !invalid.Accepted) result.UnrootedMissingPhysical++;
+            else result.UnrootedMissingBudget++;
+        }
         result.SelectionConflicts = selection.Conflicts;
+        result.Chains.AddRange(selection.Chains);
         var chosen = new HashSet<int>(selection.Ordered);
         foreach (var c in proposals.Values)
             if (!chosen.Contains(c.BasinId)) c.Rejection = selection.PotentialRunoff.ContainsKey(c.BasinId) ? "selection-conflict-or-runoff" : "no-ocean-route";
@@ -755,17 +810,13 @@ public sealed class GeodesicValleyCarving
                     if (!connected || !Connected(incoming[0], "incoming")) { connected = false; break; }
                 }
                 if (!connected) { c.Rejection = c.CoastalAttempt ? "coastal-no-ocean-connection" : "proposed-no-ocean-connection"; removed = true; }
-                else c.TargetKind = (int)(c.CoastalAttempt ? Target.Coastline : Target.OceanDrainage);
+                else c.TargetKind = (int)(c.DownstreamBasinId >= 0 ? Target.DownstreamBasin : c.CoastalAttempt ? Target.Coastline : Target.OceanDrainage);
             }
             if (!removed) return;
-            bool pruned;
-            do
-            {
-                pruned = false;
-                var retained = new HashSet<int>(result.Candidates.Where(c => c.Accepted).Select(c => c.BasinId));
-                foreach (var c in result.Candidates.Where(c => c.Accepted && c.DownstreamBasinId >= 0))
-                    if (!retained.Contains(c.DownstreamBasinId)) { c.Rejection = "downstream-proposal-rejected"; pruned = true; }
-            } while (pruned);
+            var verifiedIds = new HashSet<int>(result.Candidates.Where(c => c.Accepted).Select(c => c.BasinId));
+            var retained = GeodesicOceanDrainagePlan.CompleteChainEdges(result.Chains, verifiedIds.Contains);
+            foreach (var c in result.Candidates.Where(c => c.Accepted && !retained.Contains(c.BasinId)))
+                c.Rejection = "downstream-proposal-rejected";
         }
         // No unverified residual proposal can escape the bounded validation budget.
         foreach (var c in result.Candidates.Where(c => c.Accepted)) c.Rejection = "verification-budget";

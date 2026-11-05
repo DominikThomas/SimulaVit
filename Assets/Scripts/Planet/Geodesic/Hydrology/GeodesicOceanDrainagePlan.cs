@@ -7,9 +7,10 @@ using System.Linq;
 /// evidence may be selected; the completed TIN still decides where water actually goes.</summary>
 public static class GeodesicOceanDrainagePlan
 {
-    public const int Version = 1;
+    public const int Version = 3;
     public const int Ocean = -1, Unresolved = -2;
     public const int MaximumCandidates = 2048;
+    public const int MaximumChainEdges = 32;
 
     public sealed class Catchment
     {
@@ -31,7 +32,42 @@ public static class GeodesicOceanDrainagePlan
         public readonly List<int> Ordered = new List<int>();
         public readonly Dictionary<int, double> PotentialRunoff = new Dictionary<int, double>();
         public int Unrooted, Conflicts, BelowRunoff;
+        public int MissingDownstream, Cyclic, UnknownDestination, OverBudget;
+        public readonly List<Chain> Chains = new List<Chain>();
+        public readonly Dictionary<int, string> Rejections = new Dictionary<int, string>();
     }
+
+    public sealed class Chain
+    {
+        public int SourceId;
+        // Complete downstream-first path, including any already selected shared trunk.
+        public int[] Edges;
+        public double AddedCost, AddedRunoff;
+    }
+
+    /// <summary>Reserve the unchanged candidate budget for each seed's actual downstream
+    /// dependencies before moving to the next seed. Missing/invalid witnesses stay missing.</summary>
+    public static int[] ExpandDependencies(IEnumerable<int> seeds, Func<int, int> build)
+    {
+        var built = new HashSet<int>(); var order = new List<int>();
+        foreach (int seed in seeds)
+        {
+            int id = seed; var seen = new HashSet<int>();
+            for (int depth = 0; id >= 0 && depth < MaximumChainEdges && seen.Add(id); depth++)
+            {
+                if (!built.Contains(id))
+                {
+                    if (built.Count == MaximumCandidates) break;
+                    built.Add(id); order.Add(id);
+                }
+                id = build(id); // Caller memoizes the physical proposal.
+            }
+        }
+        return order.ToArray();
+    }
+
+    public static HashSet<int> CompleteChainEdges(IEnumerable<Chain> chains, Func<int, bool> verified) =>
+        new HashSet<int>(chains.Where(c => c.Edges.All(verified)).SelectMany(c => c.Edges));
 
     public static bool Closed(TinTermination termination) =>
         termination == TinTermination.TrueClosedBasin || termination == TinTermination.TinyNoiseDepression;
@@ -67,6 +103,21 @@ public static class GeodesicOceanDrainagePlan
         return FormattableString.Invariant($"[GeodesicOceanDrainagePlan] final=True initialHighRunoffCatchments={high} fullyOceanConnected={full} partlyOceanConnected={partial} initialCatchmentRunoff={input:R} finalComparableRunoff={currentInput:R} noLongerRunoffParcels={noLongerRunoff} confirmedOceanRunoff={ocean:R} minimumIndependentRunoff={minimumRunoff:R} includesLakeOverflow=True identities=initial-parcel-ids-not-final-basin-ids");
     }
 
+    public static string FinalChainSummary(IEnumerable<int> originallyClosedParcels, GeodesicTinHydrology final,
+        GeodesicDrainageDelivery delivery)
+    {
+        double input = 0, direct = 0, viaLakes = 0, rawClosed = 0; int count = 0, submerged = 0;
+        foreach (int id in originallyClosedParcels.Distinct().OrderBy(id => id))
+        {
+            count++; double amount = final.ParcelRunoff(id); input += amount;
+            if (amount <= 0) { submerged++; continue; }
+            if (delivery.IsOceanViaLakesParcel(id)) viaLakes += amount;
+            else if (delivery.IsConfirmedOceanParcel(id)) direct += amount;
+            else if (final.ParcelDestinations != null && Closed(final.ParcelDestinations[id].Termination)) rawClosed += amount;
+        }
+        return FormattableString.Invariant($"[GeodesicOceanDrainagePlan] finalChains=True uniqueOriginallyClosedParcels={count} finalComparableRunoff={input:R} newlyDeliveredThroughChains={direct + viaLakes:R} direct={direct:R} viaLakes={viaLakes:R} rawStillClosed={rawClosed:R} noLongerRunoffParcels={submerged} scope=unique-parcel-union-across-passes authority=final-drainage-delivery");
+    }
+
     /// <summary>Use the existing accumulation observations; never sum cumulative river flows
     /// or infer catchment ownership from overlapping lower-star basin footprints.</summary>
     public static IReadOnlyList<Catchment> CaptureCatchments(GeodesicTinHydrology tin, GeodesicTinBasins basins)
@@ -96,45 +147,82 @@ public static class GeodesicOceanDrainagePlan
         return byFloor.Values.ToArray();
     }
 
-    /// <summary>Reverse traversal from ocean roots excludes cycles/unknown targets. Aggregate
-    /// disjoint upstream runoff for priority, then admit downstream-first compatible cuts.
-    /// Potential runoff is a planning score, never a confirmed delivery measurement.</summary>
+    // Compatibility wrapper for callers inspecting one edge at a time. Production admits
+    // the whole package through SelectChains, so failed packages cannot leak partial cuts.
     public static Selection Select(IEnumerable<Connection> source, double minimumRunoff,
-        Func<int, IReadOnlyList<int>, bool> compatible)
+        Func<int, IReadOnlyList<int>, bool> compatible) => SelectChains(source, minimumRunoff, (package, selected) =>
+        {
+            var provisional = selected.ToList();
+            foreach (int id in package) { if (!compatible(id, provisional)) return false; provisional.Add(id); }
+            return true;
+        });
+
+    /// <summary>Rank complete packages by marginal independent runoff / combined new cost.
+    /// Shared trunks are charged once. Compatibility and admission are atomic per package.</summary>
+    public static Selection SelectChains(IEnumerable<Connection> source, double minimumRunoff,
+        Func<IReadOnlyList<int>, IReadOnlyList<int>, bool> compatible)
     {
         var nodes = source.OrderBy(n => n.Id).ToDictionary(n => n.Id);
         if (nodes.Count > MaximumCandidates) throw new ArgumentException("Connection planning budget exceeded.");
         foreach (var n in nodes.Values)
             if (n.Id < 0 || n.LocalRunoff < 0 || double.IsNaN(n.LocalRunoff) || double.IsInfinity(n.LocalRunoff) ||
                 n.Cost <= 0 || double.IsNaN(n.Cost) || double.IsInfinity(n.Cost)) throw new ArgumentException("Invalid connection cost or runoff.");
-        var children = nodes.Keys.ToDictionary(id => id, _ => new List<int>());
-        foreach (var n in nodes.Values) if (children.TryGetValue(n.Downstream, out var list)) list.Add(n.Id);
-        var roots = nodes.Values.Where(n => n.Downstream == Ocean).Select(n => n.Id).OrderBy(id => id).ToArray();
-        var queue = new Queue<int>(roots); var order = new List<int>(); var result = new Selection();
-        while (queue.Count > 0)
+        var result = new Selection(); var plans = new List<Chain>();
+        foreach (var n in nodes.Values.OrderBy(n => n.Id))
         {
-            int id = queue.Dequeue(); order.Add(id); result.PotentialRunoff.Add(id, nodes[id].LocalRunoff);
-            foreach (int child in children[id]) queue.Enqueue(child);
+            var path = new List<int>(); var seen = new HashSet<int>(); int id = n.Id; string failure = null;
+            while (id != Ocean)
+            {
+                if (id < 0) { failure = "unknown-destination"; result.UnknownDestination++; break; }
+                if (!seen.Add(id)) { failure = "cycle"; result.Cyclic++; break; }
+                if (!nodes.TryGetValue(id, out var edge)) { failure = "missing-downstream"; result.MissingDownstream++; break; }
+                if (path.Count == MaximumChainEdges) { failure = "chain-budget"; result.OverBudget++; break; }
+                path.Add(id); id = edge.Downstream;
+            }
+            if (failure != null) { result.Rejections[n.Id] = failure; result.Unrooted++; continue; }
+            path.Reverse(); plans.Add(new Chain { SourceId = n.Id, Edges = path.ToArray() });
+            result.PotentialRunoff[n.Id] = n.LocalRunoff;
         }
-        result.Unrooted = nodes.Count - order.Count;
-        for (int i = order.Count - 1; i >= 0; i--)
+        // Diagnostic upstream potential, separate from the marginal benefit used to admit
+        // actual packages. Each source owns a disjoint original set of runoff parcels.
+        foreach (var plan in plans.OrderBy(p => p.SourceId))
+            foreach (int id in plan.Edges)
+                if (id != plan.SourceId) result.PotentialRunoff[id] += nodes[plan.SourceId].LocalRunoff;
+        var selected = new HashSet<int>();
+        while (plans.Count > 0)
         {
-            var n = nodes[order[i]];
-            if (n.Downstream >= 0) result.PotentialRunoff[n.Downstream] += result.PotentialRunoff[n.Id];
-        }
-        var ready = new SortedSet<int>(Comparer<int>.Create((a, b) =>
-        {
-            int c = (result.PotentialRunoff[b] / nodes[b].Cost).CompareTo(result.PotentialRunoff[a] / nodes[a].Cost);
-            return c != 0 ? c : a.CompareTo(b);
-        }));
-        foreach (int root in roots) ready.Add(root);
-        while (ready.Count > 0)
-        {
-            int id = ready.Min; ready.Remove(id);
-            if (result.PotentialRunoff[id] < minimumRunoff) { result.BelowRunoff++; continue; }
-            if (!compatible(id, result.Ordered)) { result.Conflicts++; continue; }
-            result.Ordered.Add(id);
-            foreach (int child in children[id]) ready.Add(child);
+            foreach (var p in plans)
+            {
+                p.AddedCost = p.Edges.Where(id => !selected.Contains(id)).Sum(id => nodes[id].Cost);
+                p.AddedRunoff = p.Edges.Where(id => !selected.Contains(id)).Sum(id => nodes[id].LocalRunoff);
+            }
+            var best = plans.OrderByDescending(p => p.AddedCost > 0 ? p.AddedRunoff / p.AddedCost : -1)
+                .ThenBy(p => p.SourceId).First(); plans.Remove(best);
+            // A set of small tributaries can justify their common connector even when
+            // every single linear path is subthreshold. Admit their union atomically;
+            // never count a hoped-for, unselected tributary as delivered benefit.
+            var package = best.Edges.ToList(); var members = new HashSet<int>(package);
+            while (best.AddedRunoff < minimumRunoff && best.AddedCost > 0)
+            {
+                var partner = plans.Where(p => p.Edges[0] == best.Edges[0])
+                    .Select(p => new { Plan = p, Extra = p.Edges.Where(id => !members.Contains(id)).ToArray() })
+                    .Where(p => p.Extra.Length > 0 && package.Count + p.Extra.Length <= MaximumChainEdges)
+                    .Select(p => new { p.Plan, p.Extra,
+                        Gain = p.Extra.Where(id => !selected.Contains(id)).Sum(id => nodes[id].LocalRunoff),
+                        Cost = p.Extra.Where(id => !selected.Contains(id)).Sum(id => nodes[id].Cost) })
+                    .Where(p => p.Gain > 0 && p.Cost > 0)
+                    .OrderByDescending(p => p.Gain / p.Cost).ThenBy(p => p.Plan.SourceId).FirstOrDefault();
+                if (partner == null) break;
+                foreach (int id in partner.Extra) { members.Add(id); package.Add(id); }
+                best.AddedRunoff += partner.Gain; best.AddedCost += partner.Cost;
+            }
+            best.Edges = package.ToArray();
+            var added = best.Edges.Where(id => !selected.Contains(id)).ToArray();
+            if (added.Length == 0) continue;
+            if (best.AddedRunoff < minimumRunoff) { result.BelowRunoff++; result.Rejections[best.SourceId] = "runoff"; continue; }
+            if (!compatible(added, result.Ordered)) { result.Conflicts++; result.Rejections[best.SourceId] = "conflict"; continue; }
+            result.Chains.Add(best);
+            foreach (int id in added) { selected.Add(id); result.Ordered.Add(id); }
         }
         return result;
     }
