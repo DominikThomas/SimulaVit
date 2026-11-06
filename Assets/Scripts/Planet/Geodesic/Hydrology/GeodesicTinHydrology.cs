@@ -258,6 +258,60 @@ public sealed class GeodesicTinHydrology
         return minimum;
     }
 
+    // A convex polygon in the direction facet projects onto a convex polygon in
+    // the completed facet. The nearest point to the origin lies on an edge or
+    // at the perpendicular projection onto the facet plane.
+    internal double MinimumCompletedRadius(IReadOnlyList<TinPoint> polygon)
+    {
+        if (polygon.Count == 0) return double.PositiveInfinity;
+        double minimum = CompletedVisibleRadius(polygon[0]);
+        for (int i = 0; i < polygon.Count; i++)
+            minimum = Math.Min(minimum, MinimumVisibleRadius(polygon[i], polygon[(i + 1) % polygon.Count]));
+        if (!spherical || polygon.Count < 3) return minimum;
+        D3 plane = faces[polygon[0].Triangle].VisiblePlane;
+        D3 projection = plane * (1d / D3.Dot(plane, plane));
+        bool positive = false, negative = false;
+        double signedArea = 0d;
+        for (int i = 0; i < polygon.Count; i++)
+        {
+            D3 a = Position(polygon[i]), b = Position(polygon[(i + 1) % polygon.Count]);
+            a = a * (1d / D3.Dot(plane, a));
+            b = b * (1d / D3.Dot(plane, b));
+            double side = D3.Dot(D3.Cross(b - a, projection - a), plane);
+            positive |= side > 0;
+            negative |= side < 0;
+            signedArea += side;
+        }
+        // Degenerate collinear clips are already covered by their edges.
+        if (Math.Abs(signedArea) > 1e-24 && positive != negative) minimum = Math.Min(minimum, projection.Length);
+        return minimum;
+    }
+
+    internal double DirectionSide(TinPoint point, Vector3 cell, Vector3 neighbor)
+    {
+        D3 normal = new D3(cell) - new D3(neighbor);
+        return D3.Dot(Position(point), normal);
+    }
+
+    internal bool BasinFacetRetained(int facet) => faces[facet].RetainedOcean;
+    internal double MinimumOutletSegmentRadius(TinPoint a, TinPoint b) => MinimumVisibleRadius(a, b);
+
+    internal bool VerifyExposedOutlet(TinPoint[] path)
+    {
+        // TraceLakeOutlet allows small visible bumps for rendered rivers. The
+        // overflow certificate allows only numerical tolerance on exposed runs.
+        double low = CompletedVisibleRadius(path[0]);
+        for (int i = 1; i < path.Length; i++)
+        {
+            var a = path[i - 1];
+            var b = path[i];
+            double radius = CompletedVisibleRadius(b);
+            low = Math.Min(low, a.Triangle == b.Triangle ? MinimumVisibleRadius(a, b) : radius);
+            if (!Finite(low) || !Finite(radius) || radius > low + Epsilon) return false;
+        }
+        return true;
+    }
+
     private void BuildFace(int t, double radius)
     {
         D3 a = Vertex(t, 0), b = Vertex(t, 1), c = Vertex(t, 2), e1 = b - a, e2 = c - a;

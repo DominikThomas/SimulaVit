@@ -226,11 +226,15 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
         {
             var mapping = owner.GeodesicCurrentRenderMapping;
             bool hasMapping = mapping != null && mapping.SampleCount == TinDrainage.BasinVertexCount;
+            var topology = owner.GeodesicTopology;
             bool hasExcludedCells = owner.OceanConnectivity != null && owner.OceanConnectivity.ExcludedCells > 0;
             Func<int, bool> excludedAtVertex = hasExcludedCells && hasMapping
                 ? vertex => owner.IsGeodesicCellPotentialLakeBasin(mapping.Samples[vertex].NearestCell) : null;
+            var classifiedCells = hasExcludedCells && topology != null && TinDrainage.BasinOnSphere
+                ? new GeodesicBasinOverflowAudit.ClassifiedCells(topology, owner.IsGeodesicCellPotentialLakeBasin,
+                    vertex => hasMapping ? mapping.Samples[vertex].NearestCell : 0) : null;
             var overflow = GeodesicBasinOverflowAudit.Analyze(TinDrainage, TinLakeBasins.Basins, DrainageDelivery,
-                TinLakeGeometry, excludedAtVertex, hasExcludedCells && !hasMapping);
+                TinLakeGeometry, excludedAtVertex, hasExcludedCells && !hasMapping, classifiedCells);
             Debug.Log(overflow.Summary(), this);
             foreach (string line in overflow.Opportunities) Debug.Log(line, this);
         }
