@@ -3,6 +3,26 @@ using NUnit.Framework;
 public class SimulationStartupConfigTests
 {
     [Test]
+    public void GeologicalInfillIsOptInAndOlderRepairSettingsDoNotCarryOver()
+    {
+        var defaults = new SimulationStartupConfig();
+        Assert.That(defaults.infillExcludedInlandBasins, Is.False);
+        var old = SimulationStartupController.DeserializeSavedConfig(
+            "{\"version\":19,\"repairTinyInlandSeaDepressions\":true,\"excludeSmallDisconnectedSeas\":true,\"minimumOceanComponentAreaFraction\":0.01,\"depressionRepairLimits\":{\"totalArea\":0.0005}}", defaults);
+        Assert.That(old.infillExcludedInlandBasins, Is.False);
+        Assert.That(old.excludeSmallDisconnectedSeas, Is.True);
+        Assert.That(old.minimumOceanComponentAreaFraction, Is.EqualTo(.01f));
+        Assert.That(old.basinInfillLimits.totalArea, Is.EqualTo(GeodesicBasinInfillLimits.Defaults.totalArea));
+
+        var current = SimulationStartupController.DeserializeSavedConfig(
+            "{\"version\":20,\"infillExcludedInlandBasins\":true,\"basinInfillLimits\":{\"totalArea\":0.12,\"liftFraction\":0.35,\"transitionGrade\":0.45}}", defaults);
+        Assert.That(current.infillExcludedInlandBasins, Is.True);
+        Assert.That(current.basinInfillLimits.totalArea, Is.EqualTo(.12f));
+        Assert.That(current.basinInfillLimits.liftFraction, Is.EqualTo(.35f));
+        Assert.That(current.basinInfillLimits.transitionGrade, Is.EqualTo(.45f));
+    }
+
+    [Test]
     public void RiverThresholdDefaultsMigrationAndSaveLoad()
     {
         var defaults = new SimulationStartupConfig();

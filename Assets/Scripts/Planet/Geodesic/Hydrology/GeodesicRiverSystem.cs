@@ -174,8 +174,8 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
             fingerprint.AddFields("planet", owner); fingerprint.AddFields("river", this);
             fingerprint.AddFields("effectiveTerrain", owner.GetGeodesicTerrainSettings());
             fingerprint.Add("effective.inlandElevationMagnitude", owner.inlandElevationMagnitude);
-            fingerprint.Add("effective.repairTinyInlandSeaDepressions", owner.repairTinyInlandSeaDepressions);
-            fingerprint.Add("effective.depressionRepairLimits", owner.depressionRepairLimits.Normalized());
+            fingerprint.Add("effective.infillExcludedInlandBasins", owner.infillExcludedInlandBasins);
+            fingerprint.Add("effective.basinInfillLimits", owner.basinInfillLimits.Normalized());
             fingerprint.Add("effective.baseRadius", owner.BasePlanetRadius);
             fingerprint.Add("effective.seaLevel", owner.GeodesicSeaLevelRadius);
             fingerprint.Add("effective.terrainSeed", owner.DerivedTerrainSeed);
@@ -223,8 +223,8 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
         Debug.Log("[GeodesicGenerationFingerprint] parameters=" + fingerprint.Manifest, this);
         Debug.Log(FormattableString.Invariant($"[GeodesicGenerationFingerprint] postCarvePositionsHash={postPositions} independentRunoffHash={runoff} captureMs={TinDrainage.ParcelCaptureMilliseconds:F3} diagnosticWorkMs={fingerprintMs + DrainageDelivery.AnalysisMilliseconds + TinDrainage.ParcelCaptureMilliseconds:F3} durationScope=capture+analysis+fingerprints-excludes-log-output-and-clock-overhead"), this);
         Debug.Log(DrainageDelivery.Summary(), this);
-        if (owner.excludeSmallDisconnectedSeas || owner.repairTinyInlandSeaDepressions)
-            Debug.Log(FormattableString.Invariant($"[GeodesicDepressionRepairDrainage] enabled={owner.repairTinyInlandSeaDepressions} closedBasinTerminations={TinDiagnostics.ClosedBasinTerminations} tinyNoiseTerminations={TinDiagnostics.NoiseDepressionTerminations} primaryOceanRunoff={DrainageDelivery.PrimaryOcean:R} secondaryOceanRunoff={DrainageDelivery.SecondaryOcean:R} unattributedOceanRunoff={DrainageDelivery.UnattributedOcean:R} inlandTrappedRunoff={DrainageDelivery.InlandClosed:R} unresolvedRunoff={DrainageDelivery.Unresolved:R} renderedLakes={TinLakeGeometry?.Bodies.Count ?? 0} conservationResidual={DrainageDelivery.Residual:R} materialUphillSegments={TinDiagnostics.VisibleMaterialUphillSegments}"), this);
+        if (owner.excludeSmallDisconnectedSeas || owner.infillExcludedInlandBasins)
+            Debug.Log(FormattableString.Invariant($"[GeodesicBasinInfillDrainage] enabled={owner.infillExcludedInlandBasins} closedBasinTerminations={TinDiagnostics.ClosedBasinTerminations} tinyNoiseTerminations={TinDiagnostics.NoiseDepressionTerminations} primaryOceanRunoff={DrainageDelivery.PrimaryOcean:R} secondaryOceanRunoff={DrainageDelivery.SecondaryOcean:R} unattributedOceanRunoff={DrainageDelivery.UnattributedOcean:R} inlandTrappedRunoff={DrainageDelivery.InlandClosed:R} unresolvedRunoff={DrainageDelivery.Unresolved:R} rawBasins={TinLakeBasins?.Basins.Count ?? 0} renderedLakes={TinLakeGeometry?.Bodies.Count ?? 0} riverNetworks={TinDiagnostics.RiverNetworks} unexpectedBrokenNetworks={TinDiagnostics.UnexpectedBrokenNetworks} unexpectedInlandBreaks={TinDiagnostics.UnexpectedInlandBreaks} conservationResidual={DrainageDelivery.Residual:R} materialUphillSegments={TinDiagnostics.VisibleMaterialUphillSegments}"), this);
         Debug.Log(DrainageDelivery.Connectivity(TinDiagnostics.UnexpectedBrokenNetworks), this);
         foreach (string line in DrainageDelivery.CatchmentLogs(CarvingEvidence)) Debug.Log(line, this);
         try
@@ -589,14 +589,14 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
         // This lightweight vertex adjacency is used ONLY for retained-ocean component mapping.
         // River geometry, gradients, connectivity and runoff all use the render triangles.
         var oceanTopology = GeodesicHydrologyTopology.Build(geometry);
-        bool[] ocean = frozenOcean ?? owner.MapGeodesicRenderOcean(oceanTopology, completedSurface, owner.GeodesicCurrentRenderMapping);
+        bool[] ocean = frozenOcean ?? owner.GeodesicInfillOceanMask ?? owner.MapGeodesicRenderOcean(oceanTopology, completedSurface, owner.GeodesicCurrentRenderMapping);
         retainedCarvingOcean = ocean; carvingTopology = oceanTopology;
         if (collectDelivery && !intermediateCarving)
         {
             var hashWatch = System.Diagnostics.Stopwatch.StartNew();
             deliveryOceanMaskHash = GeodesicGenerationFingerprint.Mask(ocean);
             var mapping = owner.GeodesicCurrentRenderMapping;
-            deliveryOceanComponentByVertex = (owner.excludeSmallDisconnectedSeas || owner.repairTinyInlandSeaDepressions) &&
+            deliveryOceanComponentByVertex = (owner.excludeSmallDisconnectedSeas || owner.infillExcludedInlandBasins) &&
                 mapping != null && mapping.SampleCount == ocean.Length && owner.OceanConnectivity != null
                 ? GeodesicVisibleHydrology.LabelRetainedComponents(oceanTopology, ocean, mapping, owner.OceanConnectivity) : null;
             deliveryMaskHashMilliseconds = hashWatch.Elapsed.TotalMilliseconds;
@@ -613,7 +613,7 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
         float[] hydrologyTerrainHeight = GeodesicHydrologyTerrain.Build(geometry.UnitVertices, visible, ocean,
             owner.DerivedTerrainSeed, terrainSettings, owner.BasePlanetRadius,
             owner.hydrologyTerrainMode, owner.enableGeodesicTerrainDisplacement,
-            owner.GeodesicHydrologicalRenderRadii, owner.GeodesicRawRenderRadii);
+            owner.GeodesicHydrologicalRenderRadii, owner.GeodesicRawRenderRadii, owner.GeodesicInfilledRenderVertices);
         HydrologyTerrainInputHeights = hydrologyTerrainHeight;
         HydrologyTerrainSummary = GeodesicHydrologyTerrain.Summary(visible, hydrologyTerrainHeight, geometry.Triangles,
             owner.hydrologyTerrainMode, terrainSettings, owner.enableGeodesicTerrainDisplacement,

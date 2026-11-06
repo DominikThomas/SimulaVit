@@ -111,7 +111,7 @@ public sealed class GeodesicInlandUplift
     // Explicit no-op avoids even a floating-point addition on the disabled terrain path.
     public static float Add(float baseline, float offset) => offset == 0f ? baseline : baseline + offset;
 
-    private sealed class DistanceHeap
+    internal sealed class DistanceHeap
     {
         private readonly List<(int cell, float distance)> entries = new();
         private static bool Less((int cell, float distance) a, (int cell, float distance) b) =>

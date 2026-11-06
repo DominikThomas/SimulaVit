@@ -19,19 +19,22 @@ public static class GeodesicHydrologyTerrain
 
     public static float[] Build(Vector3[] directions, float[] visibleTerrainHeight, bool[] retainedOcean,
         int terrainSeed, PlanetTerrainSettings settings, float radius, HydrologyTerrainMode mode, bool displacement = true,
-        float[] largeScaleRadii = null, float[] rawRadii = null)
+        float[] largeScaleRadii = null, float[] rawRadii = null, bool[] geologicalVertices = null)
     {
         if (mode == HydrologyTerrainMode.Visible) return visibleTerrainHeight;
         if (mode != HydrologyTerrainMode.FineDetailRemoved && mode != HydrologyTerrainMode.ReducedRidgeAndFineDetail)
             throw new ArgumentOutOfRangeException(nameof(mode));
-        if (directions.Length != visibleTerrainHeight.Length || retainedOcean.Length != directions.Length)
+        if (directions.Length != visibleTerrainHeight.Length || retainedOcean.Length != directions.Length ||
+            (geologicalVertices != null && geologicalVertices.Length != directions.Length))
             throw new ArgumentException("Hydrology terrain must match render vertices and retained ocean mask.");
         bool cached = largeScaleRadii != null && rawRadii != null && largeScaleRadii.Length == directions.Length && rawRadii.Length == directions.Length;
         var hydrologyTerrainHeight = new float[directions.Length];
         for (int i = 0; i < directions.Length; i++)
         {
             hydrologyTerrainHeight[i] = visibleTerrainHeight[i];
-            if (retainedOcean[i] || !displacement) continue;
+            // Infilled vertices carry a geological surface in both alternative
+            // modes. Reapplying the original terrain noise would restore the pit.
+            if (retainedOcean[i] || !displacement || (geologicalVertices != null && geologicalVertices[i])) continue;
             if (mode == HydrologyTerrainMode.ReducedRidgeAndFineDetail)
                 hydrologyTerrainHeight[i] = radius + PlanetTerrainSampler.EvaluateHydrologyLowFrequency(directions[i], terrainSeed, settings);
             else

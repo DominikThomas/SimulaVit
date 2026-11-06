@@ -88,10 +88,12 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     private GeodesicRenderTerrainData geodesicCurrentRenderTerrainData;
     private GeodesicInlandUplift geodesicInlandUplift;
     private GeodesicRiverTerrain geodesicCarvedSurface;
-    private GeodesicRiverTerrain geodesicRepairedSurface;
-    private bool[] geodesicRepairedFacets;
-    public bool repairTinyInlandSeaDepressions { get; set; }
-    public GeodesicDepressionRepairLimits depressionRepairLimits { get; set; } = GeodesicDepressionRepairLimits.Defaults;
+    private GeodesicRiverTerrain geodesicInfilledSurface;
+    private bool[] geodesicInfilledFacets;
+    internal bool[] GeodesicInfillOceanMask { get; private set; }
+    internal bool[] GeodesicInfilledRenderVertices { get; private set; }
+    public bool infillExcludedInlandBasins { get; set; }
+    public GeodesicBasinInfillLimits basinInfillLimits { get; set; } = GeodesicBasinInfillLimits.Defaults;
     internal bool GeodesicValleyCarvingAttempted { get; set; }
     // Runtime copy of the startup configuration; intentionally not a second serialized setting.
     public float inlandElevationMagnitude { get; set; }
@@ -701,8 +703,10 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         geodesicDebugSurfaceRadiusCache = null;
         geodesicCurrentRenderTerrainData = default;
         geodesicCarvedSurface = null;
-        geodesicRepairedSurface = null;
-        geodesicRepairedFacets = null;
+        geodesicInfilledSurface = null;
+        geodesicInfilledFacets = null;
+        GeodesicInfillOceanMask = null;
+        GeodesicInfilledRenderVertices = null;
         GeodesicValleyCarvingAttempted = false;
         geodesicCurrentRenderMapping = null;
         geodesicVisibleSeafloorPositionByCell = null;
@@ -795,8 +799,10 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     private IEnumerable<PlanetGenerationProgress> GenerateGeodesicPrototypeStages()
     {
         geodesicCarvedSurface = null;
-        geodesicRepairedSurface = null;
-        geodesicRepairedFacets = null;
+        geodesicInfilledSurface = null;
+        geodesicInfilledFacets = null;
+        GeodesicInfillOceanMask = null;
+        GeodesicInfilledRenderVertices = null;
         GeodesicValleyCarvingAttempted = false;
         var total = System.Diagnostics.Stopwatch.StartNew();
         ResetGeodesicQueryDiagnostics();
@@ -863,16 +869,16 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
             LogStage("terrain displacement", renderWatch);
         }
 
-        bool repairBeforeFields = repairTinyInlandSeaDepressions && OceanConnectivity.ExcludedComponents > 0;
-        if (repairBeforeFields)
+        bool infillBeforeFields = infillExcludedInlandBasins && OceanConnectivity.ExcludedComponents > 0;
+        if (infillBeforeFields)
         {
             yield return new PlanetGenerationProgress(PlanetGenerationStage.PreparingSurface);
             BuildRenderSurface();
-            RepairGeodesicDepressions(renderGeometry, renderMapping);
+            InfillGeodesicBasins(renderGeometry, renderMapping);
         }
-        else if (excludeSmallDisconnectedSeas || repairTinyInlandSeaDepressions)
-            Debug.Log($"[GeodesicDepressionRepair] enabled={repairTinyInlandSeaDepressions} repaired=0 skipped={OceanConnectivity.ExcludedComponents} modifiedAreaFraction=0 maximumLift=0", this);
-        if (repairBeforeFields)
+        else if (excludeSmallDisconnectedSeas || infillExcludedInlandBasins)
+            LogUnchangedGeodesicInfill(infillExcludedInlandBasins ? "no-excluded-components" : "disabled");
+        if (infillBeforeFields)
             maximumGeneratedOpaqueSurfaceRadius = Mathf.Max(BasePlanetRadius, MaxRadiusFromTerrainData(geodesicCurrentRenderTerrainData));
 
         if (enableOcean)
@@ -939,7 +945,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         LogStage("ocean-temperature initialization", stage);
 
         yield return new PlanetGenerationProgress(PlanetGenerationStage.PreparingSurface);
-        if (!repairBeforeFields)
+        if (!infillBeforeFields)
         {
             BuildRenderSurface();
             maximumGeneratedOpaqueSurfaceRadius = Mathf.Max(BasePlanetRadius, MaxRadiusFromTerrainData(geodesicCurrentRenderTerrainData));
@@ -961,15 +967,15 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         LogStage("terrain mesh assignment/upload", stage);
 
         stage = System.Diagnostics.Stopwatch.StartNew();
-        if (enableGeodesicRivers || generateHydrologicalLakes || enableTerminationValleyCarving)
+        if (enableGeodesicRivers || generateHydrologicalLakes || enableTerminationValleyCarving || GeodesicInfillOceanMask != null)
         {
             foreach (var progress in GetOrAddComponent<GeodesicRiverSystem>(gameObject).InitializeStages(this, renderGeometry, mesh))
                 yield return progress;
         }
         else GetComponent<GeodesicRiverSystem>()?.Clear();
         LogStage("river drainage and ribbons", stage);
-        if (excludeSmallDisconnectedSeas || repairTinyInlandSeaDepressions)
-            LogGeodesicRepairCoverage(renderGeometry, mesh.vertices);
+        if (excludeSmallDisconnectedSeas || infillExcludedInlandBasins)
+            LogGeodesicInfillCoverage(renderGeometry, mesh.vertices);
 
         yield return new PlanetGenerationProgress(PlanetGenerationStage.PreparingSurface);
         var experiencedTemperatureField = GetOrAddComponent<GeodesicExperiencedTemperatureField>(gameObject);
@@ -979,7 +985,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
         stage = System.Diagnostics.Stopwatch.StartNew();
         // Conditioned terrain uses the same facets for visible surface and collision.
-        bool exactCollider = geodesicCarvedSurface != null || geodesicRepairedSurface != null;
+        bool exactCollider = geodesicCarvedSurface != null || geodesicInfilledSurface != null;
         if (exactCollider) colliderSubdivision = renderSubdivision;
         IcosphereRenderGeometry colliderGeometry = IcosphereRenderGeometryCache.GetOrBuild(colliderSubdivision);
         IcosphereDirectionMapping colliderMapping = GetOrBuildDirectionMapping(colliderGeometry);
@@ -1490,8 +1496,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
             adjusted = geodesicCarvedSurface.Radius(direction);
             return true;
         }
-        if (geodesicRepairedSurface != null)
-            return geodesicRepairedSurface.TryRadiusOnFacets(direction, geodesicRepairedFacets, out adjusted);
+        if (geodesicInfilledSurface != null)
+            return geodesicInfilledSurface.TryRadiusOnFacets(direction, geodesicInfilledFacets, out adjusted);
         adjusted = 0f;
         return false;
     }
@@ -1500,17 +1506,12 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         enableOcean ? GeodesicVisibleHydrology.MapRetainedOcean(topology, surface, GeodesicSeaLevelRadius,
             IsGeodesicDirectionInOceanMask, mapping, geodesicOceanMask, IsGeodesicCellPotentialLakeBasin) : new bool[surface.Length];
 
-    private void RepairGeodesicDepressions(IcosphereRenderGeometry geometry, IcosphereDirectionMapping mapping)
+    private void InfillGeodesicBasins(IcosphereRenderGeometry geometry, IcosphereDirectionMapping mapping)
     {
-        var rivers = GetComponent<GeodesicRiverSystem>();
-        string skipReason = null;
         // A coarser render mesh cannot represent every authoritative cell and shoreline.
-        if (geometry.SubdivisionLevel < GeodesicTopology.SubdivisionLevel) skipReason = "render-resolution-below-simulation";
-        else if (enableTerminationValleyCarving || (rivers != null && rivers.tinFilterStrength != 0f))
-            skipReason = "requires-zero-tin-filter-and-carving-off";
-        if (skipReason != null)
+        if (geometry.SubdivisionLevel < GeodesicTopology.SubdivisionLevel)
         {
-            Debug.Log($"[GeodesicDepressionRepair] enabled=True reason={skipReason} repaired=0 skipped={OceanConnectivity.ExcludedComponents} modifiedAreaFraction=0 maximumLift=0", this);
+            LogUnchangedGeodesicInfill("render-resolution-below-simulation");
             return;
         }
 
@@ -1520,42 +1521,51 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         bool[] retained = MapGeodesicRenderOcean(topology, original, mapping);
         var cells = new int[original.Length];
         for (int v = 0; v < cells.Length; v++) cells[v] = mapping.Samples[v].NearestCell;
-        var terrainSettings = GetGeodesicTerrainSettings();
-        double epsilon = GeodesicRiverSystem.RoutingEpsilon(BasePlanetRadius, rivers != null ? rivers.uphillTolerance : .000002f);
-        var plan = GeodesicDepressionRepair.Plan(topology, original, OceanConnectivity, geodesicRawTerrainRadius,
-            cells, retained, GeodesicSeaLevelRadius, BasePlanetRadius, depressionRepairLimits, BuildTin);
+
+        int primary = OceanConnectivity.PrimaryRetainedComponent;
+        float[] primaryDistances = null;
+        if (primary >= 0)
+        {
+            var primaryMask = new bool[GeodesicTopology.CellCount];
+            for (int cell = 0; cell < primaryMask.Length; cell++)
+                primaryMask[cell] = OceanConnectivity.ComponentId[cell] == primary;
+            // Use the existing continental distance metric with only primary-ocean
+            // seeds. The regional trend selects a rim percentile without adding uplift.
+            var primaryCoast = new GeodesicInlandUplift(GeodesicTopology, primaryMask);
+            primaryDistances = new float[primaryMask.Length];
+            for (int cell = 0; cell < primaryMask.Length; cell++)
+                primaryDistances[cell] = primaryCoast.CellDistanceRadians(cell);
+        }
+        var plan = GeodesicBasinInfill.Plan(topology, original, OceanConnectivity, geodesicRawTerrainRadius,
+            cells, retained, primaryDistances, GeodesicSeaLevelRadius, BasePlanetRadius,
+            geodesicInlandUplift.ScaleRadians, basinInfillLimits);
         if (plan.Surface != null)
         {
             mesh.vertices = plan.Surface;
-            geodesicRepairedSurface = new GeodesicRiverTerrain(geometry, plan.Surface);
-            geodesicRepairedFacets = plan.AffectedFacets;
+            geodesicInfilledSurface = new GeodesicRiverTerrain(geometry, plan.Surface);
+            geodesicInfilledFacets = plan.AffectedFacets;
+            GeodesicInfilledRenderVertices = plan.ChangedVertices;
+            GeodesicInfillOceanMask = retained;
             float min = GetGeodesicMinimumTerrainOffset(), max = GetGeodesicMaximumTerrainOffset();
             for (int v = 0; v < original.Length; v++)
             {
-                float lift = plan.Surface[v].magnitude - original[v].magnitude;
-                if (lift <= 0f) continue;
-                geodesicCurrentRenderTerrainData.SurfaceRadii[v] = plan.Surface[v].magnitude;
+                if (!plan.ChangedVertices[v]) continue;
+                float radius = plan.Surface[v].magnitude;
+                float lift = radius - original[v].magnitude;
+                geodesicCurrentRenderTerrainData.SurfaceRadii[v] = radius;
                 geodesicCurrentRenderTerrainData.Heights[v] += lift;
                 geodesicCurrentRenderTerrainData.NormalizedHeights[v] = Mathf.InverseLerp(min, max, geodesicCurrentRenderTerrainData.Heights[v]);
             }
         }
-        Debug.Log(System.FormattableString.Invariant($"[GeodesicDepressionRepair] enabled=True repaired={plan.Repaired} skipped={plan.Components.Count - plan.Repaired} modifiedAreaFraction={plan.Area:R} maximumLift={plan.MaximumLift:R} planningMs={plan.Milliseconds:F3} repairMs={watch.Elapsed.TotalMilliseconds:F3}"), this);
+        Debug.Log(plan.Describe(), this);
+        Debug.Log(System.FormattableString.Invariant($"[GeodesicBasinInfillProfile] seed={randomSeed} infillMs={watch.Elapsed.TotalMilliseconds:F3} beforePositionsHash={GeodesicGenerationFingerprint.Positions(original)} infilledPositionsHash={GeodesicGenerationFingerprint.Positions(plan.Surface ?? original)}"), this);
         foreach (var component in plan.Components) Debug.Log(component.Describe(), this);
-
-        GeodesicTinHydrology BuildTin(Vector3[] surface)
-        {
-            var visible = new float[surface.Length];
-            for (int v = 0; v < visible.Length; v++) visible[v] = surface[v].magnitude;
-            float[] hydrology = GeodesicHydrologyTerrain.Build(geometry.UnitVertices, visible, retained, DerivedTerrainSeed,
-                terrainSettings, BasePlanetRadius, hydrologyTerrainMode, enableGeodesicTerrainDisplacement,
-                GeodesicHydrologicalRenderRadii, GeodesicRawRenderRadii);
-            return new GeodesicTinHydrology(geometry.UnitVertices, geometry.Triangles, visible, hydrology,
-                retained, GeodesicSeaLevelRadius, BasePlanetRadius, epsilon, subdivisionLevel: geometry.SubdivisionLevel,
-                completedSurface: surface);
-        }
     }
 
-    private void LogGeodesicRepairCoverage(IcosphereRenderGeometry geometry, Vector3[] surface)
+    private void LogUnchangedGeodesicInfill(string reason) =>
+        Debug.Log($"[GeodesicBasinInfill] enabled={infillExcludedInlandBasins} reason={reason} excluded={OceanConnectivity.ExcludedComponents} infilled=0 preserved={OceanConnectivity.ExcludedComponents} modifiedAreaFraction=0 sedimentVolumeUnityUnitsCubed=0 meanLift=0 maximumLift=0", this);
+
+    private void LogGeodesicInfillCoverage(IcosphereRenderGeometry geometry, Vector3[] surface)
     {
         double raw = 0d, retained = 0d;
         foreach (var component in OceanConnectivity.Components)
@@ -1579,7 +1589,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         }
         string target = geodesicSeaLevelControlMode == GeodesicSeaLevelControlMode.TargetAreaCoverage
             ? geodesicTargetOceanCoveragePercent.ToString("R", System.Globalization.CultureInfo.InvariantCulture) : "n/a";
-        Debug.Log(System.FormattableString.Invariant($"[GeodesicDepressionRepairCoverage] seaLevel={GeodesicSeaLevelRadius:R} requestedTargetPercent={target} originalBelowSeaFraction={raw:R} originalPrimaryOceanFraction={primary:R} originalRetainedOceanFraction={retained:R} finalAuthoritativeOceanFraction={retained:R} finalRenderBelowSeaSampledFraction={below / total:R}"), this);
+        Debug.Log(System.FormattableString.Invariant($"[GeodesicBasinInfillCoverage] seaLevel={GeodesicSeaLevelRadius:R} requestedTargetPercent={target} originalBelowSeaFraction={raw:R} originalPrimaryOceanFraction={primary:R} originalRetainedOceanFraction={retained:R} finalAuthoritativeOceanFraction={retained:R} finalRenderBelowSeaSampledFraction={below / total:R}"), this);
     }
 
     internal void ApplyGeodesicValleySurface(IcosphereRenderGeometry geometry, Mesh targetMesh, float[] heights)
@@ -1603,6 +1613,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         targetMesh.RecalculateNormals(); targetMesh.RecalculateBounds();
         ApplyGeodesicSurfaceColours(targetMesh, geodesicCurrentRenderTerrainData);
         geodesicCarvedSurface = new GeodesicRiverTerrain(geometry, positions);
+        geodesicInfilledSurface = null;
+        geodesicInfilledFacets = null;
         geodesicDebugSurfaceRadiusCache = null;
         CacheVisibleGeodesicSeafloorAnchors(targetMesh, geometry, geodesicCurrentRenderMapping);
         maximumGeneratedOpaqueSurfaceRadius = Mathf.Max(BasePlanetRadius, MaxRadiusFromTerrainData(geodesicCurrentRenderTerrainData));
