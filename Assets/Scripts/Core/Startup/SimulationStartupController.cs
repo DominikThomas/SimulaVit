@@ -34,7 +34,7 @@ public class SimulationStartupController : MonoBehaviour
     public const float GeodesicVentPhysicalMaxPerSecond = 1000f;
     private const int InitialSpawnMin = 0;
     private const int InitialSpawnMax = 10000;
-    private const int SavedStartupConfigVersion = 20;
+    private const int SavedStartupConfigVersion = 21;
     public const float NormalAtmospherePressureMaxBar = 5f;
     public const float DenseAtmospherePressureMaxBar = 600f;
     public const float DefaultApproximateThermalIntervalSeconds = 2f;
@@ -474,6 +474,10 @@ public class SimulationStartupController : MonoBehaviour
         destination.minimumValleyCarveRunoff = source.minimumValleyCarveRunoff;
         destination.valleyCarveWidth = source.valleyCarveWidth;
         destination.showValleyCarvingDebug = source.showValleyCarvingDebug;
+        destination.enableMajorOutletBreaching = source.enableMajorOutletBreaching;
+        destination.maximumMajorOutletDepth = source.maximumMajorOutletDepth;
+        destination.maximumMajorOutletVolume = source.maximumMajorOutletVolume;
+        destination.maximumMajorOutletDegrees = source.maximumMajorOutletDegrees;
         destination.riverFlowThreshold = source.riverFlowThreshold;
         destination.majorRiverThreshold = source.majorRiverThreshold;
         destination.generateHydrologicalLakes = source.generateHydrologicalLakes;
@@ -700,6 +704,10 @@ public class SimulationStartupController : MonoBehaviour
             planetGenerator.minimumValleyCarveRunoff = config.minimumValleyCarveRunoff;
             planetGenerator.valleyCarveWidth = config.valleyCarveWidth;
             planetGenerator.showValleyCarvingDebug = config.showValleyCarvingDebug;
+            planetGenerator.enableMajorOutletBreaching = config.enableMajorOutletBreaching;
+            planetGenerator.maximumMajorOutletDepth = config.maximumMajorOutletDepth;
+            planetGenerator.maximumMajorOutletVolume = config.maximumMajorOutletVolume;
+            planetGenerator.maximumMajorOutletDegrees = config.maximumMajorOutletDegrees;
             planetGenerator.generateHydrologicalLakes = config.generateHydrologicalLakes;
             planetGenerator.minimumLakeBasinAreaFraction = GeodesicLakeBasins.NormalizeArea(config.minimumLakeBasinAreaFraction);
             planetGenerator.minimumLakeDepth = GeodesicLakeBasins.NormalizeDepth(config.minimumLakeDepth);
@@ -913,6 +921,9 @@ public class SimulationStartupController : MonoBehaviour
         config.inlandElevationMagnitude = GeodesicInlandUplift.NormalizeMagnitude(config.inlandElevationMagnitude);
         config.maximumValleyCarveDepth = GeodesicValleyCarving.Normalize(config.maximumValleyCarveDepth, GeodesicValleyCarving.DefaultDepth, 1f);
         config.valleyCarvingPasses = Mathf.Clamp(config.valleyCarvingPasses, 1, 5);
+        config.maximumMajorOutletDepth = GeodesicValleyCarving.Normalize(config.maximumMajorOutletDepth, GeodesicValleyCarving.DefaultMajorOutletDepth, 1f);
+        config.maximumMajorOutletVolume = GeodesicValleyCarving.Normalize(config.maximumMajorOutletVolume, GeodesicValleyCarving.DefaultMajorOutletVolume, 1f);
+        config.maximumMajorOutletDegrees = GeodesicValleyCarving.Normalize(config.maximumMajorOutletDegrees, GeodesicValleyCarving.DefaultMajorOutletDegrees, 45f);
         config.minimumValleyCarveRunoff = GeodesicValleyCarving.Normalize(config.minimumValleyCarveRunoff, GeodesicValleyCarving.DefaultRunoff, 1000000f);
         config.valleyCarveWidth = GeodesicValleyCarving.Normalize(config.valleyCarveWidth, GeodesicValleyCarving.DefaultWidth, 1f);
         config.majorRiverThreshold = NormalizeRiverThreshold(config.majorRiverThreshold, GeodesicRiverSystem.DefaultMajorRiverThreshold);
@@ -1042,6 +1053,7 @@ public class SimulationStartupController : MonoBehaviour
         builder.AppendLine($"Infill excluded inland basins: {config.infillExcludedInlandBasins}");
         builder.AppendLine($"Inland elevation magnitude: {config.inlandElevationMagnitude:G9}");
         builder.AppendLine($"Termination valley carving: {config.enableTerminationValleyCarving}; passes: {config.valleyCarvingPasses}; maximum cut per pass: {config.maximumValleyCarveDepth:G6}; minimum runoff: {config.minimumValleyCarveRunoff:G6}; width: {config.valleyCarveWidth:G6}; Scene debug: {config.showValleyCarvingDebug}");
+        builder.AppendLine($"Major-outlet breaching enabled {config.enableMajorOutletBreaching}, depth {config.maximumMajorOutletDepth:G6}, volume {config.maximumMajorOutletVolume:G6}, angular length {config.maximumMajorOutletDegrees:G6}");
         builder.AppendLine($"Hydrological lakes: {config.generateHydrologicalLakes}; minimum basin area: {config.minimumLakeBasinAreaFraction * 100f:0.####}% of planet; minimum depth: {config.minimumLakeDepth:0.####} planet units");
         builder.AppendLine($"Initial Spawn Count: {config.initialSpawnCount}");
         builder.AppendLine($"Start Paused: {startPaused}");
@@ -1062,6 +1074,7 @@ public class SimulationStartupController : MonoBehaviour
         saved.enableTerminationValleyCarving = false;
         saved.valleyCarvingPasses = 1;
         saved.showValleyCarvingDebug = false;
+        saved.enableMajorOutletBreaching = false;
         saved.maximumValleyCarveDepth = GeodesicValleyCarving.DefaultDepth;
         saved.minimumValleyCarveRunoff = GeodesicValleyCarving.DefaultRunoff;
         saved.valleyCarveWidth = GeodesicValleyCarving.DefaultWidth;
@@ -1088,6 +1101,10 @@ public class SimulationStartupController : MonoBehaviour
         public GeodesicBasinInfillLimits basinInfillLimits;
         public float inlandElevationMagnitude;
         public bool enableTerminationValleyCarving, showValleyCarvingDebug;
+        public bool enableMajorOutletBreaching;
+        public float maximumMajorOutletDepth = GeodesicValleyCarving.DefaultMajorOutletDepth;
+        public float maximumMajorOutletVolume = GeodesicValleyCarving.DefaultMajorOutletVolume;
+        public float maximumMajorOutletDegrees = GeodesicValleyCarving.DefaultMajorOutletDegrees;
         public int valleyCarvingPasses = 1;
         public float maximumValleyCarveDepth = GeodesicValleyCarving.DefaultDepth;
         public float minimumValleyCarveRunoff = GeodesicValleyCarving.DefaultRunoff;
@@ -1154,6 +1171,10 @@ public class SimulationStartupController : MonoBehaviour
                 enableTerminationValleyCarving = config.enableTerminationValleyCarving,
                 valleyCarvingPasses = Mathf.Clamp(config.valleyCarvingPasses, 1, 5),
                 showValleyCarvingDebug = config.showValleyCarvingDebug,
+                enableMajorOutletBreaching = config.enableMajorOutletBreaching,
+                maximumMajorOutletDepth = config.maximumMajorOutletDepth,
+                maximumMajorOutletVolume = config.maximumMajorOutletVolume,
+                maximumMajorOutletDegrees = config.maximumMajorOutletDegrees,
                 maximumValleyCarveDepth = config.maximumValleyCarveDepth,
                 minimumValleyCarveRunoff = config.minimumValleyCarveRunoff,
                 valleyCarveWidth = config.valleyCarveWidth,
@@ -1212,6 +1233,10 @@ public class SimulationStartupController : MonoBehaviour
             config.enableTerminationValleyCarving = version >= 17 && enableTerminationValleyCarving;
             config.valleyCarvingPasses = version >= 18 ? Mathf.Clamp(valleyCarvingPasses, 1, 5) : 1;
             config.showValleyCarvingDebug = version >= 17 && showValleyCarvingDebug;
+            config.enableMajorOutletBreaching = version >= 21 && enableMajorOutletBreaching;
+            config.maximumMajorOutletDepth = GeodesicValleyCarving.Normalize(version >= 21 ? maximumMajorOutletDepth : GeodesicValleyCarving.DefaultMajorOutletDepth, GeodesicValleyCarving.DefaultMajorOutletDepth, 1f);
+            config.maximumMajorOutletVolume = GeodesicValleyCarving.Normalize(version >= 21 ? maximumMajorOutletVolume : GeodesicValleyCarving.DefaultMajorOutletVolume, GeodesicValleyCarving.DefaultMajorOutletVolume, 1f);
+            config.maximumMajorOutletDegrees = GeodesicValleyCarving.Normalize(version >= 21 ? maximumMajorOutletDegrees : GeodesicValleyCarving.DefaultMajorOutletDegrees, GeodesicValleyCarving.DefaultMajorOutletDegrees, 45f);
             config.maximumValleyCarveDepth = GeodesicValleyCarving.Normalize(version >= 17 ? maximumValleyCarveDepth : GeodesicValleyCarving.DefaultDepth, GeodesicValleyCarving.DefaultDepth, 1f);
             config.minimumValleyCarveRunoff = GeodesicValleyCarving.Normalize(version >= 17 ? minimumValleyCarveRunoff : GeodesicValleyCarving.DefaultRunoff, GeodesicValleyCarving.DefaultRunoff, 1000000f);
             config.valleyCarveWidth = GeodesicValleyCarving.Normalize(version >= 17 ? valleyCarveWidth : GeodesicValleyCarving.DefaultWidth, GeodesicValleyCarving.DefaultWidth, 1f);
@@ -1633,6 +1658,20 @@ public class SimulationStartupController : MonoBehaviour
                 y += line + gap;
                 GUI.Label(new Rect(controlX, y, contentWidth, 150f), GeodesicValleyCarving.Help, new GUIStyle(labelStyle) { wordWrap = true });
                 y += 156f;
+                bool outletControlsEnabled = GUI.enabled;
+                GUI.enabled = outletControlsEnabled && currentConfig.enableTerminationValleyCarving;
+                DrawBool(new Rect(controlX, y, contentWidth, line), "Enable major-outlet breaching (experimental)", ref currentConfig.enableMajorOutletBreaching);
+                y += line + gap;
+                if (currentConfig.enableMajorOutletBreaching)
+                {
+                    DrawValleyParameter(new Rect(controlX, y, contentWidth, line), "Outlet depth limit (planet units)", ref currentConfig.maximumMajorOutletDepth, GeodesicValleyCarving.DefaultMajorOutletDepth, 1f);
+                    y += line + gap;
+                    DrawValleyParameter(new Rect(controlX, y, contentWidth, line), "Total outlet volume (fraction of base radius³)", ref currentConfig.maximumMajorOutletVolume, GeodesicValleyCarving.DefaultMajorOutletVolume, 1f);
+                    y += line + gap;
+                    DrawValleyParameter(new Rect(controlX, y, contentWidth, line), "Outlet length limit (degrees)", ref currentConfig.maximumMajorOutletDegrees, GeodesicValleyCarving.DefaultMajorOutletDegrees, 45f);
+                    y += line + gap;
+                }
+                GUI.enabled = outletControlsEnabled;
                 DrawBool(new Rect(controlX, y, contentWidth, line), "Exclude small inland seas", ref currentConfig.excludeSmallDisconnectedSeas);
                 y += line + gap;
                 bool oceanControlEnabled = GUI.enabled;

@@ -299,7 +299,15 @@ public sealed class GeodesicTinHydrology
     internal bool BasinVertexRetained(int vertex) => oceanVertices != null && oceanVertices[vertex];
     internal double MinimumOutletSegmentRadius(TinPoint a, TinPoint b) => MinimumVisibleRadius(a, b);
 
-    internal bool VerifyExposedOutlet(TinPoint[] path)
+    internal double OutletSlope(TinPoint a, TinPoint b)
+    {
+        double distance = (Position(b) - Position(a)).Length;
+        return distance > 1e-14 ? (Height(a) - Height(b)) / distance : double.NaN;
+    }
+
+    internal bool VerifyExposedOutlet(TinPoint[] path) => !FindExposedOutletRise(path, out _, out _);
+
+    internal bool FindExposedOutletRise(TinPoint[] path, out int failedIndex, out double lowestRadius)
     {
         // TraceLakeOutlet allows small visible bumps for rendered rivers. The
         // overflow certificate allows only numerical tolerance on exposed runs.
@@ -310,9 +318,16 @@ public sealed class GeodesicTinHydrology
             var b = path[i];
             double radius = CompletedVisibleRadius(b);
             low = Math.Min(low, a.Triangle == b.Triangle ? MinimumVisibleRadius(a, b) : radius);
-            if (!Finite(low) || !Finite(radius) || radius > low + Epsilon) return false;
+            if (!Finite(low) || !Finite(radius) || radius > low + Epsilon)
+            {
+                failedIndex = i;
+                lowestRadius = low;
+                return true;
+            }
         }
-        return true;
+        failedIndex = -1;
+        lowestRadius = low;
+        return false;
     }
 
     private void BuildFace(int t, double radius)
@@ -701,10 +716,11 @@ public sealed class GeodesicTinHydrology
     }
     internal double ParcelRunoff(int triangle) => localRunoff[triangle];
     internal TinPoint TransferLakePoint(TinPoint point, int triangle) => Transfer(point, triangle);
-    internal TinPoint[] TraceLakeOutlet(TinPoint spill, Func<TinPoint, TinPoint, bool> departure, out TinTermination termination, int maximumSteps = 32768)
+    internal TinPoint[] TraceLakeOutlet(TinPoint spill, Func<TinPoint, TinPoint, bool> departure, out TinTermination termination,
+        int maximumSteps = 32768, Action<TraceFailure> failure = null)
     {
         var samples = new List<TinPoint>(128); var candidates = new List<int>(8);
-        termination = TraceInto(spill, samples, candidates, maximumSteps, observe: false, departure: departure);
+        termination = TraceInto(spill, samples, candidates, maximumSteps, observe: false, departure: departure, failure: failure);
         return samples.ToArray();
     }
     internal bool ValidateLakePath(TinPoint[] path)

@@ -6,7 +6,7 @@ using UnityEngine;
 /// <summary>One immutable-input planning pass. This is a bounded saddle breach, not erosion.
 /// All heights and lengths are planet-local units; runoff uses the existing mean-cell-area units.
 /// The caller commits the resulting surface once and rebuilds the existing TIN once.</summary>
-public sealed class GeodesicValleyCarving
+public sealed partial class GeodesicValleyCarving
 {
     public const float DefaultDepth = .005f, DefaultRunoff = 64f, DefaultWidth = .02f;
     public const string Help = "1–5 passes on visible, unfiltered TIN terrain; flow and basins rebuild after each pass. Selects ocean-rooted natural spill connections by independent upstream runoff and bounded excavation cost. Depth is the maximum cut per pass; depth and width use planet-local units. Coastal spill breaches require proven retained-ocean drainage, stay within eight local edge lengths and submerge by at most min(depth, 0.005). Runoff uses mean-cell-area equivalents. Width controls lateral falloff. Scene gizmos: green accepted, red rejected, yellow termination, cyan target.";
@@ -147,7 +147,7 @@ public sealed class GeodesicValleyCarving
         }
     }
 
-    private sealed class Label
+    internal sealed class Label
     {
         public int Vertex, Id;
         public double Floor, Length, Cost, MaxCut, Priority;
@@ -181,6 +181,7 @@ public sealed class GeodesicValleyCarving
     private readonly Dictionary<int, Escape> escapes = new Dictionary<int, Escape>();
     private readonly double radius, depth, width, seaFloor, step, maxLength, maxRadius;
     private readonly double seaLevel, coastalFloor, coastalSubmergence;
+    private readonly double minimumEdgeLength;
     private readonly float microBumpFraction;
 
     private GeodesicValleyCarving(GeodesicTinHydrology drainage, GeodesicHydrologyTopology topology,
@@ -193,10 +194,15 @@ public sealed class GeodesicValleyCarving
         microBumpFraction = Mathf.Clamp(visibleMicroBumpFraction, 0f, .002f);
         step = Math.Max(tin.Epsilon * 8, radius * .000001);
         // Include the spherical facet sagitta: vertices above sea alone do not protect facet interiors.
-        double maxEdge = 0;
+        double maxEdge = 0, minEdge = double.PositiveInfinity;
         for (int v = 0; v < graph.CellCount; v++)
             for (int k = 0; k < graph.NeighborCounts[v]; k++)
-                maxEdge = Math.Max(maxEdge, Angle(v, graph.Neighbors6[v * 6 + k]));
+            {
+                double angle = Angle(v, graph.Neighbors6[v * 6 + k]);
+                maxEdge = Math.Max(maxEdge, angle);
+                minEdge = Math.Min(minEdge, angle);
+            }
+        minimumEdgeLength = radius * minEdge;
         seaFloor = (seaLevel + step * 2) / Math.Cos(maxEdge);
         // Reuse the existing incision setting, with the existing default depth as a hard
         // shallow-water ceiling. This absolute floor cannot ratchet down across passes.
@@ -655,7 +661,7 @@ public sealed class GeodesicValleyCarving
         return false;
     }
 
-    private void BuildProfile(Candidate c, List<Label> chain, Escape escape)
+    private void BuildProfile(Candidate c, List<Label> chain, Escape escape, double? routeLengthLimit = null)
     {
         c.Surface = new Dictionary<int, float>();
         var centre = new HashSet<int>(c.Vertices);
@@ -712,7 +718,7 @@ public sealed class GeodesicValleyCarving
         }
         c.AffectedVertices = c.Surface.Count; c.AffectedFacets = facets.Count; c.MeanCut = sum / Math.Max(1, c.AffectedVertices);
         if (c.MaximumCut > depth || c.MeanCut > depth) { c.Rejection = "too-deep"; return; }
-        if (c.Length > (c.CoastalAttempt ? c.CoastalLengthLimit : maxLength)) { c.Rejection = "search-distance-limit"; return; }
+        if (c.Length > (routeLengthLimit ?? (c.CoastalAttempt ? c.CoastalLengthLimit : maxLength))) { c.Rejection = "search-distance-limit"; return; }
         if (c.AffectedVertices > MaximumAffectedVertices || c.AffectedFacets > MaximumAffectedFacets)
         { c.Rejection = "footprint-limit"; return; }
         if (c.AffectedVertices == 0) { c.Rejection = "no-target"; return; }
@@ -767,19 +773,7 @@ public sealed class GeodesicValleyCarving
 
             // Match ApplyGeodesicValleySurface's float projection, then the authoritative
             // rebuild's magnitude sampling. Reuse untouched completed vertices exactly.
-            var positions = (Vector3[])completedSurface.Clone(); var heights = new float[positions.Length];
-            float min = float.PositiveInfinity, max = float.NegativeInfinity;
-            for (int v = 0; v < positions.Length; v++)
-            {
-                if (result.Heights[v] < original[v]) positions[v] = positions[v].normalized * result.Heights[v];
-                heights[v] = positions[v].magnitude;
-                min = Math.Min(min, heights[v]); max = Math.Max(max, heights[v]);
-            }
-            double bump = (max - (double)min) * microBumpFraction;
-            var proposed = new GeodesicTinHydrology(graph.CellDirections, graph.Triangles, heights, heights,
-                ocean, (float)seaLevel, radius, tin.Epsilon, bump,
-                onSphere: true, allowBoundaryOutflow: false, subdivisionLevel: tin.SubdivisionLevel, completedSurface: positions,
-                requireSeaSphereCrossing: true);
+            var proposed = ProjectProposedTin(result.Heights, requireSeaSphereCrossing: true);
             result.VerificationBuilds++;
             // Also protect known ocean-connected river sources, including tributaries
             // whose original independent centroid parcel already reached retained ocean.
@@ -822,6 +816,23 @@ public sealed class GeodesicValleyCarving
         // No unverified residual proposal can escape the bounded validation budget.
         foreach (var c in result.Candidates.Where(c => c.Accepted)) c.Rejection = "verification-budget";
         Array.Copy(original, result.Heights, original.Length);
+    }
+
+    private GeodesicTinHydrology ProjectProposedTin(float[] requestedHeights, bool requireSeaSphereCrossing)
+    {
+        var positions = (Vector3[])completedSurface.Clone(); var heights = new float[positions.Length];
+        float min = float.PositiveInfinity, max = float.NegativeInfinity;
+        for (int v = 0; v < positions.Length; v++)
+        {
+            if (requestedHeights[v] < original[v]) positions[v] = positions[v].normalized * requestedHeights[v];
+            heights[v] = positions[v].magnitude;
+            min = Math.Min(min, heights[v]); max = Math.Max(max, heights[v]);
+        }
+        double bump = (max - (double)min) * microBumpFraction;
+        return new GeodesicTinHydrology(graph.CellDirections, graph.Triangles, heights, heights,
+            ocean, (float)seaLevel, radius, tin.Epsilon, bump,
+            onSphere: true, allowBoundaryOutflow: false, subdivisionLevel: tin.SubdivisionLevel, completedSurface: positions,
+            requireSeaSphereCrossing: requireSeaSphereCrossing);
     }
 
     private double LocalEdgeLength(int vertex)

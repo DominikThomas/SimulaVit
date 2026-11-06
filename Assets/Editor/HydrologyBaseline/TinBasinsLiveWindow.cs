@@ -15,6 +15,8 @@ public sealed class TinBasinsLiveWindow : EditorWindow
 {
     private TinBasinDebugSelection mode;
     private int basinId, topN = 10, networkIndex;
+    private string networkReport;
+    private Vector2 networkScroll;
     private GameObject overlay;
     private Mesh mesh;
     private Material material;
@@ -51,6 +53,26 @@ public sealed class TinBasinsLiveWindow : EditorWindow
         if (GUILayout.Button("Overlay OFF")) Clear();
         if (GUILayout.Button("Log selected basin and matching terminations")) Try(() => { Load(); Debug.Log(GeodesicTinBasinInspection.SelectedReport(topology, rivers.TinDrainage, basinId)); });
         if (GUILayout.Button("Capture live acceptance set A–F")) Try(Capture);
+        EditorGUILayout.Space();
+        if (GUILayout.Button("Load ranked inland river networks")) Try(Load);
+        if (rivers != null && rivers.RankedInlandNetworks.Count > 0)
+        {
+            var ranks = rivers.RankedInlandNetworks.Take(topN).ToArray();
+            int current = Array.FindIndex(ranks, r => r.Network == networkIndex);
+            var labels = new[] { "Select by independent catchment runoff" }.Concat(ranks.Select((r, i) =>
+                $"{i + 1}. Network {r.Network}, basin {r.Basin}, runoff {r.Runoff:G6}")).ToArray();
+            int selected = EditorGUILayout.Popup("Ranked inland rivers", current + 1, labels);
+            if (selected > 0 && selected != current + 1) networkIndex = ranks[selected - 1].Network;
+        }
+        if (GUILayout.Button("Inspect network and show downstream arrows")) Try(ShowNetwork);
+        if (GUILayout.Button("Inspect outlet attempt for basin ID")) Try(ShowOutletAttempt);
+        if (!string.IsNullOrEmpty(networkReport))
+        {
+            if (GUILayout.Button("Copy exact TIN path and report")) EditorGUIUtility.systemCopyBuffer = networkReport;
+            networkScroll = EditorGUILayout.BeginScrollView(networkScroll, GUILayout.MinHeight(100));
+            EditorGUILayout.TextArea(networkReport);
+            EditorGUILayout.EndScrollView();
+        }
         EditorGUILayout.HelpBox(status, MessageType.None);
     }
     private void Try(Action action) { try { action(); } catch (Exception e) { status = e.Message; Debug.LogException(e); } }
@@ -78,7 +100,56 @@ public sealed class TinBasinsLiveWindow : EditorWindow
     private static Color StatusColor(TinBasinDescriptor b) => b.Terminal ? Color.magenta : b.SubseaUnclassified ? Color.gray :
         b.QualifiesForVisibleLake ? Color.green : b.BelowMinimumArea && b.BelowMinimumDepth ? Color.red :
         b.BelowMinimumDepth ? new Color(1f, .45f, 0f) : b.BelowMinimumArea ? Color.yellow : Color.cyan;
-    private void Show(IEnumerable<TinBasinDescriptor> selection, TinPoint? termination = null)
+    private void ShowNetwork()
+    {
+        Load();
+        if (networkIndex < 0 || networkIndex >= rivers.TinDrainage.Networks.Count)
+            throw new ArgumentOutOfRangeException(nameof(networkIndex), "Select an existing network index.");
+        networkReport = rivers.InspectTinNetwork(networkIndex, out var path);
+        Show(Array.Empty<TinBasinDescriptor>(), path[path.Length - 1], path);
+        status = $"Network {networkIndex}. White cross at source, cyan arrows downstream and cyan cross at terminal.";
+        Focus(path[0], Vector3.Distance(Surface(path[0]), Surface(path[path.Length - 1])));
+    }
+
+    private void ShowOutletAttempt()
+    {
+        Load();
+        var selected = topology.Basins.FirstOrDefault(b => b.Id == basinId);
+        networkReport = rivers.InspectTinOutletAttempt(basinId, out var path, out var attempt);
+        Show(selected == null ? Array.Empty<TinBasinDescriptor>() : new[] { selected },
+            path.Length == 0 ? (TinPoint?)null : path[path.Length - 1], path, attempt);
+        status = "Cyan is live flow. Yellow ticks mark the remaining frontier, yellow lines mark the closest unverified receiver hint, orange is the candidate, green is its existing receiver, and magenta marks the verification failure.";
+        if (selected != null)
+        {
+            var search = attempt?.Search;
+            float extent = search == null ? 0f : search.ExpandedVertices.Concat(search.CandidateVertices)
+                .Select(v => Vector3.Distance(Surface(selected.Floor), Surface(VertexPoint(v)))).DefaultIfEmpty(0f).Max();
+            Focus(selected.Floor, extent);
+        }
+    }
+
+    private TinPoint VertexPoint(int vertex)
+    {
+        var tin = rivers.TinDrainage;
+        return tin.BasinPoint(tin.BasinIncidentTriangle(tin.BasinIncidentStart(vertex)), vertex);
+    }
+
+    private void Focus(TinPoint point, float extent)
+    {
+        var view = SceneView.lastActiveSceneView;
+        if (view != null)
+        {
+            Vector3 start = Surface(point);
+            Vector3 focus = planet.transform.TransformPoint(start);
+            Vector3 outward = planet.transform.TransformDirection(start.normalized);
+            Vector3 up = Mathf.Abs(Vector3.Dot(outward, Vector3.up)) > .95f ? Vector3.forward : Vector3.up;
+            view.LookAt(focus, Quaternion.LookRotation(-outward, up),
+                Mathf.Max(planet.BasePlanetRadius * .025f, extent * 1.2f));
+        }
+    }
+
+    private void Show(IEnumerable<TinBasinDescriptor> selection, TinPoint? termination = null, TinPoint[] path = null,
+        GeodesicValleyCarving.MajorOutletAttempt attempt = null)
     {
         Clear(); var vertices = new List<Vector3>(); var colors = new List<Color>();
         void Line(Vector3 a, Vector3 b, Color c) { vertices.Add(a); vertices.Add(b); colors.Add(c); colors.Add(c); }
@@ -106,7 +177,50 @@ public sealed class TinBasinsLiveWindow : EditorWindow
             var parent = topology.Basins.FirstOrDefault(p => p.Id == b.ParentBasinId);
             if (parent != null && b.Spill.HasValue) Line(Surface(b.Spill.Value), Surface(parent.Floor), new Color(.6f, .2f, 1f));
         }
+        if (path != null && path.Length > 0)
+        {
+            Mark(Surface(path[0]), Color.white);
+            float spacing = planet.BasePlanetRadius * .008f, sinceArrow = spacing;
+            for (int i = 1; i < path.Length; i++)
+            {
+                Vector3 a = Surface(path[i - 1]), b = Surface(path[i]);
+                float distance = Vector3.Distance(a, b);
+                if (distance <= 1e-8f) continue;
+                Line(a, b, Color.cyan);
+                sinceArrow += distance;
+                if (sinceArrow < spacing) continue;
+                Vector3 middle = (a + b) * .5f;
+                Vector3 forward = (b - a).normalized * (spacing * .28f);
+                Vector3 side = Vector3.Cross(middle.normalized, forward) * .6f;
+                Line(middle + forward, middle - forward + side, Color.cyan);
+                Line(middle + forward, middle - forward - side, Color.cyan);
+                sinceArrow = 0f;
+            }
+        }
         if (termination.HasValue) Mark(Surface(termination.Value), Color.cyan);
+        if (attempt != null)
+        {
+            var search = attempt.Search;
+            foreach (int vertex in search.FrontierVertices)
+            {
+                Vector3 point = Surface(VertexPoint(vertex));
+                Line(point, point + point.normalized * (planet.BasePlanetRadius * .001f), Color.yellow);
+            }
+            void DrawPath(TinPoint[] points, Color color)
+            {
+                for (int i = 1; i < points.Length; i++) Line(Surface(points[i - 1]), Surface(points[i]), color);
+            }
+            DrawPath(search.HintPath.Select(VertexPoint).ToArray(), Color.yellow);
+            DrawPath(search.CandidateVertices.Select(VertexPoint).ToArray(), new Color(1f, .45f, 0f));
+            DrawPath(search.ReceiverPath, Color.green);
+            if (attempt.TraceFailure != null)
+            {
+                var failure = attempt.TraceFailure;
+                DrawPath(failure.Trace, new Color(.75f, .45f, .9f));
+                if (failure.HasSegment) Line(Surface(failure.Start), Surface(failure.End), Color.magenta);
+                Mark(Surface(failure.HasSegment ? failure.End : failure.Terminal), Color.magenta);
+            }
+        }
         overlay = new GameObject("TIN topology DEBUG (not water)") { hideFlags = HideFlags.HideAndDontSave };
         overlay.transform.SetParent(planet.transform, false);
         mesh = new Mesh { name = "TIN basin debug lines", indexFormat = IndexFormat.UInt32, hideFlags = HideFlags.HideAndDontSave };
