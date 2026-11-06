@@ -10,6 +10,12 @@ using static System.FormattableString;
 internal sealed class GeodesicBasinOverflowAudit
 {
     private const int MaximumOutletSteps = 4096;
+    private const int FreshwaterCandidateLimit = 5;
+    private const double FloodAreaFraction = .01;
+    // Diagnostic shortlist limits expressed in world units relative to the
+    // nominal planet radius. These are scale screens, not storage estimates.
+    private const double FloodVerticalFraction = .01;
+    private const string FreshwaterReview = "ExcludedInlandWaterNeedsFreshwaterReview";
 
     internal sealed class BasinEvidence
     {
@@ -19,11 +25,13 @@ internal sealed class GeodesicBasinOverflowAudit
         public string AncestryFailure, GeometryFailure;
         public bool Duplicate, WetRegionChecked, PossibleRetainedOceanOverlap, PossibleExcludedSeaOverlap, RenderedLakeOverlap;
         public double ControllingSpill => OceanRoot?.Basin.SpillElevation ?? double.NaN;
-        internal string PreviousFailure, LocalFailure;
+        internal string PreviousFailure, LocalFailure, FreshwaterLocalFailure, PriorRefinedFailure;
         internal int PreviousBlockBasin = -1;
         internal BasinEvidence Receiver;
         internal WetRegion Region;
-        internal bool DirectOcean, RenderedLakeConflict, LargeFlood;
+        internal bool DirectOcean, RenderedLakeConflict, LargeFlood, SourceSaddleWitnessed, InitialExcludedFloor;
+        internal bool? InitialBelowSeaFloor;
+        internal bool ExcessiveDepth, ExcessiveHead;
         internal double RouteArea = double.NaN, RouteDepth = double.NaN;
         internal int RouteBasinCount;
         internal byte RouteVisit;
@@ -31,7 +39,9 @@ internal sealed class GeodesicBasinOverflowAudit
 
         public BasinEvidence(TinBasinDescriptor basin) { Basin = basin; }
         public bool StructuralOcean => OceanRoot != null;
-        public bool GeometricallySupported => StructuralOcean && GeometryFailure == null && !LargeFlood;
+        public bool GeometricallySupported => StructuralOcean && GeometryFailure == null && FloodFailure == null;
+        internal string FloodFailure => LargeFlood ? "LargeFloodScaleReview" :
+            ExcessiveDepth ? "ExcessiveFloodDepth" : ExcessiveHead ? "ExcessiveControllingHead" : null;
     }
 
     internal enum Outcome
@@ -43,12 +53,24 @@ internal sealed class GeodesicBasinOverflowAudit
 
     internal enum Overlap { None, BoundaryUncertain, Exact }
 
+    internal enum FreshwaterOutcome
+    {
+        EligibleOverflow, ExistingRenderedLake, ReceivingBasinBlocked, FootprintEscape,
+        ExcessiveArea, ExcessiveDepth, ExcessiveHead, InvalidExposedOutlet, LakeSurfaceConflict, Uncertain
+    }
+
+    private enum FreshwaterOccupancy
+    {
+        Unverified, InvalidOrAmbiguous, FinalDepression, ExceedsFloodScreen, PotentialFreshwater, PotentialSharedWater, ExistingRenderedLake
+    }
+
     internal sealed class WetRegion
     {
         internal readonly HashSet<int> Facets = new HashSet<int>();
         internal double Area, Depth;
         internal Overlap Excluded;
         internal bool Measured, EarlyOcean, BoundaryOcean, EscapesFootprint;
+        internal string FreshwaterBlock;
     }
 
     private readonly Dictionary<int, BasinEvidence> basins = new Dictionary<int, BasinEvidence>();
@@ -56,9 +78,14 @@ internal sealed class GeodesicBasinOverflowAudit
     private readonly Dictionary<string, double> runoffReasons = new Dictionary<string, double>(StringComparer.Ordinal);
     private readonly Dictionary<string, int> excludedCohort = new Dictionary<string, int>(StringComparer.Ordinal);
     private readonly double[] runoffByOutcome = new double[Enum.GetValues(typeof(Outcome)).Length];
+    private readonly double[] freshwaterRunoff = new double[Enum.GetValues(typeof(FreshwaterOutcome)).Length];
+    private readonly List<string> freshwaterCandidates = new List<string>(FreshwaterCandidateLimit);
+    private double freshwaterReviewRunoff, freshwaterBoundedSourceRunoff;
+    private double largeFloodArea, verticalLimit;
     private int previousClosedOutlets, resolvedClosedOutlets, previousExcluded, resolvedExcluded;
     private double floodingClosed, invalidGeometryClosed, uncertainClosed;
     internal double Runoff(Outcome outcome) => runoffByOutcome[(int)outcome];
+    internal double FreshwaterRunoff(FreshwaterOutcome outcome) => freshwaterRunoff[(int)outcome];
 
     private readonly List<string> opportunities = new List<string>();
     private int descriptorCount, duplicateIds, parentLinks, validLinks, invalidLinks, missingReferences;
@@ -72,11 +99,13 @@ internal sealed class GeodesicBasinOverflowAudit
 
     internal IReadOnlyDictionary<int, BasinEvidence> Basins => basins;
     internal IEnumerable<string> Opportunities => opportunities;
+    internal IEnumerable<string> FreshwaterCandidates => freshwaterCandidates;
 
     internal static GeodesicBasinOverflowAudit Analyze(GeodesicTinHydrology tin,
         IReadOnlyList<TinBasinDescriptor> descriptors, GeodesicDrainageDelivery delivery,
         GeodesicTinLakeGeometry renderedLakes = null, Func<int, bool> excludedAtVertex = null,
-        bool excludedMappingMissing = false, ClassifiedCells classifiedCells = null)
+        bool excludedMappingMissing = false, ClassifiedCells classifiedCells = null, double planetRadius = double.NaN,
+        Func<int, bool> initiallyBelowSeaAtVertex = null)
     {
         var clock = Stopwatch.StartNew();
         var audit = new GeodesicBasinOverflowAudit
@@ -84,7 +113,10 @@ internal sealed class GeodesicBasinOverflowAudit
             descriptorCount = descriptors.Count,
             excludedMappingMissing = excludedMappingMissing,
             excludedMappingUsed = excludedAtVertex != null || classifiedCells != null,
-            classifiedGeometryUsed = classifiedCells != null
+            classifiedGeometryUsed = classifiedCells != null,
+            largeFloodArea = tin.BasinOnSphere ? FloodAreaFraction * tin.LocalArea.Sum() : double.PositiveInfinity,
+            verticalLimit = tin.BasinOnSphere && Finite(planetRadius) && planetRadius > 0
+                ? FloodVerticalFraction * planetRadius : double.PositiveInfinity
         };
         foreach (var basin in descriptors)
         {
@@ -93,28 +125,47 @@ internal sealed class GeodesicBasinOverflowAudit
                 duplicate.Duplicate = true;
                 audit.duplicateIds++;
             }
-            else audit.basins.Add(basin.Id, new BasinEvidence(basin));
+            else audit.basins.Add(basin.Id, new BasinEvidence(basin)
+            {
+                InitialExcludedFloor = basin.Id >= 0 && basin.Id < tin.BasinVertexCount && excludedAtVertex?.Invoke(basin.Id) == true,
+                InitialBelowSeaFloor = basin.Id >= 0 && basin.Id < tin.BasinVertexCount ? initiallyBelowSeaAtVertex?.Invoke(basin.Id) : null
+            });
         }
 
         var downstreamFirst = audit.ResolveAncestry(tin);
         var renderedLevels = RenderedFacetLevels(renderedLakes);
         var groups = downstreamFirst.Where(b => b.StructuralOcean).GroupBy(b => b.OceanRoot).ToArray();
         var lakeOwners = RenderedFacetOwners(renderedLakes);
-        // A scale screen for planet-wide diagnostics, in the same units as LocalArea.
-        double largeFloodArea = tin.BasinOnSphere ? .01 * tin.LocalArea.Sum() : double.PositiveInfinity;
         var groupChecks = groups.Select(group =>
             audit.CheckWetRegion(tin, group.Key, group, renderedLevels, lakeOwners, excludedAtVertex, classifiedCells)).ToArray();
         for (int i = 0; i < groups.Length; i++)
             audit.CheckGroupSpills(tin, groups[i], groupChecks[i], renderedLevels, lakeOwners, excludedAtVertex, classifiedCells);
 
-        foreach (var b in downstreamFirst.Where(b => b.StructuralOcean))
-            ResolveRoute(b, largeFloodArea);
+        // Reproduce the previous refined first blocker on the same terminal
+        // geometry, then evaluate freshwater semantics on those same legs.
+        var structural = downstreamFirst.Where(b => b.StructuralOcean).ToArray();
+        foreach (var b in structural) ResolveRoute(b, audit.largeFloodArea);
+        foreach (var b in structural)
+        {
+            b.PriorRefinedFailure = b.GeometryFailure ?? b.FloodFailure;
+            b.LocalFailure = b.FreshwaterLocalFailure;
+            b.RouteVisit = 0;
+            b.RouteArea = b.RouteDepth = double.NaN;
+            b.RouteBasinCount = 0;
+            b.LargeFlood = false;
+        }
+        foreach (var b in structural)
+        {
+            ResolveRoute(b, audit.largeFloodArea);
+            b.ExcessiveDepth = b.RouteDepth > audit.verticalLimit;
+            b.ExcessiveHead = b.ControllingSpill - tin.BasinSeaLevel > audit.verticalLimit;
+        }
 
         foreach (var b in audit.basins.Values)
         {
             if (b.StructuralOcean) audit.structuralCount++;
             if (b.GeometricallySupported) audit.geometryCount++;
-            var reason = b.AncestryFailure ?? b.GeometryFailure ?? (b.LargeFlood ? "LargeFloodScaleReview" : null);
+            var reason = b.AncestryFailure ?? b.GeometryFailure ?? b.FloodFailure;
             if (reason != null) Increment(audit.reasons, reason);
             if (b.PreviousFailure == "OutletEndsAtTrueClosedBasin")
             {
@@ -128,7 +179,7 @@ internal sealed class GeodesicBasinOverflowAudit
                 Increment(audit.excludedCohort, ExcludedClassification(b.OceanRoot, classifiedCells != null));
             }
         }
-        audit.AccountRunoff(tin, delivery);
+        audit.AccountRunoff(tin, delivery, renderedLevels, lakeOwners);
         // Estimates include object/map slack and the largest sequential wet-region workspace.
         audit.estimatedBytes = 448L * audit.basins.Count + 48L * (renderedLevels.Count + lakeOwners.Count) + audit.peakRegionBytes
             + groups.Sum(g => 32L * g.Key.Region.Facets.Count)
@@ -349,7 +400,7 @@ internal sealed class GeodesicBasinOverflowAudit
                 region.EscapesFootprint ? "UnboundedFloodFootprint" : null;
         }
         string refinedFailure = regionFailure ??
-            (region.Excluded == Overlap.Exact ? "ExcludedInlandWaterNeedsFreshwaterReview" :
+            (region.Excluded == Overlap.Exact ? FreshwaterReview :
              region.Excluded == Overlap.BoundaryUncertain ||
              (classifiedCells == null && (excludedMappingMissing || root.PossibleExcludedSeaOverlap)) ? "ExcludedSeaBoundaryUncertain" :
              root.RenderedLakeConflict ? "IncompatibleRenderedLakeOwnership" : null);
@@ -362,6 +413,9 @@ internal sealed class GeodesicBasinOverflowAudit
         Dictionary<int, int> lakeOwners, Func<int, bool> excludedAtVertex, ClassifiedCells classifiedCells)
     {
         var root = group.Key;
+        root.Region.FreshwaterBlock = regionFailures.Refined == FreshwaterReview
+            ? (root.RenderedLakeConflict ? "IncompatibleRenderedLakeOwnership" : null)
+            : regionFailures.Refined;
         (TinPoint[] Path, TinTermination End) trace = default;
         foreach (var b in group)
         {
@@ -381,6 +435,10 @@ internal sealed class GeodesicBasinOverflowAudit
                 ? CheckSpill(tin, b, parent, renderedLevels, lakeOwners, excludedAtVertex, classifiedCells, false, ref trace)
                 : null;
             b.LocalFailure = regionFailures.Refined ?? (basin.SubseaUnclassified ? "SubseaFloorUnclassified" : spillFailure);
+            // An initial exclusion has no bearing on water already bounded by
+            // this final wet component. Keep the boundary and ownership gates.
+            b.FreshwaterLocalFailure = root.Region.FreshwaterBlock ??
+                (basin.SubseaUnclassified && !b.SourceSaddleWitnessed ? "SubseaFloorUnclassified" : spillFailure);
         }
         int traceSamples = trace.Path?.Length ?? 0;
         if (traceSamples > 0)
@@ -458,6 +516,7 @@ internal sealed class GeodesicBasinOverflowAudit
             return "FloorOrSpillOutsideCompoundWater";
         if (!legacy && !TouchesWetRegion(tin, saddle, basin.MemberTriangles, basin.SpillElevation))
             return "SpillOutsideSourceWater";
+        if (!legacy) evidence.SourceSaddleWitnessed = true;
         // A recorded external merge can be exactly at the retained shoreline.
         if (parent == null && tin.IsRetainedOceanBoundary(spill))
         {
@@ -543,7 +602,9 @@ internal sealed class GeodesicBasinOverflowAudit
             if (classifiedCells != null && sameFacet)
             {
                 var overlap = classifiedCells.OnSegment(tin, path[i - 1], point);
-                if (overlap == Overlap.Exact) return "OutletIntersectsExcludedInlandWater";
+                // Outside a certified pool, a below-sea segment in an excluded
+                // cell supplies no evidence about the receiving water level.
+                if (overlap == Overlap.Exact) return "ExposedOutletBelowSeaInExcludedCell";
                 if (overlap == Overlap.BoundaryUncertain) return "ExcludedSeaBoundaryUncertain";
             }
             else if (classifiedCells == null && excludedAtVertex != null)
@@ -687,7 +748,8 @@ internal sealed class GeodesicBasinOverflowAudit
     private static bool MatchesHeight(double a, double b, double epsilon) => Finite(a) && Finite(b) && Math.Abs(a - b) <= epsilon;
     private static string Number(double value) => Finite(value) ? value.ToString("R", CultureInfo.InvariantCulture) : "unknown";
 
-    private void AccountRunoff(GeodesicTinHydrology tin, GeodesicDrainageDelivery delivery)
+    private void AccountRunoff(GeodesicTinHydrology tin, GeodesicDrainageDelivery delivery,
+        Dictionary<int, double> renderedLevels, Dictionary<int, int> lakeOwners)
     {
         total = delivery.TotalRunoff;
         confirmed = delivery.DirectOcean + delivery.ViaLakesOcean;
@@ -695,6 +757,7 @@ internal sealed class GeodesicBasinOverflowAudit
         unresolved = delivery.Unresolved;
         runoffByOutcome[(int)Outcome.ConfirmedOcean] = confirmed;
         runoffByOutcome[(int)Outcome.ExistingUnresolved] = unresolved;
+        var candidateRunoff = new Dictionary<BasinEvidence, double>();
         foreach (var catchment in delivery.DisconnectedCatchments)
         {
             if (catchment.Terminal.Destination != GeodesicDrainageDelivery.Destination.InlandClosed) continue;
@@ -705,6 +768,23 @@ internal sealed class GeodesicBasinOverflowAudit
             string failure = FailureFor(tin, catchment, b);
             var outcome = Classify(failure, b?.Receiver != null);
             runoffByOutcome[(int)outcome] += runoff;
+            if (b?.StructuralOcean == true)
+            {
+                bool existing = HasMatchingRenderedLake(tin, catchment, b, renderedLevels, lakeOwners);
+                if (b.PriorRefinedFailure == FreshwaterReview)
+                {
+                    freshwaterReviewRunoff += runoff;
+                    freshwaterRunoff[(int)ClassifyFreshwater(b, failure, existing)] += runoff;
+                    var sourceOccupancy = Occupancy(tin, b, existing);
+                    if (TerminalInSourceWater(tin, catchment, b) &&
+                        (sourceOccupancy == FreshwaterOccupancy.PotentialFreshwater ||
+                         sourceOccupancy == FreshwaterOccupancy.PotentialSharedWater ||
+                         sourceOccupancy == FreshwaterOccupancy.ExistingRenderedLake))
+                        freshwaterBoundedSourceRunoff += runoff;
+                }
+                if (failure == null && !existing)
+                    candidateRunoff[b] = candidateRunoff.TryGetValue(b, out double input) ? input + runoff : runoff;
+            }
             if (failure != null)
                 runoffReasons[failure] = runoffReasons.TryGetValue(failure, out double amount) ? amount + runoff : runoff;
             if (b?.StructuralOcean != true) { MissingAncestryClosed += runoff; continue; }
@@ -713,7 +793,7 @@ internal sealed class GeodesicBasinOverflowAudit
             if (failure != null)
             {
                 UnverifiedGeometryClosed += runoff;
-                if (failure == "UnboundedFloodFootprint" || failure == "LargeFloodScaleReview") floodingClosed += runoff;
+                if (failure == "UnboundedFloodFootprint" || failure == b.FloodFailure) floodingClosed += runoff;
                 else if (InvalidGeometry(failure)) invalidGeometryClosed += runoff;
                 else uncertainClosed += runoff;
                 continue;
@@ -721,6 +801,7 @@ internal sealed class GeodesicBasinOverflowAudit
             GeometricClosed += runoff;
             if (tiny) tinyGeometric += runoff;
         }
+        RankFreshwaterCandidates(tin, candidateRunoff);
         int rank = 0;
         foreach (var catchment in delivery.LargestDisconnected)
         {
@@ -731,6 +812,10 @@ internal sealed class GeodesicBasinOverflowAudit
             string failure = isClosed ? FailureFor(tin, catchment, b)
                 : "ExistingUnresolved:" + catchment.Terminal.Type;
             double head = b?.ControllingSpill ?? double.NaN;
+            bool existing = b?.StructuralOcean == true && HasMatchingRenderedLake(tin, catchment, b, renderedLevels, lakeOwners);
+            var occupancy = Occupancy(tin, b, existing);
+            double finalFloor = b != null && ValidFacet(tin, b.Basin.Floor.Triangle)
+                ? tin.CompletedVisibleRadius(b.Basin.Floor) : double.NaN;
             var route = ReceivingRoute(b, out bool cycle);
             double routeHead = route.Count > 0 ? route.Max(leg => leg.ControllingSpill) : double.NaN;
             bool earlyOcean = route.Any(leg => leg.OceanRoot?.Region.EarlyOcean == true);
@@ -749,7 +834,76 @@ internal sealed class GeodesicBasinOverflowAudit
                 Invariant($"excludedSea={(root == null ? "unknown" : ExcludedClassification(root, classifiedGeometryUsed || !excludedMappingUsed && !excludedMappingMissing))} ") +
                 Invariant($"floodedLandAreaEstimate={Number(earlyOcean ? double.NaN : RouteMeasure(b, true))} maximumDepthEstimate={Number(RouteMeasure(b, false))} routeCompoundBasins={b?.RouteBasinCount ?? 0} floodEstimateScope={(b?.RouteBasinCount > 0 ? "route" : "source_region")} ") +
                 Invariant($"retainedOceanBeforeSaddle={Flag(earlyOcean || root?.Region.Measured == true, earlyOcean)} floodEscapesFootprint={Flag(floodEscape || root?.Region.Measured == true, floodEscape)} renderedLakeCompatibility={LakeCompatibility(route)} ") +
+                Invariant($"initialBelowSeaFloor={Flag(b?.InitialBelowSeaFloor != null, b?.InitialBelowSeaFloor == true)} initialExcludedFloor={Flag(excludedMappingUsed && !excludedMappingMissing && b != null, b?.InitialExcludedFloor == true)} finalFloorRadius={Number(finalFloor)} finalFloorRelativeToSea={RelativeToSea(tin, finalFloor)} freshwaterOccupancy={occupancy} priorRefinedBlock={b?.PriorRefinedFailure ?? "none"} ") +
+                Invariant($"areaScreenExceeded={Flag(Finite(RouteMeasure(b, true)), RouteMeasure(b, true) > largeFloodArea)} depthScreenExceeded={Flag(Finite(RouteMeasure(b, false)), RouteMeasure(b, false) > verticalLimit)} headScreenExceeded={Flag(Finite(routeHead), routeHead - tin.BasinSeaLevel > verticalLimit)} ") +
                 Invariant($"canPlausiblyReachOcean={(failure == null ? "geometry_supported_storage_unassessed" : "unverified")}"));
+        }
+    }
+
+    private static bool HasMatchingRenderedLake(GeodesicTinHydrology tin, GeodesicDrainageDelivery.Catchment catchment,
+        BasinEvidence b, Dictionary<int, double> renderedLevels, Dictionary<int, int> lakeOwners)
+    {
+        var point = catchment.Terminal.Point;
+        return point.HasValue && lakeOwners.TryGetValue(point.Value.Triangle, out int owner) &&
+            owner == b.OceanRoot.Basin.Id && !b.OceanRoot.RenderedLakeConflict &&
+            renderedLevels.TryGetValue(point.Value.Triangle, out double level) &&
+            MatchesHeight(level, b.ControllingSpill, tin.Epsilon) &&
+            tin.Height(point.Value) < level && tin.CompletedVisibleRadius(point.Value) < level;
+    }
+
+    private FreshwaterOccupancy Occupancy(GeodesicTinHydrology tin, BasinEvidence b, bool existing)
+    {
+        if (b == null) return FreshwaterOccupancy.Unverified;
+        if (existing) return FreshwaterOccupancy.ExistingRenderedLake;
+        var region = b.OceanRoot?.Region;
+        if (region?.FreshwaterBlock != null) return FreshwaterOccupancy.InvalidOrAmbiguous;
+        if (region?.Measured != true || !b.SourceSaddleWitnessed) return FreshwaterOccupancy.FinalDepression;
+        if (region.Area > largeFloodArea || region.Depth > verticalLimit || b.ControllingSpill - tin.BasinSeaLevel > verticalLimit)
+            return FreshwaterOccupancy.ExceedsFloodScreen;
+        return b.OceanRoot.CompoundBasinCount > 1 ? FreshwaterOccupancy.PotentialSharedWater : FreshwaterOccupancy.PotentialFreshwater;
+    }
+
+    private static string RelativeToSea(GeodesicTinHydrology tin, double radius)
+    {
+        double offset = radius - tin.BasinSeaLevel;
+        if (!Finite(offset)) return "unknown";
+        return Math.Abs(offset) <= tin.Epsilon ? "at_sea_tolerance" : offset < 0 ? "below_sea" : "above_sea";
+    }
+
+    private static FreshwaterOutcome ClassifyFreshwater(BasinEvidence b, string failure, bool existing)
+    {
+        if (existing) return FreshwaterOutcome.ExistingRenderedLake;
+        switch (failure)
+        {
+            case null: return FreshwaterOutcome.EligibleOverflow;
+            case "UnboundedFloodFootprint": return FreshwaterOutcome.FootprintEscape;
+            case "LargeFloodScaleReview": return FreshwaterOutcome.ExcessiveArea;
+            case "ExcessiveFloodDepth": return FreshwaterOutcome.ExcessiveDepth;
+            case "ExcessiveControllingHead": return FreshwaterOutcome.ExcessiveHead;
+            case "ExposedOutletRisesOnFinalSurface":
+            case "OutletReentersCompoundWater": return FreshwaterOutcome.InvalidExposedOutlet;
+            case "IncompatibleRenderedLakeOwnership":
+            case "OutletEntersExistingRenderedLake": return FreshwaterOutcome.LakeSurfaceConflict;
+            case "InvalidReceivingHeadOrBackwater":
+            case "MissingReceivingBasinEvidence":
+            case "MissingReceivingWaterContact": return FreshwaterOutcome.ReceivingBasinBlocked;
+            default: return b.GeometryBlockBasin >= 0 && b.GeometryBlockBasin != b.Basin.Id
+                ? FreshwaterOutcome.ReceivingBasinBlocked : FreshwaterOutcome.Uncertain;
+        }
+    }
+
+    private void RankFreshwaterCandidates(GeodesicTinHydrology tin, Dictionary<BasinEvidence, double> candidateRunoff)
+    {
+        int rank = 0;
+        foreach (var pair in candidateRunoff.OrderByDescending(p => p.Value).ThenBy(p => p.Key.RouteArea)
+            .ThenBy(p => p.Key.RouteDepth).ThenBy(p => p.Key.Basin.Id).Take(FreshwaterCandidateLimit))
+        {
+            var b = pair.Key;
+            var route = ReceivingRoute(b, out bool cycle);
+            freshwaterCandidates.Add(
+                Invariant($"[GeodesicFreshwaterOverflowCandidate] rank={++rank} basin={b.Basin.Id} independentRunoff={pair.Value:R} runoffPercent={Percent(pair.Value):F6} ") +
+                Invariant($"route={RouteLabel(route, cycle)} head={b.ControllingSpill:R} headAboveSea={Math.Max(0, b.ControllingSpill - tin.BasinSeaLevel):R} ") +
+                Invariant($"areaEstimate={b.RouteArea:R} maxDepthEstimate={b.RouteDepth:R} occupancy={Occupancy(tin, b, false)} renderedLakeCompatibility={LakeCompatibility(route)} status=future_overflow_candidate"));
         }
     }
 
@@ -791,16 +945,15 @@ internal sealed class GeodesicBasinOverflowAudit
     }
 
     private static string FailureFor(GeodesicTinHydrology tin, GeodesicDrainageDelivery.Catchment catchment, BasinEvidence b) =>
-        b == null ? "MissingTerminalBasin" : b.AncestryFailure ?? CatchmentGeometryFailure(tin, catchment, b) ??
-            (b.LargeFlood ? "LargeFloodScaleReview" : null);
+        b == null ? "MissingTerminalBasin" : b.AncestryFailure ?? CatchmentGeometryFailure(tin, catchment, b) ?? b.FloodFailure;
 
     private static Outcome Classify(string failure, bool continuation)
     {
         switch (failure)
         {
             case null: return continuation ? Outcome.VerifiedBasinContinuation : Outcome.VerifiedOceanOutlet;
-            case "ExcludedInlandWaterNeedsFreshwaterReview":
-            case "OutletIntersectsExcludedInlandWater": return Outcome.ExactExcludedSeaIntersection;
+            case FreshwaterReview:
+            case "ExposedOutletBelowSeaInExcludedCell": return Outcome.ExactExcludedSeaIntersection;
             case "ExcludedSeaBoundaryUncertain": return Outcome.ProxyOnlyExcludedSeaUncertainty;
             case "ReceivingOceanAboveSpill":
             case "ParentSpillBelowChild":
@@ -838,17 +991,18 @@ internal sealed class GeodesicBasinOverflowAudit
     private BasinEvidence EvidenceFor(GeodesicDrainageDelivery.Catchment catchment) =>
         catchment.Terminal.Basin != null && basins.TryGetValue(catchment.Terminal.Basin.Id, out var b) ? b : null;
 
-    private static string CatchmentGeometryFailure(GeodesicTinHydrology tin, GeodesicDrainageDelivery.Catchment catchment, BasinEvidence b)
+    private static string CatchmentGeometryFailure(GeodesicTinHydrology tin, GeodesicDrainageDelivery.Catchment catchment, BasinEvidence b) =>
+        b.GeometryFailure ?? (TerminalInSourceWater(tin, catchment, b) ? null : "TerminalOutsideCompoundWater");
+
+    private static bool TerminalInSourceWater(GeodesicTinHydrology tin, GeodesicDrainageDelivery.Catchment catchment, BasinEvidence b)
     {
-        if (b.GeometryFailure != null) return b.GeometryFailure;
         var point = catchment.Terminal.Point;
         if (!point.HasValue || !ValidFacet(tin, point.Value.Triangle) ||
             !b.OceanRoot.Region.Facets.Contains(point.Value.Triangle) ||
             !ContainsSorted(b.Basin.MemberTriangles, point.Value.Triangle))
-            return "TerminalOutsideCompoundWater";
+            return false;
         double height = tin.Height(point.Value), radius = tin.CompletedVisibleRadius(point.Value);
-        return Finite(height) && Finite(radius) && height < b.Basin.SpillElevation && radius <= b.ControllingSpill + tin.Epsilon
-            ? null : "TerminalOutsideCompoundWater";
+        return Finite(height) && Finite(radius) && height < b.Basin.SpillElevation && radius <= b.ControllingSpill + tin.Epsilon;
     }
 
     private static string Flag(bool known, bool value) => known ? value.ToString() : "unknown";
@@ -860,14 +1014,18 @@ internal sealed class GeodesicBasinOverflowAudit
         double tolerance = Math.Max(1e-9, total * 1e-9);
         double outcomeResidual = total - runoffByOutcome.Sum();
         double potentialResidual = StructuralClosed - GeometricClosed - floodingClosed - invalidGeometryClosed - uncertainClosed;
+        double freshwaterResidual = freshwaterReviewRunoff - freshwaterRunoff.Sum();
         bool accountingPass = Math.Abs(closedResidual) <= tolerance && Math.Abs(total - confirmed - closed - unresolved) <= tolerance &&
-            Math.Abs(outcomeResidual) <= tolerance && Math.Abs(potentialResidual) <= tolerance;
+            Math.Abs(outcomeResidual) <= tolerance && Math.Abs(potentialResidual) <= tolerance && Math.Abs(freshwaterResidual) <= tolerance;
         string excludedEvidence = excludedMappingMissing ? "unavailable" : classifiedGeometryUsed ? "final_facet_and_simulation_voronoi" : excludedMappingUsed ? "conservative_vertex_mapping" : "no_excluded_cells";
         string reasonCounts = string.Join(",", reasons.OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => p.Key + ":" + p.Value));
         string outcomeTotals = string.Join(",", Enum.GetValues(typeof(Outcome)).Cast<Outcome>().Select(o => Invariant($"{o}:{Runoff(o):R}")));
         string blockerRunoff = string.Join(",", runoffReasons.OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => Invariant($"{p.Key}:{p.Value:R}")));
         string excludedBreakdown = string.Join(",", excludedCohort.OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => Invariant($"{p.Key}:{p.Value}")));
+        string freshwaterTotals = string.Join(",", Enum.GetValues(typeof(FreshwaterOutcome)).Cast<FreshwaterOutcome>()
+            .Select(o => Invariant($"{o}:{FreshwaterRunoff(o):R}")));
         return "[GeodesicBasinOverflowAudit] scope=final counterfactual=filled_lossless_fixed_input aggregation=independent_terminal_parcels storageVolume=unavailable floodArea=linear_TIN_clip_approximation largeFloodScreen=1_percent_of_spherical_TIN_area " +
+            Invariant($"freshwaterVerticalScreen=1_percent_of_nominal_radius areaLimit={Number(largeFloodArea)} depthLimit={Number(verticalLimit)} headAboveSeaLimit={Number(verticalLimit)} ") +
             Invariant($"descriptors={descriptorCount} duplicateIds={duplicateIds} parentLinks={parentLinks} validParentLinks={validLinks} rejectedParentLinks={parentLinks - validLinks} invalidHierarchyLinks={invalidLinks} missingReferences={missingReferences} ") +
             Invariant($"cycles={cycles} cycleNodes={cycleNodes} oceanRoots={oceanRoots} boundaryRoots={boundaryRoots} ambiguousRoots={ambiguousRoots} terminalRoots={terminalRoots} ") +
             Invariant($"structuralOceanBasins={structuralCount} geometricallySupportedBasins={geometryCount} unverifiedBasins={basins.Count - geometryCount} totalRunoff={total:R} ") +
@@ -879,6 +1037,7 @@ internal sealed class GeodesicBasinOverflowAudit
             Invariant($"floodingPotential={floodingClosed:R} floodingPotentialPercent={Percent(floodingClosed):F6} invalidGeometryPotential={invalidGeometryClosed:R} invalidGeometryPotentialPercent={Percent(invalidGeometryClosed):F6} uncertainPotential={uncertainClosed:R} uncertainPotentialPercent={Percent(uncertainClosed):F6} ") +
             Invariant($"previousClosedOutletDescriptors={previousClosedOutlets} resolvedClosedOutletDescriptors={resolvedClosedOutlets} previousExcludedProxyDescriptors={previousExcluded} resolvedExcludedProxyDescriptors={resolvedExcluded} excludedProxyBreakdown=[{excludedBreakdown}] ") +
             Invariant($"runoffByOutcome=[{outcomeTotals}] blockerRunoff=[{blockerRunoff}] outcomeResidual={outcomeResidual:R} structuralPotentialResidual={potentialResidual:R} ") +
+            Invariant($"freshwaterPriorReviewRunoff={freshwaterReviewRunoff:R} freshwaterBoundedSourceSubset={freshwaterBoundedSourceRunoff:R} freshwaterCohortRunoffByOutcome=[{freshwaterTotals}] freshwaterCohortResidual={freshwaterResidual:R} freshwaterCandidates={freshwaterCandidates.Count} ") +
             Invariant($"tinyClosed={tinyClosed:R} tinyClosedPercent={Percent(tinyClosed):F6} tinyStructural={tinyStructural:R} tinyStructuralPercent={Percent(tinyStructural):F6} tinySupported={tinyGeometric:R} tinySupportedPercent={Percent(tinyGeometric):F6} ") +
             Invariant($"closedResidual={closedResidual:R} accountingPass={accountingPass} analysisMs={milliseconds:F3} approximateScratchBytes={estimatedBytes} excludedSeaEvidence={excludedEvidence} basinBlockReasons=[{reasonCounts}]");
     }

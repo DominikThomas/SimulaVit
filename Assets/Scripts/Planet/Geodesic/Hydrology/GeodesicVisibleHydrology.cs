@@ -102,6 +102,47 @@ public static class GeodesicVisibleHydrology
         return ocean;
     }
 
+    // Carry original simulation component identities onto the established render mask
+    // for reporting only. Mixed provenance stays unattributed.
+    internal static int[] LabelRetainedComponents(IGeodesicHydrologyTopology topology, bool[] retained,
+        IcosphereDirectionMapping mapping, GeodesicOceanConnectivity authority)
+    {
+        var labels = new int[retained.Length];
+        Array.Fill(labels, -1);
+        var queue = new int[retained.Length];
+        int tail = 0;
+        for (int v = 0; v < retained.Length; v++)
+        {
+            if (!retained[v]) continue;
+            var sample = mapping.Samples[v];
+            int label = Label(sample.NearestCell);
+            if (label < 0)
+                for (int i = sample.NeighborStart; i < sample.NeighborStart + sample.NeighborCount; i++)
+                {
+                    int neighbor = Label(mapping.NeighborIndices[i]);
+                    if (neighbor < 0) continue;
+                    if (label >= 0 && neighbor != label) { label = -2; break; }
+                    label = neighbor;
+                }
+            labels[v] = label;
+            if (label >= 0) queue[tail++] = v;
+        }
+        for (int head = 0; head < tail; head++)
+        {
+            int v = queue[head];
+            for (int i = 0; i < topology.NeighborCounts[v]; i++)
+            {
+                int neighbor = topology.Neighbors6[v * 6 + i];
+                if (!retained[neighbor] || labels[neighbor] != -1) continue;
+                labels[neighbor] = labels[v];
+                queue[tail++] = neighbor;
+            }
+        }
+        return labels;
+
+        int Label(int cell) => cell >= 0 && authority.OceanMask[cell] ? authority.ComponentId[cell] : -1;
+    }
+
     public static Vector3[] InteriorPath(IGeodesicHydrologyTopology topology, GeodesicRiverTerrain terrain,
         float[] routing, int cell, int receiver)
     {

@@ -58,6 +58,14 @@ public sealed class GeodesicRiverTerrain
     public float VisibleHeight(Vector3 direction) => Sample(direction, false, false);
     public float Radius(Vector3 direction) => Sample(direction, true, false);
 
+    internal bool TryRadiusOnFacets(Vector3 direction, bool[] affectedFacets, out float radius)
+    {
+        Vector3 unit = direction.sqrMagnitude > 1e-10f ? direction.normalized : Vector3.up;
+        int face = FindTriangle(unit);
+        radius = affectedFacets[face] ? 1f / Vector3.Dot(surfacePlanes[face], unit) : 0f;
+        return affectedFacets[face];
+    }
+
     /// <summary>Check every crossed terrain triangle, including narrow ridges between
     /// uniform samples. Barycentric altitude is monotone along a straight spherical arc
     /// inside one triangle, so its extrema are at triangle entry/exit points.</summary>

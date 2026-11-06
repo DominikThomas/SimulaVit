@@ -88,6 +88,10 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     private GeodesicRenderTerrainData geodesicCurrentRenderTerrainData;
     private GeodesicInlandUplift geodesicInlandUplift;
     private GeodesicRiverTerrain geodesicCarvedSurface;
+    private GeodesicRiverTerrain geodesicRepairedSurface;
+    private bool[] geodesicRepairedFacets;
+    public bool repairTinyInlandSeaDepressions { get; set; }
+    public GeodesicDepressionRepairLimits depressionRepairLimits { get; set; } = GeodesicDepressionRepairLimits.Defaults;
     internal bool GeodesicValleyCarvingAttempted { get; set; }
     // Runtime copy of the startup configuration; intentionally not a second serialized setting.
     public float inlandElevationMagnitude { get; set; }
@@ -697,6 +701,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         geodesicDebugSurfaceRadiusCache = null;
         geodesicCurrentRenderTerrainData = default;
         geodesicCarvedSurface = null;
+        geodesicRepairedSurface = null;
+        geodesicRepairedFacets = null;
         GeodesicValleyCarvingAttempted = false;
         geodesicCurrentRenderMapping = null;
         geodesicVisibleSeafloorPositionByCell = null;
@@ -789,6 +795,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     private IEnumerable<PlanetGenerationProgress> GenerateGeodesicPrototypeStages()
     {
         geodesicCarvedSurface = null;
+        geodesicRepairedSurface = null;
+        geodesicRepairedFacets = null;
         GeodesicValleyCarvingAttempted = false;
         var total = System.Diagnostics.Stopwatch.StartNew();
         ResetGeodesicQueryDiagnostics();
@@ -836,6 +844,36 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         stage = System.Diagnostics.Stopwatch.StartNew();
         foreach (var progress in RebuildGeodesicOceanClassificationStages()) yield return progress;
         LogStage("bathymetry sampling/interpolation", stage);
+
+        IcosphereRenderGeometry renderGeometry = default;
+        IcosphereDirectionMapping renderMapping = null;
+        void BuildRenderSurface()
+        {
+            var renderWatch = System.Diagnostics.Stopwatch.StartNew();
+            renderGeometry = IcosphereRenderGeometryCache.GetOrBuild(renderSubdivision);
+            renderMapping = GetOrBuildDirectionMapping(renderGeometry);
+            geodesicCurrentRenderMapping = renderMapping;
+            mesh = IcosphereRenderMeshBuilder.BuildSurfaceMesh(renderGeometry, BasePlanetRadius, $"Geodesic Terrain Render L{renderSubdivision}");
+            LogStage("render icosphere generation", renderWatch);
+
+            renderWatch.Restart();
+            geodesicCurrentRenderTerrainData = ApplyGeodesicTerrainDisplacement(mesh, renderGeometry, renderMapping, false, false, true);
+            Debug.Log(geodesicCurrentRenderTerrainData.InlandDiagnostics.Describe(inlandElevationMagnitude,
+                GeodesicInlandUplift.DefaultScaleDegrees * Mathf.Deg2Rad, geodesicInlandUplift != null && geodesicInlandUplift.HasCoast), this);
+            LogStage("terrain displacement", renderWatch);
+        }
+
+        bool repairBeforeFields = repairTinyInlandSeaDepressions && OceanConnectivity.ExcludedComponents > 0;
+        if (repairBeforeFields)
+        {
+            yield return new PlanetGenerationProgress(PlanetGenerationStage.PreparingSurface);
+            BuildRenderSurface();
+            RepairGeodesicDepressions(renderGeometry, renderMapping);
+        }
+        else if (excludeSmallDisconnectedSeas || repairTinyInlandSeaDepressions)
+            Debug.Log($"[GeodesicDepressionRepair] enabled={repairTinyInlandSeaDepressions} repaired=0 skipped={OceanConnectivity.ExcludedComponents} modifiedAreaFraction=0 maximumLift=0", this);
+        if (repairBeforeFields)
+            maximumGeneratedOpaqueSurfaceRadius = Mathf.Max(BasePlanetRadius, MaxRadiusFromTerrainData(geodesicCurrentRenderTerrainData));
 
         if (enableOcean)
             yield return new PlanetGenerationProgress(PlanetGenerationStage.MixingOceans);
@@ -901,19 +939,11 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         LogStage("ocean-temperature initialization", stage);
 
         yield return new PlanetGenerationProgress(PlanetGenerationStage.PreparingSurface);
-        stage = System.Diagnostics.Stopwatch.StartNew();
-        IcosphereRenderGeometry renderGeometry = IcosphereRenderGeometryCache.GetOrBuild(renderSubdivision);
-        IcosphereDirectionMapping renderMapping = GetOrBuildDirectionMapping(renderGeometry);
-        geodesicCurrentRenderMapping = renderMapping;
-        mesh = IcosphereRenderMeshBuilder.BuildSurfaceMesh(renderGeometry, BasePlanetRadius, $"Geodesic Terrain Render L{renderSubdivision}");
-        LogStage("render icosphere generation", stage);
-
-        stage = System.Diagnostics.Stopwatch.StartNew();
-        geodesicCurrentRenderTerrainData = ApplyGeodesicTerrainDisplacement(mesh, renderGeometry, renderMapping, false, false, true);
-        Debug.Log(geodesicCurrentRenderTerrainData.InlandDiagnostics.Describe(inlandElevationMagnitude,
-            GeodesicInlandUplift.DefaultScaleDegrees * Mathf.Deg2Rad, geodesicInlandUplift != null && geodesicInlandUplift.HasCoast), this);
-        maximumGeneratedOpaqueSurfaceRadius = Mathf.Max(BasePlanetRadius, MaxRadiusFromTerrainData(geodesicCurrentRenderTerrainData));
-        LogStage("terrain displacement", stage);
+        if (!repairBeforeFields)
+        {
+            BuildRenderSurface();
+            maximumGeneratedOpaqueSurfaceRadius = Mathf.Max(BasePlanetRadius, MaxRadiusFromTerrainData(geodesicCurrentRenderTerrainData));
+        }
         stage = System.Diagnostics.Stopwatch.StartNew();
         ApplyGeodesicSurfaceColours(mesh, geodesicCurrentRenderTerrainData);
         LogStage("vertex-colour generation", stage);
@@ -938,6 +968,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         }
         else GetComponent<GeodesicRiverSystem>()?.Clear();
         LogStage("river drainage and ribbons", stage);
+        if (excludeSmallDisconnectedSeas || repairTinyInlandSeaDepressions)
+            LogGeodesicRepairCoverage(renderGeometry, mesh.vertices);
 
         yield return new PlanetGenerationProgress(PlanetGenerationStage.PreparingSurface);
         var experiencedTemperatureField = GetOrAddComponent<GeodesicExperiencedTemperatureField>(gameObject);
@@ -946,12 +978,13 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         ventVisualizer.Initialize(experiencedTemperatureField, this);
 
         stage = System.Diagnostics.Stopwatch.StartNew();
-        // The opt-in carved terrain needs the same facets for visible surface, queries and collision.
-        if (geodesicCarvedSurface != null) colliderSubdivision = renderSubdivision;
+        // Conditioned terrain uses the same facets for visible surface and collision.
+        bool exactCollider = geodesicCarvedSurface != null || geodesicRepairedSurface != null;
+        if (exactCollider) colliderSubdivision = renderSubdivision;
         IcosphereRenderGeometry colliderGeometry = IcosphereRenderGeometryCache.GetOrBuild(colliderSubdivision);
         IcosphereDirectionMapping colliderMapping = GetOrBuildDirectionMapping(colliderGeometry);
-        Mesh colliderMesh = geodesicCarvedSurface != null ? Instantiate(mesh) : IcosphereRenderMeshBuilder.BuildSurfaceMesh(colliderGeometry, BasePlanetRadius, $"Geodesic Terrain Collider L{colliderSubdivision}");
-        GeodesicRenderTerrainData colliderTerrainData = geodesicCarvedSurface != null ? geodesicCurrentRenderTerrainData : ApplyGeodesicTerrainDisplacement(colliderMesh, colliderGeometry, colliderMapping, true, true, geodesicSeaLevelControlMode == GeodesicSeaLevelControlMode.OceanWorld);
+        Mesh colliderMesh = exactCollider ? Instantiate(mesh) : IcosphereRenderMeshBuilder.BuildSurfaceMesh(colliderGeometry, BasePlanetRadius, $"Geodesic Terrain Collider L{colliderSubdivision}");
+        GeodesicRenderTerrainData colliderTerrainData = exactCollider ? geodesicCurrentRenderTerrainData : ApplyGeodesicTerrainDisplacement(colliderMesh, colliderGeometry, colliderMapping, true, true, geodesicSeaLevelControlMode == GeodesicSeaLevelControlMode.OceanWorld);
         if (geodesicSeaLevelControlMode == GeodesicSeaLevelControlMode.OceanWorld) ValidateOceanWorldGeometryCoverage(geodesicCurrentRenderTerrainData, colliderTerrainData);
         MeshCollider meshCollider = GetOrAddComponent<MeshCollider>(gameObject);
         meshCollider.sharedMesh = null;
@@ -1043,7 +1076,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     Vector3 SampleGeodesicDebugSurfacePosition(Vector3 direction)
     {
         Vector3 unit = direction.sqrMagnitude > 1e-10f ? direction.normalized : Vector3.up;
-        if (geodesicCarvedSurface != null) return unit * geodesicCarvedSurface.Radius(unit);
+        if (TryGetGeodesicAdjustedRadius(unit, out float adjusted)) return unit * adjusted;
         if (geodesicDebugSurfaceRadiusCache == null) BuildGeodesicDebugSurfaceRadiusCache();
         if (geodesicDebugSurfaceRadiusCache != null && geodesicDebugSurfaceRadiusCache.TryGetValue(GeodesicDebugDirectionKey.From(unit), out float cachedRadius))
         {
@@ -1233,7 +1266,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     {
         if (CurrentGridType == PlanetGridType.GeodesicIcosphere)
         {
-            if (geodesicCarvedSurface != null) return geodesicCarvedSurface.Radius(direction) - BasePlanetRadius;
+            if (TryGetGeodesicAdjustedRadius(direction, out float adjusted)) return adjusted - BasePlanetRadius;
             return GeodesicInlandUplift.Add(EvaluateGeodesicTerrainHeight(direction), SampleGeodesicInlandOffset(direction));
         }
 
@@ -1260,8 +1293,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
     public float GetCellTerrainHeight(int geodesicCellIndex)
     {
-        if (geodesicCarvedSurface != null && GeodesicTopology != null && geodesicCellIndex >= 0 && geodesicCellIndex < GeodesicTopology.CellCount)
-            return geodesicCarvedSurface.Radius(GeodesicTopology.CellDirections[geodesicCellIndex]) - BasePlanetRadius;
+        if (TryGetGeodesicAdjustedCellRadius(geodesicCellIndex, out float adjusted)) return adjusted - BasePlanetRadius;
         if (geodesicTerrainHeightByCell != null && geodesicCellIndex >= 0 && geodesicCellIndex < geodesicTerrainHeightByCell.Length)
         {
             return GeodesicInlandUplift.Add(geodesicTerrainHeightByCell[geodesicCellIndex], GeodesicCellInlandOffset(geodesicCellIndex));
@@ -1287,8 +1319,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
     public float GetCellNormalizedTerrainHeight(int geodesicCellIndex)
     {
-        if (geodesicCarvedSurface != null)
-            return Mathf.InverseLerp(GetGeodesicMinimumTerrainOffset(), GetGeodesicMaximumTerrainOffset(), GetCellTerrainHeight(geodesicCellIndex));
+        if (TryGetGeodesicAdjustedCellRadius(geodesicCellIndex, out float adjusted))
+            return Mathf.InverseLerp(GetGeodesicMinimumTerrainOffset(), GetGeodesicMaximumTerrainOffset(), adjusted - BasePlanetRadius);
         if (geodesicNormalizedTerrainByCell != null && geodesicCellIndex >= 0 && geodesicCellIndex < geodesicNormalizedTerrainByCell.Length)
         {
             if (GeodesicCellInlandOffset(geodesicCellIndex) == 0f) return geodesicNormalizedTerrainByCell[geodesicCellIndex];
@@ -1444,6 +1476,112 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
     void ApplyGeodesicTerrainDisplacement(Mesh targetMesh) => ApplyGeodesicTerrainDisplacement(targetMesh, default(IcosphereRenderGeometry), null, true, true, false);
 
+    private bool TryGetGeodesicAdjustedCellRadius(int cell, out float adjusted)
+    {
+        adjusted = 0f;
+        return GeodesicTopology != null && cell >= 0 && cell < GeodesicTopology.CellCount &&
+            TryGetGeodesicAdjustedRadius(GeodesicTopology.CellDirections[cell], out adjusted);
+    }
+
+    private bool TryGetGeodesicAdjustedRadius(Vector3 direction, out float adjusted)
+    {
+        if (geodesicCarvedSurface != null)
+        {
+            adjusted = geodesicCarvedSurface.Radius(direction);
+            return true;
+        }
+        if (geodesicRepairedSurface != null)
+            return geodesicRepairedSurface.TryRadiusOnFacets(direction, geodesicRepairedFacets, out adjusted);
+        adjusted = 0f;
+        return false;
+    }
+
+    internal bool[] MapGeodesicRenderOcean(IGeodesicHydrologyTopology topology, Vector3[] surface, IcosphereDirectionMapping mapping) =>
+        enableOcean ? GeodesicVisibleHydrology.MapRetainedOcean(topology, surface, GeodesicSeaLevelRadius,
+            IsGeodesicDirectionInOceanMask, mapping, geodesicOceanMask, IsGeodesicCellPotentialLakeBasin) : new bool[surface.Length];
+
+    private void RepairGeodesicDepressions(IcosphereRenderGeometry geometry, IcosphereDirectionMapping mapping)
+    {
+        var rivers = GetComponent<GeodesicRiverSystem>();
+        string skipReason = null;
+        // A coarser render mesh cannot represent every authoritative cell and shoreline.
+        if (geometry.SubdivisionLevel < GeodesicTopology.SubdivisionLevel) skipReason = "render-resolution-below-simulation";
+        else if (enableTerminationValleyCarving || (rivers != null && rivers.tinFilterStrength != 0f))
+            skipReason = "requires-zero-tin-filter-and-carving-off";
+        if (skipReason != null)
+        {
+            Debug.Log($"[GeodesicDepressionRepair] enabled=True reason={skipReason} repaired=0 skipped={OceanConnectivity.ExcludedComponents} modifiedAreaFraction=0 maximumLift=0", this);
+            return;
+        }
+
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var topology = GeodesicHydrologyTopology.Build(geometry);
+        var original = mesh.vertices;
+        bool[] retained = MapGeodesicRenderOcean(topology, original, mapping);
+        var cells = new int[original.Length];
+        for (int v = 0; v < cells.Length; v++) cells[v] = mapping.Samples[v].NearestCell;
+        var terrainSettings = GetGeodesicTerrainSettings();
+        double epsilon = GeodesicRiverSystem.RoutingEpsilon(BasePlanetRadius, rivers != null ? rivers.uphillTolerance : .000002f);
+        var plan = GeodesicDepressionRepair.Plan(topology, original, OceanConnectivity, geodesicRawTerrainRadius,
+            cells, retained, GeodesicSeaLevelRadius, BasePlanetRadius, depressionRepairLimits, BuildTin);
+        if (plan.Surface != null)
+        {
+            mesh.vertices = plan.Surface;
+            geodesicRepairedSurface = new GeodesicRiverTerrain(geometry, plan.Surface);
+            geodesicRepairedFacets = plan.AffectedFacets;
+            float min = GetGeodesicMinimumTerrainOffset(), max = GetGeodesicMaximumTerrainOffset();
+            for (int v = 0; v < original.Length; v++)
+            {
+                float lift = plan.Surface[v].magnitude - original[v].magnitude;
+                if (lift <= 0f) continue;
+                geodesicCurrentRenderTerrainData.SurfaceRadii[v] = plan.Surface[v].magnitude;
+                geodesicCurrentRenderTerrainData.Heights[v] += lift;
+                geodesicCurrentRenderTerrainData.NormalizedHeights[v] = Mathf.InverseLerp(min, max, geodesicCurrentRenderTerrainData.Heights[v]);
+            }
+        }
+        Debug.Log(System.FormattableString.Invariant($"[GeodesicDepressionRepair] enabled=True repaired={plan.Repaired} skipped={plan.Components.Count - plan.Repaired} modifiedAreaFraction={plan.Area:R} maximumLift={plan.MaximumLift:R} planningMs={plan.Milliseconds:F3} repairMs={watch.Elapsed.TotalMilliseconds:F3}"), this);
+        foreach (var component in plan.Components) Debug.Log(component.Describe(), this);
+
+        GeodesicTinHydrology BuildTin(Vector3[] surface)
+        {
+            var visible = new float[surface.Length];
+            for (int v = 0; v < visible.Length; v++) visible[v] = surface[v].magnitude;
+            float[] hydrology = GeodesicHydrologyTerrain.Build(geometry.UnitVertices, visible, retained, DerivedTerrainSeed,
+                terrainSettings, BasePlanetRadius, hydrologyTerrainMode, enableGeodesicTerrainDisplacement,
+                GeodesicHydrologicalRenderRadii, GeodesicRawRenderRadii);
+            return new GeodesicTinHydrology(geometry.UnitVertices, geometry.Triangles, visible, hydrology,
+                retained, GeodesicSeaLevelRadius, BasePlanetRadius, epsilon, subdivisionLevel: geometry.SubdivisionLevel,
+                completedSurface: surface);
+        }
+    }
+
+    private void LogGeodesicRepairCoverage(IcosphereRenderGeometry geometry, Vector3[] surface)
+    {
+        double raw = 0d, retained = 0d;
+        foreach (var component in OceanConnectivity.Components)
+        {
+            raw += component.PlanetAreaFraction;
+            if (component.Retained) retained += component.PlanetAreaFraction;
+        }
+        int primaryId = OceanConnectivity.PrimaryRetainedComponent;
+        double primary = primaryId < 0 ? 0d : OceanConnectivity.Components[primaryId].PlanetAreaFraction;
+        double below = 0d, total = 0d;
+        var radii = new float[surface.Length];
+        for (int v = 0; v < radii.Length; v++) radii[v] = surface[v].magnitude;
+        for (int t = 0; t < geometry.Triangles.Length; t += 3)
+        {
+            int a = geometry.Triangles[t], b = geometry.Triangles[t + 1], c = geometry.Triangles[t + 2];
+            double area = GeodesicHydrologyTopology.SphericalTriangleArea(geometry.UnitVertices[a], geometry.UnitVertices[b], geometry.UnitVertices[c]);
+            int submerged = (radii[a] < GeodesicSeaLevelRadius ? 1 : 0) +
+                (radii[b] < GeodesicSeaLevelRadius ? 1 : 0) + (radii[c] < GeodesicSeaLevelRadius ? 1 : 0);
+            below += area * submerged / 3d;
+            total += area;
+        }
+        string target = geodesicSeaLevelControlMode == GeodesicSeaLevelControlMode.TargetAreaCoverage
+            ? geodesicTargetOceanCoveragePercent.ToString("R", System.Globalization.CultureInfo.InvariantCulture) : "n/a";
+        Debug.Log(System.FormattableString.Invariant($"[GeodesicDepressionRepairCoverage] seaLevel={GeodesicSeaLevelRadius:R} requestedTargetPercent={target} originalBelowSeaFraction={raw:R} originalPrimaryOceanFraction={primary:R} originalRetainedOceanFraction={retained:R} finalAuthoritativeOceanFraction={retained:R} finalRenderBelowSeaSampledFraction={below / total:R}"), this);
+    }
+
     internal void ApplyGeodesicValleySurface(IcosphereRenderGeometry geometry, Mesh targetMesh, float[] heights)
     {
         var positions = targetMesh.vertices;
@@ -1555,7 +1693,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
     float SampleGeodesicSurfaceRadiusMapped(Vector3 direction, int sampleIndex, IcosphereDirectionMapping mapping)
     {
-        if (geodesicCarvedSurface != null) return geodesicCarvedSurface.Radius(direction);
+        if (TryGetGeodesicAdjustedRadius(direction, out float adjusted)) return adjusted;
         if (enableGeodesicTerrainDisplacement) geodesicTerrainNoiseEvaluationCount++;
         Vector3 d = direction.sqrMagnitude > 1e-10f ? direction.normalized : Vector3.up;
         float raw = EvaluateRawGeodesicTerrainRadiusUncounted(d);
@@ -1646,8 +1784,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
     public float GetGeodesicCellSeafloorRadius(int cellIndex)
     {
-        if (geodesicCarvedSurface != null && GeodesicTopology != null && cellIndex >= 0 && cellIndex < GeodesicTopology.CellCount)
-            return geodesicCarvedSurface.Radius(GeodesicTopology.CellDirections[cellIndex]);
+        if (TryGetGeodesicAdjustedCellRadius(cellIndex, out float adjusted)) return adjusted;
         if (geodesicSeafloorRadius != null && cellIndex >= 0 && cellIndex < geodesicSeafloorRadius.Length)
             return GeodesicInlandUplift.Add(geodesicSeafloorRadius[cellIndex], GeodesicCellInlandOffset(cellIndex));
         return GetGeodesicCellRawTerrainRadius(cellIndex);
@@ -1689,7 +1826,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
     public float GetGeodesicSeafloorRadiusAtDirection(Vector3 direction)
     {
-        if (geodesicCarvedSurface != null) return geodesicCarvedSurface.Radius(direction);
+        if (TryGetGeodesicAdjustedRadius(direction, out float adjusted)) return adjusted;
         if (enableGeodesicTerrainDisplacement) geodesicTerrainNoiseEvaluationCount++;
         Vector3 d = direction.sqrMagnitude > 1e-10f ? direction.normalized : Vector3.up;
         float raw = EvaluateRawGeodesicTerrainRadiusUncounted(d);

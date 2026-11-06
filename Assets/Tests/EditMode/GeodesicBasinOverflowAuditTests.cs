@@ -47,10 +47,10 @@ public sealed class GeodesicBasinOverflowAuditTests
     }
 
     private static TinBasinDescriptor Copy(TinBasinDescriptor b, int? parent = null,
-        int? witnessFacet = null, TinBasinExternalSource? external = null) =>
+        int? witnessFacet = null, TinBasinExternalSource? external = null, int[] members = null) =>
         new TinBasinDescriptor(b.Id, b.Floor, b.FloorElevation, b.SpillElevation, b.Spill,
             witnessFacet ?? b.DownstreamTriangle, b.DownstreamVertex, parent ?? b.ParentBasinId,
-            b.MemberTriangles.ToArray(), b.Area, b.TouchesRetainedOcean, b.SubseaUnclassified,
+            members ?? b.MemberTriangles.ToArray(), b.Area, b.TouchesRetainedOcean, b.SubseaUnclassified,
             0, 0, external ?? b.ExternalSource);
 
     private static GeodesicTinHydrology Cascade()
@@ -64,6 +64,163 @@ public sealed class GeodesicBasinOverflowAuditTests
             int left = Math.Min((int)i, profile.Length - 2);
             return Mathf.Lerp(profile[left], profile[left + 1], i - left) + 16 * (y - 1) * (y - 1);
         });
+    }
+
+    private static (GeodesicTinHydrology Tin, GeodesicOceanConnectivity Ocean,
+        GeodesicBasinOverflowAudit.ClassifiedCells Cells, Func<int, bool> ExcludedVertex) FreshwaterFixture(
+        float floor, bool includeOceanArea = true, bool cascade = false)
+    {
+        const float sea = 8f;
+        var patch = GeodesicTinHydrologyTests.Grid((x, y) =>
+        {
+            if (cascade)
+            {
+                var profile = new[] { 9f, 1f, 7f, 2f, 5f, 3f, 4f, -1f, -2f };
+                float i = (x + 1) * 4;
+                int left = Math.Min((int)i, profile.Length - 2);
+                return floor + .006f * (Mathf.Lerp(profile[left], profile[left + 1], i - left) - 1 + 16 * (y - 1) * (y - 1));
+            }
+            float profileHeight = x <= -.5f ? 8 * (-.5f - x) : x <= 0 ? 4 * (x + .5f) : 2 - 4 * x;
+            return floor + .014f * (profileHeight + 8 * (y - 1) * (y - 1));
+        }, size: 32);
+        var grid = GeodesicGridTopology.Build(6);
+        var center = grid.CellDirections[0];
+        var east = Vector3.Cross(center, Vector3.up).normalized;
+        var north = Vector3.Cross(center, east).normalized;
+        var directions = patch.Vertices.Select(v => (center + .045f * (v.x * east + (v.y - 1) * north)).normalized).ToList();
+        int source = Array.FindIndex(patch.Vertices, v => v.x == (cascade ? -.75f : -.5f) && v.y == 1f);
+        int excluded = GeodesicOceanConnectivity.FindNearestCell(grid, directions[source]);
+        var baseline = Enumerable.Repeat(sea - .1f, grid.CellCount).ToArray();
+        for (int n = 0; n < grid.NeighborCounts[excluded]; n++) baseline[grid.Neighbors6[6 * excluded + n]] = sea + .1f;
+        var ocean = GeodesicOceanConnectivity.Build(grid, baseline, sea, true, true, .001f);
+        var nearest = directions.Select(d => GeodesicOceanConnectivity.FindNearestCell(grid, d)).ToArray();
+        var retained = patch.Vertices.Select((v, i) => v.x > (cascade ? .5f : 0f) && ocean.OceanMask[nearest[i]]).ToList();
+        var indices = patch.Triangles.ToList();
+        var heights = patch.Heights.ToList();
+        if (includeOceanArea)
+        {
+            // This coarse disconnected ocean facet supplies area only. It has
+            // no terrestrial parcels and cannot provide an outlet for the patch.
+            int start = directions.Count;
+            directions.AddRange(new[] { Vector3.right, Vector3.up, Vector3.forward });
+            heights.AddRange(new[] { 7f, 7f, 7f });
+            retained.AddRange(new[] { true, true, true });
+            indices.AddRange(new[] { start, start + 1, start + 2 });
+        }
+        var visible = heights.ToArray();
+        var tin = new GeodesicTinHydrology(directions.ToArray(), indices.ToArray(), visible, visible,
+            retained.ToArray(), sea, radius: 8, epsilon: .00002) { CaptureParcelDestinations = true };
+        tin.Accumulate();
+        var cells = new GeodesicBasinOverflowAudit.ClassifiedCells(grid, cell => ocean.PotentialLakeBasin[cell],
+            vertex => vertex < nearest.Length ? nearest[vertex] : 0);
+        return (tin, ocean, cells, vertex => vertex < nearest.Length && ocean.PotentialLakeBasin[nearest[vertex]]);
+    }
+
+    [Test] public void InitialExcludedSeaCanBecomeElevatedDryTerrain() => VerifyFinalFreshwater(8.01f, false);
+
+    [Test] public void SubseaFreshwaterWithAShallowSpillCanReachRetainedOcean() => VerifyFinalFreshwater(7.99f, true);
+
+    private static void VerifyFinalFreshwater(float floor, bool belowSea)
+    {
+        var fixture = FreshwaterFixture(floor);
+        var tin = fixture.Tin;
+        var topology = GeodesicTinBasins.Build(tin);
+        var delivery = GeodesicDrainageDelivery.Analyze(tin, topology);
+        var oceanMask = fixture.Ocean.OceanMask.ToArray();
+        var initialBelowSea = fixture.Ocean.BelowSeaLevel.ToArray();
+        var initialExcluded = fixture.Ocean.PotentialLakeBasin.ToArray();
+        string current = delivery.Summary();
+        var audit = GeodesicBasinOverflowAudit.Analyze(tin, topology.Basins, delivery, excludedAtVertex: fixture.ExcludedVertex,
+            classifiedCells: fixture.Cells, planetRadius: 8);
+        var source = audit.Basins.Values.Single();
+        Assert.That(source.InitialExcludedFloor, Is.True);
+        Assert.That(source.OceanRoot.Region.Excluded, Is.EqualTo(belowSea
+            ? GeodesicBasinOverflowAudit.Overlap.Exact : GeodesicBasinOverflowAudit.Overlap.None), audit.Summary());
+        Assert.That(source.Basin.SubseaUnclassified, Is.EqualTo(belowSea));
+        Assert.That(source.GeometricallySupported, Is.True, audit.Summary());
+        Assert.That(audit.FreshwaterCandidates.Single(), Does.Contain("status=future_overflow_candidate").And.Contain(">ocean"));
+        Assert.That(audit.FreshwaterRunoff(GeodesicBasinOverflowAudit.FreshwaterOutcome.EligibleOverflow),
+            Is.EqualTo(belowSea ? delivery.InlandClosed : 0d).Within(1e-9));
+        Assert.That(audit.Opportunities.First(), Does.Contain(belowSea ? "finalFloorRelativeToSea=below_sea" : "finalFloorRelativeToSea=above_sea"));
+        Assert.That(delivery.Summary(), Is.EqualTo(current));
+        CollectionAssert.AreEqual(oceanMask, fixture.Ocean.OceanMask);
+        CollectionAssert.AreEqual(initialBelowSea, fixture.Ocean.BelowSeaLevel);
+        CollectionAssert.AreEqual(initialExcluded, fixture.Ocean.PotentialLakeBasin);
+        StringAssert.Contains("accountingPass=True", audit.Summary());
+    }
+
+    [Test] public void ExcessiveAreaBlocksAnOtherwiseWitnessedFreshwaterRoute()
+    {
+        var fixture = FreshwaterFixture(7.99f, includeOceanArea: false);
+        var tin = fixture.Tin;
+        var topology = GeodesicTinBasins.Build(tin);
+        var delivery = GeodesicDrainageDelivery.Analyze(tin, topology);
+        var audit = GeodesicBasinOverflowAudit.Analyze(tin, topology.Basins, delivery, excludedAtVertex: fixture.ExcludedVertex,
+            classifiedCells: fixture.Cells, planetRadius: 8);
+        var source = audit.Basins.Values.Single();
+        Assert.That(source.Region.EscapesFootprint, Is.False);
+        Assert.That(source.LargeFlood, Is.True, audit.Summary());
+        Assert.That(audit.FreshwaterCandidates, Is.Empty);
+        Assert.That(audit.FreshwaterRunoff(GeodesicBasinOverflowAudit.FreshwaterOutcome.ExcessiveArea),
+            Is.EqualTo(delivery.InlandClosed).Within(1e-9));
+    }
+
+    [Test] public void FootprintEscapeIsDifferentFromExcessiveArea()
+    {
+        var fixture = FreshwaterFixture(7.99f);
+        var tin = fixture.Tin;
+        var topology = GeodesicTinBasins.Build(tin);
+        var source = topology.Basins.Single();
+        int omitted = source.MemberTriangles.First(f => f != source.Floor.Triangle &&
+            Enumerable.Range(0, 3).Any(k => tin.BasinVertex(f, k) == source.Id));
+        var shortened = Copy(source, members: source.MemberTriangles.Where(f => f != omitted).ToArray());
+        var audit = GeodesicBasinOverflowAudit.Analyze(tin, new[] { shortened }, GeodesicDrainageDelivery.Analyze(tin, topology),
+            excludedAtVertex: fixture.ExcludedVertex, classifiedCells: fixture.Cells, planetRadius: 8);
+        var evidence = audit.Basins[source.Id];
+        Assert.That(evidence.Region.EscapesFootprint, Is.True);
+        Assert.That(evidence.GeometryFailure, Is.EqualTo("UnboundedFloodFootprint"));
+        Assert.That(audit.Opportunities.First(), Does.Contain("areaScreenExceeded=False"));
+        Assert.That(audit.FreshwaterCandidates, Is.Empty);
+    }
+
+    [Test] public void FreshwaterOccupancyDoesNotResolveAMissingReceivingOutlet()
+    {
+        var fixture = FreshwaterFixture(7.99f, cascade: true);
+        var tin = fixture.Tin;
+        var topology = GeodesicTinBasins.Build(tin);
+        var basins = topology.Basins.OrderByDescending(b => b.SpillElevation).ToArray();
+        var delivery = GeodesicDrainageDelivery.Analyze(tin, topology);
+        basins[basins.Length - 1] = Copy(basins[basins.Length - 1], witnessFacet: -1);
+        var audit = GeodesicBasinOverflowAudit.Analyze(tin, basins, delivery, excludedAtVertex: fixture.ExcludedVertex,
+            classifiedCells: fixture.Cells, planetRadius: 8);
+        var source = audit.Basins[basins[0].Id];
+        Assert.That(source.PriorRefinedFailure, Is.EqualTo("ExcludedInlandWaterNeedsFreshwaterReview"), audit.Summary());
+        Assert.That(source.GeometryBlockBasin, Is.EqualTo(basins[basins.Length - 1].Id), audit.Summary());
+        Assert.That(audit.FreshwaterRunoff(GeodesicBasinOverflowAudit.FreshwaterOutcome.ReceivingBasinBlocked), Is.GreaterThan(0));
+        Assert.That(audit.FreshwaterRunoff(GeodesicBasinOverflowAudit.FreshwaterOutcome.EligibleOverflow), Is.Zero);
+        Assert.That(audit.FreshwaterCandidates, Is.Empty);
+        StringAssert.Contains("accountingPass=True", audit.Summary());
+    }
+
+    [Test] public void DepthAndHeadUseIndependentDiagnosticLimits()
+    {
+        var deep = FreshwaterFixture(7.99f);
+        var elevated = FreshwaterFixture(8.01f);
+        GeodesicBasinOverflowAudit Analyze((GeodesicTinHydrology Tin, GeodesicOceanConnectivity Ocean,
+            GeodesicBasinOverflowAudit.ClassifiedCells Cells, Func<int, bool> ExcludedVertex) fixture, double radius)
+        {
+            var topology = GeodesicTinBasins.Build(fixture.Tin);
+            var delivery = GeodesicDrainageDelivery.Analyze(fixture.Tin, topology);
+            return GeodesicBasinOverflowAudit.Analyze(fixture.Tin, topology.Basins, delivery, excludedAtVertex: fixture.ExcludedVertex,
+                classifiedCells: fixture.Cells, planetRadius: radius);
+        }
+        var depthAudit = Analyze(deep, 2);
+        var headAudit = Analyze(elevated, 3.2);
+        Assert.That(depthAudit.Basins.Values.Single().FloodFailure, Is.EqualTo("ExcessiveFloodDepth"), depthAudit.Summary());
+        Assert.That(headAudit.Basins.Values.Single().FloodFailure, Is.EqualTo("ExcessiveControllingHead"), headAudit.Summary());
+        Assert.That(depthAudit.FreshwaterRunoff(GeodesicBasinOverflowAudit.FreshwaterOutcome.ExcessiveDepth), Is.GreaterThan(0));
+        Assert.That(depthAudit.FreshwaterCandidates, Is.Empty);
+        Assert.That(headAudit.FreshwaterCandidates, Is.Empty);
     }
 
     [Test] public void SingleBasinHasWitnessedOceanPotentialAndPreservesActualDelivery()

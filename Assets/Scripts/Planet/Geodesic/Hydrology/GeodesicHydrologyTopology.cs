@@ -77,7 +77,7 @@ public sealed class GeodesicHydrologyTopology : IGeodesicHydrologyTopology
         return Mathf.Acos(Mathf.Clamp(Vector3.Dot(CellDirections[cell], CellDirections[neighbor]), -1f, 1f));
     }
 
-    private static float SphericalTriangleArea(Vector3 a, Vector3 b, Vector3 c)
+    internal static float SphericalTriangleArea(Vector3 a, Vector3 b, Vector3 c)
     {
         double determinant = Math.Abs(Vector3.Dot(a, Vector3.Cross(b, c)));
         double denominator = 1d + Vector3.Dot(a, b) + Vector3.Dot(b, c) + Vector3.Dot(c, a);

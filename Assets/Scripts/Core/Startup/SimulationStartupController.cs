@@ -34,7 +34,7 @@ public class SimulationStartupController : MonoBehaviour
     public const float GeodesicVentPhysicalMaxPerSecond = 1000f;
     private const int InitialSpawnMin = 0;
     private const int InitialSpawnMax = 10000;
-    private const int SavedStartupConfigVersion = 18;
+    private const int SavedStartupConfigVersion = 19;
     public const float NormalAtmospherePressureMaxBar = 5f;
     public const float DenseAtmospherePressureMaxBar = 600f;
     public const float DefaultApproximateThermalIntervalSeconds = 2f;
@@ -465,6 +465,8 @@ public class SimulationStartupController : MonoBehaviour
         destination.excludeSmallDisconnectedSeas = source.excludeSmallDisconnectedSeas;
         destination.minimumOceanComponentAreaFraction = source.minimumOceanComponentAreaFraction;
         destination.hydrologyTerrainMode = source.hydrologyTerrainMode;
+        destination.repairTinyInlandSeaDepressions = source.repairTinyInlandSeaDepressions;
+        destination.depressionRepairLimits = source.depressionRepairLimits;
         destination.inlandElevationMagnitude = source.inlandElevationMagnitude;
         destination.enableTerminationValleyCarving = source.enableTerminationValleyCarving;
         destination.valleyCarvingPasses = Mathf.Clamp(source.valleyCarvingPasses, 1, 5);
@@ -689,6 +691,8 @@ public class SimulationStartupController : MonoBehaviour
             planetGenerator.excludeSmallDisconnectedSeas = config.excludeSmallDisconnectedSeas;
             planetGenerator.minimumOceanComponentAreaFraction = GeodesicOceanConnectivity.NormalizeThreshold(config.minimumOceanComponentAreaFraction);
             planetGenerator.hydrologyTerrainMode = config.hydrologyTerrainMode;
+            planetGenerator.repairTinyInlandSeaDepressions = config.repairTinyInlandSeaDepressions;
+            planetGenerator.depressionRepairLimits = config.depressionRepairLimits.Normalized();
             planetGenerator.inlandElevationMagnitude = GeodesicInlandUplift.NormalizeMagnitude(config.inlandElevationMagnitude);
             planetGenerator.enableTerminationValleyCarving = config.enableTerminationValleyCarving;
             planetGenerator.valleyCarvingPasses = Mathf.Clamp(config.valleyCarvingPasses, 1, 5);
@@ -905,6 +909,7 @@ public class SimulationStartupController : MonoBehaviour
         config.minimumLakeBasinAreaFraction = GeodesicLakeBasins.NormalizeArea(config.minimumLakeBasinAreaFraction);
         config.minimumLakeDepth = GeodesicLakeBasins.NormalizeDepth(config.minimumLakeDepth);
         config.riverFlowThreshold = NormalizeRiverThreshold(config.riverFlowThreshold, GeodesicRiverSystem.DefaultRiverFlowThreshold);
+        config.depressionRepairLimits = config.depressionRepairLimits.Normalized();
         config.inlandElevationMagnitude = GeodesicInlandUplift.NormalizeMagnitude(config.inlandElevationMagnitude);
         config.maximumValleyCarveDepth = GeodesicValleyCarving.Normalize(config.maximumValleyCarveDepth, GeodesicValleyCarving.DefaultDepth, 1f);
         config.valleyCarvingPasses = Mathf.Clamp(config.valleyCarvingPasses, 1, 5);
@@ -1034,6 +1039,7 @@ public class SimulationStartupController : MonoBehaviour
         builder.AppendLine($"Terrestrial Vent Fraction: {config.terrestrialVentFraction:0.###}");
         builder.AppendLine($"Exclude small inland seas: {config.excludeSmallDisconnectedSeas}; minimum ocean basin area: {config.minimumOceanComponentAreaFraction * 100f:0.###}% of planet surface");
         builder.AppendLine($"Hydrology terrain mode: {config.hydrologyTerrainMode}");
+        builder.AppendLine($"Repair tiny inland-sea depressions: {config.repairTinyInlandSeaDepressions}");
         builder.AppendLine($"Inland elevation magnitude: {config.inlandElevationMagnitude:G9}");
         builder.AppendLine($"Termination valley carving: {config.enableTerminationValleyCarving}; passes: {config.valleyCarvingPasses}; maximum cut per pass: {config.maximumValleyCarveDepth:G6}; minimum runoff: {config.minimumValleyCarveRunoff:G6}; width: {config.valleyCarveWidth:G6}; Scene debug: {config.showValleyCarvingDebug}");
         builder.AppendLine($"Hydrological lakes: {config.generateHydrologicalLakes}; minimum basin area: {config.minimumLakeBasinAreaFraction * 100f:0.####}% of planet; minimum depth: {config.minimumLakeDepth:0.####} planet units");
@@ -1050,6 +1056,8 @@ public class SimulationStartupController : MonoBehaviour
         // Missing fields use the historical river defaults even with customized scene defaults.
         saved.riverFlowThreshold = GeodesicRiverSystem.DefaultRiverFlowThreshold;
         saved.majorRiverThreshold = GeodesicRiverSystem.DefaultMajorRiverThreshold;
+        saved.repairTinyInlandSeaDepressions = false;
+        saved.depressionRepairLimits = GeodesicDepressionRepairLimits.Defaults;
         saved.inlandElevationMagnitude = 0f;
         saved.enableTerminationValleyCarving = false;
         saved.valleyCarvingPasses = 1;
@@ -1076,6 +1084,8 @@ public class SimulationStartupController : MonoBehaviour
         public bool colourRenderedRiversByVisibleTerrainGrade, showRiverTerminationReasons;
         public bool useLowFrequencyTerrainForHydrology; // Schema 13 migration only.
         public HydrologyTerrainMode hydrologyTerrainMode;
+        public bool repairTinyInlandSeaDepressions;
+        public GeodesicDepressionRepairLimits depressionRepairLimits;
         public float inlandElevationMagnitude;
         public bool enableTerminationValleyCarving, showValleyCarvingDebug;
         public int valleyCarvingPasses = 1;
@@ -1138,6 +1148,8 @@ public class SimulationStartupController : MonoBehaviour
                 showRiverTerminationReasons = config.showRiverTerminationReasons,
                 useLowFrequencyTerrainForHydrology = config.useLowFrequencyTerrainForHydrology,
                 hydrologyTerrainMode = config.hydrologyTerrainMode,
+                repairTinyInlandSeaDepressions = config.repairTinyInlandSeaDepressions,
+                depressionRepairLimits = config.depressionRepairLimits.Normalized(),
                 inlandElevationMagnitude = config.inlandElevationMagnitude,
                 enableTerminationValleyCarving = config.enableTerminationValleyCarving,
                 valleyCarvingPasses = Mathf.Clamp(config.valleyCarvingPasses, 1, 5),
@@ -1194,6 +1206,8 @@ public class SimulationStartupController : MonoBehaviour
             config.cubeSphereResolution = cubeSphereResolution > 0 ? cubeSphereResolution : config.cubeSphereResolution;
             config.geodesicSubdivisionLevel = geodesicSubdivisionLevel;
             config.riverFlowThreshold = NormalizeRiverThreshold(version >= 15 ? riverFlowThreshold : GeodesicRiverSystem.DefaultRiverFlowThreshold, GeodesicRiverSystem.DefaultRiverFlowThreshold);
+            config.repairTinyInlandSeaDepressions = version >= 19 && repairTinyInlandSeaDepressions;
+            config.depressionRepairLimits = version >= 19 ? depressionRepairLimits.Normalized() : GeodesicDepressionRepairLimits.Defaults;
             config.inlandElevationMagnitude = version >= 16 ? GeodesicInlandUplift.NormalizeMagnitude(inlandElevationMagnitude) : 0f;
             config.enableTerminationValleyCarving = version >= 17 && enableTerminationValleyCarving;
             config.valleyCarvingPasses = version >= 18 ? Mathf.Clamp(valleyCarvingPasses, 1, 5) : 1;
@@ -1503,7 +1517,9 @@ public class SimulationStartupController : MonoBehaviour
         setupGuiScrollPosition = GUILayout.BeginScrollView(setupGuiScrollPosition, GUILayout.Width(width), GUILayout.Height(scrollHeight));
 
         float contentWidth = Mathf.Max(1f, width - 20f);
-        float advancedHeight = advancedSettingsExpanded ? 1920f : 0f;
+        float repairHeight = currentConfig.gridType == PlanetGridType.GeodesicIcosphere
+            ? 98f + (currentConfig.repairTinyInlandSeaDepressions ? (line + gap) * 8f : 0f) : 0f;
+        float advancedHeight = advancedSettingsExpanded ? 1920f + repairHeight : 0f;
         float contentHeight = 44f + ((line + gap) * 25f) + advancedHeight + (debugSettingsExpanded ? 370f : 40f) + (gap * 2f) + 42f + 30f + 82f;
         Rect contentRect = GUILayoutUtility.GetRect(contentWidth, contentHeight, GUILayout.Width(contentWidth), GUILayout.Height(contentHeight));
         float controlX = contentRect.x;
@@ -1626,8 +1642,18 @@ public class SimulationStartupController : MonoBehaviour
                 currentConfig.minimumOceanComponentAreaFraction = GeodesicOceanConnectivity.NormalizeThreshold(basinPercent / 100f);
                 GUI.enabled = oceanControlEnabled;
                 y += line * 2f + gap;
-                GUI.Label(new Rect(controlX, y, contentWidth, 52f), "Small enclosed depressions stay outside the ocean.\nTerrain is unchanged; hydrological lakes can fill valid basins.", labelStyle);
+                GUI.Label(new Rect(controlX, y, contentWidth, 52f), "Small enclosed depressions stay outside the ocean.\nHydrological lakes can fill valid basins.", labelStyle);
                 y += 58f;
+                GUI.enabled = oceanControlEnabled && currentConfig.excludeSmallDisconnectedSeas;
+                DrawBool(new Rect(controlX, y, contentWidth, line), "Repair tiny inland-sea depressions (experimental)", ref currentConfig.repairTinyInlandSeaDepressions);
+                y += line + gap;
+                GUI.Label(new Rect(controlX, y, contentWidth, 64f),
+                    "Requires excluded seas, a zero TIN filter and valley carving off.\nFills shallow depressions with a verified descending outlet. Depth and lift use planet units.",
+                    new GUIStyle(labelStyle) { wordWrap = true });
+                y += 70f;
+                if (currentConfig.repairTinyInlandSeaDepressions)
+                    DrawDepressionRepairLimits(controlX, contentWidth, line, gap, ref y);
+                GUI.enabled = oceanControlEnabled;
                 DrawBool(new Rect(controlX, y, contentWidth, line), "Generate hydrological lakes", ref currentConfig.generateHydrologicalLakes);
                 y += line + gap;
                 GUI.enabled = oceanControlEnabled && currentConfig.generateHydrologicalLakes;
@@ -1798,6 +1824,29 @@ public class SimulationStartupController : MonoBehaviour
             value = GeodesicInlandUplift.NormalizeMagnitude(parsed);
         riverThresholdEdits[label] = (value, next);
         currentConfig.inlandElevationMagnitude = value;
+    }
+
+    private void DrawDepressionRepairLimits(float x, float width, float line, float gap, ref float y)
+    {
+        var limits = currentConfig.depressionRepairLimits;
+        DrawArea("Repair max. original component area (% of planet)", ref limits.componentArea, GeodesicDepressionRepairLimits.MaximumComponentArea, y);
+        y += 2f * line + gap;
+        DrawFloat(new Rect(x, y, width, line), "Repair max. fill depth", ref limits.fillDepth, 0f, GeodesicDepressionRepairLimits.MaximumHeight);
+        y += line + gap;
+        DrawArea("Repair max. affected area per basin (% of planet)", ref limits.affectedArea, GeodesicDepressionRepairLimits.MaximumAffectedArea, y);
+        y += 2f * line + gap;
+        DrawFloat(new Rect(x, y, width, line), "Repair max. local lift", ref limits.localAdjustment, 0f, GeodesicDepressionRepairLimits.MaximumHeight);
+        y += line + gap;
+        DrawArea("Repair max. total affected area (% of planet)", ref limits.totalArea, GeodesicDepressionRepairLimits.MaximumTotalArea, y);
+        y += 2f * line + gap;
+        currentConfig.depressionRepairLimits = limits.Normalized();
+
+        void DrawArea(string label, ref float fraction, float maximum, float position)
+        {
+            float percent = fraction * 100f;
+            DrawFloat(new Rect(x, position, width, line), label, ref percent, 0f, maximum * 100f, labelAbove: true);
+            fraction = percent / 100f;
+        }
     }
 
     private void DrawFloat(Rect rect, string label, ref float value, float min, float max, bool labelAbove = false)

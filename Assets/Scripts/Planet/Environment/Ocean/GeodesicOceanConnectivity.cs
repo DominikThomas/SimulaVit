@@ -27,6 +27,7 @@ public sealed class GeodesicOceanConnectivity
     public int[] ComponentId { get; private set; }
     public Basin[] Components { get; private set; }
     public int BelowSeaCells { get; private set; }
+    public int PrimaryRetainedComponent { get; private set; } = -1;
     public int RetainedComponents { get; private set; }
     public int ExcludedComponents { get; private set; }
     public int RetainedCells { get; private set; }
@@ -105,7 +106,13 @@ public sealed class GeodesicOceanConnectivity
             bool retained = oceanEnabled && !excluded;
             components.Add(new Basin(tail, area, fraction, retained));
             result.LargestAreaFraction = Math.Max(result.LargestAreaFraction, fraction);
-            if (retained) { result.RetainedComponents++; result.RetainedCells += tail; }
+            if (retained)
+            {
+                result.RetainedComponents++;
+                result.RetainedCells += tail;
+                int primary = result.PrimaryRetainedComponent;
+                if (primary < 0 || fraction > components[primary].PlanetAreaFraction) result.PrimaryRetainedComponent = id;
+            }
             if (excluded) { result.ExcludedComponents++; result.ExcludedCells += tail; }
             for (int i = 0; i < tail; i++)
             { result.OceanMask[queue[i]] = retained; result.PotentialLakeBasin[queue[i]] = excluded; }

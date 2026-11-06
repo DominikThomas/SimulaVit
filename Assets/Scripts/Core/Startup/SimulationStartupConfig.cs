@@ -86,6 +86,10 @@ public class SimulationStartupConfig
     public float minimumOceanComponentAreaFraction = GeodesicOceanConnectivity.DefaultMinimumAreaFraction;
 
     [Header("Advanced Geodesic Terrain")]
+    [Tooltip("Experimental fill of tiny excluded inland seas with a verified descending outlet.")]
+    public bool repairTinyInlandSeaDepressions;
+    public GeodesicDepressionRepairLimits depressionRepairLimits = GeodesicDepressionRepairLimits.Defaults;
+
     [Tooltip(GeodesicInlandUplift.Help)]
     [Range(0f, GeodesicInlandUplift.MaximumMagnitude)] public float inlandElevationMagnitude = 0f;
 
