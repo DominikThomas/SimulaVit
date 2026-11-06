@@ -172,6 +172,38 @@ public sealed class GeodesicBasinInfillTests
     }
 
     [Test]
+    public void RaisingAdjacentBasinTerrainCanCreateAMinimumOnAnUntouchedDryVertex()
+    {
+        var patch = new Patch();
+        patch.Land((x, z) => Sea + .30f);
+        patch.Basin(14, 22, 9, 17, Sea - .10f);
+        int dryVertex = patch.Set(18, 13, Sea + .015f);
+        var plan = patch.Plan();
+        Assert.That(plan.Infilled, Is.EqualTo(1), Describe(plan));
+        Assert.That(plan.ChangedVertices[dryVertex], Is.False);
+        var baseline = GeodesicTinBasins.Build(patch.Tin(patch.Surface));
+        var final = GeodesicTinBasins.Build(patch.Tin(plan.Surface));
+        Assert.That(baseline.Basins.Any(b => b.Id == dryVertex), Is.False);
+        Assert.That(final.Basins.Any(b => b.Id == dryVertex && b.MaximumDepth > 0d), Is.True);
+    }
+
+    [Test]
+    public void PartlyInfilledCoastalBasinIdentifiesItsProtectedSubseaMinimum()
+    {
+        var patch = new Patch();
+        int protectedVertex = patch.Set(5, 14, Sea - .003f);
+        patch.Set(6, 14, Sea - .015f);
+        patch.MarkRenderShoreline(4, 14);
+        var plan = patch.Plan();
+        Assert.That(plan.Infilled, Is.EqualTo(1), Describe(plan));
+        var report = plan.Components.Single();
+        Assert.That(report.FinalMinimumVertex, Is.EqualTo(protectedVertex));
+        Assert.That(report.SubseaProtected, Is.EqualTo(1));
+        Assert.That(plan.Surface[protectedVertex], Is.EqualTo(patch.Surface[protectedVertex]));
+        Assert.That(report.SubseaBlended + report.SubseaOutsideRim + report.SubseaLiftLimited + report.SubseaGradeLimited, Is.Zero);
+    }
+
+    [Test]
     public void InfillIsDeterministicAndAreaBudgetUsesWholeAffectedFacets()
     {
         var patch = new Patch();

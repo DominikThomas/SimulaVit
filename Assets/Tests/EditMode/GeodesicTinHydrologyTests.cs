@@ -65,6 +65,30 @@ public sealed class GeodesicTinHydrologyTests
     }
 
     [Test]
+    public void SubSeaInlandReachEndsAtItsFirstProvenRetainedFacet()
+    {
+        var f = Grid((x, y) => -x, size: 8, boundaryOutflow: false);
+        f.Tin = new GeodesicTinHydrology(f.Vertices, f.Triangles, f.Heights, f.Heights,
+            f.Vertices.Select(v => v.x >= .75f).ToArray(), onSphere: false);
+        foreach (float x in new[] { -.125f, .125f })
+        {
+            var path = Trace(f, x, .62f, TinTermination.OceanCoast);
+            var before = path[path.Length - 2];
+            var coast = path[path.Length - 1];
+            Assert.That(f.Tin.IsRetainedOceanBoundary(before), Is.False);
+            Assert.That(f.Tin.IsRetainedOceanBoundary(coast), Is.True);
+            Assert.That(f.Tin.Direction(coast), Is.EqualTo(f.Tin.Direction(before)));
+            Assert.That(f.Tin.Direction(coast).x, Is.EqualTo(.5f).Within(1e-6f));
+            Assert.That(f.Tin.ValidateLakePath(path), Is.True);
+        }
+        f.Tin.CaptureParcelDestinations = true;
+        f.Tin.Accumulate();
+        var delivery = GeodesicDrainageDelivery.Analyze(f.Tin);
+        Assert.That(delivery.DirectOcean, Is.EqualTo(delivery.TotalRunoff).Within(delivery.Tolerance));
+        Assert.That(delivery.Unresolved, Is.Zero);
+    }
+
+    [Test]
     public void AnalyticTriangleGradientsAreFlatDownhillRidgeAndValleyFacing()
     {
         Vector3[] vertices = { new Vector3(0f, 0f, 0f), new Vector3(1f, 0f, 0f), new Vector3(0f, 1f, 0f) };

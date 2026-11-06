@@ -11,6 +11,7 @@ public sealed class TinLakeFlowNode
     public int DownstreamLakeId = -1, OutletReachId = -1;
     public TinBasinDescriptor Basin { get; internal set; }
     public TinPoint[] OutletPath { get; internal set; } = Array.Empty<TinPoint>();
+    internal TinPoint? CoastContactAtSpill { get; set; }
     public TinTermination OutletTermination { get; internal set; }
     public int JoinNetwork { get; internal set; } = -1;
     // A shared shoreline can transfer discharge without a dry, visible outlet segment.
@@ -122,7 +123,13 @@ public sealed class GeodesicTinLakeRouting
         node.OutletTermination = termination;
         node.DownstreamSample = FirstDownstreamSample(path);
         node.ExitsAtSpill = !node.DownstreamSample.HasValue && termination == TinTermination.OceanCoast;
-        if (node.ExitsAtSpill) return path; // An exact ocean/boundary spill needs no invented dry segment.
+        if (node.ExitsAtSpill)
+        {
+            // Rendering can discard a zero-length path. Retain the proven
+            // carrier separately from the basin descriptor's spill facet.
+            node.CoastContactAtSpill = path[path.Length - 1];
+            return path;
+        }
         if (!hasWitness || !node.DownstreamSample.HasValue || Inside(node.DownstreamSample.Value, basin.Id))
         {
             string report = "[GeodesicTinLakeRouting] unresolved overflowing outlet; refusing invented terminal storage. " +

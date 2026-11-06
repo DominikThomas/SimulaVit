@@ -778,7 +778,8 @@ public sealed class GeodesicValleyCarving
             double bump = (max - (double)min) * microBumpFraction;
             var proposed = new GeodesicTinHydrology(graph.CellDirections, graph.Triangles, heights, heights,
                 ocean, (float)seaLevel, radius, tin.Epsilon, bump,
-                onSphere: true, allowBoundaryOutflow: false, subdivisionLevel: tin.SubdivisionLevel, completedSurface: positions);
+                onSphere: true, allowBoundaryOutflow: false, subdivisionLevel: tin.SubdivisionLevel, completedSurface: positions,
+                requireSeaSphereCrossing: true);
             result.VerificationBuilds++;
             // Also protect known ocean-connected river sources, including tributaries
             // whose original independent centroid parcel already reached retained ocean.

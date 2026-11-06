@@ -243,14 +243,31 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
             var overflow = GeodesicBasinOverflowAudit.Analyze(TinDrainage, TinLakeBasins.Basins, DrainageDelivery,
                 TinLakeGeometry, excludedAtVertex, hasExcludedCells && !hasMapping, classifiedCells, owner.BasePlanetRadius, initiallyBelowSeaAtVertex);
             Debug.Log(overflow.Summary(), this);
+            Debug.Log(overflow.WitnessSummary(), this);
             foreach (string line in overflow.Opportunities) Debug.Log(line, this);
             foreach (string line in overflow.FreshwaterCandidates) Debug.Log(line, this);
+            if (owner.excludeSmallDisconnectedSeas || owner.infillExcludedInlandBasins)
+            {
+                try
+                {
+                    foreach (string line in GeodesicInfillDrainageAudit.Logs(owner, TinDrainage, TinLakeBasins, DrainageDelivery,
+                        TinLakeRouting, surfaceMesh.vertices, deliveryOceanComponentByVertex)) Debug.Log(line, this);
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[GeodesicInfillDrainageAudit] unavailable={ex.GetType().Name} detail={ex.Message}", this);
+                }
+            }
         }
         catch (Exception ex)
         {
             Debug.LogWarning($"[GeodesicBasinOverflowAudit] unavailable={ex.GetType().Name} detail={ex.Message}", this);
         }
-        finally { TinDrainage.ReleaseParcelDestinations(); }
+        finally
+        {
+            deliveryOceanComponentByVertex = null;
+            TinDrainage.ReleaseParcelDestinations();
+        }
     }
 
     private string CarvingEvidence(TinBasinDescriptor basin)
@@ -625,12 +642,12 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
                 owner.GeodesicSeaLevelRadius, owner.BasePlanetRadius, epsilon, bump, tinFilterStrength,
                 ResolvedDrainageAreaThreshold, Mathf.Max(0f, uniformRunoffPerArea), geometry.SubdivisionLevel,
                 completedSurface: completedSurface, hydrologyTerrainHeights: hydrologyTerrainHeight,
-                captureParcelDestinations: CaptureGenerationParcels(owner, intermediateCarving));
+                captureParcelDestinations: CaptureGenerationParcels(owner, intermediateCarving), requireSeaSphereCrossing: intermediateCarving);
         else
             TinDrainage = GeodesicTinHydrology.BuildAdaptive(geometry.UnitVertices, geometry.Triangles, visible, ocean,
             owner.GeodesicSeaLevelRadius, owner.BasePlanetRadius, epsilon, bump, tinFilterStrength,
             ResolvedDrainageAreaThreshold, Mathf.Max(0f, uniformRunoffPerArea), geometry.SubdivisionLevel, completedSurface: completedSurface,
-            captureParcelDestinations: CaptureGenerationParcels(owner, intermediateCarving));
+            captureParcelDestinations: CaptureGenerationParcels(owner, intermediateCarving), requireSeaSphereCrossing: intermediateCarving);
         routingHeights = TinDrainage.HydrologyHeight;
         terrain = new GeodesicRiverTerrain(geometry, completedSurface, routingHeights, true);
         int count = TinDrainage.TriangleCount;
@@ -735,7 +752,6 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
             deliveryOceanComponentByVertex != null ? DeliveryOceanComponent : (Func<TinPoint, int>)null,
             planet.OceanConnectivity?.PrimaryRetainedComponent ?? -1) : null;
         if (delivery != null) DrainageDelivery = delivery;
-        deliveryOceanComponentByVertex = null;
         yield return new PlanetGenerationProgress(PlanetGenerationStage.BuildingRiverRibbons);
         var watch = System.Diagnostics.Stopwatch.StartNew();
         double threshold = ResolvedDrainageAreaThreshold;

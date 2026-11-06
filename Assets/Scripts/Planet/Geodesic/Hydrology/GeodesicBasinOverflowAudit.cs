@@ -28,6 +28,8 @@ internal sealed class GeodesicBasinOverflowAudit
         internal string PreviousFailure, LocalFailure, FreshwaterLocalFailure, PriorRefinedFailure;
         internal int PreviousBlockBasin = -1;
         internal BasinEvidence Receiver;
+        internal TinPoint? ReceivingEndpoint;
+        internal string ReceivingRejection;
         internal WetRegion Region;
         internal bool DirectOcean, RenderedLakeConflict, LargeFlood, SourceSaddleWitnessed, InitialExcludedFloor;
         internal bool? InitialBelowSeaFloor;
@@ -71,11 +73,14 @@ internal sealed class GeodesicBasinOverflowAudit
         internal Overlap Excluded;
         internal bool Measured, EarlyOcean, BoundaryOcean, EscapesFootprint;
         internal string FreshwaterBlock;
+        internal int MissingWetVertex = -1, MissingIncidentFacet = -1;
+        internal (int Facet, int Outside, int A, int B, double LinearLow, double RadialLow)? EscapingEdge;
     }
 
     private readonly Dictionary<int, BasinEvidence> basins = new Dictionary<int, BasinEvidence>();
     private readonly Dictionary<string, int> reasons = new Dictionary<string, int>(StringComparer.Ordinal);
     private readonly Dictionary<string, double> runoffReasons = new Dictionary<string, double>(StringComparer.Ordinal);
+    private readonly Dictionary<string, double> witnessRunoff = new Dictionary<string, double>(StringComparer.Ordinal);
     private readonly Dictionary<string, int> excludedCohort = new Dictionary<string, int>(StringComparer.Ordinal);
     private readonly double[] runoffByOutcome = new double[Enum.GetValues(typeof(Outcome)).Length];
     private readonly double[] freshwaterRunoff = new double[Enum.GetValues(typeof(FreshwaterOutcome)).Length];
@@ -100,6 +105,9 @@ internal sealed class GeodesicBasinOverflowAudit
     internal IReadOnlyDictionary<int, BasinEvidence> Basins => basins;
     internal IEnumerable<string> Opportunities => opportunities;
     internal IEnumerable<string> FreshwaterCandidates => freshwaterCandidates;
+    internal string WitnessSummary() => "[GeodesicBasinOverflowWitnesses] independentRunoffByFirstBlockEvidence=[" +
+        string.Join(",", witnessRunoff.OrderBy(kv => kv.Key, StringComparer.Ordinal)
+            .Select(kv => Invariant($"{kv.Key}:{kv.Value:R}"))) + "]";
 
     internal static GeodesicBasinOverflowAudit Analyze(GeodesicTinHydrology tin,
         IReadOnlyList<TinBasinDescriptor> descriptors, GeodesicDrainageDelivery delivery,
@@ -376,7 +384,12 @@ internal sealed class GeodesicBasinOverflowAudit
                     int facet = tin.BasinIncidentTriangle(i);
                     if (!facets.Contains(facet))
                     {
-                        region.EscapesFootprint |= ValidFacet(tin, facet);
+                        if (ValidFacet(tin, facet))
+                        {
+                            region.EscapesFootprint = true;
+                            if (region.MissingWetVertex < 0)
+                            { region.MissingWetVertex = v; region.MissingIncidentFacet = facet; }
+                        }
                         continue;
                     }
                     for (int k = 0; k < 3; k++)
@@ -478,8 +491,12 @@ internal sealed class GeodesicBasinOverflowAudit
                 if (neighbor >= 0 && region.Facets.Contains(neighbor)) continue;
                 var a = tin.BasinPoint(facet, tin.BasinVertex(facet, (k + 1) % 3));
                 var b = tin.BasinPoint(facet, tin.BasinVertex(facet, (k + 2) % 3));
-                if (tin.MinimumOutletSegmentRadius(a, b) < head - tin.Epsilon)
-                    region.EscapesFootprint = true;
+                double radialLow = tin.MinimumOutletSegmentRadius(a, b);
+                if (radialLow >= head - tin.Epsilon) continue;
+                region.EscapesFootprint = true;
+                double linearLow = Math.Min(tin.Height(a), tin.Height(b));
+                if (!region.EscapingEdge.HasValue || (linearLow < head && region.EscapingEdge.Value.LinearLow >= head))
+                    region.EscapingEdge = (facet, neighbor, CornerVertex(tin, a), CornerVertex(tin, b), linearLow, radialLow);
             }
         }
     }
@@ -573,11 +590,18 @@ internal sealed class GeodesicBasinOverflowAudit
         if (closesInBasin)
         {
             int floor = CornerVertex(tin, endpoint, 1e-9);
-            if (!basins.TryGetValue(floor, out receiver) || !receiver.StructuralOcean ||
-                !ContainsSorted(receiver.Basin.MemberTriangles, endpoint.Triangle) ||
-                !MatchesHeight(tin.Height(endpoint), receiver.Basin.FloorElevation, tin.Epsilon) ||
-                tin.CompletedVisibleRadius(endpoint) >= receiver.Basin.SpillElevation)
+            string missing = floor < 0 ? "endpoint-is-not-a-vertex" :
+                !basins.TryGetValue(floor, out receiver) ? "floor-id-has-no-descriptor" :
+                !receiver.StructuralOcean ? "receiver-has-no-ocean-ancestry" :
+                !ContainsSorted(receiver.Basin.MemberTriangles, endpoint.Triangle) ? "endpoint-facet-outside-receiver-footprint" :
+                !MatchesHeight(tin.Height(endpoint), receiver.Basin.FloorElevation, tin.Epsilon) ? "endpoint-height-differs-from-floor" :
+                tin.CompletedVisibleRadius(endpoint) >= receiver.Basin.SpillElevation ? "endpoint-radius-at-or-above-receiver-spill" : null;
+            if (missing != null)
+            {
+                evidence.ReceivingEndpoint = endpoint;
+                evidence.ReceivingRejection = missing;
                 return "MissingReceivingBasinEvidence";
+            }
             evidence.Receiver = receiver;
             if (receiver.OceanRoot == evidence || receiver.ControllingSpill > head)
                 return "InvalidReceivingHeadOrBackwater";
@@ -787,6 +811,17 @@ internal sealed class GeodesicBasinOverflowAudit
             }
             if (failure != null)
                 runoffReasons[failure] = runoffReasons.TryGetValue(failure, out double amount) ? amount + runoff : runoff;
+            if (failure == "UnboundedFloodFootprint" || failure == "MissingReceivingBasinEvidence")
+            {
+                var blocker = b != null && basins.TryGetValue(b.GeometryBlockBasin, out var firstBlock) ? firstBlock : b;
+                var region = blocker?.OceanRoot?.Region;
+                string witness = failure == "MissingReceivingBasinEvidence" ? blocker?.ReceivingRejection :
+                    region == null ? null : region.MissingWetVertex >= 0 ? "omitted-incident-facet-of-wet-vertex" :
+                    region.EscapingEdge is { } edge ? edge.LinearLow < blocker.OceanRoot.ControllingSpill
+                        ? "edge-below-head-in-linear-tin" : "edge-below-head-only-in-exact-radius" : null;
+                string key = failure + "/" + (witness ?? "unclassified");
+                witnessRunoff[key] = witnessRunoff.TryGetValue(key, out double previous) ? previous + runoff : runoff;
+            }
             if (b?.StructuralOcean != true) { MissingAncestryClosed += runoff; continue; }
             StructuralClosed += runoff;
             if (tiny) tinyStructural += runoff;
@@ -822,6 +857,7 @@ internal sealed class GeodesicBasinOverflowAudit
             bool floodEscape = route.Any(leg => leg.OceanRoot?.Region.EscapesFootprint == true);
             bool overlapsKnown = root?.WetRegionChecked == true;
             bool structural = isClosed && b?.StructuralOcean == true;
+            BasinEvidence blocked = b != null && basins.TryGetValue(b.GeometryBlockBasin, out var blocker) ? blocker : b;
             string steps = structural ? b.SpillSteps.ToString(CultureInfo.InvariantCulture) : "unknown";
             opportunities.Add(
                 Invariant($"[GeodesicBasinOverflowOpportunity] rank={++rank} terminalId={catchment.Terminal.TerminalId} terminalType={catchment.Terminal.Type} currentDestination={catchment.Terminal.Destination} ") +
@@ -836,8 +872,23 @@ internal sealed class GeodesicBasinOverflowAudit
                 Invariant($"retainedOceanBeforeSaddle={Flag(earlyOcean || root?.Region.Measured == true, earlyOcean)} floodEscapesFootprint={Flag(floodEscape || root?.Region.Measured == true, floodEscape)} renderedLakeCompatibility={LakeCompatibility(route)} ") +
                 Invariant($"initialBelowSeaFloor={Flag(b?.InitialBelowSeaFloor != null, b?.InitialBelowSeaFloor == true)} initialExcludedFloor={Flag(excludedMappingUsed && !excludedMappingMissing && b != null, b?.InitialExcludedFloor == true)} finalFloorRadius={Number(finalFloor)} finalFloorRelativeToSea={RelativeToSea(tin, finalFloor)} freshwaterOccupancy={occupancy} priorRefinedBlock={b?.PriorRefinedFailure ?? "none"} ") +
                 Invariant($"areaScreenExceeded={Flag(Finite(RouteMeasure(b, true)), RouteMeasure(b, true) > largeFloodArea)} depthScreenExceeded={Flag(Finite(RouteMeasure(b, false)), RouteMeasure(b, false) > verticalLimit)} headScreenExceeded={Flag(Finite(routeHead), routeHead - tin.BasinSeaLevel > verticalLimit)} ") +
-                Invariant($"canPlausiblyReachOcean={(failure == null ? "geometry_supported_storage_unassessed" : "unverified")}"));
+                Invariant($"canPlausiblyReachOcean={(failure == null ? "geometry_supported_storage_unassessed" : "unverified")}") +
+                BlockWitness(tin, failure, blocked));
         }
+    }
+
+    private static string BlockWitness(GeodesicTinHydrology tin, string failure, BasinEvidence blocked)
+    {
+        if (failure == "MissingReceivingBasinEvidence" && blocked?.ReceivingEndpoint is TinPoint p)
+            return Invariant($" receivingFailureDetail={blocked.ReceivingRejection} receivingEndpoint={p.Triangle}:{p.A:R}/{p.B:R}/{p.C:R} receivingVertex={CornerVertex(tin, p, 1e-9)} receivingHeight={tin.Height(p):R} receivingRadius={tin.CompletedVisibleRadius(p):R}");
+        if (failure == "UnboundedFloodFootprint" && blocked?.OceanRoot?.Region is WetRegion region)
+        {
+            string wetVertex = Invariant($" omittedWetVertex={region.MissingWetVertex} omittedIncidentFacet={region.MissingIncidentFacet}");
+            if (region.EscapingEdge is { } edge)
+                return wetVertex + Invariant($" escapeEdge={edge.A}/{edge.B} footprintFacet={edge.Facet} outsideFacet={edge.Outside} floodHead={blocked.OceanRoot.ControllingSpill:R} linearEdgeMinimum={edge.LinearLow:R} radialEdgeMinimum={edge.RadialLow:R} radialOnly={edge.LinearLow >= blocked.OceanRoot.ControllingSpill}");
+            return wetVertex;
+        }
+        return "";
     }
 
     private static bool HasMatchingRenderedLake(GeodesicTinHydrology tin, GeodesicDrainageDelivery.Catchment catchment,

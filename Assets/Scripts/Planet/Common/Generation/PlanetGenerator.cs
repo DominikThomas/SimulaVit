@@ -92,6 +92,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     private bool[] geodesicInfilledFacets;
     internal bool[] GeodesicInfillOceanMask { get; private set; }
     internal bool[] GeodesicInfilledRenderVertices { get; private set; }
+    internal float[] GeodesicPreInfillRenderRadii { get; private set; }
+    internal int[] GeodesicInfillComponentByVertex { get; private set; }
     public bool infillExcludedInlandBasins { get; set; }
     public GeodesicBasinInfillLimits basinInfillLimits { get; set; } = GeodesicBasinInfillLimits.Defaults;
     internal bool GeodesicValleyCarvingAttempted { get; set; }
@@ -707,6 +709,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         geodesicInfilledFacets = null;
         GeodesicInfillOceanMask = null;
         GeodesicInfilledRenderVertices = null;
+        GeodesicPreInfillRenderRadii = null;
+        GeodesicInfillComponentByVertex = null;
         GeodesicValleyCarvingAttempted = false;
         geodesicCurrentRenderMapping = null;
         geodesicVisibleSeafloorPositionByCell = null;
@@ -803,6 +807,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         geodesicInfilledFacets = null;
         GeodesicInfillOceanMask = null;
         GeodesicInfilledRenderVertices = null;
+        GeodesicPreInfillRenderRadii = null;
+        GeodesicInfillComponentByVertex = null;
         GeodesicValleyCarvingAttempted = false;
         var total = System.Diagnostics.Stopwatch.StartNew();
         ResetGeodesicQueryDiagnostics();
@@ -969,8 +975,16 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         stage = System.Diagnostics.Stopwatch.StartNew();
         if (enableGeodesicRivers || generateHydrologicalLakes || enableTerminationValleyCarving || GeodesicInfillOceanMask != null)
         {
-            foreach (var progress in GetOrAddComponent<GeodesicRiverSystem>(gameObject).InitializeStages(this, renderGeometry, mesh))
-                yield return progress;
+            try
+            {
+                foreach (var progress in GetOrAddComponent<GeodesicRiverSystem>(gameObject).InitializeStages(this, renderGeometry, mesh))
+                    yield return progress;
+            }
+            finally
+            {
+                GeodesicPreInfillRenderRadii = null;
+                GeodesicInfillComponentByVertex = null;
+            }
         }
         else GetComponent<GeodesicRiverSystem>()?.Clear();
         LogStage("river drainage and ribbons", stage);
@@ -1545,6 +1559,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
             geodesicInfilledSurface = new GeodesicRiverTerrain(geometry, plan.Surface);
             geodesicInfilledFacets = plan.AffectedFacets;
             GeodesicInfilledRenderVertices = plan.ChangedVertices;
+            GeodesicPreInfillRenderRadii = plan.OriginalHeights;
+            GeodesicInfillComponentByVertex = plan.ComponentByVertex;
             GeodesicInfillOceanMask = retained;
             float min = GetGeodesicMinimumTerrainOffset(), max = GetGeodesicMaximumTerrainOffset();
             for (int v = 0; v < original.Length; v++)

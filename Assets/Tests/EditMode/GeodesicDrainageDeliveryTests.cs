@@ -107,6 +107,28 @@ public sealed class GeodesicDrainageDeliveryTests
         Assert.That(r.DuplicateMemberships, Is.EqualTo(1)); Assert.That(r.Unresolved, Is.EqualTo(tin.ParcelRunoff(parcel)));
         Assert.That(Math.Abs(r.Residual), Is.LessThanOrEqualTo(r.Tolerance));
     }
+    [Test] public void CoastHandoffAtSpillRemainsDeliverableWithoutARibbon()
+    {
+        var grid = GeodesicTinHydrologyTests.Grid((x, y) => -x, size: 8, boundaryOutflow: false);
+        var tin = Prepare(new GeodesicTinHydrologyTests.Fixture
+        {
+            Tin = new GeodesicTinHydrology(grid.Vertices, grid.Triangles, grid.Heights, grid.Heights,
+                grid.Vertices.Select(v => v.x >= .75f).ToArray(), onSphere: false)
+        });
+        TinPoint spill = grid.At(.5f, .62f);
+        var path = tin.TraceLakeOutlet(spill, null, out var end);
+        Assert.That(end, Is.EqualTo(TinTermination.OceanCoast));
+        Assert.That(tin.IsRetainedOceanBoundary(spill), Is.False);
+        Assert.That(tin.IsRetainedOceanBoundary(path.Last()), Is.True);
+        Assert.That(tin.Direction(path.Last()), Is.EqualTo(tin.Direction(spill)));
+        int parcel = Enumerable.Range(0, tin.TriangleCount).First(t => tin.ParcelRunoff(t) > 0);
+        var lake = new TinLakeFlowNode(10) { ExitsAtSpill = true, OutletTermination = end, CoastContactAtSpill = path.Last() };
+        lake.DirectParcels.Add(parcel);
+        var delivery = GeodesicDrainageDelivery.Analyze(tin, lakes: new[] { lake });
+        Assert.That(delivery.ViaLakesOcean, Is.EqualTo(tin.ParcelRunoff(parcel)));
+        Accounted(delivery);
+    }
+
     [Test] public void ExternalFixtureBoundaryIsNeverMistakenForRetainedOcean()
     {
         var tin = Prepare(GeodesicTinHydrologyTests.Grid((x, y) => -x, size: 8));

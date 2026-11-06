@@ -178,6 +178,8 @@ public sealed class GeodesicBasinOverflowAuditTests
             excludedAtVertex: fixture.ExcludedVertex, classifiedCells: fixture.Cells, planetRadius: 8);
         var evidence = audit.Basins[source.Id];
         Assert.That(evidence.Region.EscapesFootprint, Is.True);
+        Assert.That(evidence.Region.MissingWetVertex, Is.EqualTo(source.Id));
+        Assert.That(evidence.Region.MissingIncidentFacet, Is.EqualTo(omitted));
         Assert.That(evidence.GeometryFailure, Is.EqualTo("UnboundedFloodFootprint"));
         Assert.That(audit.Opportunities.First(), Does.Contain("areaScreenExceeded=False"));
         Assert.That(audit.FreshwaterCandidates, Is.Empty);

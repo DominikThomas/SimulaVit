@@ -20,10 +20,12 @@ internal static class GeodesicBasinInfill
         public double OriginalMinimum = double.NaN, OriginalMean = double.NaN, OriginalMaximum = double.NaN;
         public double FinalMinimum = double.NaN, FinalMean = double.NaN, FinalMaximum = double.NaN;
         public int ProtectedVertices, CollarVertices, GradeLimitedVertices, LiftLimitedVertices;
+        public int FinalMinimumVertex = -1;
+        public int SubseaProtected, SubseaOutsideRim, SubseaGradeLimited, SubseaLiftLimited, SubseaBlended;
         public bool LargeRelativeToRelief, SteepTransition;
 
         public string Describe() => FormattableString.Invariant(
-            $"[GeodesicBasinInfillComponent] id={Id} status={Status} originalAreaFraction={OriginalArea:R} rawFloor={RawFloor:R} originalMinMeanMax={OriginalMinimum:R}/{OriginalMean:R}/{OriginalMaximum:R} finalMinMeanMax={FinalMinimum:R}/{FinalMean:R}/{FinalMaximum:R} target={Target:R} rimInterquartileRelief={RimRelief:R} primaryDistanceDegrees={PrimaryDistance * Mathf.Rad2Deg:R} modifiedAreaFraction={Area:R} sedimentVolume={Volume:R} meanLift={MeanLift:R} maxLift={MaximumLift:R} maxAddedGrade={MaximumAddedGrade:R} protectedVertices={ProtectedVertices} collarVertices={CollarVertices} gradeLimitedVertices={GradeLimitedVertices} liftLimitedVertices={LiftLimitedVertices} largeRelativeToRelief={LargeRelativeToRelief} steepTransition={SteepTransition}");
+            $"[GeodesicBasinInfillComponent] id={Id} status={Status} originalAreaFraction={OriginalArea:R} rawFloor={RawFloor:R} originalMinMeanMax={OriginalMinimum:R}/{OriginalMean:R}/{OriginalMaximum:R} finalMinMeanMax={FinalMinimum:R}/{FinalMean:R}/{FinalMaximum:R} target={Target:R} rimInterquartileRelief={RimRelief:R} primaryDistanceDegrees={PrimaryDistance * Mathf.Rad2Deg:R} modifiedAreaFraction={Area:R} sedimentVolume={Volume:R} meanLift={MeanLift:R} maxLift={MaximumLift:R} maxAddedGrade={MaximumAddedGrade:R} protectedVertices={ProtectedVertices} collarVertices={CollarVertices} gradeLimitedVertices={GradeLimitedVertices} liftLimitedVertices={LiftLimitedVertices} largeRelativeToRelief={LargeRelativeToRelief} steepTransition={SteepTransition} finalMinVertex={FinalMinimumVertex} subseaProtected={SubseaProtected} subseaOutsideRim={SubseaOutsideRim} subseaGradeLimited={SubseaGradeLimited} subseaLiftLimited={SubseaLiftLimited} subseaBlended={SubseaBlended}");
     }
 
     internal sealed class Result
@@ -31,6 +33,8 @@ internal static class GeodesicBasinInfill
         public readonly List<Component> Components = new();
         public Vector3[] Surface;
         public bool[] AffectedFacets, ChangedVertices;
+        public int[] ComponentByVertex;
+        public float[] OriginalHeights;
         public int Infilled;
         public double Area, Volume, MeanLift, MaximumLift;
 
@@ -204,6 +208,8 @@ internal static class GeodesicBasinInfill
         if (result.Infilled > 0)
         {
             result.AffectedFacets = affectedFacets;
+            result.ComponentByVertex = owner;
+            result.OriginalHeights = heights;
             result.MeanLift = weightedLift / liftedArea;
         }
         foreach (var patch in candidates)
@@ -374,7 +380,19 @@ internal static class GeodesicBasinInfill
             {
                 double h = final && result.ChangedVertices != null && result.ChangedVertices[v] ? result.Surface[v].magnitude : heights[v];
                 double a = topology.UnitCellAreas[v];
-                minimum = Math.Min(minimum, h);
+                if (h < minimum)
+                {
+                    minimum = h;
+                    if (final) patch.Report.FinalMinimumVertex = v;
+                }
+                if (final && h < sea && patch.Report.Status == "infilled")
+                {
+                    if (owner[v] < 0) patch.Report.SubseaProtected++;
+                    else if (anchor[v] < 0) patch.Report.SubseaOutsideRim++;
+                    else if (proposal[v] < smoothed[v]) patch.Report.SubseaGradeLimited++;
+                    else if (smoothed[v] >= heights[v] + limits.liftFraction * radius) patch.Report.SubseaLiftLimited++;
+                    else patch.Report.SubseaBlended++;
+                }
                 maximum = Math.Max(maximum, h);
                 sum += a * h;
                 area += a;

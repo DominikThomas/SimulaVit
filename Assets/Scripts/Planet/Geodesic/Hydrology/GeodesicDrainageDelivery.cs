@@ -49,6 +49,7 @@ public sealed class GeodesicDrainageDelivery
     public double SecondaryOcean { get; private set; }
     public double UnattributedOcean { get; private set; }
     private readonly Outcome[] networkOutcomes;
+    internal Outcome NetworkOutcome(int network) => networkOutcomes[network];
     private readonly byte[] confirmedOceanParcels;
     public bool IsConfirmedOceanParcel(int id) => id >= 0 && id < confirmedOceanParcels.Length && confirmedOceanParcels[id] != 0;
     public bool IsOceanViaLakesParcel(int id) => id >= 0 && id < confirmedOceanParcels.Length && confirmedOceanParcels[id] == 2;
@@ -144,7 +145,7 @@ public sealed class GeodesicDrainageDelivery
             string id = "lake:" + lake.BasinId;
             Outcome end = lake.Basin != null && !lake.Basin.HasEscape
                 ? r.Terminal(TinTermination.TrueClosedBasin, lake.Basin.Floor, id)
-                : r.Terminal(lake.OutletTermination, End(lake.OutletPath) ?? (lake.ExitsAtSpill ? lake.Basin?.Spill : null), id);
+                : r.Terminal(lake.OutletTermination, End(lake.OutletPath) ?? (lake.ExitsAtSpill ? lake.CoastContactAtSpill ?? lake.Basin?.Spill : null), id);
             r.links.Add(id, new Link { Lake = true, End = end,
                 Next = lake.DownstreamLakeId >= 0 ? "lake:" + lake.DownstreamLakeId : lake.JoinNetwork >= 0 ? "network:" + lake.JoinNetwork : null });
             foreach (int parcel in lake.DirectParcels)
