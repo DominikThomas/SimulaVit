@@ -2,6 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
+[Flags]
+internal enum TinBasinExternalSource : byte
+{
+    None = 0,
+    RetainedOcean = 1,
+    OpenBoundary = 2
+}
+
 /// <summary>Immutable lower-star component at its first merge into an older component.
 /// Member triangles are a conservative footprint, not shoreline polygons. IDs are floor vertex IDs.
 /// ParentBasinId describes the elder-rule merge tree, not a river receiver.</summary>
@@ -16,6 +24,7 @@ public sealed class TinBasinDescriptor
     public int DownstreamTriangle { get; }
     public int DownstreamVertex { get; }
     public int ParentBasinId { get; }
+    internal TinBasinExternalSource ExternalSource { get; }
     public IReadOnlyList<int> MemberTriangles { get; }
     public double Area { get; }
     public bool HasEscape => Spill.HasValue;
@@ -28,11 +37,13 @@ public sealed class TinBasinDescriptor
 
     internal TinBasinDescriptor(int id, TinPoint floor, double floorHeight, double spillHeight,
         TinPoint? spill, int downstreamTriangle, int downstreamVertex, int parent, int[] members,
-        double area, bool ocean, bool subsea, double minimumDepth, double minimumArea)
+        double area, bool ocean, bool subsea, double minimumDepth, double minimumArea,
+        TinBasinExternalSource externalSource = TinBasinExternalSource.None)
     {
         Id = id; Floor = floor; FloorElevation = floorHeight; SpillElevation = spillHeight;
         Spill = spill; DownstreamTriangle = downstreamTriangle; DownstreamVertex = downstreamVertex;
         ParentBasinId = parent; MemberTriangles = Array.AsReadOnly(members); Area = area;
+        ExternalSource = externalSource;
         TouchesRetainedOcean = ocean; SubseaUnclassified = subsea;
         BelowMinimumDepth = HasEscape && MaximumDepth < minimumDepth;
         BelowMinimumArea = area < minimumArea;
@@ -68,6 +79,7 @@ public sealed class GeodesicTinBasins
         int n = tin.BasinVertexCount;
         var parent = new int[n]; var head = new int[n]; var tail = new int[n]; var next = new int[n];
         var floor = new int[n]; var external = new bool[n]; var ocean = new bool[n];
+        var externalSource = new TinBasinExternalSource[n];
         var point = new TinPoint[n]; var used = new bool[n];
         Array.Fill(parent, -1); Array.Fill(next, -1);
         double totalArea = 0;
@@ -83,7 +95,12 @@ public sealed class GeodesicTinBasins
                 if (tin.BasinBoundaryOutflow && (tin.Neighbors[t * 3 + (k + 1) % 3] < 0 || tin.Neighbors[t * 3 + (k + 2) % 3] < 0)) external[v] = true;
             }
         }
-        for (int v = 0; v < n; v++) external[v] |= ocean[v];
+        for (int v = 0; v < n; v++)
+        {
+            if (external[v]) externalSource[v] = TinBasinExternalSource.OpenBoundary;
+            if (ocean[v]) externalSource[v] |= TinBasinExternalSource.RetainedOcean;
+            external[v] |= ocean[v];
+        }
         var order = Enumerable.Range(0, n).Where(v => used[v]).ToArray();
         Array.Sort(order, (a, b) => { int c = tin.HydrologyHeight[a].CompareTo(tin.HydrologyHeight[b]); return c != 0 ? c : a.CompareTo(b); });
         var result = new List<TinBasinDescriptor>();
@@ -113,7 +130,8 @@ public sealed class GeodesicTinBasins
             result.Add(new TinBasinDescriptor(f, point[f], tin.HydrologyHeight[f], level,
                 saddle < 0 ? (TinPoint?)null : tin.BasinPoint(sideTriangle, saddle), sideVertex == saddle ? -1 : sideTriangle, sideVertex,
                 target >= 0 && !external[target] ? floor[target] : -1, footprint, area, touches,
-                tin.VisibleHeight[f] <= tin.BasinSeaLevel && !ocean[f], minimumDepth, totalArea * minimumAreaFraction));
+                tin.VisibleHeight[f] <= tin.BasinSeaLevel && !ocean[f], minimumDepth, totalArea * minimumAreaFraction,
+                target >= 0 && external[target] ? externalSource[target] : TinBasinExternalSource.None));
         }
         foreach (int v in order)
         {
@@ -146,6 +164,7 @@ public sealed class GeodesicTinBasins
                     }
                     Record(loser, v, winner, sideTriangle, sideVertex);
                     parent[loser] = winner; next[tail[winner]] = head[loser]; tail[winner] = tail[loser];
+                    externalSource[winner] |= externalSource[loser];
                 }
             }
         }

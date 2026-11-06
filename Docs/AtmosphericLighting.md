@@ -8,6 +8,8 @@ The existing Atmosphere Layer mesh and Atmosphere_Fresnel_Mat asset remain in us
 
 Warm colour now uses local solar elevation around the true geometric terminator, a narrow Gaussian twilight mask, and a squared limb mask. Warm light is suppressed beyond 0.4 times the twilight width on the dark side. Sunset Strength controls the brightness of this local contribution. Cool scattered light and the independently adjustable night residual remain.
 
+The cool afterglow uses a separate narrow, view-dependent limb profile, rather than the lit halo's clearance taper or Surface Haze. Its path response saturates quickly enough to remain visible in the thin shell. Smooth solar-elevation weighting gives a brighter localized twilight arc and a weak deep-night floor, including when the Sun is directly behind the planet. It remains blue/cyan, does not restore the orange overlay, and rapidly vanishes toward the centre of the visible disc. No world-axis or screen-position mask is used.
+
 Face-on haze defaults to only 0.015 of the limb response. The outer halo tapers relative to the physical sea/ground sphere, preventing a luminous detached ring at the global tallest-peak bound. The scattering volume itself remains above the terrain. Shadowing uses the physical planet radius independently of atmospheric clearance.
 
 ### Radius adjustment
@@ -41,7 +43,8 @@ On the atmosphere material:
 | Optical Density | 0.65 | Optical column strength |
 | Density Falloff | 4.5 | Concentration toward the inner boundary |
 | Day Night Softness | 0.035 | Curved planet-shadow transition |
-| Night Residual Glow | 0.012 | Faint cool residual, compensated for the thinner layer |
+| Night Residual Glow | 0.035 | Primary afterglow brightness control; zero disables residual glow |
+| Night Rim Width | 0.025 | Independent residual profile width as a fraction of physical planet radius |
 
 In the Planet Generator Inspector, Atmosphere Terrain Clearance controls the safety margin and Atmosphere Radius Multiplier controls thickness. These apply when the existing atmosphere mesh is built; no continuous rebuilding was added.
 
@@ -87,6 +90,16 @@ Verified on desktop Direct3D11:
 - Desktop Forward+ and mobile Forward renderer configurations; the latter with camera depth disabled.
 
 The PNGs and validation.txt are controlled GPU captures, not screenshots of the user's running world. No mobile-device build or GPU timing benchmark was performed.
+
+### Cool afterglow comparison
+
+Run Tools > Atmosphere > Validate Cool Afterglow, or batch-execute AtmosphereAfterglowValidation.Capture. Results go to Artifacts/AtmosphereAfterglow (ignored by Git). Optional BeforeAfterglow shader/material snapshots in the isolated validation copy capture the immediately preceding shader at Night Residual Glow = 0.012.
+
+This check compares the Sun just below the visible hemisphere's horizon, directly behind the planet, an off-axis night view, and camera motion around the night-side limb. A tall-mountain clearance case and mobile Forward configuration are also captured. Controls with Night Residual Glow = 0 isolate the residual signal and check that it stays off the central terrain. Old/new images with residuals disabled verify that the narrow warm band and sunlit scattering are unchanged.
+
+The final Direct3D11 checks passed runtime/editor compilation and shader rendering for desktop Forward+ and mobile Forward. Residual blue signal in the measured limb annulus increased 4.37 times just below the horizon and 4.68 times with the Sun directly behind the planet. Central-disc residual measured zero. With residuals disabled, the old/new mean RGB difference was zero, confirming unchanged warm and sunlit scattering. A night-side camera sweep was captured from -60 to +60 degrees in 15-degree steps. These remain synthetic GPU comparisons rather than gameplay screenshots or mobile-device validation.
+
+Night Residual Glow is the most direct brightness knob. Night Rim Width changes thickness without broadening the warm band. Global Intensity, Optical Density, and Rayleigh Colour continue to affect the residual. Geometry, clearance, warm settings, water and terrain lighting are unchanged by this afterglow adjustment.
 
 ## Limits
 

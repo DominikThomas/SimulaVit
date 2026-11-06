@@ -56,6 +56,7 @@ public sealed class GeodesicDrainageDelivery
     public long ApproximateMemoryBytes { get; private set; }
     public double Residual => TotalRunoff - DirectOcean - ViaLakesOcean - InlandClosed - Unresolved;
     public double Tolerance => Math.Max(1e-9, TotalRunoff * 1e-9);
+    internal IEnumerable<Catchment> DisconnectedCatchments => catchments.Values;
     public IEnumerable<Catchment> LargestDisconnected => catchments.Values.OrderByDescending(c => c.Runoff).ThenBy(c => c.Terminal.TerminalId, StringComparer.Ordinal).Take(20);
     private GeodesicDrainageDelivery(GeodesicTinHydrology source, GeodesicTinBasins topology)
     { tin = source; basins = topology; networkOutcomes = new Outcome[tin.Networks.Count]; confirmedOceanParcels = new byte[tin.TriangleCount]; }

@@ -13,7 +13,8 @@ Shader "SimulaVit/AtmosphereScatteringURP"
         _Density ("Optical Density", Range(0, 3)) = 0.65
         _DensityFalloff ("Density Falloff / Rim Thinness", Range(1, 12)) = 4.5
         _TerminatorSoftness ("Day Night Softness", Range(0.005, 0.2)) = 0.035
-        _NightGlow ("Night Residual Glow", Range(0, 0.1)) = 0.012
+        _NightGlow ("Night Residual Glow", Range(0, 0.1)) = 0.035
+        _NightRimWidth ("Night Rim Width (Radius Fraction)", Range(0.005, 0.1)) = 0.025
         [HideInInspector] _PlanetRadius ("Planet Radius (Local)", Float) = 1
         [HideInInspector] _AtmosphereInnerRadius ("Atmosphere Inner Radius (Local)", Float) = 1.001
         [HideInInspector] _AtmosphereRadius ("Atmosphere Radius (Local)", Float) = 1.04
@@ -53,6 +54,7 @@ Shader "SimulaVit/AtmosphereScatteringURP"
                 float _DensityFalloff;
                 float _TerminatorSoftness;
                 float _NightGlow;
+                float _NightRimWidth;
                 float _PlanetRadius;
                 float _AtmosphereInnerRadius;
                 float _AtmosphereRadius;
@@ -203,8 +205,24 @@ Shader "SimulaVit/AtmosphereScatteringURP"
                 float3 colour = integral.rgb / max(column, 1e-5);
                 float3 radiance = colour * mainLight.color * mainLight.distanceAttenuation
                     * (rayleighPhase + miePhase) * opacity * _Intensity;
-                float residual = (1.0 - exp(-path / thickness * 0.02)) * _NightGlow * _Density * limbMask;
-                radiance += _RayleighColor.rgb * residual * _Intensity;
+                // Artistic afterglow has its own thin view-dependent profile. It must
+                // survive the planet shadow and the lit halo's terrain-clearance taper,
+                // without inheriting SurfaceHaze or illuminating the face of the planet.
+                float rimDistance = (impact / planet - 1.0) / max(_NightRimWidth, 0.001);
+                float nightRim = exp(-rimDistance * rimDistance);
+                float3 glowPoint = origin + ray * (start + path * 0.5);
+                float solarElevation = dot(SafeNormalize(glowPoint), sun);
+                float nightWeight = 1.0 - smoothstep(0.0, 0.25, solarElevation);
+                float twilightGlow = exp(-pow(solarElevation / 0.18, 2.0));
+                // A weak deep-night floor remains even with the Sun directly behind
+                // the planet. Twilight makes a localized brighter arc, rather than
+                // imposing a bright circular ring independent of the Sun direction.
+                float glowLighting = nightWeight * (0.3 + 0.7 * twilightGlow);
+                float glowPath = 1.0 - exp(-path / thickness * 1.5);
+                float residual = _NightGlow * _Density * nightRim * glowLighting * glowPath;
+                float3 glowCyan = float3(_RayleighColor.r * 0.5, max(_RayleighColor.g, _RayleighColor.b * 0.45), _RayleighColor.b);
+                float3 glowColour = lerp(_RayleighColor.rgb, glowCyan, twilightGlow * 0.35);
+                radiance += glowColour * residual * _Intensity;
                 // Premultiplied, bounded extinction preserves terrain, water and stars.
                 return half4(radiance, saturate((opacity + residual) * _Intensity));
             }

@@ -14,6 +14,7 @@ parser.add_argument('--unity-data', required=True, type=Path)
 parser.add_argument('--benchmark', type=int, choices=range(1, 8))
 parser.add_argument('--delivery-only', action='store_true', help='Run focused drainage delivery tests only')
 parser.add_argument('--ocean-plan-only', action='store_true', help='Run focused ocean-directed connection planning tests only')
+parser.add_argument('--overflow-audit-only', action='store_true', help='Run focused basin overflow audit tests only')
 parser.add_argument('--output', type=Path, default=Path('Artifacts/LowFrequencyHydrology/managed'))
 args = parser.parse_args()
 root = Path(__file__).resolve().parents[1]
@@ -45,6 +46,7 @@ sources += [root / p for p in [
     'Assets/Tests/EditMode/GeodesicTinHydrologyTests.cs',
     'Assets/Tests/EditMode/GeodesicDrainageDeliveryTests.cs',
     'Assets/Tests/EditMode/GeodesicOceanDrainagePlanTests.cs',
+    'Assets/Tests/EditMode/GeodesicBasinOverflowAuditTests.cs',
     'Assets/Tests/EditMode/GeodesicTinBasinTests.cs',
     'Assets/Tests/EditMode/GeodesicTinLakeGeometryTests.cs',
     'Assets/Tests/EditMode/GeodesicTinLakeRoutingTests.cs',
@@ -77,4 +79,6 @@ if args.delivery_only:
     command += ['--delivery-only']
 if args.ocean_plan_only:
     command += ['--ocean-plan-only']
+if args.overflow_audit_only:
+    command += ['--overflow-audit-only']
 subprocess.run(command, check=True, cwd=root, env=env)

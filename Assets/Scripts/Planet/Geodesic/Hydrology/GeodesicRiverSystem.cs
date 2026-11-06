@@ -222,7 +222,23 @@ public sealed class GeodesicRiverSystem : MonoBehaviour
         Debug.Log(DrainageDelivery.Summary(), this);
         Debug.Log(DrainageDelivery.Connectivity(TinDiagnostics.UnexpectedBrokenNetworks), this);
         foreach (string line in DrainageDelivery.CatchmentLogs(CarvingEvidence)) Debug.Log(line, this);
-        TinDrainage.ReleaseParcelDestinations();
+        try
+        {
+            var mapping = owner.GeodesicCurrentRenderMapping;
+            bool hasMapping = mapping != null && mapping.SampleCount == TinDrainage.BasinVertexCount;
+            bool hasExcludedCells = owner.OceanConnectivity != null && owner.OceanConnectivity.ExcludedCells > 0;
+            Func<int, bool> excludedAtVertex = hasExcludedCells && hasMapping
+                ? vertex => owner.IsGeodesicCellPotentialLakeBasin(mapping.Samples[vertex].NearestCell) : null;
+            var overflow = GeodesicBasinOverflowAudit.Analyze(TinDrainage, TinLakeBasins.Basins, DrainageDelivery,
+                TinLakeGeometry, excludedAtVertex, hasExcludedCells && !hasMapping);
+            Debug.Log(overflow.Summary(), this);
+            foreach (string line in overflow.Opportunities) Debug.Log(line, this);
+        }
+        catch (Exception ex)
+        {
+            Debug.LogWarning($"[GeodesicBasinOverflowAudit] unavailable={ex.GetType().Name} detail={ex.Message}", this);
+        }
+        finally { TinDrainage.ReleaseParcelDestinations(); }
     }
 
     private string CarvingEvidence(TinBasinDescriptor basin)

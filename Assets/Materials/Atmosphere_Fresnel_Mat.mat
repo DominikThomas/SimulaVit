@@ -47,7 +47,8 @@ Material:
     - _Density: 0.65
     - _DensityFalloff: 4.5
     - _TerminatorSoftness: 0.035
-    - _NightGlow: 0.012
+    - _NightGlow: 0.035
+    - _NightRimWidth: 0.025
     m_Colors:
     - _RayleighColor: {r: 0.12, g: 0.42, b: 1, a: 1}
     - _SunsetColor: {r: 1, g: 0.24, b: 0.035, a: 1}
