@@ -375,6 +375,14 @@ public sealed class GeodesicTinHydrology
     // not the routing epsilon or a proximity-to-ocean heuristic, when auditing its endpoint.
     internal bool IsRetainedOceanBoundary(TinPoint p) => p.Triangle >= 0 && p.Triangle < TriangleCount &&
         faces[p.Triangle].RetainedOcean && CompletedVisibleRadius(p) <= seaLevel + Math.Max(1e-10, Math.Abs(seaLevel) * 1e-12);
+
+    internal bool TryCoast(TinPoint dry, TinPoint wet, out TinPoint coast)
+    {
+        coast = default;
+        if (dry.Triangle != wet.Triangle || CompletedVisibleRadius(dry) <= seaLevel || !IsOcean(wet)) return false;
+        coast = Coast(dry, wet);
+        return IsRetainedOceanBoundary(coast);
+    }
     private static bool Finite(double x) => !double.IsNaN(x) && !double.IsInfinity(x);
     private static double Weight(TinPoint p, int k) => k == 0 ? p.A : k == 1 ? p.B : p.C;
     private static TinPoint Mix(TinPoint a, TinPoint b, double fraction) => new TinPoint(a.Triangle,
@@ -716,13 +724,24 @@ public sealed class GeodesicTinHydrology
     /// <summary>Read-only replay of the same centroid parcels used by Accumulate. The callback
     /// must not retain the reused path list. IDs are source triangle IDs, not cumulative flow.</summary>
     internal void VisitRunoffParcels(Action<int, double, IReadOnlyList<TinPoint>> visit)
+        => ReplayRunoffParcels((id, path, _) => visit(id, localRunoff[id], path));
+
+    internal void EnsureParcelDestinations()
+    {
+        if (ParcelDestinations != null) return;
+        var destinations = new TinParcelDestination[TriangleCount];
+        ReplayRunoffParcels((id, path, end) => destinations[id] = new TinParcelDestination(path[path.Count - 1], end));
+        ParcelDestinations = destinations;
+    }
+
+    private void ReplayRunoffParcels(Action<int, IReadOnlyList<TinPoint>, TinTermination> visit)
     {
         var samples = new List<TinPoint>(128); var candidates = new List<int>(8);
         for (int t = 0; t < TriangleCount; t++)
         {
             if (localRunoff[t] <= 0 || !faces[t].Valid || IsOcean(Centroid(t))) continue;
-            TraceInto(Centroid(t), samples, candidates, 32768, observe: false);
-            visit(t, localRunoff[t], samples);
+            var end = TraceInto(Centroid(t), samples, candidates, 32768, observe: false);
+            visit(t, samples, end);
         }
     }
     internal double ParcelRunoff(int triangle) => localRunoff[triangle];

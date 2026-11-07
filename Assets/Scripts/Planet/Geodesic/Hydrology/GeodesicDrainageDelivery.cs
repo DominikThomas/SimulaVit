@@ -13,7 +13,7 @@ public readonly struct TinParcelDestination
 
 /// <summary>Observation only. Parcels are the original facet inputs, never accumulated reach
 /// discharge. Lake membership comes from the router's existing first-entry parcel sets.
-/// Graph traversal follows only published directed edges; it never chooses a terrain route.</summary>
+/// Graph traversal follows the published lake, river and sediment corridor edges.</summary>
 public sealed class GeodesicDrainageDelivery
 {
     public enum Destination { DirectOcean, OceanViaLakes, InlandClosed, Unresolved }
@@ -23,10 +23,12 @@ public sealed class GeodesicDrainageDelivery
         public string TerminalId, Type;
         public TinPoint? Point;
         public TinBasinDescriptor Basin;
-        public bool ViaLake;
+        public bool ViaLake, ViaCorridor;
         internal int OceanComponent = -1;
-        internal Outcome ThroughLake() => new Outcome { Destination = Destination == Destination.DirectOcean ? Destination.OceanViaLakes : Destination,
-            TerminalId = TerminalId, Type = Type, Point = Point, Basin = Basin, ViaLake = true, OceanComponent = OceanComponent };
+        internal Outcome Through(bool lake, bool corridor) => new Outcome {
+            Destination = lake && Destination == Destination.DirectOcean ? Destination.OceanViaLakes : Destination,
+            TerminalId = TerminalId, Type = Type, Point = Point, Basin = Basin, ViaLake = ViaLake || lake,
+            ViaCorridor = ViaCorridor || corridor, OceanComponent = OceanComponent };
     }
     public sealed class Catchment
     {
@@ -35,7 +37,7 @@ public sealed class GeodesicDrainageDelivery
         public int Parcels, SourcePaths;
         public bool ViaLake;
     }
-    private sealed class Link { public string Next; public Outcome End; public bool Lake; }
+    private sealed class Link { public string Next; public Outcome End; public bool Lake, Corridor; }
     private Dictionary<string, Link> links = new Dictionary<string, Link>(StringComparer.Ordinal);
     private Dictionary<string, Outcome> resolved = new Dictionary<string, Outcome>(StringComparer.Ordinal);
     private readonly Dictionary<string, Catchment> catchments = new Dictionary<string, Catchment>(StringComparer.Ordinal);
@@ -45,9 +47,11 @@ public sealed class GeodesicDrainageDelivery
     private readonly GeodesicTinHydrology tin;
     private readonly GeodesicTinBasins basins;
     private Func<TinPoint, int> oceanComponentAt;
+    private IReadOnlyDictionary<int, GeodesicTinSedimentCorridors.Connection> corridors;
     public double PrimaryOcean { get; private set; }
     public double SecondaryOcean { get; private set; }
     public double UnattributedOcean { get; private set; }
+    public double CorridorOcean { get; private set; }
     private readonly Outcome[] networkOutcomes;
     internal Outcome NetworkOutcome(int network) => networkOutcomes[network];
     private readonly byte[] confirmedOceanParcels;
@@ -62,6 +66,8 @@ public sealed class GeodesicDrainageDelivery
     public long ApproximateMemoryBytes { get; private set; }
     public double Residual => TotalRunoff - DirectOcean - ViaLakesOcean - InlandClosed - Unresolved;
     public double Tolerance => Math.Max(1e-9, TotalRunoff * 1e-9);
+    internal int ClosedBasinCount => catchments.Values.Where(c => c.Terminal.Destination == Destination.InlandClosed && c.Terminal.Basin != null)
+        .Select(c => c.Terminal.Basin.Id).Distinct().Count();
     internal IEnumerable<Catchment> DisconnectedCatchments => catchments.Values;
     public IEnumerable<Catchment> LargestDisconnected => catchments.Values.OrderByDescending(c => c.Runoff).ThenBy(c => c.Terminal.TerminalId, StringComparer.Ordinal).Take(20);
     private GeodesicDrainageDelivery(GeodesicTinHydrology source, GeodesicTinBasins topology)
@@ -115,21 +121,41 @@ public sealed class GeodesicDrainageDelivery
                 result = Unknown("cycle:" + path.Skip(first).OrderBy(x => x, StringComparer.Ordinal).First(), "DirectedCycle"); break;
             }
             path.Add(id);
-            if (link.Next == null) { result = link.End; break; }
-            id = link.Next;
+            string next = link.Next ?? CorridorLink(link.End);
+            if (next == null) { result = link.End; break; }
+            id = next;
         }
         for (int i = path.Count - 1; i >= 0; i--)
-        { if (links[path[i]].Lake) result = result.ThroughLake(); resolved[path[i]] = result; }
+        {
+            var link = links[path[i]];
+            if (link.Lake || link.Corridor) result = result.Through(link.Lake, link.Corridor);
+            resolved[path[i]] = result;
+        }
         return result;
     }
+
+    private string CorridorLink(Outcome end) => corridors != null && end?.Destination == Destination.InlandClosed &&
+        end.Basin != null && corridors.ContainsKey(end.Basin.Id) ? "corridor:" + end.Basin.Id : null;
+
     private static TinPoint? End(IReadOnlyList<TinPoint> path) => path != null && path.Count > 0 ? path[path.Count - 1] : (TinPoint?)null;
 
     public static GeodesicDrainageDelivery Analyze(GeodesicTinHydrology tin, GeodesicTinBasins basins = null,
         IReadOnlyList<TinLakeFlowNode> lakes = null, IReadOnlyList<TinLakeAdjustedReach> reaches = null, bool renderedLakesWithoutRouting = false,
-        Func<TinPoint, int> oceanComponentAt = null, int primaryOceanComponent = -1)
+        Func<TinPoint, int> oceanComponentAt = null, int primaryOceanComponent = -1,
+        IReadOnlyDictionary<int, GeodesicTinSedimentCorridors.Connection> corridors = null)
     {
         var watch = Stopwatch.StartNew(); var r = new GeodesicDrainageDelivery(tin, basins);
         r.oceanComponentAt = oceanComponentAt;
+        r.corridors = corridors;
+        if (corridors != null)
+            foreach (var pair in corridors)
+            {
+                var connection = pair.Value;
+                string id = "corridor:" + pair.Key;
+                r.links.Add(id, new Link { Corridor = true,
+                    Next = connection.TargetNetwork >= 0 ? "network:" + connection.TargetNetwork : null,
+                    End = r.Terminal(TinTermination.OceanCoast, connection.Coast, id) });
+            }
         lakes = lakes ?? Array.Empty<TinLakeFlowNode>();
         for (int i = 0; i < tin.Networks.Count; i++)
         {
@@ -168,7 +194,12 @@ public sealed class GeodesicDrainageDelivery
             else if (owners[t] == -2) end = Unknown("parcel:" + t, "DuplicateFirstLakeOwnership");
             else if (owners[t] >= 0) end = r.Resolve("lake:" + owners[t]);
             else if (tin.ParcelDestinations == null) end = Unknown("parcel:" + t, "ParcelEndpointNotCaptured");
-            else { var p = tin.ParcelDestinations[t]; end = r.Terminal(p.Termination, p.Point, "parcel:" + t); }
+            else
+            {
+                var p = tin.ParcelDestinations[t]; end = r.Terminal(p.Termination, p.Point, "parcel:" + t);
+                string next = r.CorridorLink(end);
+                if (next != null) end = r.Resolve(next);
+            }
             switch (end.Destination)
             {
                 case Destination.DirectOcean: r.DirectOcean += amount; break;
@@ -180,6 +211,7 @@ public sealed class GeodesicDrainageDelivery
             r.terminalRunoff.TryGetValue(end.Type, out double previous); r.terminalRunoff[end.Type] = previous + amount;
             if (end.Destination == Destination.DirectOcean || end.Destination == Destination.OceanViaLakes)
             {
+                if (end.ViaCorridor) r.CorridorOcean += amount;
                 if (end.OceanComponent < 0) r.UnattributedOcean += amount;
                 else if (end.OceanComponent == primaryOceanComponent) r.PrimaryOcean += amount;
                 else r.SecondaryOcean += amount;
@@ -205,7 +237,7 @@ public sealed class GeodesicDrainageDelivery
         r.ApproximateMemoryBytes = (tin.ParcelDestinations == null ? 0L : 40L * tin.TriangleCount) +
             5L * tin.TriangleCount + 400L * r.links.Count + r.terminalCache.Values.Sum(o => 240L + 2L * o.TerminalId.Length) +
             r.catchments.Values.Sum(c => 320L + 2L * c.Terminal.TerminalId.Length);
-        r.oceanComponentAt = null; r.links = null; r.resolved = null; r.terminalCache = null; // Scratch only; reports retain their own outcomes.
+        r.oceanComponentAt = null; r.corridors = null; r.links = null; r.resolved = null; r.terminalCache = null; // Scratch only; reports retain their own outcomes.
         r.AnalysisMilliseconds = watch.Elapsed.TotalMilliseconds; return r;
     }
     private void CountBreak(Outcome end)

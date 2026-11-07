@@ -134,6 +134,9 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
     private GeodesicTinBasins routingLakeBasins;
     private GeodesicTinLakeGeometry routingLakeGeometry;
     private GeodesicTinLakeSediment lakeSediment;
+    public GeodesicTinSedimentCorridors SedimentCorridors { get; private set; }
+    private GeodesicHydrologyTopology corridorTopology;
+    private GeodesicRiverTerrain corridorTerrain;
     private Mesh sourceTerrainMesh, sedimentTerrainMesh, sourceColliderMesh;
     private double extractedTinThreshold = double.NaN;
     public float[] RiverStrength { get; private set; } = Array.Empty<float>();
@@ -270,7 +273,7 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
         }
         finally
         {
-            deliveryOceanComponentByVertex = null;
+            if (!UseSedimentCorridors) deliveryOceanComponentByVertex = null;
             TinDrainage.ReleaseParcelDestinations();
         }
     }
@@ -493,7 +496,8 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
         {
             if (localRunoff != null && localRunoff.Length == planet.GeodesicTopology.CellCount)
                 localRunoff = MapSimulationRunoffToTriangles(localRunoff);
-            TinDrainage.CaptureParcelDestinations = collectDelivery = logDrainageDelivery;
+            collectDelivery = logDrainageDelivery;
+            TinDrainage.CaptureParcelDestinations = collectDelivery || UseSedimentCorridors;
             try
             {
                 TinDrainage.Accumulate(Mathf.Max(0f, uniformRunoffPerArea), localRunoff);
@@ -655,11 +659,12 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
         var oceanTopology = GeodesicHydrologyTopology.Build(geometry);
         bool[] ocean = frozenOcean ?? owner.GeodesicInfillOceanMask ?? owner.MapGeodesicRenderOcean(oceanTopology, completedSurface, owner.GeodesicCurrentRenderMapping);
         retainedCarvingOcean = ocean; carvingTopology = oceanTopology;
-        if (collectDelivery && (!intermediateCarving || majorOutletInput))
+        if (!intermediateCarving && owner.generateHydrologicalLakes) corridorTopology = oceanTopology;
+        if ((collectDelivery || UseSedimentCorridors) && (!intermediateCarving || majorOutletInput))
         {
             var hashWatch = System.Diagnostics.Stopwatch.StartNew();
             deliveryOceanMaskHash = GeodesicGenerationFingerprint.Mask(ocean);
-            deliveryOceanComponentByVertex = owner.excludeSmallDisconnectedSeas || owner.infillExcludedInlandBasins || owner.enableMajorOutletBreaching
+            deliveryOceanComponentByVertex = UseSedimentCorridors || owner.excludeSmallDisconnectedSeas || owner.infillExcludedInlandBasins || owner.enableMajorOutletBreaching
                 ? LabelOceanComponents(owner, oceanTopology, ocean) : null;
             deliveryMaskHashMilliseconds = hashWatch.Elapsed.TotalMilliseconds;
         }
@@ -729,7 +734,7 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
         Math.Min(Math.Max(0f, tolerance), Math.Min(.000002d, radius * .00000025d));
 
     private bool CaptureGenerationParcels(PlanetGenerator owner, bool intermediate) =>
-        intermediate || collectDelivery || (owner.enableTerminationValleyCarving &&
+        intermediate || collectDelivery || UseSedimentCorridors || (owner.enableTerminationValleyCarving &&
             owner.hydrologyTerrainMode == HydrologyTerrainMode.Visible && tinFilterStrength == 0f);
 
     private double[] MapSimulationRunoffToTriangles(double[] supplied)
@@ -778,7 +783,7 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
             extractedTinThreshold = ResolvedDrainageAreaThreshold;
             TinLakeRouting = null;
             DrainageDelivery = null;
-            CaptureRankedInlandNetworks();
+            SedimentCorridors = null;
         }
         if (planet.generateHydrologicalLakes) EnsureRoutingLakeGeometry();
         if (integrateTinLakeRivers && planet.generateHydrologicalLakes && routingLakeGeometry.Bodies.Count > 0)
@@ -790,13 +795,15 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
             }
         }
         else TinLakeRouting = null;
+        var delivery = ResolveSedimentCorridors();
         if (planet.generateHydrologicalLakes) yield return new PlanetGenerationProgress(PlanetGenerationStage.FillingLakes);
         RefreshTinLakeVisuals();
-        var delivery = collectDelivery ? GeodesicDrainageDelivery.Analyze(TinDrainage, routingLakeBasins ?? TinLakeBasins,
-            TinLakeRouting?.Lakes, TinLakeRouting?.RiverReaches,
-            TinLakeRouting == null && TinLakeGeometry != null && TinLakeGeometry.Bodies.Count > 0,
-            deliveryOceanComponentByVertex != null ? DeliveryOceanComponent : (Func<TinPoint, int>)null,
-            planet.OceanConnectivity?.PrimaryRetainedComponent ?? -1) : null;
+        if (!reuseRawNetworks) CaptureRankedInlandNetworks();
+        if (delivery == null && collectDelivery)
+            delivery = GeodesicDrainageDelivery.Analyze(TinDrainage, routingLakeBasins ?? TinLakeBasins, TinLakeRouting?.Lakes, TinLakeRouting?.RiverReaches,
+                TinLakeRouting == null && TinLakeGeometry != null && TinLakeGeometry.Bodies.Count > 0,
+                deliveryOceanComponentByVertex != null ? DeliveryOceanComponent : (Func<TinPoint, int>)null,
+                planet.OceanConnectivity?.PrimaryRetainedComponent ?? -1);
         if (delivery != null) DrainageDelivery = delivery;
         RefreshSedimentSurface();
         yield return new PlanetGenerationProgress(PlanetGenerationStage.BuildingRiverRibbons);
@@ -866,7 +873,7 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
             {
                 TinDiagnostics.Confluences--; TinDiagnostics.UnexpectedBrokenNetworks++; TinDiagnostics.UnexpectedInlandBreaks++;
                 delivery?.ObserveVisualBreak(id, "missing-trunk");
-                network.Termination = TinTermination.RoutingFailure; network.JunctionNetwork = -1;
+                if (SedimentCorridors == null) { network.Termination = TinTermination.RoutingFailure; network.JunctionNetwork = -1; }
             }
             if (riverTerminationPoints != null)
             {
@@ -886,12 +893,16 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
                 riverMouths++;
             }
         }
+        var corridorInletLakes = new HashSet<int>();
+        if (SedimentCorridors != null)
+            foreach (var connection in SedimentCorridors.Connections.Values) corridorInletLakes.UnionWith(connection.InletLakes);
+        var renderedLakeOutlets = new HashSet<int>();
         if (TinLakeRouting != null)
         {
             var crossings = lakeSediment != null ? GeodesicTinLakeCrossings.Build(TinDrainage, TinLakeRouting, lakeSediment, rendered) : null;
             foreach (var lake in TinLakeRouting.Lakes)
             {
-                if (lake.OutletReachId < 0 && crossings?.VisibleOutlets.Contains(lake.BasinId) != true) continue;
+                if (lake.OutletReachId < 0 && crossings?.VisibleOutlets.Contains(lake.BasinId) != true && !corridorInletLakes.Contains(lake.BasinId)) continue;
                 var path = TinLakeRouting.Directions(lake.OutletPath);
                 if (path.Length < 2) continue;
                 float? startLevel = lakeSediment?.Level(lake.BasinId, lake.OutletPath[0]);
@@ -900,6 +911,7 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
                 else AddTinRibbon(path, lake.OutletPath[0].Triangle, vertices, indices, colors,
                     Array.ConvertAll(path, _ => lake.Discharge), lake.DownstreamLakeId >= 0 && lake.JoinNetwork < 0, true, startLevel, endLevel);
                 visibleReaches++;
+                renderedLakeOutlets.Add(lake.BasinId);
             }
             if (crossings != null)
             {
@@ -920,6 +932,7 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
             }
             Debug.Log(TinLakeRouting.Summary(), this);
         }
+        DrawSedimentCorridors(rendered, renderedLakeOutlets, vertices, indices, colors);
         if (VisibleGradeAudit != null)
         {
             VisibleGradeAudit.Resolve(planet.BasePlanetRadius);
@@ -1079,13 +1092,13 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
     }
 
     private void AddRawTinLine(Vector3[] path, List<Vector3> vertices, List<int> indices, List<Color> colors,
-        float? startLevel = null, float? endLevel = null)
+        float? startLevel = null, float? endLevel = null, float minimumRadius = 0)
     {
         int first = vertices.Count;
         for (int i = 0; i < path.Length; i++)
         {
             float? level = i == 0 ? startLevel : i == path.Length - 1 ? endLevel : null;
-            vertices.Add(path[i] * ((level ?? terrain.Radius(path[i])) + Mathf.Max(.000001f, surfaceOffset))); colors.Add(riverColor);
+            vertices.Add(path[i] * (Mathf.Max(minimumRadius, level ?? RenderRadius(path[i])) + Mathf.Max(.000001f, surfaceOffset))); colors.Add(riverColor);
             if (i > 0) { indices.Add(first + i - 1); indices.Add(first + i); }
         }
     }
@@ -1104,7 +1117,8 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
     }
 
     private void AddTinRibbon(Vector3[] path, int source, List<Vector3> vertices, List<int> indices, List<Color> colors,
-        double[] discharge = null, bool shorelineEnd = false, bool spillStart = false, float? startLevel = null, float? endLevel = null)
+        double[] discharge = null, bool shorelineEnd = false, bool spillStart = false, float? startLevel = null, float? endLevel = null,
+        float minimumRadius = 0)
     {
         // A short lake-to-lake reach needs an interior cross-section when both ends
         // taper to exact shore points; two collapsed caps alone have zero area.
@@ -1123,7 +1137,7 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
                 Mathf.Clamp(Mathf.Sqrt(strength), 1f, Mathf.Max(1f, maximumWidthMultiplier));
             Vector3 forward = path[Math.Min(i + 1, path.Length - 1)] - path[Math.Max(0, i - 1)];
             Vector3 side = Vector3.Cross(path[i], forward).normalized;
-            float angle = width / Mathf.Max(.001f, terrain.Radius(path[i]));
+            float angle = width / Mathf.Max(.001f, RenderRadius(path[i]));
             Vector3 left = (path[i] - side * angle * .5f).normalized;
             Vector3 right = (path[i] + side * angle * .5f).normalized;
             // A zero-width cap meets the exact shoreline/spill witness; banks cannot
@@ -1133,9 +1147,9 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
             float offset = Mathf.Max(.000001f, surfaceOffset);
             // Three columns retain the EXACT checked centreline as mesh vertices. Projecting
             // unequal banks must not move the river's middle onto a different routing path.
-            vertices.Add(left * ((level ?? terrain.Radius(left)) + offset));
-            vertices.Add(path[i] * ((level ?? terrain.Radius(path[i])) + offset));
-            vertices.Add(right * ((level ?? terrain.Radius(right)) + offset));
+            vertices.Add(left * (Mathf.Max(minimumRadius, level ?? RenderRadius(left)) + offset));
+            vertices.Add(path[i] * (Mathf.Max(minimumRadius, level ?? RenderRadius(path[i])) + offset));
+            vertices.Add(right * (Mathf.Max(minimumRadius, level ?? RenderRadius(right)) + offset));
             Color color = strength * riverFlowThreshold >= Math.Max(riverFlowThreshold, majorRiverThreshold)
                 ? Color.Lerp(riverColor, Color.cyan, .3f) : riverColor;
             colors.Add(color); colors.Add(color); colors.Add(color);
@@ -1186,9 +1200,11 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
     private void RefreshSedimentSurface()
     {
         ClearSedimentSurface();
-        if (TinLakeRouting == null || sourceTerrainMesh == null) return;
-        lakeSediment = new GeodesicTinLakeSediment(TinDrainage, routingLakeGeometry, TinLakeGeometry);
-        sedimentTerrainMesh = lakeSediment.BuildSurface(sourceTerrainMesh);
+        if (sourceTerrainMesh == null) return;
+        if (TinLakeRouting != null) lakeSediment = new GeodesicTinLakeSediment(TinDrainage, routingLakeGeometry, TinLakeGeometry);
+        Mesh corridorMesh = BuildCorridorSurface();
+        sedimentTerrainMesh = lakeSediment?.BuildSurface(corridorMesh ?? sourceTerrainMesh) ?? corridorMesh;
+        if (corridorMesh != sedimentTerrainMesh) Release(corridorMesh);
         var filter = planet.GetComponent<MeshFilter>();
         if (sedimentTerrainMesh != null && filter != null && filter.sharedMesh == sourceTerrainMesh)
             filter.sharedMesh = sedimentTerrainMesh;
@@ -1218,6 +1234,7 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
         Release(sedimentTerrainMesh);
         sedimentTerrainMesh = sourceColliderMesh = null;
         lakeSediment = null;
+        corridorTerrain = null;
     }
 
     private void LogSediment(GeodesicTinLakeCrossings crossings)
@@ -1469,6 +1486,7 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
     public void Clear()
     {
         ClearSedimentSurface();
+        SedimentCorridors = null; corridorTopology = null;
         sourceTerrainMesh = null;
         routingLakeBasins = null; routingLakeGeometry = null; extractedTinThreshold = double.NaN;
         ValleyCarving = null; retainedCarvingOcean = null; carvingTopology = null;
