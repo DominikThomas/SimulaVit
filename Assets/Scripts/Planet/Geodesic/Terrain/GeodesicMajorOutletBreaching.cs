@@ -50,6 +50,10 @@ public sealed partial class GeodesicValleyCarving
         internal Candidate Cut;
         internal readonly MajorOutletSearchEvidence Search = new MajorOutletSearchEvidence();
         internal MajorOutletTraceFailure TraceFailure;
+        internal readonly List<OutletIteration> Iterations = new List<OutletIteration>();
+        internal float[] OriginalBeds, TestedBeds;
+        internal TinPoint[] TestedTrace = Array.Empty<TinPoint>();
+        internal string OriginalPonding;
         internal int VerificationSourcesChecked;
         public bool Accepted => Rejection == null;
     }
@@ -228,6 +232,9 @@ public sealed partial class GeodesicValleyCarving
                 result.Attempts.Add(attempt);
             }
             Verify(result, lakes, lakeAreaFraction, lakeDepth);
+            foreach (var attempt in result.Attempts.Where(a => !a.Accepted && !double.IsNaN(a.SpillElevation)))
+                attempt.OriginalPonding = DescribeOutletPonding(tin, carving.basins,
+                    VertexPoint(tin, attempt.BasinId), components, primary);
         }
 
         private void Search(GeodesicOceanDrainagePlan.Catchment source, MajorOutletAttempt attempt, int[] parcelBasin)
@@ -409,6 +416,7 @@ public sealed partial class GeodesicValleyCarving
                 evidence.ReceiverPath = receiver.Path;
                 evidence.CandidateVertices = proposal.Vertices;
                 evidence.CandidateProfileOutcome = proposal.Rejection ?? "within-budgets";
+                attempt.OriginalBeds = OutletBeds(proposal);
                 attempt.Destination = ((Target)proposal.TargetKind).ToString();
                 attempt.Length = proposal.Length;
                 attempt.RequiredDepth = Math.Max(proposal.MaximumCut, best != null ? bestRequiredDepth : rejectedRequiredDepth);
@@ -491,10 +499,10 @@ public sealed partial class GeodesicValleyCarving
         }
 
         private TinPoint[] TraceVertex(int vertex, out TinTermination termination)
-        {
-            int t = tin.BasinIncidentTriangle(tin.BasinIncidentStart(vertex));
-            return tin.TraceLakeOutlet(tin.BasinPoint(t, vertex), null, out termination);
-        }
+            => tin.TraceLakeOutlet(VertexPoint(tin, vertex), null, out termination);
+
+        private static TinPoint VertexPoint(GeodesicTinHydrology surface, int vertex) =>
+            surface.BasinPoint(surface.BasinIncidentTriangle(surface.BasinIncidentStart(vertex)), vertex);
 
         private int[] CrossedBasins(Candidate cut, int source)
         {
@@ -541,24 +549,21 @@ public sealed partial class GeodesicValleyCarving
 
         private void Verify(MajorOutletResult result, GeodesicTinLakeGeometry lakes, double lakeAreaFraction, double lakeDepth)
         {
-            var selected = new Dictionary<int, float>();
-            var sources = new Dictionary<int, TinPoint>();
+            var selected = new List<MajorOutletAttempt>();
+            double selectedVolume = 0;
             foreach (var attempt in result.Attempts.Where(a => a.Accepted))
             {
-                if (attempt.Cut.Surface.Keys.Any(selected.ContainsKey) ||
-                    result.Attempts.Any(a => a != attempt && sources.ContainsKey(a.BasinId) &&
-                        (a.Cut.Vertices.Any(attempt.Cut.Surface.ContainsKey) || attempt.Cut.Vertices.Any(a.Cut.Surface.ContainsKey))))
+                if (selected.Any(a => Overlaps(a.Cut, attempt.Cut)))
                 { attempt.Rejection = "overlapping-outlet"; continue; }
-                if (result.Attempts.Where(a => sources.ContainsKey(a.BasinId)).Sum(a => a.Volume) + attempt.Volume > maxVolume)
+                if (selectedVolume + attempt.Volume > maxVolume)
                 { attempt.Rejection = "combined-volume-budget"; continue; }
-                foreach (var cut in attempt.Cut.Surface) selected.Add(cut.Key, cut.Value);
-                int v = attempt.BasinId;
-                sources.Add(v, tin.BasinPoint(tin.BasinIncidentTriangle(tin.BasinIncidentStart(v)), v));
+                selected.Add(attempt);
+                selectedVolume += attempt.Volume;
             }
-            for (int pass = 0; pass < 3; pass++)
+            var heights = (float[])carving.original.Clone();
+            for (int pass = 1; pass <= MaximumOutletVerificationBuilds; pass++)
             {
                 var active = result.Attempts.Where(a => a.Accepted).ToArray();
-                Array.Copy(carving.original, result.Heights, result.Heights.Length);
                 if (active.Length == 0) return;
                 var merged = new Dictionary<int, float>();
                 var editedFacets = new HashSet<int>();
@@ -575,18 +580,105 @@ public sealed partial class GeodesicValleyCarving
                         ? "projected-batch-volume-budget" : "projected-batch-depth-budget";
                     return;
                 }
-                foreach (var cut in merged) result.Heights[cut.Key] = cut.Value;
-                var proposed = carving.ProjectProposedTin(result.Heights, requireSeaSphereCrossing: false);
+                Array.Copy(carving.original, heights, heights.Length);
+                foreach (var cut in merged) heights[cut.Key] = cut.Value;
+                var proposed = carving.ProjectProposedTin(heights, requireSeaSphereCrossing: false);
                 result.VerificationBuilds++;
                 GeodesicTinBasins proposedBasins = null;
-                bool removed = false;
+                bool rebuild = false;
                 foreach (var a in active)
                 {
-                    bool connected = Connects(a, sources[a.BasinId], "basin-floor") &&
-                        a.SourceFacets.All(t => Connects(a, proposed.Centroid(t), "prior-network"));
-                    if (!connected) { a.Rejection = "modified-tin-no-descending-primary-path"; removed = true; }
+                    a.TestedBeds = a.Cut.Vertices.Select(v => proposed.VisibleHeight[v]).ToArray();
+                    var iteration = new OutletIteration { Pass = pass, Volume = a.Volume, Depth = a.ActualDepth };
+                    a.TraceFailure = Check(VertexPoint(tin, a.BasinId), "basin-floor", out a.TestedTrace);
+                    if (a.TraceFailure == null && a.TestedTrace.Any(p => protectedReceiverFacets.Contains(p.Triangle)))
+                        a.Rejection = "verified-path-intersects-protected-lake";
+                    if (a.TraceFailure == null && a.Rejection == null)
+                    {
+                        foreach (int facet in a.SourceFacets)
+                        {
+                            a.TraceFailure = Check(proposed.Centroid(facet), "prior-network", out _);
+                            if (a.TraceFailure != null) break;
+                        }
+                        var receiver = proposed.TraceLakeOutlet(VertexPoint(proposed, a.TargetVertex), null, out var end);
+                        var receiverFailure = CheckMajorReceiver(proposed, receiver, end, components, primary, protectedReceiverFacets);
+                        if (receiverFailure != MajorReceiverFailure.None) a.Rejection = "modified-receiver-" + receiverFailure;
+                    }
+
+                    var failure = a.TraceFailure;
+                    var trace = failure?.Trace ?? a.TestedTrace;
+                    var branch = CompareOutletPath(tin, proposed, trace, a.Cut.Vertices, merged, detailsRequested: false);
+                    iteration.Branch = branch;
+                    var last = a.Iterations.LastOrDefault();
+                    iteration.MovedDownstream = last?.Branch.PlannedIndex >= 0 && branch.PlannedIndex > last.Branch.PlannedIndex;
+                    iteration.RepeatedState = branch.PlannedIndex >= 0 && a.Iterations.Any(prior => SameState(prior, iteration));
+                    int revisions = a.Iterations.Count(i => i.Outcome == "revised");
+                    a.Iterations.Add(iteration);
+                    if (failure == null && a.Rejection == null && revisions > 0 && branch.PlannedIndex >= 0)
+                        a.Rejection = "adaptive-trace-bypasses-channel";
+                    if (failure != null && a.Rejection == null)
+                    {
+                        // A trace that never engages the channel, or fails along it
+                        // without a downhill diversion, supplies no branch constraint.
+                        if (branch.PlannedIndex < 0 || !(branch.ActualSlope > 0))
+                            a.Rejection = "modified-tin-no-descending-primary-path";
+                        else if (iteration.RepeatedState) a.Rejection = "adaptive-repeated-drainage-state";
+                        else if (pass == MaximumOutletVerificationBuilds || revisions >= MaximumOutletRevisions)
+                            a.Rejection = "adaptive-verification-budget";
+                        else
+                        {
+                            var revised = ReviseOutlet(proposed, a, iteration, out a.Rejection);
+                            if (!double.IsNaN(iteration.RevisedDepth))
+                                a.RequiredDepth = Math.Max(a.RequiredDepth, iteration.RevisedDepth);
+                            if (revised != null)
+                            {
+                                var others = active.Where(other => other != a && other.Accepted).ToArray();
+                                if (others.Any(other => Overlaps(revised, other.Cut))) a.Rejection = "adaptive-overlapping-outlet";
+                                else if (others.Sum(other => other.Volume) + iteration.RevisedVolume > maxVolume)
+                                    a.Rejection = "adaptive-combined-volume-budget";
+                                else
+                                {
+                                    a.Cut = revised;
+                                    a.Volume = iteration.RevisedVolume;
+                                    a.Area = iteration.RevisedArea;
+                                    a.ActualDepth = iteration.RevisedDepth;
+                                    a.RequiredDepth = Math.Max(a.RequiredDepth, revised.MaximumCut);
+                                    iteration.Outcome = "revised";
+                                    rebuild = true;
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+                    iteration.Outcome = a.Rejection ?? "verified-primary-ocean";
+                    if (a.Rejection == null) continue;
+                    rebuild = true;
+                    if (failure == null) continue;
+                    failure.PathComparison = CompareOutletPath(tin, proposed, trace, a.Cut.Vertices, merged);
+                    if (GeodesicOceanDrainagePlan.Closed(failure.Termination))
+                    {
+                        proposedBasins ??= GeodesicTinBasins.Build(proposed, 0, double.MaxValue);
+                        failure.ProposedPonding = DescribeOutletPonding(proposed, proposedBasins, failure.Terminal, components, primary);
+                    }
+
+                    MajorOutletTraceFailure Check(TinPoint source, string role, out TinPoint[] path)
+                    {
+                        a.VerificationSourcesChecked++;
+                        var error = InspectMajorOutletTrace(tin, proposed, source, components, primary, editedFacets, out path, out var end);
+                        if (error == null && role != "basin-floor") return null;
+                        iteration.SourceRole = role;
+                        iteration.Terminal = path[path.Length - 1];
+                        iteration.Termination = end;
+                        int support = Support(iteration.Terminal);
+                        iteration.TerminalVertex = support == 1 || support == 2 || support == 4
+                            ? proposed.BasinVertex(iteration.Terminal.Triangle, support == 1 ? 0 : support == 2 ? 1 : 2) : -1;
+                        iteration.OceanComponent = end == TinTermination.OceanCoast ?
+                            OceanComponentAt(proposed, components, iteration.Terminal) : -1;
+                        if (error != null) { error.SourceRole = role; error.VerificationPass = pass; }
+                        return error;
+                    }
                 }
-                if (removed) continue;
+                if (rebuild) continue;
                 if (lakes != null)
                 {
                     var nextBasins = GeodesicTinBasins.Build(proposed, lakeAreaFraction, lakeDepth);
@@ -597,29 +689,21 @@ public sealed partial class GeodesicValleyCarving
                 if (!PreservesExistingReceivers(proposed))
                 { foreach (var a in active) a.Rejection = "existing-ocean-network-changed-component"; break; }
                 result.CommittedVolume = result.ProposedBatchVolume;
+                Array.Copy(heights, result.Heights, heights.Length);
                 return;
-
-                bool Connects(MajorOutletAttempt attempt, TinPoint source, string role)
-                {
-                    attempt.VerificationSourcesChecked++;
-                    var failure = InspectMajorOutletTrace(tin, proposed, source, components, primary, editedFacets);
-                    if (failure == null) return true;
-                    failure.SourceRole = role;
-                    failure.VerificationPass = pass + 1;
-                    failure.PathComparison = CompareOutletPath(tin, proposed, failure.Trace, attempt.Cut.Vertices, merged);
-                    if (GeodesicOceanDrainagePlan.Closed(failure.Termination))
-                    {
-                        proposedBasins ??= GeodesicTinBasins.Build(proposed, 0, double.MaxValue);
-                        failure.OriginalPonding = DescribeOutletPonding(tin, carving.basins, sources[attempt.BasinId], components, primary);
-                        failure.ProposedPonding = DescribeOutletPonding(proposed, proposedBasins, failure.Terminal, components, primary);
-                    }
-                    attempt.TraceFailure = failure;
-                    return false;
-                }
             }
             foreach (var a in result.Attempts.Where(a => a.Accepted)) a.Rejection = "verification-budget";
-            Array.Copy(carving.original, result.Heights, result.Heights.Length);
         }
+
+        private static bool Overlaps(Candidate a, Candidate b) => a.Surface.Keys.Any(b.Surface.ContainsKey) ||
+            a.Vertices.Any(b.Surface.ContainsKey) || b.Vertices.Any(a.Surface.ContainsKey);
+
+        private static bool SameState(OutletIteration a, OutletIteration b) => a.SourceRole == b.SourceRole &&
+            a.Branch.PlannedIndex == b.Branch.PlannedIndex && a.Termination == b.Termination &&
+            a.Terminal.Triangle == b.Terminal.Triangle && a.Branch.ActualNext.Value.Triangle == b.Branch.ActualNext.Value.Triangle &&
+            Support(a.Terminal) == Support(b.Terminal) && Support(a.Branch.ActualNext.Value) == Support(b.Branch.ActualNext.Value);
+
+        private static int Support(TinPoint p) => (p.A > 1e-10 ? 1 : 0) | (p.B > 1e-10 ? 2 : 0) | (p.C > 1e-10 ? 4 : 0);
 
         private bool PreservesExistingReceivers(GeodesicTinHydrology proposed)
         {

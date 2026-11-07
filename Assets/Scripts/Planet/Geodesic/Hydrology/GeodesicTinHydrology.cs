@@ -301,9 +301,20 @@ public sealed class GeodesicTinHydrology
 
     internal double OutletSlope(TinPoint a, TinPoint b)
     {
-        double distance = (Position(b) - Position(a)).Length;
+        double distance = OutletDistance(a, b);
         return distance > 1e-14 ? (Height(a) - Height(b)) / distance : double.NaN;
     }
+
+    internal double OutletDistance(TinPoint a, TinPoint b) => (Position(b) - Position(a)).Length;
+
+    internal double OutletEdgeProjection(TinPoint start, TinPoint end, TinPoint point)
+    {
+        D3 edge = Position(end) - Position(start);
+        return D3.Dot(Position(point) - Position(start), edge) / D3.Dot(edge, edge);
+    }
+
+    internal bool TryOutletDownhillStep(TinPoint point, List<int> incident, out TinPoint start, out TinPoint end) =>
+        DownhillStep(point, incident, out start, out end);
 
     internal bool VerifyExposedOutlet(TinPoint[] path) => !FindExposedOutletRise(path, out _, out _);
 

@@ -9,27 +9,34 @@ public sealed partial class GeodesicValleyCarving
     internal sealed class OutletPathComparison
     {
         internal int DepartureIndex = -1, FirstEditedSample = -1, LastChannelSample = -1;
-        internal int PlannedNextVertex = -1;
+        internal int PlannedNextVertex = -1, PlannedIndex = -1, DepartureVertex = -1;
         internal TinPoint? Departure, ActualNext, PlannedNext;
         internal double ActualSlope = double.NaN, PlannedSlope = double.NaN;
         internal string Summary, Details;
     }
 
     internal static OutletPathComparison CompareOutletPath(GeodesicTinHydrology original, GeodesicTinHydrology proposed,
-        TinPoint[] actual, int[] centreline, IReadOnlyDictionary<int, float> edits)
+        TinPoint[] actual, int[] centreline, IReadOnlyDictionary<int, float> edits, bool detailsRequested = true)
     {
         var report = new OutletPathComparison();
         var indices = new Dictionary<int, int>();
         for (int i = 0; i < centreline.Length; i++) indices.Add(centreline[i], i);
-        var baseline = original.TraceLakeOutlet(actual[0], null, out var baselineEnd);
-        var details = new StringBuilder("Proposed TIN trace in flow order\n");
+        var details = detailsRequested ? new StringBuilder("Proposed TIN trace in flow order\n") : null;
         double lastProgress = double.NaN;
         for (int i = 0; i < actual.Length; i++)
         {
             var point = actual[i];
             bool onChannel = TryProgress(point, out double progress);
             if (onChannel) report.LastChannelSample = i;
-            if (report.FirstEditedSample < 0 && Enumerable.Range(0, 3).Any(k => edits.ContainsKey(proposed.BasinVertex(point.Triangle, k))))
+            // A facet excursion can drain back into the channel. Keep the
+            // departure that still matters after the last recovered junction.
+            if (onChannel && report.PlannedIndex >= 0 && progress >= report.PlannedIndex - 1e-9)
+            {
+                report.DepartureIndex = report.PlannedNextVertex = report.PlannedIndex = report.DepartureVertex = -1;
+                report.Departure = report.ActualNext = report.PlannedNext = null;
+                report.ActualSlope = report.PlannedSlope = double.NaN;
+            }
+            if (detailsRequested && report.FirstEditedSample < 0 && Enumerable.Range(0, 3).Any(k => edits.ContainsKey(proposed.BasinVertex(point.Triangle, k))))
                 report.FirstEditedSample = i;
             if (report.DepartureIndex < 0 && !double.IsNaN(lastProgress) && lastProgress < centreline.Length - 1 &&
                 (!onChannel || progress < lastProgress - 1e-9 ||
@@ -44,13 +51,17 @@ public sealed partial class GeodesicValleyCarving
                 report.DepartureIndex = i;
                 report.Departure = departure; report.ActualNext = point; report.PlannedNext = expected;
                 report.PlannedNextVertex = vertex;
+                report.PlannedIndex = plannedIndex;
+                if (Math.Abs(lastProgress - (plannedIndex - 1)) < 1e-9) report.DepartureVertex = previous;
                 report.ActualSlope = proposed.OutletSlope(departure, point);
                 report.PlannedSlope = proposed.OutletSlope(departure, expected);
             }
             lastProgress = onChannel ? progress : double.NaN;
-            details.AppendLine(FormattableString.Invariant(
+            details?.AppendLine(FormattableString.Invariant(
                 $"{i} {Describe(point)} centrelineProgress={(onChannel ? progress : double.NaN):R}"));
         }
+        if (!detailsRequested) return report;
+        var baseline = original.TraceLakeOutlet(actual[0], null, out var baselineEnd);
         details.AppendLine("Candidate centreline in flow order");
         for (int i = 0; i < centreline.Length; i++)
         {
@@ -84,15 +95,7 @@ public sealed partial class GeodesicValleyCarving
             return active > 0 && active <= 2 && max - min <= 1;
         }
 
-        int FindEdgeFacet(int a, int b)
-        {
-            for (int i = proposed.BasinIncidentStart(a); i < proposed.BasinIncidentEnd(a); i++)
-            {
-                int facet = proposed.BasinIncidentTriangle(i);
-                for (int k = 0; k < 3; k++) if (proposed.BasinVertex(facet, k) == b) return facet;
-            }
-            throw new InvalidOperationException("Outlet centreline vertices do not share an edge.");
-        }
+        int FindEdgeFacet(int a, int b) => OutletEdgeFacet(proposed, a, b);
 
         string Describe(TinPoint p)
         {
@@ -104,6 +107,16 @@ public sealed partial class GeodesicValleyCarving
             return FormattableString.Invariant(
                 $"{FormatPoint(p)} height={original.Height(p):R}->{proposed.Height(p):R} radius={original.CompletedVisibleRadius(p):R}->{proposed.CompletedVisibleRadius(p):R} vertices=[{string.Join(",", corners)}]");
         }
+    }
+
+    private static int OutletEdgeFacet(GeodesicTinHydrology tin, int a, int b)
+    {
+        for (int i = tin.BasinIncidentStart(a); i < tin.BasinIncidentEnd(a); i++)
+        {
+            int facet = tin.BasinIncidentTriangle(i);
+            for (int k = 0; k < 3; k++) if (tin.BasinVertex(facet, k) == b) return facet;
+        }
+        throw new InvalidOperationException("Outlet centreline vertices do not share an edge.");
     }
 
     internal static string DescribeOutletPonding(GeodesicTinHydrology tin, GeodesicTinBasins basins,

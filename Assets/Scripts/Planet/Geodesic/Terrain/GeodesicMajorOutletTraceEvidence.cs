@@ -14,7 +14,7 @@ public sealed partial class GeodesicValleyCarving
         internal double BeforeStart, BeforeEnd, AfterStart, AfterEnd, LowestRadius, Epsilon, LowestHydrology = double.NaN;
         internal double BeforeSegmentMinimum, AfterSegmentMinimum;
         internal OutletPathComparison PathComparison;
-        internal string OriginalPonding, ProposedPonding;
+        internal string ProposedPonding;
 
         internal string Summary() => FormattableString.Invariant(
             $"verificationPass={VerificationPass} sourceRole={SourceRole} failure={Reason} source={FormatPoint(Source)} terminal={FormatPoint(Terminal)} termination={Termination} component={OceanComponent} samples={Trace.Length} hasSegment={HasSegment} sampleIndex={SampleIndex} segmentStart={FormatPoint(Start)} segmentEnd={FormatPoint(End)} editedFacets={StartFacetEdited}/{EndFacetEdited} beforeRadius={BeforeStart:R}/{BeforeEnd:R} afterRadius={AfterStart:R}/{AfterEnd:R} beforeSegmentMinimum={BeforeSegmentMinimum:R} afterSegmentMinimum={AfterSegmentMinimum:R} lowestRadius={LowestRadius:R} lowestHydrology={LowestHydrology:R} riseAboveRunningMinimum={AfterEnd - LowestRadius:R} epsilon={Epsilon:R}");
@@ -23,10 +23,15 @@ public sealed partial class GeodesicValleyCarving
     internal static string FormatPoint(TinPoint p) => FormattableString.Invariant($"{p.Triangle}({p.A:R},{p.B:R},{p.C:R})");
 
     internal static MajorOutletTraceFailure InspectMajorOutletTrace(GeodesicTinHydrology original,
-        GeodesicTinHydrology proposed, TinPoint source, int[] components, int primary, HashSet<int> editedFacets)
+        GeodesicTinHydrology proposed, TinPoint source, int[] components, int primary, HashSet<int> editedFacets) =>
+        InspectMajorOutletTrace(original, proposed, source, components, primary, editedFacets, out _, out _);
+
+    private static MajorOutletTraceFailure InspectMajorOutletTrace(GeodesicTinHydrology original,
+        GeodesicTinHydrology proposed, TinPoint source, int[] components, int primary, HashSet<int> editedFacets,
+        out TinPoint[] trace, out TinTermination termination)
     {
         var tracerFailure = default(GeodesicTinHydrology.TraceFailure);
-        var trace = proposed.TraceLakeOutlet(source, null, out var termination, failure: error => tracerFailure = error);
+        trace = proposed.TraceLakeOutlet(source, null, out termination, failure: error => tracerFailure = error);
         int index = trace.Length - 1;
         TinPoint terminal = trace[index];
         bool retainedBoundary = GeodesicOceanDrainagePlan.ConfirmedOcean(proposed, new TinParcelDestination(terminal, termination));

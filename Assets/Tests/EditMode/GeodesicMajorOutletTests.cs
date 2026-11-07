@@ -66,6 +66,57 @@ public sealed class GeodesicMajorOutletTests
     }
 
     [Test]
+    public void AdaptiveProfileRetainsFlowPastSeveralCompetingBranches()
+    {
+        var fixture = BranchedCorridor();
+        var result = fixture.Plan();
+        var attempt = result.Attempts[0];
+        string evidence = Summary(result) + "\n" + string.Join("\n", attempt.Iterations.Select(i => i.Summary()));
+        Assert.That(attempt.Iterations.Any(i => i.Outcome == "revised" && i.CorrectedJunctions >= 2), Is.True, evidence);
+        Assert.That(attempt.Accepted, Is.True, evidence);
+        Assert.That(attempt.Iterations.Last().Termination, Is.EqualTo(TinTermination.OceanCoast), evidence);
+        Assert.That(attempt.TestedTrace.Any(p => Vector3.Distance(fixture.Tin.Direction(p),
+            fixture.Tin.Direction(attempt.Search.ReceiverPath[0])) < 1e-6f), Is.True, evidence);
+        fixture.AssertRebuild(result);
+        CollectionAssert.AreEqual(result.Heights, fixture.Plan().Heights);
+    }
+
+    [Test]
+    public void RebuiltBanksExposeASecondDiversionFartherDownstream()
+    {
+        var fixture = BranchedCorridor();
+        var result = fixture.Plan(width: .045f);
+        var attempt = result.Attempts[0];
+        string evidence = Summary(result) + "\n" + string.Join("\n", attempt.Iterations.Select(i => i.Summary()));
+        Assert.That(attempt.Accepted, Is.True, evidence);
+        Assert.That(attempt.Iterations.Select(i => i.Outcome), Is.EqualTo(new[] { "revised", "revised", "verified-primary-ocean" }), evidence);
+        Assert.That(attempt.Iterations[1].MovedDownstream, Is.True, evidence);
+        Assert.That(attempt.Iterations[1].RevisedVolume, Is.GreaterThan(attempt.Iterations[0].RevisedVolume));
+        Assert.That(attempt.Iterations.Any(i => i.RepeatedState), Is.False, evidence);
+        fixture.AssertRebuild(result);
+    }
+
+    [Test]
+    public void SecondRevisionOverVolumeBudgetLeavesBothCutsUncommitted()
+    {
+        var fixture = BranchedCorridor();
+        const double volume = .00045;
+        var result = fixture.Plan(volume: volume, width: .045f);
+        var attempt = result.Attempts[0];
+        Assert.That(attempt.Iterations[0].Outcome, Is.EqualTo("revised"), Summary(result));
+        Assert.That(attempt.Iterations[0].RevisedVolume, Is.LessThan(volume));
+        Assert.That(attempt.Iterations[1].RevisedVolume, Is.GreaterThan(volume));
+        Assert.That(attempt.Rejection, Is.EqualTo("adaptive-volume-budget"), Summary(result));
+        Assert.That(attempt.OriginalPonding, Does.Contain("estimatedStorageToFirstSpillPlanetUnitsCubed"));
+        Assert.That(result.CommittedVolume, Is.Zero);
+        CollectionAssert.AreEqual(fixture.Tin.VisibleHeight, result.Heights);
+    }
+
+    private static Fixture BranchedCorridor() => new Fixture(0, corridor: new[] {
+        1.092f, 1.100f, 1.084f, 1.088f, 1.076f, 1.080f, 1.064f, 1.068f, 1.048f, 1.052f, 1.032f, 1.012f
+    }, branches: new[] { (2, 1.0736f), (4, 1.0612f), (6, 1.047f) });
+
+    [Test]
     public void ProtectedLakeShoreBlocksAFeasibleOutlet()
     {
         var fixture = new Fixture(1);
@@ -292,6 +343,17 @@ public sealed class GeodesicMajorOutletTests
         Assert.That(original.Height(comparison.ActualNext.Value),
             Is.EqualTo(proposed.Height(comparison.ActualNext.Value)).Within(1e-10));
 
+        int next = local[intendedVertex];
+        var revised = (float[])after.Clone();
+        revised[next] = (float)GeodesicValleyCarving.OutletBranchBedCeiling(proposed,
+            comparison.Departure.Value, comparison.ActualNext.Value, comparison.PlannedNext.Value,
+            local[departureVertex], next, p => proposed.Height(p), 8 * proposed.Epsilon, constrainFacet: true);
+        Assert.That(revised[next], Is.LessThan(after[next]));
+        Assert.That(before[next] - revised[next], Is.LessThan(GeodesicValleyCarving.DefaultMajorOutletDepth));
+        var corrected = Build(revised);
+        var redirected = corrected.TraceLakeOutlet(corrected.BasinPoint(1, local[departureVertex]), null, out _, maximumSteps: 1);
+        Assert.That(corrected.OutletDistance(redirected.Last(), comparison.PlannedNext.Value), Is.LessThan(1e-10));
+
         GeodesicTinHydrology Build(float[] h) => new GeodesicTinHydrology(positions, facets, h, h,
             radius: 8, epsilon: .000002, visibleBumpTolerance: .0007);
     }
@@ -325,7 +387,8 @@ public sealed class GeodesicMajorOutletTests
         private readonly double[] runoff;
         public GeodesicTinHydrology Tin { get; }
 
-        public Fixture(int basinCount, bool secondary = false, bool belowSea = false, float[] corridor = null)
+        public Fixture(int basinCount, bool secondary = false, bool belowSea = false, float[] corridor = null,
+            (int Station, float Height)[] branches = null)
         {
             graph = GeodesicHydrologyTopology.Build(geometry);
             surface = geometry.UnitVertices.Select(d => d * (1.1f - .3f * d.x - (d.z > 0f ?
@@ -343,8 +406,10 @@ public sealed class GeodesicMajorOutletTests
                 Array.Fill(ocean, false);
                 Array.Fill(components, -1);
                 runoff = new double[geometry.Triangles.Length / 3];
+                var route = new List<int>();
                 for (int i = 0; i < corridor.Length; i++)
                 {
+                    route.Add(vertex);
                     float height = corridor[i];
                     surface[vertex] = geometry.UnitVertices[vertex] * height;
                     if (height < Sea) { ocean[vertex] = true; components[vertex] = 0; }
@@ -355,14 +420,24 @@ public sealed class GeodesicMajorOutletTests
                     vertex = graph.Neighbors6.Skip(vertex * 6).Take(graph.NeighborCounts[vertex])
                         .OrderByDescending(v => Vector3.Dot(geometry.UnitVertices[v], direction)).First();
                 }
+                if (branches != null)
+                    foreach (var branch in branches)
+                    {
+                        int junction = route[branch.Station];
+                        int side = Neighbors(junction).Where(v => !route.Contains(v))
+                            .OrderByDescending(v => Vector3.Dot(geometry.UnitVertices[v], direction)).First();
+                        surface[side] = geometry.UnitVertices[side] * branch.Height;
+                    }
+
+                IEnumerable<int> Neighbors(int v) => graph.Neighbors6.Skip(v * 6).Take(graph.NeighborCounts[v]);
             }
             Tin = Build(surface);
         }
 
         public GeodesicValleyCarving.MajorOutletResult Plan(float depth = .05f, double volume = .001,
-            GeodesicTinLakeGeometry lakes = null) => GeodesicValleyCarving.PlanMajorOutlets(Tin, graph,
+            GeodesicTinLakeGeometry lakes = null, float width = .007f) => GeodesicValleyCarving.PlanMajorOutlets(Tin, graph,
                 ocean, components, 0, GeodesicTinBasins.Build(Tin, 0, double.MaxValue), lakes, 1, Sea,
-                depth, volume, 45, 0, .007f, surface, .001f, 0, .00001);
+                depth, volume, 45, 0, width, surface, .001f, 0, .00001);
 
         public GeodesicValleyCarving.MajorReceiverFailure ReceiverCheck(TinPoint[] path, HashSet<int> protectedFacets,
             int primary = 0) => GeodesicValleyCarving.CheckMajorReceiver(Tin, path, TinTermination.OceanCoast,

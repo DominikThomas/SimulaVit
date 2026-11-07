@@ -118,7 +118,7 @@ public sealed class TinBasinsLiveWindow : EditorWindow
         networkReport = rivers.InspectTinOutletAttempt(basinId, out var path, out var attempt);
         Show(selected == null ? Array.Empty<TinBasinDescriptor>() : new[] { selected },
             path.Length == 0 ? (TinPoint?)null : path[path.Length - 1], path, attempt);
-        status = "Cyan is live flow. Yellow ticks mark the remaining frontier, yellow lines mark the closest unverified receiver hint, orange is the candidate, green is its existing receiver, and magenta marks the verification failure.";
+        status = "Cyan is live flow. Orange is the initial bed, blue is the revised bed, purple is flow on the tested TIN, green is the receiver, and magenta marks the remaining diversion or failure. Yellow shows search evidence.";
         if (selected != null)
         {
             var search = attempt?.Search;
@@ -211,12 +211,43 @@ public sealed class TinBasinsLiveWindow : EditorWindow
                 for (int i = 1; i < points.Length; i++) Line(Surface(points[i - 1]), Surface(points[i]), color);
             }
             DrawPath(search.HintPath.Select(VertexPoint).ToArray(), Color.yellow);
-            DrawPath(search.CandidateVertices.Select(VertexPoint).ToArray(), new Color(1f, .45f, 0f));
+            var originalColor = new Color(1f, .45f, 0f);
+            var revisedColor = new Color(.25f, .55f, 1f);
+            bool showRevision = attempt.TestedBeds != null && attempt.Iterations.Any(i => i.Outcome == "revised");
+            var originalProfile = new Vector3[search.CandidateVertices.Length];
+            var revisedProfile = new Vector3[originalProfile.Length];
+            for (int i = 0; i < originalProfile.Length; i++)
+            {
+                var point = Surface(VertexPoint(search.CandidateVertices[i]));
+                var direction = point.normalized;
+                float originalBed = attempt.OriginalBeds[i];
+                float testedBed = showRevision ? attempt.TestedBeds[i] : originalBed;
+                // Lift both profiles above the live terrain, with the same local
+                // offset so a rejected cut is visible and its bed change is legible.
+                float baseRadius = point.magnitude + planet.BasePlanetRadius * .0006f;
+                float low = Mathf.Min(originalBed, testedBed);
+                originalProfile[i] = direction * (baseRadius + originalBed - low);
+                revisedProfile[i] = direction * (baseRadius + testedBed - low);
+                if (showRevision && originalBed - testedBed > rivers.TinDrainage.Epsilon)
+                    Line(originalProfile[i], revisedProfile[i], revisedColor);
+                if (i == 0) continue;
+                Line(originalProfile[i - 1], originalProfile[i], originalColor);
+                if (showRevision && (revisedProfile[i] != originalProfile[i] || revisedProfile[i - 1] != originalProfile[i - 1]))
+                    Line(revisedProfile[i - 1], revisedProfile[i], revisedColor);
+            }
             DrawPath(search.ReceiverPath, Color.green);
+            var traceColor = new Color(.75f, .45f, .9f);
+            DrawPath(attempt.TestedTrace, traceColor);
+            var branch = attempt.Iterations.LastOrDefault()?.Branch;
+            if (branch?.Departure is TinPoint departure && branch.ActualNext is TinPoint diversion)
+            {
+                Line(Surface(departure), Surface(diversion), Color.magenta);
+                Mark(Surface(departure), Color.magenta);
+            }
             if (attempt.TraceFailure != null)
             {
                 var failure = attempt.TraceFailure;
-                DrawPath(failure.Trace, new Color(.75f, .45f, .9f));
+                if (!ReferenceEquals(failure.Trace, attempt.TestedTrace)) DrawPath(failure.Trace, traceColor);
                 if (failure.HasSegment) Line(Surface(failure.Start), Surface(failure.End), Color.magenta);
                 Mark(Surface(failure.HasSegment ? failure.End : failure.Terminal), Color.magenta);
             }

@@ -58,13 +58,15 @@ public sealed partial class GeodesicRiverSystem
             Debug.Log($"[GeodesicMajorOutletSearch] basin={a.BasinId} {a.Search.Summary()} verificationSourcesChecked={a.VerificationSourcesChecked}", this);
             if (a.Search.CoarseEstimates != null)
                 Debug.Log($"[GeodesicMajorOutletCorridors] basin={a.BasinId} {a.Search.CoarseEstimates}", this);
+            foreach (var iteration in a.Iterations)
+                Debug.Log($"[GeodesicMajorOutletIteration] basin={a.BasinId} corridor=[{string.Join(",", a.Search.CandidateCoarseChain)}] receiver={a.TargetVertex} {iteration.Summary()}", this);
             if (a.TraceFailure != null)
             {
                 Debug.Log($"[GeodesicMajorOutletTraceFailure] basin={a.BasinId} {a.TraceFailure.Summary()}", this);
                 Debug.Log($"[GeodesicMajorOutletPath] basin={a.BasinId} {a.TraceFailure.PathComparison?.Summary}", this);
-                if (a.TraceFailure.ProposedPonding != null)
-                    Debug.Log($"[GeodesicMajorOutletPonding] basin={a.BasinId} original=({a.TraceFailure.OriginalPonding}) proposed=({a.TraceFailure.ProposedPonding})", this);
             }
+            if (a.OriginalPonding != null || a.TraceFailure?.ProposedPonding != null)
+                Debug.Log($"[GeodesicMajorOutletPonding] basin={a.BasinId} original=({a.OriginalPonding}) proposed=({a.TraceFailure?.ProposedPonding})", this);
         }
         if (DrainageDelivery != null)
             Debug.Log(DrainageDelivery.Connectivity(TinDiagnostics.UnexpectedBrokenNetworks), this);
@@ -88,8 +90,8 @@ public sealed partial class GeodesicRiverSystem
             $"targetVertex={attempt.TargetVertex} targetFacet={attempt.TargetFacet} destination={attempt.Destination} routeLength={attempt.Length:R} requiredDepth={attempt.RequiredDepth:R} candidateVolumePlanetUnitsCubed={attempt.Volume:R} volumeLimitPlanetUnitsCubed={MajorOutletBreaching.MaximumVolume:R} crossedBasins=[{string.Join(",", attempt.CrossedBasins)}]");
         var failure = attempt.TraceFailure;
         return $"{summary}\n{search.Summary()}\n{search.CoarseEstimates}\nexploredBasinIds=[{string.Join(",", search.ExploredBasins)}]\n" +
-            $"{candidate}\n{failure?.Summary()}\n{failure?.PathComparison?.Summary}\n" +
-            $"Original storage: {failure?.OriginalPonding}\nProposed storage: {failure?.ProposedPonding}\n" +
+            $"{candidate}\n{string.Join("\n", attempt.Iterations.Select(i => i.Summary()))}\n{failure?.Summary()}\n{failure?.PathComparison?.Summary}\n" +
+            $"Original storage {attempt.OriginalPonding}\nProposed storage {failure?.ProposedPonding}\n" +
             $"{failure?.PathComparison?.Details}\n\n{network}";
     }
 
