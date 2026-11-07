@@ -36,18 +36,21 @@ public sealed class TinBasinDescriptor
     public bool QualifiesForVisibleLake => HasEscape && !BelowMinimumDepth && !BelowMinimumArea && !SubseaUnclassified;
 
     internal TinBasinDescriptor(int id, TinPoint floor, double floorHeight, double spillHeight,
-        TinPoint? spill, int downstreamTriangle, int downstreamVertex, int parent, int[] members,
+        TinPoint? spill, int downstreamTriangle, int downstreamVertex, int parent, IReadOnlyList<int> members,
         double area, bool ocean, bool subsea, double minimumDepth, double minimumArea,
         TinBasinExternalSource externalSource = TinBasinExternalSource.None)
     {
         Id = id; Floor = floor; FloorElevation = floorHeight; SpillElevation = spillHeight;
         Spill = spill; DownstreamTriangle = downstreamTriangle; DownstreamVertex = downstreamVertex;
-        ParentBasinId = parent; MemberTriangles = Array.AsReadOnly(members); Area = area;
+        ParentBasinId = parent; MemberTriangles = members; Area = area;
         ExternalSource = externalSource;
         TouchesRetainedOcean = ocean; SubseaUnclassified = subsea;
         BelowMinimumDepth = HasEscape && MaximumDepth < minimumDepth;
         BelowMinimumArea = area < minimumArea;
     }
+    internal TinBasinDescriptor WithVisibility(double area, double depth) => new TinBasinDescriptor(Id, Floor,
+        FloorElevation, SpillElevation, Spill, DownstreamTriangle, DownstreamVertex, ParentBasinId, MemberTriangles,
+        Area, TouchesRetainedOcean, SubseaUnclassified, depth, area, ExternalSource);
     public override string ToString() => $"[GeodesicTinBasins] id={Id} floor={FloorElevation:G9} spill={SpillElevation:G9} depth={MaximumDepth:G9} area={Area:G9} terminal={Terminal} parent={ParentBasinId} downstreamTriangle={DownstreamTriangle} ocean={TouchesRetainedOcean} candidate={QualifiesForVisibleLake}";
 }
 
@@ -58,10 +61,12 @@ public sealed class GeodesicTinBasins
 {
     public IReadOnlyList<TinBasinDescriptor> Basins { get; }
     private readonly GeodesicTinHydrology tin;
+    private readonly double totalArea;
     private readonly Dictionary<int, List<TinBasinDescriptor>> byTriangle = new Dictionary<int, List<TinBasinDescriptor>>();
-    private GeodesicTinBasins(GeodesicTinHydrology source, List<TinBasinDescriptor> basins)
+    private GeodesicTinBasins(GeodesicTinHydrology source, List<TinBasinDescriptor> basins, double totalArea)
     {
-        tin = source; basins.Sort((a, b) => a.Id.CompareTo(b.Id)); Basins = basins.AsReadOnly();
+        tin = source; this.totalArea = totalArea;
+        basins.Sort((a, b) => a.Id.CompareTo(b.Id)); Basins = basins.AsReadOnly();
         foreach (var b in basins)
         foreach (int t in b.MemberTriangles)
         {
@@ -69,6 +74,9 @@ public sealed class GeodesicTinBasins
             list.Add(b);
         }
     }
+
+    internal GeodesicTinBasins WithVisibility(double areaFraction, double depth) => areaFraction == 0 && depth == 0 ? this :
+        new GeodesicTinBasins(tin, Basins.Select(b => b.WithVisibility(totalArea * areaFraction, depth)).ToList(), totalArea);
 
     public static GeodesicTinBasins Build(GeodesicTinHydrology tin, double minimumAreaFraction = .0001d, double minimumDepth = .005d)
     {
@@ -129,7 +137,7 @@ public sealed class GeodesicTinBasins
             int f = floor[r];
             result.Add(new TinBasinDescriptor(f, point[f], tin.HydrologyHeight[f], level,
                 saddle < 0 ? (TinPoint?)null : tin.BasinPoint(sideTriangle, saddle), sideVertex == saddle ? -1 : sideTriangle, sideVertex,
-                target >= 0 && !external[target] ? floor[target] : -1, footprint, area, touches,
+                target >= 0 && !external[target] ? floor[target] : -1, Array.AsReadOnly(footprint), area, touches,
                 tin.VisibleHeight[f] <= tin.BasinSeaLevel && !ocean[f], minimumDepth, totalArea * minimumAreaFraction,
                 target >= 0 && external[target] ? externalSource[target] : TinBasinExternalSource.None));
         }
@@ -169,7 +177,7 @@ public sealed class GeodesicTinBasins
             }
         }
         foreach (int v in order) if (parent[v] == v) Record(v, -1, -1, -1, -1);
-        return new GeodesicTinBasins(tin, result);
+        return new GeodesicTinBasins(tin, result, totalArea);
     }
 
     /// <summary>Choose the smallest containing sublevel component. A facet may occur in several

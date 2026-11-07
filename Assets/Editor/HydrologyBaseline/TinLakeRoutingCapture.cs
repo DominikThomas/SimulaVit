@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
@@ -7,7 +8,7 @@ using UnityEditor;
 using UnityEngine;
 using Object = UnityEngine.Object;
 
-/// <summary>Actual-scene A/B capture. The lake meshes and raw TIN are never rebuilt.</summary>
+/// <summary>Actual-scene A/B capture of lake integration on the same raw TIN.</summary>
 [InitializeOnLoad]
 public static class TinLakeRoutingCapture
 {
@@ -90,9 +91,11 @@ public static class TinLakeRoutingCapture
             Time.timeScale = 0;
             if (rivers.TinLakeRouting == null) { rivers.integrateTinLakeRivers = true; rivers.RefreshTinLakeRiverIntegration(); }
             var routing = rivers.TinLakeRouting;
-            var one = routing.Lakes.Where(n => n.InletDischarges.Count == 1 && n.OutletReachId >= 0 && !routing.Lakes.Any(up => up.DownstreamLakeId == n.BasinId)).OrderByDescending(n => n.Discharge).FirstOrDefault();
-            var multi = routing.Lakes.Where(n => n.InletDischarges.Count > 1 && n.OutletReachId >= 0).OrderByDescending(n => n.InletDischarges.Count).FirstOrDefault();
-            var cascade = routing.Lakes.Where(n => n.DownstreamLakeId >= 0).OrderByDescending(n => n.Discharge).FirstOrDefault();
+            var visible = new HashSet<int>(rivers.TinLakeGeometry.Bodies.Select(b => b.BasinId));
+            var visibleNodes = routing.Lakes.Where(n => visible.Contains(n.BasinId)).ToArray();
+            var one = visibleNodes.Where(n => n.InletDischarges.Count == 1 && n.OutletReachId >= 0 && !routing.Lakes.Any(up => up.DownstreamLakeId == n.BasinId)).OrderByDescending(n => n.Discharge).FirstOrDefault();
+            var multi = visibleNodes.Where(n => n.InletDischarges.Count > 1 && n.OutletReachId >= 0).OrderByDescending(n => n.InletDischarges.Count).FirstOrDefault();
+            var cascade = visibleNodes.Where(n => visible.Contains(n.DownstreamLakeId)).OrderByDescending(n => n.Discharge).FirstOrDefault();
             var examples = new[] { one, multi, cascade }.Where(n => n != null).GroupBy(n => n.BasinId).Select(g => g.First()).ToArray();
             rivers.integrateTinLakeRivers = false; rivers.RefreshTinLakeRiverIntegration();
             Image("01-before-integration");

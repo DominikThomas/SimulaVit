@@ -1015,6 +1015,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         MeshCollider meshCollider = GetOrAddComponent<MeshCollider>(gameObject);
         meshCollider.sharedMesh = null;
         meshCollider.sharedMesh = colliderMesh;
+        GetComponent<GeodesicRiverSystem>()?.ApplySedimentCollider();
         LogStage("MeshCollider assignment/cooking", stage);
 
         if (oceanMesh != null) oceanMesh.Clear();

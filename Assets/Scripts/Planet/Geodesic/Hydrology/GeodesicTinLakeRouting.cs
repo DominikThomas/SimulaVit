@@ -17,6 +17,7 @@ public sealed class TinLakeFlowNode
     // A shared shoreline can transfer discharge without a dry, visible outlet segment.
     public bool Terminal => DownstreamLakeId < 0 && !ExitsAtSpill && OutletPath.Length < 2;
     public TinPoint? DownstreamSample { get; internal set; }
+    public TinPoint? DownstreamLakeEntry { get; internal set; }
     public bool ExitsAtSpill { get; internal set; }
     public readonly HashSet<int> DirectParcels = new HashSet<int>();
     public readonly HashSet<int> ContributingParcels = new HashSet<int>();
@@ -223,6 +224,7 @@ public sealed class GeodesicTinLakeRouting
             if (result.FirstEntry(path, out var hit))
             {
                 path = ClipAtEntry(path, hit); node.DownstreamLakeId = hit.BasinId;
+                node.DownstreamLakeEntry = hit.Point;
             }
             // Reuse an existing dry channel by an exact same-facet, validated join. Its
             // downstream lake destination is followed through the existing raw junctions.
@@ -244,7 +246,7 @@ public sealed class GeodesicTinLakeRouting
                         if (!tin.ValidateLakePath(candidate.Concat(r.Samples.Skip(j + 1)).ToArray()) || result.FirstEntry(candidate, out _)) continue;
                         path = candidate; node.JoinNetwork = r.RawNetworkId; termination = TinTermination.Confluence;
                         node.DownstreamSample = FirstDownstreamSample(path);
-                        node.DownstreamLakeId = destinations[r.RawNetworkId]; joined = true;
+                        node.DownstreamLakeId = destinations[r.RawNetworkId]; node.DownstreamLakeEntry = null; joined = true;
                         break;
                 }
             }

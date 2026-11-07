@@ -31,7 +31,7 @@ public sealed class GeodesicTinLakeGeometry
 
     /// <summary>Ordered convex wet polygon (0, 3 or 4 vertices, except zero-area ties).
     /// Shared edges always interpolate from the same indexed endpoint, preventing cracks.</summary>
-    public static TinPoint[] ClipTriangle(GeodesicTinHydrology tin, int triangle, double level)
+    public static TinPoint[] ClipTriangle(GeodesicTinHydrology tin, int triangle, double level, bool wet = true)
     {
         if (tin == null) throw new ArgumentNullException(nameof(tin));
         if (triangle < 0 || triangle >= tin.TriangleCount || double.IsNaN(level) || double.IsInfinity(level)) throw new ArgumentOutOfRangeException();
@@ -45,7 +45,7 @@ public sealed class GeodesicTinLakeGeometry
         {
             int j = (k + 1) % 3; TinPoint a = Corner(k), b = Corner(j);
             double ha = tin.Height(a), hb = tin.Height(b);
-            if (ha <= level) Add(a);
+            if (wet ? ha <= level : ha >= level) Add(a);
             if ((ha < level && hb > level) || (ha > level && hb < level))
             {
                 if (tin.BasinVertex(triangle, k) > tin.BasinVertex(triangle, j)) { var p = a; a = b; b = p; double h = ha; ha = hb; hb = h; }

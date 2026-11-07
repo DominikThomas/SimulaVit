@@ -63,7 +63,7 @@ public sealed class GeodesicTinLakeRoutingTests
     [Test] public void CycleIsRejectedBeforeAnyNonconservativeOutletIsPublished()
     {
         var a = new TinLakeFlowNode(1) { DownstreamLakeId = 2 }; var b = new TinLakeFlowNode(2) { DownstreamLakeId = 1 };
-        Assert.Throws<InvalidOperationException>(() => GeodesicTinLakeRouting.ResolveDischarge(new[] { a, b }, _ => 1));
+        Assert.Throws<InvalidOperationException>(() => GeodesicTinLakeRouting.ResolveDischarge(new[] { a, b }, _ => 1, _ => { }));
     }
     [Test] public void CascadedGeometryTransfersIntoLowerLakeAndConservesLocalAndUpstreamFlow()
     {
