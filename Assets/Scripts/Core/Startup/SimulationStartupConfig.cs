@@ -100,12 +100,6 @@ public class SimulationStartupConfig
     [Min(0f)] public float minimumValleyCarveRunoff = GeodesicValleyCarving.DefaultRunoff;
     [Range(0f, 1f)] public float valleyCarveWidth = GeodesicValleyCarving.DefaultWidth;
     public bool showValleyCarvingDebug;
-    [Tooltip("Experimental dry outlets for the largest closed rivers after ordinary carving. Requires visible, unfiltered TIN terrain.")]
-    public bool enableMajorOutletBreaching;
-    [Range(0f, 1f)] public float maximumMajorOutletDepth = GeodesicValleyCarving.DefaultMajorOutletDepth;
-    [Tooltip("Total experimental excavation volume as a fraction of the cubed base radius.")]
-    [Range(0f, 1f)] public float maximumMajorOutletVolume = GeodesicValleyCarving.DefaultMajorOutletVolume;
-    [Range(0f, 45f)] public float maximumMajorOutletDegrees = GeodesicValleyCarving.DefaultMajorOutletDegrees;
     [Min(0.01f)] public float riverFlowThreshold = GeodesicRiverSystem.DefaultRiverFlowThreshold;
     [Min(0.01f)] public float majorRiverThreshold = GeodesicRiverSystem.DefaultMajorRiverThreshold;
     public bool colourRiversByUltimateDestination;

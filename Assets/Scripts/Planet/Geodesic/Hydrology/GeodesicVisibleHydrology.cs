@@ -4,6 +4,18 @@ using UnityEngine;
 /// <summary>Routing heights and ocean roots on the existing render mesh. The visible mesh is never changed.</summary>
 public static class GeodesicVisibleHydrology
 {
+    internal static int OceanComponentAt(GeodesicTinHydrology tin, int[] components, TinPoint endpoint)
+    {
+        int component = -1;
+        for (int k = 0; k < 3; k++)
+        {
+            int label = components[tin.BasinVertex(endpoint.Triangle, k)];
+            if (label == -2 || (label >= 0 && component >= 0 && label != component)) return -1;
+            if (label >= 0) component = label;
+        }
+        return component;
+    }
+
     public static string FeatureAudit(IGeodesicHydrologyTopology topology, Vector3[] surface, float[] filtered)
     {
         int ridges = 0, retainedRidges = 0, valleys = 0, retainedValleys = 0;

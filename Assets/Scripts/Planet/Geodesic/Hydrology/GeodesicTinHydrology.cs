@@ -747,10 +747,10 @@ public sealed class GeodesicTinHydrology
     internal double ParcelRunoff(int triangle) => localRunoff[triangle];
     internal TinPoint TransferLakePoint(TinPoint point, int triangle) => Transfer(point, triangle);
     internal TinPoint[] TraceLakeOutlet(TinPoint spill, Func<TinPoint, TinPoint, bool> departure, out TinTermination termination,
-        int maximumSteps = 32768, Action<TraceFailure> failure = null)
+        int maximumSteps = 32768)
     {
         var samples = new List<TinPoint>(128); var candidates = new List<int>(8);
-        termination = TraceInto(spill, samples, candidates, maximumSteps, observe: false, departure: departure, failure: failure);
+        termination = TraceInto(spill, samples, candidates, maximumSteps, observe: false, departure: departure);
         return samples.ToArray();
     }
     internal bool ValidateLakePath(TinPoint[] path)

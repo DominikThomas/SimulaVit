@@ -22,6 +22,32 @@ public class SimulationStartupConfigTests
         Assert.That(current.basinInfillLimits.transitionGrade, Is.EqualTo(.45f));
     }
 
+    [TestCase(20)]
+    [TestCase(21)]
+    [TestCase(22)]
+    public void RetiredOutletSettingsDoNotChangeCarvingOrLakeSettings(int version)
+    {
+        string active = $"{{\"version\":{version},\"enableTerminationValleyCarving\":true,\"valleyCarvingPasses\":3," +
+            "\"maximumValleyCarveDepth\":0.025,\"minimumValleyCarveRunoff\":5,\"valleyCarveWidth\":0.009," +
+            "\"showValleyCarvingDebug\":true,\"generateHydrologicalLakes\":true,\"minimumLakeBasinAreaFraction\":0.000225," +
+            "\"minimumLakeDepth\":0,\"infillExcludedInlandBasins\":true,\"colourRiversByUltimateDestination\":true";
+        var loaded = SimulationStartupController.DeserializeSavedConfig(active +
+            ",\"enableMajorOutletBreaching\":true,\"maximumMajorOutletDepth\":0.5," +
+            "\"maximumMajorOutletVolume\":0.1,\"maximumMajorOutletDegrees\":35}", new SimulationStartupConfig());
+
+        Assert.That(loaded.enableTerminationValleyCarving, Is.True);
+        Assert.That(loaded.valleyCarvingPasses, Is.EqualTo(3));
+        Assert.That(loaded.maximumValleyCarveDepth, Is.EqualTo(.025f));
+        Assert.That(loaded.minimumValleyCarveRunoff, Is.EqualTo(5f));
+        Assert.That(loaded.valleyCarveWidth, Is.EqualTo(.009f));
+        Assert.That(loaded.showValleyCarvingDebug, Is.True);
+        Assert.That(loaded.generateHydrologicalLakes, Is.True);
+        Assert.That(loaded.minimumLakeBasinAreaFraction, Is.EqualTo(.000225f));
+        Assert.That(loaded.minimumLakeDepth, Is.Zero);
+        Assert.That(loaded.infillExcludedInlandBasins, Is.True);
+        Assert.That(loaded.colourRiversByUltimateDestination, Is.EqualTo(version >= 22));
+    }
+
     [Test]
     public void RiverThresholdDefaultsMigrationAndSaveLoad()
     {

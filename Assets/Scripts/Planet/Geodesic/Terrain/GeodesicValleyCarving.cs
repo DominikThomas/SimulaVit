@@ -6,7 +6,7 @@ using UnityEngine;
 /// <summary>One immutable-input planning pass. This is a bounded saddle breach, not erosion.
 /// All heights and lengths are planet-local units; runoff uses the existing mean-cell-area units.
 /// The caller commits the resulting surface once and rebuilds the existing TIN once.</summary>
-public sealed partial class GeodesicValleyCarving
+public sealed class GeodesicValleyCarving
 {
     public const float DefaultDepth = .005f, DefaultRunoff = 64f, DefaultWidth = .02f;
     public const string Help = "1–5 passes on visible, unfiltered TIN terrain; flow and basins rebuild after each pass. Selects ocean-rooted natural spill connections by independent upstream runoff and bounded excavation cost. Depth is the maximum cut per pass; depth and width use planet-local units. Coastal spill breaches require proven retained-ocean drainage, stay within eight local edge lengths and submerge by at most min(depth, 0.005). Runoff uses mean-cell-area equivalents. Width controls lateral falloff. Scene gizmos: green accepted, red rejected, yellow termination, cyan target.";
