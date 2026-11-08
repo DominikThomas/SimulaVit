@@ -42,6 +42,23 @@ public sealed class GeodesicTinSedimentCorridorTests
     }
 
     [Test]
+    public void SupplementalCorridorCanDeliverToASecondaryRetainedOcean()
+    {
+        var f = new Fixture(.98f, oceanComponent: 1);
+        Assert.That(f.Plan(supplementalLimit: 0).Connections, Is.Empty);
+        var plan = f.Plan();
+        var connection = plan.Connections.Values.Single();
+        var final = plan.Verify(f.Analyze(plan.Connections));
+        Assert.That(plan.Failure, Is.Null);
+        Assert.That(final.PrimaryOcean, Is.EqualTo(f.Before.PrimaryOcean));
+        Assert.That(final.SecondaryOcean - f.Before.SecondaryOcean, Is.EqualTo(connection.Runoff).Within(final.Tolerance));
+        Assert.That(final.RiverOutcome("corridor:" + connection.BasinId).RiverColour,
+            Is.EqualTo(GeodesicDrainageDelivery.RiverDestination.Ocean));
+        Assert.That(final.RiverDestinationAccountingPass, Is.True);
+        Assert.That(final.CycleNodes, Is.Zero);
+    }
+
+    [Test]
     public void ShortLowlandConnectionLevelsARidgeWithoutReroutingTheTin()
     {
         var f = new Fixture(.998f);
@@ -157,9 +174,11 @@ public sealed class GeodesicTinSedimentCorridorTests
         internal readonly GeodesicTinLakeGeometry Lakes;
         internal readonly GeodesicTinLakeRouting Routing;
         internal readonly GeodesicDrainageDelivery Before;
+        private readonly int oceanComponent;
 
-        internal Fixture(float floor, Func<float, float> ridge = null, double networkThreshold = .0003)
+        internal Fixture(float floor, Func<float, float> ridge = null, double networkThreshold = .0003, int oceanComponent = 0)
         {
+            this.oceanComponent = oceanComponent;
             float Height(float x, float y)
             {
                 float saddle = ridge?.Invoke(y) ?? 1.014f;
@@ -181,10 +200,11 @@ public sealed class GeodesicTinSedimentCorridorTests
 
         internal GeodesicDrainageDelivery Analyze(IReadOnlyDictionary<int, GeodesicTinSedimentCorridors.Connection> connections = null) =>
             GeodesicDrainageDelivery.Analyze(Tin, Basins, Routing.Lakes, Routing.RiverReaches,
-                oceanComponentAt: _ => 0, primaryOceanComponent: 0, corridors: connections);
+                oceanComponentAt: _ => oceanComponent, primaryOceanComponent: 0, corridors: connections);
 
-        internal GeodesicTinSedimentCorridors Plan() => GeodesicTinSedimentCorridors.Build(Tin, Graph, Basins, Lakes, Routing,
-            Before, _ => 0, 0, 1f, .001);
+        internal GeodesicTinSedimentCorridors Plan(int supplementalLimit = GeodesicTinSedimentCorridors.MaximumSupplementalConnections) =>
+            GeodesicTinSedimentCorridors.Build(Tin, Graph, Basins, Lakes, Routing,
+                Before, _ => oceanComponent, 0, 1f, .001, supplementalLimit);
 
         internal GeodesicDrainageDelivery AssertDelivery(GeodesicTinSedimentCorridors plan)
         {

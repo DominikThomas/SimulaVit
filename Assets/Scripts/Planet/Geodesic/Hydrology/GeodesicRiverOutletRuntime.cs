@@ -19,14 +19,15 @@ public sealed partial class GeodesicRiverSystem
         if (delivery != null) OutletAudit = new GeodesicRiverOutletAudit(delivery);
     }
 
-    private void FitOceanOutlet(string route, TinPoint logicalCoast, ref Vector3[] path, ref double[] discharge)
+    private void FitOceanOutlet(string route, TinPoint logicalCoast, ref Vector3[] path, ref double[] discharge,
+        GeodesicRiverTerrain surfaceOverride = null)
     {
         var shoreline = planet.RiverShoreline;
         if (shoreline == null || !planet.enableOcean) return;
         int component = deliveryOceanComponentByVertex != null ? DeliveryOceanComponent(logicalCoast) : -1;
         shorelineTopology ??= corridorTopology ?? carvingTopology ??
             GeodesicHydrologyTopology.Build(IcosphereRenderGeometryCache.GetOrBuild(TinDrainage.SubdivisionLevel));
-        var surface = corridorTerrain ?? terrain;
+        var surface = surfaceOverride ?? corridorTerrain ?? terrain;
         if (!shoreline.TryContact(TinDrainage, shorelineTopology, logicalCoast, component, path, surface,
             out int keep, out var extension, planet.GeodesicCurrentRenderMapping) || keep == 0) return;
 
@@ -51,7 +52,7 @@ public sealed partial class GeodesicRiverSystem
             for (int i = keep; i < discharge.Length; i++) discharge[i] = last;
         }
         path = fitted.ToArray();
-        OutletAudit?.FitCoast(route, contact);
+        if (route != null) OutletAudit?.FitCoast(route, contact);
     }
 
     private void CompleteOutletAudit()

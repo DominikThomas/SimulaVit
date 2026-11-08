@@ -27,6 +27,7 @@ public sealed class GeodesicDrainageDelivery
         public bool ViaLake, ViaCorridor;
         internal int OceanComponent = -1;
         internal int TerminalLakeId = -1;
+        internal int TerminalVertex = -1;
         internal RiverDestination RiverColour => Destination == Destination.DirectOcean || Destination == Destination.OceanViaLakes
             ? RiverDestination.Ocean
             : Destination == Destination.InlandClosed
@@ -36,7 +37,7 @@ public sealed class GeodesicDrainageDelivery
             Destination = lake && Destination == Destination.DirectOcean ? Destination.OceanViaLakes : Destination,
             TerminalId = TerminalId, Type = Type, Point = Point, Basin = Basin, ViaLake = ViaLake || lake,
             ViaCorridor = ViaCorridor || corridor, OceanComponent = OceanComponent,
-            TerminalLakeId = terminalLakeId >= 0 ? terminalLakeId : TerminalLakeId };
+            TerminalLakeId = terminalLakeId >= 0 ? terminalLakeId : TerminalLakeId, TerminalVertex = TerminalVertex };
     }
     public sealed class Catchment
     {
@@ -128,7 +129,8 @@ public sealed class GeodesicDrainageDelivery
         string key = basin != null ? "basin:" + basin.Id : PointId(p);
         var result = new Outcome { Destination = ocean ? Destination.DirectOcean : closed ? Destination.InlandClosed : Destination.Unresolved,
             TerminalId = type + ":" + key, Type = type == TinTermination.OceanCoast && !ocean ? "OceanCoastWithoutRetainedBoundary" : type.ToString(),
-            Point = p, Basin = basin, OceanComponent = ocean ? oceanComponentAt?.Invoke(p) ?? -1 : -1 };
+            Point = p, Basin = basin, OceanComponent = ocean ? oceanComponentAt?.Invoke(p) ?? -1 : -1,
+            TerminalVertex = closed && basin == null ? ExactVertex(tin, p) : -1 };
         terminalCache.Add(cacheKey, result); return result;
     }
     private string PointId(TinPoint p)
@@ -171,8 +173,21 @@ public sealed class GeodesicDrainageDelivery
         return result;
     }
 
-    private string CorridorLink(Outcome end) => corridors != null && end?.Destination == Destination.InlandClosed &&
-        end.Basin != null && corridors.ContainsKey(end.Basin.Id) ? "corridor:" + end.Basin.Id : null;
+    internal static int ExactVertex(GeodesicTinHydrology tin, TinPoint p)
+    {
+        if (p.A == 1 && p.B == 0 && p.C == 0) return tin.BasinVertex(p.Triangle, 0);
+        if (p.A == 0 && p.B == 1 && p.C == 0) return tin.BasinVertex(p.Triangle, 1);
+        if (p.A == 0 && p.B == 0 && p.C == 1) return tin.BasinVertex(p.Triangle, 2);
+        return -1;
+    }
+
+    private string CorridorLink(Outcome end)
+    {
+        if (corridors == null || end?.RiverColour != RiverDestination.ClosedBasin) return null;
+        int id = end.Basin?.Id ?? end.TerminalVertex;
+        return corridors.TryGetValue(id, out var connection) && (end.Basin != null || connection.ShorePath != null)
+            ? "corridor:" + id : null;
+    }
 
     private static TinPoint? End(IReadOnlyList<TinPoint> path) => path != null && path.Count > 0 ? path[path.Count - 1] : (TinPoint?)null;
 

@@ -41,13 +41,22 @@ public sealed partial class GeodesicRiverSystem
 
             var baseline = Analyze();
             var plan = GeodesicTinSedimentCorridors.Build(TinDrainage, corridorTopology, routingLakeBasins,
-                routingLakeGeometry, TinLakeRouting, baseline, oceanComponentAt, primary, planet.BasePlanetRadius, ResolvedDrainageAreaThreshold * 2);
+                routingLakeGeometry, TinLakeRouting, baseline, oceanComponentAt, primary, planet.BasePlanetRadius,
+                ResolvedDrainageAreaThreshold * 2, fitShore: FitSupplementalShore);
             var delivery = plan.Connections.Count == 0 ? baseline : plan.Verify(Analyze(plan.Connections));
             SedimentCorridors = plan;
             foreach (string decision in plan.Decisions) Debug.Log("[GeodesicTinSedimentCorridor] " + decision, this);
             return delivery;
         }
         finally { if (replayed && !collectDelivery) TinDrainage.ReleaseParcelDestinations(); }
+    }
+
+    private Vector3[] FitSupplementalShore(TinPoint coast, Vector3[] directions)
+    {
+        var fitted = directions;
+        double[] discharge = null;
+        FitOceanOutlet(null, coast, ref fitted, ref discharge, terrain);
+        return fitted == directions ? null : fitted;
     }
 
     private Mesh BuildCorridorSurface()
@@ -94,12 +103,16 @@ public sealed partial class GeodesicRiverSystem
                 Gap(corridor.BasinId, $"receiver river {corridor.TargetNetwork} did not render");
 
             var path = new List<Vector3> { corridorTopology.CellDirections[corridor.Vertices[0]] };
-            for (int i = 1; i < corridor.Vertices.Length; i++) AddSegment(corridorTopology.CellDirections[corridor.Vertices[i]]);
-            if (corridor.Coast.HasValue) AddSegment(TinDrainage.Direction(corridor.Coast.Value));
-            Vector3[] samples = path.ToArray();
+            if (corridor.ShorePath == null)
+            {
+                for (int i = 1; i < corridor.Vertices.Length; i++) AddSegment(corridorTopology.CellDirections[corridor.Vertices[i]]);
+                if (corridor.Coast.HasValue) AddSegment(TinDrainage.Direction(corridor.Coast.Value));
+            }
+            Vector3[] samples = corridor.ShorePath ?? path.ToArray();
             string route = "corridor:" + corridor.BasinId;
             double[] discharge = drawRawTrianglePaths ? null : Array.ConvertAll(samples, _ => corridor.Runoff);
-            if (corridor.Coast.HasValue) FitOceanOutlet(route, corridor.Coast.Value, ref samples, ref discharge);
+            if (corridor.ShorePath != null) OutletAudit?.FitCoast(route, samples[samples.Length - 1]);
+            else if (corridor.Coast.HasValue) FitOceanOutlet(route, corridor.Coast.Value, ref samples, ref discharge);
             int firstVertex = vertices.Count;
             if (drawRawTrianglePaths) AddRawTinLine(samples, vertices, indices, colors);
             else AddTinRibbon(samples, 0, vertices, indices, colors, discharge);

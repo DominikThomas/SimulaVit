@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using NUnit.Framework;
+using UnityEngine;
 
 public sealed class GeodesicDrainageDeliveryTests
 {
@@ -57,6 +59,41 @@ public sealed class GeodesicDrainageDeliveryTests
         Assert.That(r.LargestDisconnected.First().Terminal.Type, Is.EqualTo("TrueClosedBasin")); Accounted(r);
         Assert.That(r.RiverOutcome("network:0").RiverColour, Is.EqualTo(GeodesicDrainageDelivery.RiverDestination.ClosedBasin));
         Assert.That(r.RiverRunoff(GeodesicDrainageDelivery.RiverDestination.ClosedBasin), Is.EqualTo(r.TotalRunoff).Within(r.Tolerance));
+    }
+    [Test] public void DescriptorlessTerminalRequiresAVerifiedShorePathAndTerminalLakeRemainsPurple()
+    {
+        var tin = Plane();
+        int parcel = Enumerable.Range(0, tin.TriangleCount).First(t => tin.ParcelRunoff(t) > 0);
+        var floor = new TinPoint(parcel, 1, 0, 0);
+        int vertex = GeodesicDrainageDelivery.ExactVertex(tin, floor);
+        var coast = tin.ParcelDestinations[parcel].Point;
+        var reaches = tin.Networks.Select(n => new TinLakeAdjustedReach
+        {
+            Samples = n.Samples, JunctionNetwork = n.JunctionNetwork, Termination = n.Termination
+        }).ToArray();
+        reaches[0].Termination = TinTermination.TrueClosedBasin;
+        reaches[0].Samples = new[] { tin.Centroid(parcel), floor };
+        var lake = new TinLakeFlowNode(vertex)
+        {
+            Basin = new TinBasinDescriptor(vertex, floor, -1, 0, null, -1, -1, -1,
+                new[] { parcel }, 1, false, false, 0, 0)
+        };
+        reaches[1].ReceivingLakeId = vertex;
+        lake.DirectParcels.Add(parcel);
+        GeodesicDrainageDelivery Analyze(Vector3[] shorePath)
+        {
+            var corridor = new GeodesicTinSedimentCorridors.Connection(vertex, -1, coast, new[] { vertex },
+                new[] { 0 }, Array.Empty<int>(), 0, 0, 0, 0, shorePath);
+            return GeodesicDrainageDelivery.Analyze(tin, lakes: new[] { lake }, reaches: reaches,
+                corridors: new Dictionary<int, GeodesicTinSedimentCorridors.Connection> { [vertex] = corridor });
+        }
+        var before = Analyze(null);
+        Assert.That(before.RiverOutcome("network:0").RiverColour, Is.EqualTo(GeodesicDrainageDelivery.RiverDestination.ClosedBasin));
+        var final = Analyze(new[] { tin.Direction(floor), tin.Direction(coast) });
+        Assert.That(final.RiverOutcome("network:0").RiverColour, Is.EqualTo(GeodesicDrainageDelivery.RiverDestination.Ocean));
+        Assert.That(final.RiverOutcome("network:1").RiverColour, Is.EqualTo(GeodesicDrainageDelivery.RiverDestination.TerminalLake));
+        Assert.That(final.RiverRunoff(GeodesicDrainageDelivery.RiverDestination.TerminalLake), Is.EqualTo(tin.ParcelRunoff(parcel)));
+        Accounted(final);
     }
     [Test] public void ClippedRibbonDoesNotChangeLogicalOceanDelivery()
     {

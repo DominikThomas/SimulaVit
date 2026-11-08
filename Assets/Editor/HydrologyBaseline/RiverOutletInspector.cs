@@ -66,7 +66,7 @@ internal sealed class RiverOutletInspector : EditorWindow
         var end = audit.Links[chain[chain.Length - 1]].End;
         int corridor = chain.Where(r => r.StartsWith("corridor:", StringComparison.Ordinal)).Select(Id).DefaultIfEmpty(-1).First();
         int lake = chain.Where(r => r.StartsWith("lake:", StringComparison.Ordinal)).Select(Id).DefaultIfEmpty(-1).First();
-        int basin = corridor >= 0 ? corridor : end.Basin?.Id ?? lake;
+        int basin = corridor >= 0 ? corridor : end.Basin?.Id ?? (end.TerminalVertex >= 0 ? end.TerminalVertex : lake);
         string destination = end.Destination == GeodesicDrainageDelivery.Destination.InlandClosed
             ? (lake >= 0 && !rivers.OutletIsSedimentLake(lake) ? "retained lake in a closed inland basin" : "closed inland basin")
             : end.Destination == GeodesicDrainageDelivery.Destination.Unresolved ? end.Type
@@ -78,8 +78,8 @@ internal sealed class RiverOutletInspector : EditorWindow
         string details = closed ? $"Terminal {end.TerminalId}   closed runoff {audit.ClosedRunoff(end):G8}\n" : "";
         if (rivers.SedimentCorridors != null && (corridor >= 0 || closed))
         {
-            string decision = closed && end.Basin == null
-                ? "closed terminal has no eligible basin descriptor" : rivers.SedimentCorridors.DecisionFor(basin);
+            string decision = closed && end.Basin == null && end.TerminalVertex < 0
+                ? "closed terminal has no basin descriptor or exact shore vertex" : rivers.SedimentCorridors.DecisionFor(basin);
             details += $"Corridor decision {decision}\n";
             if (closed && end.Point.HasValue)
             {
