@@ -1,8 +1,10 @@
 # Hydrology cleanup inventory
 
-This inventory covers the pipeline after the sediment corridor pass. Keep any removals in a cleanup commit after manual Unity validation. The experimental path remains available for comparison. The recorded seed 123456 major-outlet runs attempted 12 candidates each and accepted zero. The latest replay used terrain hash `4fb741bd…`, recorded in [MajorOutletBreaching.md](MajorOutletBreaching.md).
+This is the pre-cleanup inventory. The major-outlet experiment is retired and its settings are ignored when reading historical startup saves. The recorded seed 123456 experiment attempted 12 candidates and accepted zero. Its development record is in [MajorOutletBreaching.md](MajorOutletBreaching.md).
 
-## Removal candidates
+Run the hydrology regression fixtures with Unity Test Runner in Edit Mode. The test classes in `Assets/Tests/EditMode` cover TIN routing, lake geometry and routing, sediment crossings and corridors, shoreline contact, ordinary valley carving, drainage delivery, and startup config migration. For batch runs use `-batchmode -runTests -testPlatform EditMode -testFilter` with those class names and `-testResults` for NUnit XML. The standalone `Tools/ValidateTinHydrology.py` command in older notes belongs to the historical managed source list. Native Unity is the regression workflow for this branch.
+
+## Original removal candidates
 
 | Code | Cleanup boundary |
 | --- | --- |

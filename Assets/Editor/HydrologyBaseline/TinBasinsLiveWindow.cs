@@ -1,8 +1,6 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
-using System.Security.Cryptography;
 using System.Text;
 using UnityEditor;
 using UnityEngine;
@@ -10,7 +8,6 @@ using UnityEngine.Rendering;
 using Object = UnityEngine.Object;
 
 /// <summary>Editor-only, opt-in observation of the existing generated planet. Never generates terrain.</summary>
-[InitializeOnLoad]
 public sealed class TinBasinsLiveWindow : EditorWindow
 {
     private TinBasinDebugSelection mode;
@@ -26,19 +23,6 @@ public sealed class TinBasinsLiveWindow : EditorWindow
     private GeodesicRiverSystem rivers;
     private PlanetGenerator planet;
     private string status = "Overlay OFF. Build reads the existing generated planet.";
-    private static readonly string Request = "Library/TinBasinsLive.request";
-    static TinBasinsLiveWindow() { EditorApplication.update += PollRequest; }
-    private static void PollRequest()
-    {
-        if (EditorApplication.isCompiling || EditorApplication.isUpdating || !File.Exists(Request)) return;
-        File.Delete(Request);
-        try { GetWindow<TinBasinsLiveWindow>("TIN Basin Debug").Capture(); }
-        catch (Exception e)
-        {
-            Directory.CreateDirectory("Artifacts/TinBasinsLive");
-            File.WriteAllText("Artifacts/TinBasinsLive/request-error.txt", e.ToString()); Debug.LogException(e);
-        }
-    }
     [MenuItem("Tools/Hydrology/TIN Basin Live Inspector")]
     public static void Open() => GetWindow<TinBasinsLiveWindow>("TIN Basin Debug");
     public void ShowLakeComparison(int id) { Load(); Show(topology.Basins.Where(b => b.Id == id)); }
@@ -54,7 +38,6 @@ public sealed class TinBasinsLiveWindow : EditorWindow
         if (GUILayout.Button("Build / Show selected overlay")) Try(() => { Load(); Show(GeodesicTinBasinInspection.Select(topology, rivers.TinDrainage, mode, basinId, topN, networkIndex)); });
         if (GUILayout.Button("Overlay OFF")) Clear();
         if (GUILayout.Button("Log selected basin and matching terminations")) Try(() => { Load(); Debug.Log(GeodesicTinBasinInspection.SelectedReport(topology, rivers.TinDrainage, basinId)); });
-        if (GUILayout.Button("Capture live acceptance set A–F")) Try(Capture);
         EditorGUILayout.Space();
         if (GUILayout.Button("Load ranked inland river networks")) Try(Load);
         if (rankedNetworks.Length > 0)
@@ -212,87 +195,5 @@ public sealed class TinBasinsLiveWindow : EditorWindow
         overlay.AddComponent<MeshFilter>().sharedMesh = mesh;
         var renderer = overlay.AddComponent<MeshRenderer>(); renderer.sharedMaterial = material; renderer.shadowCastingMode = ShadowCastingMode.Off; renderer.receiveShadows = false;
         SceneView.RepaintAll();
-    }
-
-    private string Fingerprint()
-    {
-        using (var stream = new MemoryStream())
-        using (var writer = new BinaryWriter(stream))
-        {
-            var tin = rivers.TinDrainage;
-            writer.Write(EditorJsonUtility.ToJson(planet)); writer.Write(EditorJsonUtility.ToJson(rivers));
-            foreach (float x in tin.VisibleHeight) writer.Write(x); foreach (float x in tin.HydrologyHeight) writer.Write(x);
-            foreach (int x in tin.TriangleReceiver) writer.Write(x); foreach (double x in tin.AccumulatedRunoff) writer.Write(x); foreach (double x in tin.DrainageArea) writer.Write(x);
-            void V(Vector3 v) { writer.Write(v.x); writer.Write(v.y); writer.Write(v.z); }
-            for (int t = 0; t < tin.TriangleCount; t++)
-            { writer.Write(tin.IsOcean(tin.Centroid(t))); for (int k = 0; k < 3; k++) writer.Write(tin.IsOcean(new TinPoint(t, k == 0 ? 1 : 0, k == 1 ? 1 : 0, k == 2 ? 1 : 0))); }
-            writer.Write(tin.Diagnostics.Sources); writer.Write(tin.Networks.Count);
-            foreach (var n in tin.Networks)
-            {
-                writer.Write(n.SourceTriangle); writer.Write(n.JunctionNetwork); writer.Write((int)n.Termination); writer.Write(n.Length);
-                foreach (var p in n.Samples) { writer.Write(p.Triangle); writer.Write(p.A); writer.Write(p.B); writer.Write(p.C); }
-                foreach (var p in n.Centreline) V(p);
-            }
-            foreach (var filter in planet.GetComponentsInChildren<MeshFilter>(true).Where(f => overlay == null || f.gameObject != overlay).OrderBy(f => f.GetInstanceID()))
-            {
-                var m = filter.sharedMesh; if (m == null || !m.isReadable) continue;
-                writer.Write(filter.GetInstanceID()); foreach (var v in m.vertices) V(v);
-                foreach (var color in m.colors) { writer.Write(color.r); writer.Write(color.g); writer.Write(color.b); writer.Write(color.a); }
-                for (int sub = 0; sub < m.subMeshCount; sub++)
-                { writer.Write((int)m.GetTopology(sub)); foreach (int i in m.GetIndices(sub)) writer.Write(i); }
-            }
-            writer.Flush(); using (var sha = SHA256.Create()) return BitConverter.ToString(sha.ComputeHash(stream.ToArray()));
-        }
-    }
-
-    public void Capture()
-    {
-        Clear(); Load();
-        if (planet.randomSeed != 123456 || planet.GeodesicTopology.SubdivisionLevel != 6 || planet.geodesicRenderSubdivisionLevel != 7 ||
-            planet.hydrologyTerrainMode != HydrologyTerrainMode.Visible || rivers.riverFlowThreshold != 2 || rivers.LakeMeshVertexCount != 0)
-            throw new InvalidOperationException($"Live settings mismatch: seed={planet.randomSeed} sim={planet.GeodesicTopology.SubdivisionLevel} render={planet.geodesicRenderSubdivisionLevel} input={planet.hydrologyTerrainMode} threshold={rivers.riverFlowThreshold} lakeSetting={planet.generateHydrologicalLakes} lakeMeshVertices={rivers.LakeMeshVertexCount}. Capture refused; no settings changed.");
-        if (Camera.main == null) throw new InvalidOperationException("Live main camera required.");
-        string directory = Path.GetFullPath("Artifacts/TinBasinsLive/" + DateTime.Now.ToString("yyyyMMdd-HHmmss")); Directory.CreateDirectory(directory);
-        File.WriteAllText(Path.Combine(directory, "planet-settings.json"), EditorJsonUtility.ToJson(planet, true));
-        File.WriteAllText(Path.Combine(directory, "river-settings.json"), EditorJsonUtility.ToJson(rivers, true));
-        string before = Fingerprint(); var report = new StringBuilder(GeodesicTinBasinInspection.Report(topology, rivers.TinDrainage));
-        report.AppendLine($"seed={planet.randomSeed} sim={planet.GeodesicTopology.SubdivisionLevel} render={planet.geodesicRenderSubdivisionLevel} input={planet.hydrologyTerrainMode} threshold={rivers.riverFlowThreshold} lakeSetting={planet.generateHydrologicalLakes} lakeMeshVertices={rivers.LakeMeshVertexCount} minAreaFraction={planet.minimumLakeBasinAreaFraction:R} minDepth={planet.minimumLakeDepth:R}");
-        var cameraObject = new GameObject("TIN debug capture camera") { hideFlags = HideFlags.HideAndDontSave };
-        var camera = cameraObject.AddComponent<Camera>(); camera.CopyFrom(Camera.main); camera.enabled = false;
-        camera.transform.SetPositionAndRotation(Camera.main.transform.position, Camera.main.transform.rotation);
-        void Image(string name) => RiverUphillDebugCapture.Image(camera, Path.Combine(directory, name + ".png"));
-        void Focus(TinBasinDescriptor b)
-        {
-            Vector3 floor = planet.transform.TransformPoint(Surface(b.Floor));
-            Vector3 normal = (floor - planet.transform.position).normalized;
-            float span = Mathf.Max(planet.BasePlanetRadius * .02f, Mathf.Sqrt((float)b.Area) * 1.4f);
-            camera.transform.position = floor + normal * span * 2f; camera.transform.LookAt(floor, Vector3.Cross(normal, Vector3.right).normalized);
-            camera.nearClipPlane = .001f;
-        }
-        try
-        {
-            Image("A-normal");
-            foreach (var item in new[] { (TinBasinDebugSelection.Qualifying, "B-qualifying"), (TinBasinDebugSelection.Largest, "C-largest"), (TinBasinDebugSelection.Deepest, "D-deepest") })
-            {
-                var selected = GeodesicTinBasinInspection.Select(topology, rivers.TinDrainage, item.Item1, basinId, 10, networkIndex);
-                Show(selected); Image(item.Item2);
-                foreach (var b in selected.Take(10)) { Focus(b); Image(item.Item2 + "-basin-" + b.Id); report.AppendLine(GeodesicTinBasinInspection.GeometryChecks(rivers.TinDrainage, b)); }
-                camera.transform.SetPositionAndRotation(Camera.main.transform.position, Camera.main.transform.rotation);
-            }
-            var chosen = topology.Basins.FirstOrDefault(b => b.Id == basinId) ?? topology.Basins.OrderByDescending(b => b.Area).FirstOrDefault();
-            if (chosen != null) { Show(new[] { chosen }); Focus(chosen); Image("E-selected-" + chosen.Id); report.AppendLine(GeodesicTinBasinInspection.SelectedReport(topology, rivers.TinDrainage, chosen.Id)); }
-            for (int i = 0; i < rivers.TinDrainage.Networks.Count; i++)
-            {
-                var selected = GeodesicTinBasinInspection.Select(topology, rivers.TinDrainage, TinBasinDebugSelection.ClosedTermination, 0, 1, i);
-                if (selected.Length == 0) continue;
-                Show(selected, rivers.TinDrainage.Networks[i].Samples.Last()); Focus(selected[0]); Image("F-closed-termination-network-" + i); report.AppendLine(GeodesicTinBasinInspection.SelectedReport(topology, rivers.TinDrainage, selected[0].Id)); break;
-            }
-            Clear(); string after = Fingerprint(); report.AppendLine("stateBefore=" + before).AppendLine("stateAfter=" + after).AppendLine("ExactObservedStateUnchanged=" + (before == after));
-            report.AppendLine("Screenshots require visual inspection; topology debug is not water. No settings were changed.");
-            File.WriteAllText(Path.Combine(directory, "report.txt"), report.ToString());
-            if (before != after) throw new InvalidOperationException("Observed terrain/hydrology/river/settings state changed during capture.");
-            Debug.Log(report.ToString()); status = "Captured: " + directory;
-        }
-        finally { Clear(); DestroyImmediate(cameraObject); }
     }
 }

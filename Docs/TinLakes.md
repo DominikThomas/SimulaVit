@@ -18,7 +18,7 @@ The existing **Hydrological lakes** setting controls the new `Geodesic TIN Lakes
 
 `GeodesicRiverSystem.RefreshTinLakeVisuals()` rebuilds only lake objects and has its own context action. Initialization invokes it after existing river generation. The normal river refresh also refreshes water afterward. The lake-only refresh never extracts networks, modifies receivers, accumulates runoff, clips river paths, or creates outlets. Disable/destroy/reinitialize releases the lake mesh, object and material. Shader bias is the only visual offset.
 
-The historical `HydrologicalLakesPausedForBaselineValidation` flag still applies only to historical graph-dependent code. TIN diagnostic text now says `lakeRouting=OFF`, independently of the water-rendering setting.
+This static-surface milestone preceded complete TIN lake routing. The current generation path routes all hydrological lakes before applying the visual size filter.
 
 ## Live capture
 

@@ -1,6 +1,8 @@
 # Experimental major river outlets
 
-In New Game, open **Advanced → Terrain / Hydrology** and enable **Termination valley carving**. **Enable major-outlet breaching (experimental)** starts off. It requires Visible terrain and zero TIN filtering. The extra pass uses the completed terrain after infill and ordinary carving, with the same retained ocean mask.
+This is a historical record of the retired major-outlet experiment. The active outlet planner uses sediment corridors and verified shoreline handoffs.
+
+The experiment was an opt-in pass under **Advanced → Terrain / Hydrology**. It required **Termination valley carving**, Visible terrain and zero TIN filtering. It used the completed terrain after infill and ordinary carving with the retained ocean mask from those passes.
 
 The defaults are a maximum cut of 0.01 planet units, a combined excavation volume of 0.000002 times the cubed base radius, and a maximum new channel length of 20 degrees along the surface. The existing minimum carving runoff and carve width also apply. The depth limit is measured from the post-carving surface. At most 12 closed catchments with extracted river networks are attempted in descending independent runoff order.
 
