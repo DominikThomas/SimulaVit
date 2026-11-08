@@ -26,7 +26,7 @@ public sealed class GeodesicTinLakeSedimentTests
         Assert.That(lake.Direction(path.Last()), Is.EqualTo(end));
         var vertices = new List<Vector3>(); var indices = new List<int>();
         GeodesicTinLakeCrossings.AddRibbon(new GeodesicTinLakeCrossings.Crossing { Bed = lake, Path = path },
-            .05f, .0003f, Color.blue, false, vertices, indices, new List<Color>());
+            .025f, .05f, .0003f, Color.blue, false, vertices, indices, new List<Color>());
         Assert.That(indices.Count, Is.GreaterThan(0));
         Assert.That(vertices.Max(v => Math.Abs(v.z - (lake.Level + .0003f))), Is.LessThan(1e-6f));
         Assert.That(vertices.Min(v => (v - (start + Vector3.forward * (lake.Level + .0003f))).magnitude), Is.LessThan(1e-6f), "inlet cap");
