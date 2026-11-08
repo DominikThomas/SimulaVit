@@ -151,7 +151,7 @@ public static class LowFrequencyHydrologyCapture
         {
             if (!vertices.SequenceEqual(mesh.vertices) || !indices.SequenceEqual(mesh.triangles) || sea != planet.GeodesicSeaLevelRadius
                 || !mask.SequenceEqual(Enumerable.Range(0, planet.GeodesicTopology.CellCount).Select(planet.IsGeodesicCellOcean))
-                || rivers.Lakes != null || !rivers.HydrologicalLakesPausedForBaselineValidation)
+                || rivers.Lakes != null)
                 throw new InvalidOperationException("Visible terrain, ocean, sea level or paused lakes changed.");
         }
     }

@@ -39,7 +39,7 @@ public sealed class GeodesicLakeIntegrationTests
     }
 
     [Test]
-    public void TinRenderDrainagePausesSavedLakesWithoutChangingTerrain()
+    public void TinRenderDrainageUsesActiveTopologyWithoutChangingTerrain()
     {
         var obj = new GameObject("Lake integration fixture"); obj.SetActive(false);
         Mesh surface = null;
@@ -64,10 +64,10 @@ public sealed class GeodesicLakeIntegrationTests
             Assert.That(rivers.Drainage, Is.Null);
             Assert.That(rivers.TinDrainage.TriangleCount, Is.EqualTo(geometry.TriangleCount));
             Assert.That(rivers.drawRawTrianglePaths, Is.False);
-            Assert.That(rivers.HydrologicalLakesPausedForBaselineValidation, Is.True);
-            Assert.That(planet.generateHydrologicalLakes, Is.True, "Preserve the saved preference during the temporary validation gate.");
+            Assert.That(planet.generateHydrologicalLakes, Is.True, "Preserve the saved lake generation preference.");
             Assert.That(rivers.Lakes, Is.Null);
             Assert.That(rivers.LakeGeometry, Is.Null);
+            Assert.That(rivers.TinLakeBasins, Is.Not.Null);
             Assert.That(obj.transform.Find("Geodesic Lakes"), Is.Null);
             Assert.That(rivers.Mouths.All(m => m.OceanCell >= 0 && planet.IsGeodesicCellOcean(m.OceanCell)), Is.True);
             CollectionAssert.AreEqual(original, surface.vertices);

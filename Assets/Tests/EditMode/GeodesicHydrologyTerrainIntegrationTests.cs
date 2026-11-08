@@ -78,7 +78,7 @@ public sealed class GeodesicHydrologyTerrainIntegrationTests
                 CollectionAssert.AreEqual(mask, Enumerable.Range(0, topology.CellCount).Select(planet.IsGeodesicCellOcean));
                 CollectionAssert.AreEqual(ocean, Enumerable.Range(0, rivers.TinDrainage.TriangleCount).Select(t => rivers.TinDrainage.IsOcean(rivers.TinDrainage.Centroid(t))));
                 Assert.That(planet.GeodesicSeaLevelRadius, Is.EqualTo(sea));
-                Assert.That(rivers.Lakes, Is.Null); Assert.That(rivers.HydrologicalLakesPausedForBaselineValidation, Is.True);
+                Assert.That(rivers.Lakes, Is.Null); Assert.That(rivers.UsesDedicatedRenderHydrology, Is.True);
                 Assert.That(planet.generateHydrologicalLakes, Is.True);
                 if (enabled) Assert.That(rivers.TinDrainage.HydrologyHeight.SequenceEqual(heights), Is.False);
                 else
