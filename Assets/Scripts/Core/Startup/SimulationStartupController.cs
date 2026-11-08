@@ -34,7 +34,7 @@ public class SimulationStartupController : MonoBehaviour
     public const float GeodesicVentPhysicalMaxPerSecond = 1000f;
     private const int InitialSpawnMin = 0;
     private const int InitialSpawnMax = 10000;
-    private const int SavedStartupConfigVersion = 8;
+    private const int SavedStartupConfigVersion = 22;
     public const float NormalAtmospherePressureMaxBar = 5f;
     public const float DenseAtmospherePressureMaxBar = 600f;
     public const float DefaultApproximateThermalIntervalSeconds = 2f;
@@ -88,6 +88,7 @@ public class SimulationStartupController : MonoBehaviour
     private enum StartupUiState { MainMenu, ConfigScreen, SavePicker }
 
     private Vector2 setupGuiScrollPosition;
+    private readonly Dictionary<string, (float value, string text)> riverThresholdEdits = new();
     private Vector2 savePickerScrollPosition;
     private StartupUiState startupUiState;
     private IReadOnlyList<SimulationSaveLoadService.SaveFileInfo> cachedSaveFiles = Array.Empty<SimulationSaveLoadService.SaveFileInfo>();
@@ -95,6 +96,11 @@ public class SimulationStartupController : MonoBehaviour
     private int resumeStepsPerFrame = 1;
     private bool startupComplete;
     private bool applyingConfig;
+    private bool generationFailed;
+    private Coroutine startupRoutine;
+    private IEnumerator<PlanetGenerationProgress> startupStages;
+    private bool startupSunSuspended;
+    private bool startupSunWasEnabled;
     private GUIStyle titleStyle;
     private GUIStyle labelStyle;
     private GUIStyle boxStyle;
@@ -106,6 +112,7 @@ public class SimulationStartupController : MonoBehaviour
     private bool returningToMainMenu;
     private bool deferredStartupPrepared;
     private bool advancedSettingsExpanded;
+    private bool debugSettingsExpanded;
 
     public static bool IsSetupActive { get; private set; }
     public static bool IsStartupBlockingHud => IsSetupActive;
@@ -138,6 +145,7 @@ public class SimulationStartupController : MonoBehaviour
 
     private void OnDisable()
     {
+        CancelStartupLoading();
         RestoreWorldRoots();
         RestoreRuntimeHud();
 
@@ -157,6 +165,8 @@ public class SimulationStartupController : MonoBehaviour
         simulationPipeline ??= FindFirstObjectByType<ReplicatorSimulationPipeline>();
         saveLoadService ??= FindFirstObjectByType<SimulationSaveLoadService>();
         loadingOverlay ??= FindFirstObjectByType<StartupFadeOverlay>();
+        if (loadingOverlay == null && setupCurtainOrOverlay == null)
+            loadingOverlay = gameObject.AddComponent<StartupFadeOverlay>();
         setupCurtainOrOverlay ??= loadingOverlay;
         loadingOverlay ??= setupCurtainOrOverlay;
     }
@@ -287,6 +297,7 @@ public class SimulationStartupController : MonoBehaviour
 
     public void ExitToMainMenu()
     {
+        CancelStartupLoading();
         ResolveReferences();
         returningToMainMenu = true;
         startupComplete = false;
@@ -451,6 +462,24 @@ public class SimulationStartupController : MonoBehaviour
     {
         if (source == null || destination == null) return;
         destination.geodesicSubdivisionLevel = source.geodesicSubdivisionLevel;
+        destination.excludeSmallDisconnectedSeas = source.excludeSmallDisconnectedSeas;
+        destination.minimumOceanComponentAreaFraction = source.minimumOceanComponentAreaFraction;
+        destination.hydrologyTerrainMode = source.hydrologyTerrainMode;
+        destination.infillExcludedInlandBasins = source.infillExcludedInlandBasins;
+        destination.basinInfillLimits = source.basinInfillLimits;
+        destination.inlandElevationMagnitude = source.inlandElevationMagnitude;
+        destination.enableTerminationValleyCarving = source.enableTerminationValleyCarving;
+        destination.valleyCarvingPasses = Mathf.Clamp(source.valleyCarvingPasses, 1, 5);
+        destination.maximumValleyCarveDepth = source.maximumValleyCarveDepth;
+        destination.minimumValleyCarveRunoff = source.minimumValleyCarveRunoff;
+        destination.valleyCarveWidth = source.valleyCarveWidth;
+        destination.showValleyCarvingDebug = source.showValleyCarvingDebug;
+        destination.riverFlowThreshold = source.riverFlowThreshold;
+        destination.majorRiverThreshold = source.majorRiverThreshold;
+        destination.colourRiversByUltimateDestination = source.colourRiversByUltimateDestination;
+        destination.generateHydrologicalLakes = source.generateHydrologicalLakes;
+        destination.minimumLakeBasinAreaFraction = source.minimumLakeBasinAreaFraction;
+        destination.minimumLakeDepth = source.minimumLakeDepth;
         destination.baseTempKelvin = source.baseTempKelvin;
         destination.terrestrialVentFraction = source.terrestrialVentFraction;
         destination.allowDenseAtmosphere = source.allowDenseAtmosphere;
@@ -464,29 +493,89 @@ public class SimulationStartupController : MonoBehaviour
 
     public void StartSimulation()
     {
+        if (applyingConfig || generationFailed) return;
         currentConfig.startPaused = false;
-        StartCoroutine(ApplyAndStartRoutine(false));
+        startupRoutine = StartCoroutine(ApplyAndStartRoutine(false));
     }
 
     public void StartSimulationPaused()
     {
+        if (applyingConfig || generationFailed) return;
         currentConfig.startPaused = true;
-        StartCoroutine(ApplyAndStartRoutine(true));
+        startupRoutine = StartCoroutine(ApplyAndStartRoutine(true));
     }
 
     private IEnumerator ApplyAndStartRoutine(bool keepPaused)
     {
-        if (applyingConfig)
-        {
-            yield break;
-        }
-
+        if (applyingConfig) yield break;
         applyingConfig = true;
+        generationFailed = false;
+        startupComplete = false;
+        replicatorManager?.SetSimulationTiming(0);
+        simulationPipeline?.SetSimulationStepsPerFrame(0);
+        if (sunSkyRotator != null)
+        {
+            startupSunWasEnabled = sunSkyRotator.enabled;
+            startupSunSuspended = true;
+            sunSkyRotator.enabled = false;
+        }
         ShowSetupScreen(false);
-        loadingOverlay?.ShowLoading("Generating planet...");
+        loadingOverlay.ShowLoading();
 
+        // StartSimulation may run from OnGUI, after this frame's coroutine phase.
+        // Two null yields guarantee a complete render opportunity before the first work.
+        yield return null;
+        yield return null;
+
+        startupStages = ApplyStartupStages(keepPaused).GetEnumerator();
+        try
+        {
+            while (true)
+            {
+                bool hasNext;
+                try
+                {
+                    hasNext = startupStages.MoveNext();
+                    if (hasNext) loadingOverlay.ShowGenerationProgress(startupStages.Current);
+                }
+                catch (Exception exception)
+                {
+                    ShowGenerationFailure(exception);
+                    yield break;
+                }
+                if (!hasNext) break;
+                // Report first, then repaint, then execute the next synchronous stage.
+                yield return null;
+            }
+        }
+        finally
+        {
+            startupStages?.Dispose();
+            startupStages = null;
+            startupRoutine = null;
+        }
+    }
+
+    private void CompleteGeneratedStartup(bool keepPaused)
+    {
+        int targetSteps = keepPaused ? 0 : Mathf.Max(1, resumeStepsPerFrame);
+        replicatorManager?.SetSimulationTiming(targetSteps);
+        simulationPipeline?.SetSimulationStepsPerFrame(targetSteps);
+        FindFirstObjectByType<SimulationSpeedController>()?.RefreshFromSimulationTiming();
+        startupComplete = true;
+        returningToMainMenu = false;
+        applyingConfig = false;
+        RestoreStartupSun();
+        IsSetupActive = false;
+        setupCurtainOrOverlay?.HideImmediate();
+        loadingOverlay.HideImmediate();
+        Debug.Log("[StartupLifecycle] Simulation started.", this);
+    }
+
+    private IEnumerable<PlanetGenerationProgress> ApplyStartupStages(bool keepPaused)
+    {
         ClampLoadedConfig(currentConfig);
-        ApplyConfig(currentConfig);
+        foreach (var progress in ApplyConfigStages(currentConfig)) yield return progress;
 
         if (saveStartupConfigOnStart)
         {
@@ -498,42 +587,77 @@ public class SimulationStartupController : MonoBehaviour
             LogStartupConfigApplied(currentConfig, keepPaused);
         }
 
+        yield return new PlanetGenerationProgress(PlanetGenerationStage.PreparingPrimordialWorld);
         if (currentConfig.gridType == PlanetGridType.LegacyCubeSphere && replicatorManager != null)
         {
             if (replicatorManager.InitializeForSimulation(false))
             {
                 replicatorManager.SpawnInitialPopulation();
             }
+            else throw new InvalidOperationException("Legacy biology initialization failed.");
         }
         else if (currentConfig.gridType == PlanetGridType.GeodesicIcosphere)
         {
             if (replicatorManager != null && !replicatorManager.InitializeForSimulation(true))
             {
-                Debug.LogError("[StartupLifecycle] Geodesic biology initialization failed.", this);
+                throw new InvalidOperationException("Geodesic biology initialization failed.");
             }
         }
 
-        // Simulation timing remains the shared authoritative clock for either biology mode.
-        int targetSteps = keepPaused ? 0 : Mathf.Max(1, resumeStepsPerFrame);
-        replicatorManager?.SetSimulationTiming(targetSteps);
-        simulationPipeline?.SetSimulationStepsPerFrame(targetSteps);
-        FindFirstObjectByType<SimulationSpeedController>()?.RefreshFromSimulationTiming();
-
-        startupComplete = true;
-        returningToMainMenu = false;
-        applyingConfig = false;
+        yield return new PlanetGenerationProgress(PlanetGenerationStage.AlmostReady);
+        // Restore hidden roots under the opaque screen, then let their OnEnable/Start
+        // and canvas layout settle for a rendered frame before revealing the simulation.
         RestoreWorldRoots();
         RestoreRuntimeHud();
-        IsSetupActive = false;
-        loadingOverlay?.FadeOut(0.5f);
-        Debug.Log("[StartupLifecycle] Simulation started.", this);
+        yield return new PlanetGenerationProgress(PlanetGenerationStage.AlmostReady);
+        CompleteGeneratedStartup(keepPaused);
     }
 
-    private void ApplyConfig(SimulationStartupConfig config)
+    private void ShowGenerationFailure(Exception exception)
+    {
+        // Keep the original exception and stack; the screen deliberately shows concise copy.
+        Debug.LogException(exception, this);
+        startupComplete = false;
+        generationFailed = true;
+        applyingConfig = false;
+        IsSetupActive = true;
+        replicatorManager?.SetSimulationTiming(0);
+        simulationPipeline?.SetSimulationStepsPerFrame(0);
+        HideRuntimeHudForSetup();
+        loadingOverlay.ShowFailure(ReturnToConfigurationAfterFailure);
+    }
+
+    private void RestoreStartupSun()
+    {
+        if (!startupSunSuspended) return;
+        if (sunSkyRotator != null) sunSkyRotator.enabled = startupSunWasEnabled;
+        startupSunSuspended = false;
+    }
+
+    private void CancelStartupLoading()
+    {
+        if (startupRoutine != null) StopCoroutine(startupRoutine);
+        startupRoutine = null;
+        startupStages?.Dispose();
+        startupStages = null;
+        applyingConfig = false;
+        generationFailed = false;
+        RestoreStartupSun();
+        loadingOverlay?.HideImmediate();
+    }
+
+    private void ReturnToConfigurationAfterFailure()
+    {
+        // Reuse the normal menu teardown; never dispose shared terrain caches or assets.
+        ExitToMainMenu();
+        ShowConfigScreenFromMainMenu();
+    }
+
+    private IEnumerable<PlanetGenerationProgress> ApplyConfigStages(SimulationStartupConfig config)
     {
         if (config == null)
         {
-            return;
+            yield break;
         }
 
         bool requestedRandomSeed = config.useRandomSeed;
@@ -565,14 +689,46 @@ public class SimulationStartupController : MonoBehaviour
                 atmosphere?.Configure(config.atmosphereInventoryPerBar, config.atmosphericN2Bar, config.atmosphericCO2Bar, config.atmosphericO2Bar, config.atmosphericCH4Bar, config.atmosphericH2Bar, config.atmosphericH2SBar);
                 planetGenerator.GetComponent<GeodesicAirSeaGasExchange>()?.SetCommonHalfLife(config.airSeaExchangeHalfLifeSeconds);
             }
-            planetGenerator.InitializeAuthoritativePlanet("New Game startup selection");
+            planetGenerator.excludeSmallDisconnectedSeas = config.excludeSmallDisconnectedSeas;
+            planetGenerator.minimumOceanComponentAreaFraction = GeodesicOceanConnectivity.NormalizeThreshold(config.minimumOceanComponentAreaFraction);
+            planetGenerator.hydrologyTerrainMode = config.hydrologyTerrainMode;
+            planetGenerator.infillExcludedInlandBasins = config.infillExcludedInlandBasins;
+            planetGenerator.basinInfillLimits = config.basinInfillLimits.Normalized();
+            planetGenerator.inlandElevationMagnitude = GeodesicInlandUplift.NormalizeMagnitude(config.inlandElevationMagnitude);
+            planetGenerator.enableTerminationValleyCarving = config.enableTerminationValleyCarving;
+            planetGenerator.valleyCarvingPasses = Mathf.Clamp(config.valleyCarvingPasses, 1, 5);
+            planetGenerator.maximumValleyCarveDepth = config.maximumValleyCarveDepth;
+            planetGenerator.minimumValleyCarveRunoff = config.minimumValleyCarveRunoff;
+            planetGenerator.valleyCarveWidth = config.valleyCarveWidth;
+            planetGenerator.showValleyCarvingDebug = config.showValleyCarvingDebug;
+            planetGenerator.generateHydrologicalLakes = config.generateHydrologicalLakes;
+            planetGenerator.minimumLakeBasinAreaFraction = GeodesicLakeBasins.NormalizeArea(config.minimumLakeBasinAreaFraction);
+            planetGenerator.minimumLakeDepth = GeodesicLakeBasins.NormalizeDepth(config.minimumLakeDepth);
+            var riverDebug = planetGenerator.GetComponent<GeodesicRiverSystem>();
+            if (riverDebug == null && config.gridType == PlanetGridType.GeodesicIcosphere)
+                riverDebug = planetGenerator.gameObject.AddComponent<GeodesicRiverSystem>();
+            if (riverDebug != null)
+            {
+                riverDebug.riverFlowThreshold = NormalizeRiverThreshold(config.riverFlowThreshold, GeodesicRiverSystem.DefaultRiverFlowThreshold);
+                riverDebug.majorRiverThreshold = NormalizeRiverThreshold(config.majorRiverThreshold, GeodesicRiverSystem.DefaultMajorRiverThreshold);
+                riverDebug.showRejectedUphillRiverSegments = config.showRejectedUphillRiverSegments;
+                riverDebug.colourRenderedRiversByVisibleTerrainGrade = config.colourRenderedRiversByVisibleTerrainGrade;
+                riverDebug.showRiverTerminationReasons = config.showRiverTerminationReasons;
+                riverDebug.SetRiverDestinationColours(config.colourRiversByUltimateDestination);
+            }
+            foreach (var progress in planetGenerator.InitializeAuthoritativePlanetStages("New Game startup selection"))
+                yield return progress;
         }
+
+        if (planetGenerator == null || !planetGenerator.IsPlanetInitialized)
+            throw new InvalidOperationException("Planet initialization did not complete.");
 
         if (requestedRandomSeed)
         {
             config.useRandomSeed = false;
         }
 
+        yield return new PlanetGenerationProgress(PlanetGenerationStage.PreparingPrimordialWorld);
         if (config.gridType == PlanetGridType.LegacyCubeSphere && planetResourceMap != null)
         {
             planetResourceMap.baseTempKelvin = config.baseTempKelvin;
@@ -751,11 +907,28 @@ public class SimulationStartupController : MonoBehaviour
         config.ventClustering = Mathf.Clamp01(config.ventClustering);
         config.terrestrialVentFraction = Mathf.Clamp01(config.terrestrialVentFraction);
         config.initialSpawnCount = Mathf.Clamp(config.initialSpawnCount, InitialSpawnMin, InitialSpawnMax);
+        config.minimumOceanComponentAreaFraction = GeodesicOceanConnectivity.NormalizeThreshold(config.minimumOceanComponentAreaFraction);
+        config.minimumLakeBasinAreaFraction = GeodesicLakeBasins.NormalizeArea(config.minimumLakeBasinAreaFraction);
+        config.minimumLakeDepth = GeodesicLakeBasins.NormalizeDepth(config.minimumLakeDepth);
+        config.riverFlowThreshold = NormalizeRiverThreshold(config.riverFlowThreshold, GeodesicRiverSystem.DefaultRiverFlowThreshold);
+        config.basinInfillLimits = config.basinInfillLimits.Normalized();
+        config.inlandElevationMagnitude = GeodesicInlandUplift.NormalizeMagnitude(config.inlandElevationMagnitude);
+        config.maximumValleyCarveDepth = GeodesicValleyCarving.Normalize(config.maximumValleyCarveDepth, GeodesicValleyCarving.DefaultDepth, 1f);
+        config.valleyCarvingPasses = Mathf.Clamp(config.valleyCarvingPasses, 1, 5);
+        config.minimumValleyCarveRunoff = GeodesicValleyCarving.Normalize(config.minimumValleyCarveRunoff, GeodesicValleyCarving.DefaultRunoff, 1000000f);
+        config.valleyCarveWidth = GeodesicValleyCarving.Normalize(config.valleyCarveWidth, GeodesicValleyCarving.DefaultWidth, 1f);
+        config.majorRiverThreshold = NormalizeRiverThreshold(config.majorRiverThreshold, GeodesicRiverSystem.DefaultMajorRiverThreshold);
         config.cubeSphereResolution = Mathf.Clamp(config.cubeSphereResolution, 3, 240);
         config.geodesicSubdivisionLevel = Mathf.Clamp(config.geodesicSubdivisionLevel, 0, GeodesicGridTopology.MaxSupportedSubdivision);
         config.approximateThermalIntervalSeconds = NormalizeToPreset(config.approximateThermalIntervalSeconds, ApproximateThermalIntervalPresets, DefaultApproximateThermalIntervalSeconds);
         config.geodesicResourceTransportIntervalSeconds = NormalizeToPreset(config.geodesicResourceTransportIntervalSeconds, ResourceTransportIntervalPresets, DefaultResourceTransportIntervalSeconds);
         if (float.IsNaN(config.chemistryTelemetryIntervalSimSeconds) || float.IsInfinity(config.chemistryTelemetryIntervalSimSeconds)) config.chemistryTelemetryIntervalSimSeconds = DefaultChemistryTelemetryIntervalSimSeconds;
+    }
+
+    public static float NormalizeRiverThreshold(float value, float fallback)
+    {
+        return float.IsNaN(value) || float.IsInfinity(value) || value <= 0f
+            ? fallback : Mathf.Max(0.01f, value);
     }
 
     public static float NormalizeToPreset(float value, float[] presets, float fallback)
@@ -866,6 +1039,12 @@ public class SimulationStartupController : MonoBehaviour
         else
             builder.AppendLine($"Legacy Vent Rates H2/H2S/CO2/Fe2: {config.ventH2PerTick:0.####}/{config.ventH2SPerTick:0.####}/{config.ventCO2PerTick:0.####}/{config.ventFe2PerTick:0.####} per legacy tick semantics");
         builder.AppendLine($"Terrestrial Vent Fraction: {config.terrestrialVentFraction:0.###}");
+        builder.AppendLine($"Exclude small inland seas: {config.excludeSmallDisconnectedSeas}; minimum ocean basin area: {config.minimumOceanComponentAreaFraction * 100f:0.###}% of planet surface");
+        builder.AppendLine($"Hydrology terrain mode: {config.hydrologyTerrainMode}");
+        builder.AppendLine($"Infill excluded inland basins: {config.infillExcludedInlandBasins}");
+        builder.AppendLine($"Inland elevation magnitude: {config.inlandElevationMagnitude:G9}");
+        builder.AppendLine($"Termination valley carving: {config.enableTerminationValleyCarving}; passes: {config.valleyCarvingPasses}; maximum cut per pass: {config.maximumValleyCarveDepth:G6}; minimum runoff: {config.minimumValleyCarveRunoff:G6}; width: {config.valleyCarveWidth:G6}; Scene debug: {config.showValleyCarvingDebug}");
+        builder.AppendLine($"Hydrological lakes: {config.generateHydrologicalLakes}; minimum basin area: {config.minimumLakeBasinAreaFraction * 100f:0.####}% of planet; minimum depth: {config.minimumLakeDepth:0.####} planet units");
         builder.AppendLine($"Initial Spawn Count: {config.initialSpawnCount}");
         builder.AppendLine($"Start Paused: {startPaused}");
         builder.AppendLine($"Saved Config Path: {SavedStartupConfigPath}");
@@ -876,6 +1055,19 @@ public class SimulationStartupController : MonoBehaviour
     {
         SimulationStartupConfig authoritativeFallback = fallback ?? new SimulationStartupConfig();
         SavedStartupConfig saved = SavedStartupConfig.FromDefaults(authoritativeFallback);
+        // Missing fields use the historical river defaults even with customized scene defaults.
+        saved.riverFlowThreshold = GeodesicRiverSystem.DefaultRiverFlowThreshold;
+        saved.majorRiverThreshold = GeodesicRiverSystem.DefaultMajorRiverThreshold;
+        saved.colourRiversByUltimateDestination = false;
+        saved.infillExcludedInlandBasins = false;
+        saved.basinInfillLimits = GeodesicBasinInfillLimits.Defaults;
+        saved.inlandElevationMagnitude = 0f;
+        saved.enableTerminationValleyCarving = false;
+        saved.valleyCarvingPasses = 1;
+        saved.showValleyCarvingDebug = false;
+        saved.maximumValleyCarveDepth = GeodesicValleyCarving.DefaultDepth;
+        saved.minimumValleyCarveRunoff = GeodesicValleyCarving.DefaultRunoff;
+        saved.valleyCarveWidth = GeodesicValleyCarving.DefaultWidth;
         if (!string.IsNullOrWhiteSpace(json)) JsonUtility.FromJsonOverwrite(json, saved);
         return saved.ToConfig(authoritativeFallback);
     }
@@ -889,6 +1081,25 @@ public class SimulationStartupController : MonoBehaviour
         public PlanetGridType gridType;
         public int cubeSphereResolution;
         public int geodesicSubdivisionLevel;
+        public bool excludeSmallDisconnectedSeas;
+        public float minimumOceanComponentAreaFraction;
+        public bool showRejectedUphillRiverSegments;
+        public bool colourRenderedRiversByVisibleTerrainGrade, showRiverTerminationReasons;
+        public bool useLowFrequencyTerrainForHydrology; // Schema 13 migration only.
+        public HydrologyTerrainMode hydrologyTerrainMode;
+        public bool infillExcludedInlandBasins;
+        public GeodesicBasinInfillLimits basinInfillLimits;
+        public float inlandElevationMagnitude;
+        public bool enableTerminationValleyCarving, showValleyCarvingDebug;
+        public int valleyCarvingPasses = 1;
+        public float maximumValleyCarveDepth = GeodesicValleyCarving.DefaultDepth;
+        public float minimumValleyCarveRunoff = GeodesicValleyCarving.DefaultRunoff;
+        public float valleyCarveWidth = GeodesicValleyCarving.DefaultWidth;
+        public float riverFlowThreshold = GeodesicRiverSystem.DefaultRiverFlowThreshold;
+        public float majorRiverThreshold = GeodesicRiverSystem.DefaultMajorRiverThreshold;
+        public bool colourRiversByUltimateDestination;
+        public bool generateHydrologicalLakes;
+        public float minimumLakeBasinAreaFraction, minimumLakeDepth;
         public float axisTiltDegrees;
         public float dayLengthSeconds;
         public float yearLengthInDays;
@@ -934,6 +1145,28 @@ public class SimulationStartupController : MonoBehaviour
                 gridType = config.gridType,
                 cubeSphereResolution = config.cubeSphereResolution,
                 geodesicSubdivisionLevel = config.geodesicSubdivisionLevel,
+                excludeSmallDisconnectedSeas = config.excludeSmallDisconnectedSeas,
+                minimumOceanComponentAreaFraction = config.minimumOceanComponentAreaFraction,
+                showRejectedUphillRiverSegments = config.showRejectedUphillRiverSegments,
+                colourRenderedRiversByVisibleTerrainGrade = config.colourRenderedRiversByVisibleTerrainGrade,
+                showRiverTerminationReasons = config.showRiverTerminationReasons,
+                useLowFrequencyTerrainForHydrology = config.useLowFrequencyTerrainForHydrology,
+                hydrologyTerrainMode = config.hydrologyTerrainMode,
+                infillExcludedInlandBasins = config.infillExcludedInlandBasins,
+                basinInfillLimits = config.basinInfillLimits.Normalized(),
+                inlandElevationMagnitude = config.inlandElevationMagnitude,
+                enableTerminationValleyCarving = config.enableTerminationValleyCarving,
+                valleyCarvingPasses = Mathf.Clamp(config.valleyCarvingPasses, 1, 5),
+                showValleyCarvingDebug = config.showValleyCarvingDebug,
+                maximumValleyCarveDepth = config.maximumValleyCarveDepth,
+                minimumValleyCarveRunoff = config.minimumValleyCarveRunoff,
+                valleyCarveWidth = config.valleyCarveWidth,
+                riverFlowThreshold = config.riverFlowThreshold,
+                majorRiverThreshold = config.majorRiverThreshold,
+                colourRiversByUltimateDestination = config.colourRiversByUltimateDestination,
+                generateHydrologicalLakes = config.generateHydrologicalLakes,
+                minimumLakeBasinAreaFraction = config.minimumLakeBasinAreaFraction,
+                minimumLakeDepth = config.minimumLakeDepth,
                 axisTiltDegrees = config.axisTiltDegrees,
                 dayLengthSeconds = config.dayLengthSeconds,
                 yearLengthInDays = config.yearLengthInDays,
@@ -977,6 +1210,31 @@ public class SimulationStartupController : MonoBehaviour
             config.gridType = gridType;
             config.cubeSphereResolution = cubeSphereResolution > 0 ? cubeSphereResolution : config.cubeSphereResolution;
             config.geodesicSubdivisionLevel = geodesicSubdivisionLevel;
+            config.riverFlowThreshold = NormalizeRiverThreshold(version >= 15 ? riverFlowThreshold : GeodesicRiverSystem.DefaultRiverFlowThreshold, GeodesicRiverSystem.DefaultRiverFlowThreshold);
+            config.infillExcludedInlandBasins = version >= 20 && infillExcludedInlandBasins;
+            config.basinInfillLimits = version >= 20 ? basinInfillLimits.Normalized() : GeodesicBasinInfillLimits.Defaults;
+            config.inlandElevationMagnitude = version >= 16 ? GeodesicInlandUplift.NormalizeMagnitude(inlandElevationMagnitude) : 0f;
+            config.enableTerminationValleyCarving = version >= 17 && enableTerminationValleyCarving;
+            config.valleyCarvingPasses = version >= 18 ? Mathf.Clamp(valleyCarvingPasses, 1, 5) : 1;
+            config.showValleyCarvingDebug = version >= 17 && showValleyCarvingDebug;
+            config.maximumValleyCarveDepth = GeodesicValleyCarving.Normalize(version >= 17 ? maximumValleyCarveDepth : GeodesicValleyCarving.DefaultDepth, GeodesicValleyCarving.DefaultDepth, 1f);
+            config.minimumValleyCarveRunoff = GeodesicValleyCarving.Normalize(version >= 17 ? minimumValleyCarveRunoff : GeodesicValleyCarving.DefaultRunoff, GeodesicValleyCarving.DefaultRunoff, 1000000f);
+            config.valleyCarveWidth = GeodesicValleyCarving.Normalize(version >= 17 ? valleyCarveWidth : GeodesicValleyCarving.DefaultWidth, GeodesicValleyCarving.DefaultWidth, 1f);
+            config.majorRiverThreshold = NormalizeRiverThreshold(version >= 15 ? majorRiverThreshold : GeodesicRiverSystem.DefaultMajorRiverThreshold, GeodesicRiverSystem.DefaultMajorRiverThreshold);
+            config.showRejectedUphillRiverSegments = version >= 11 && showRejectedUphillRiverSegments;
+            config.colourRenderedRiversByVisibleTerrainGrade = version >= 12 && colourRenderedRiversByVisibleTerrainGrade;
+            config.showRiverTerminationReasons = version >= 12 && showRiverTerminationReasons;
+            config.colourRiversByUltimateDestination = version >= 22 && colourRiversByUltimateDestination;
+            config.hydrologyTerrainMode = version >= 14 && System.Enum.IsDefined(typeof(HydrologyTerrainMode), hydrologyTerrainMode)
+                ? hydrologyTerrainMode : version == 13 && useLowFrequencyTerrainForHydrology
+                    ? HydrologyTerrainMode.ReducedRidgeAndFineDetail : HydrologyTerrainMode.Visible;
+            config.generateHydrologicalLakes = version >= 10 && generateHydrologicalLakes;
+            config.minimumLakeBasinAreaFraction = GeodesicLakeBasins.NormalizeArea(version >= 10 ? minimumLakeBasinAreaFraction : GeodesicLakeBasins.DefaultMinimumAreaFraction);
+            config.minimumLakeDepth = GeodesicLakeBasins.NormalizeDepth(version >= 10 ? minimumLakeDepth : GeodesicLakeBasins.DefaultMinimumDepth);
+            // Older saved worlds must not silently opt into a changed water mask.
+            config.excludeSmallDisconnectedSeas = version >= 9 && excludeSmallDisconnectedSeas;
+            config.minimumOceanComponentAreaFraction = GeodesicOceanConnectivity.NormalizeThreshold(version >= 9
+                ? minimumOceanComponentAreaFraction : GeodesicOceanConnectivity.DefaultMinimumAreaFraction);
             config.axisTiltDegrees = axisTiltDegrees;
             config.dayLengthSeconds = dayLengthSeconds;
             config.yearLengthInDays = yearLengthInDays;
@@ -1206,7 +1464,7 @@ public class SimulationStartupController : MonoBehaviour
 
     private void OnGUI()
     {
-        if ((startupComplete && !returningToMainMenu) || applyingConfig || !useBuiltInSetupGui)
+        if ((startupComplete && !returningToMainMenu) || applyingConfig || generationFailed || !useBuiltInSetupGui)
         {
             return;
         }
@@ -1265,8 +1523,10 @@ public class SimulationStartupController : MonoBehaviour
         setupGuiScrollPosition = GUILayout.BeginScrollView(setupGuiScrollPosition, GUILayout.Width(width), GUILayout.Height(scrollHeight));
 
         float contentWidth = Mathf.Max(1f, width - 20f);
-        float advancedHeight = advancedSettingsExpanded ? 480f : 0f;
-        float contentHeight = 44f + ((line + gap) * 25f) + advancedHeight + (gap * 2f) + 42f + 30f + 82f;
+        float infillHeight = currentConfig.gridType == PlanetGridType.GeodesicIcosphere
+            ? 98f + (currentConfig.infillExcludedInlandBasins ? (line + gap) * 6f : 0f) : 0f;
+        float advancedHeight = advancedSettingsExpanded ? 1920f + infillHeight + (currentConfig.gridType == PlanetGridType.GeodesicIcosphere ? line + gap + 78f : 0f) : 0f;
+        float contentHeight = 44f + ((line + gap) * 25f) + advancedHeight + (debugSettingsExpanded ? 370f : 40f) + (gap * 2f) + 42f + 30f + 82f;
         Rect contentRect = GUILayoutUtility.GetRect(contentWidth, contentHeight, GUILayout.Width(contentWidth), GUILayout.Height(contentHeight));
         float controlX = contentRect.x;
         float y = contentRect.y;
@@ -1345,6 +1605,79 @@ public class SimulationStartupController : MonoBehaviour
             {
                 DrawInt(new Rect(controlX, y, contentWidth, line), "Geodesic Subdivision Level", ref currentConfig.geodesicSubdivisionLevel, true, 0, GeodesicGridTopology.MaxSupportedSubdivision);
                 y += line + gap;
+                DrawInlandElevationMagnitude(new Rect(controlX, y, contentWidth, line));
+                y += line + gap;
+                GUI.Label(new Rect(controlX, y, contentWidth, 100f), GeodesicInlandUplift.Help, new GUIStyle(labelStyle) { wordWrap = true });
+                y += 106f;
+                GUI.Label(new Rect(controlX, y, contentWidth, line), "Terrain / Hydrology", labelStyle);
+                y += line + gap;
+                DrawRiverThreshold(new Rect(controlX, y, contentWidth, line), "River flow threshold", ref currentConfig.riverFlowThreshold, GeodesicRiverSystem.DefaultRiverFlowThreshold);
+                y += line + gap;
+                GUI.Label(new Rect(controlX, y, contentWidth, 88f), "Minimum accumulated runoff required for a visible river.\nLower values create more small streams; higher values retain only larger drainage networks.\nExpressed in mean-cell-area equivalents at unit runoff.", new GUIStyle(labelStyle) { wordWrap = true });
+                y += 94f;
+                DrawRiverThreshold(new Rect(controlX, y, contentWidth, line), "Major river threshold", ref currentConfig.majorRiverThreshold, GeodesicRiverSystem.DefaultMajorRiverThreshold);
+                y += line + gap;
+                GUI.Label(new Rect(controlX, y, contentWidth, 44f), "Accumulated runoff threshold used to classify/scale major rivers.", new GUIStyle(labelStyle) { wordWrap = true });
+                y += 50f;
+                DrawBool(new Rect(controlX, y, contentWidth, line), "Colour rivers by ultimate destination (debug)", ref currentConfig.colourRiversByUltimateDestination);
+                y += line + gap;
+                GUI.Label(new Rect(controlX, y, contentWidth, 72f),
+                    "Shows where each river ultimately drains.\nBlue = ocean • Red = closed inland basin\nPurple = terminal lake • Orange = unresolved",
+                    new GUIStyle(labelStyle) { wordWrap = true });
+                y += 78f;
+                GUI.Label(new Rect(controlX, y, contentWidth, line), "Hydrology terrain input", labelStyle);
+                y += line + gap;
+                currentConfig.hydrologyTerrainMode = (HydrologyTerrainMode)GUI.SelectionGrid(
+                    new Rect(controlX, y, contentWidth, line * 3f), (int)currentConfig.hydrologyTerrainMode,
+                    new[] { "Visible terrain", "Fine detail removed (full ridges)", "Reduced ridge + fine detail (failed reference)" }, 1);
+                y += line * 3f + gap;
+                currentConfig.enableTerminationValleyCarving = GUI.Toggle(new Rect(controlX, y, contentWidth, line), currentConfig.enableTerminationValleyCarving, "Enable termination valley carving");
+                y += line + gap;
+                DrawInt(new Rect(controlX, y, contentWidth, line), "Valley carving passes", ref currentConfig.valleyCarvingPasses, true, 1, 5);
+                y += line + gap;
+                DrawValleyParameter(new Rect(controlX, y, contentWidth, line), "Maximum carve depth (planet units)", ref currentConfig.maximumValleyCarveDepth, GeodesicValleyCarving.DefaultDepth, 1f);
+                y += line + gap;
+                DrawValleyParameter(new Rect(controlX, y, contentWidth, line), "Minimum river runoff for carving", ref currentConfig.minimumValleyCarveRunoff, GeodesicValleyCarving.DefaultRunoff, 1000000f);
+                y += line + gap;
+                DrawValleyParameter(new Rect(controlX, y, contentWidth, line), "Carve width (planet units)", ref currentConfig.valleyCarveWidth, GeodesicValleyCarving.DefaultWidth, 1f);
+                y += line + gap;
+                currentConfig.showValleyCarvingDebug = GUI.Toggle(new Rect(controlX, y, contentWidth, line), currentConfig.showValleyCarvingDebug, "Show valley carving debug (Scene gizmos)");
+                y += line + gap;
+                GUI.Label(new Rect(controlX, y, contentWidth, 150f), GeodesicValleyCarving.Help, new GUIStyle(labelStyle) { wordWrap = true });
+                y += 156f;
+                DrawBool(new Rect(controlX, y, contentWidth, line), "Exclude small inland seas", ref currentConfig.excludeSmallDisconnectedSeas);
+                y += line + gap;
+                bool oceanControlEnabled = GUI.enabled;
+                GUI.enabled = oceanControlEnabled && currentConfig.excludeSmallDisconnectedSeas;
+                float basinPercent = currentConfig.minimumOceanComponentAreaFraction * 100f;
+                DrawFloat(new Rect(controlX, y, contentWidth, line), "Minimum ocean basin area (% of planet)", ref basinPercent, 0f, GeodesicOceanConnectivity.MaximumAreaFraction * 100f, labelAbove: true);
+                currentConfig.minimumOceanComponentAreaFraction = GeodesicOceanConnectivity.NormalizeThreshold(basinPercent / 100f);
+                GUI.enabled = oceanControlEnabled;
+                y += line * 2f + gap;
+                GUI.Label(new Rect(controlX, y, contentWidth, 52f), "Small enclosed depressions stay outside the ocean.\nHydrological lakes can fill valid basins.", labelStyle);
+                y += 58f;
+                GUI.enabled = oceanControlEnabled && currentConfig.excludeSmallDisconnectedSeas;
+                DrawBool(new Rect(controlX, y, contentWidth, line), "Infill excluded inland basins (experimental)", ref currentConfig.infillExcludedInlandBasins);
+                y += line + gap;
+                GUI.Label(new Rect(controlX, y, contentWidth, 64f),
+                    "Builds sedimentary plains from the surrounding land. Requires the render subdivision to match or exceed the simulation subdivision.",
+                    new GUIStyle(labelStyle) { wordWrap = true });
+                y += 70f;
+                if (currentConfig.infillExcludedInlandBasins)
+                    DrawBasinInfillLimits(controlX, contentWidth, line, gap, ref y);
+                GUI.enabled = oceanControlEnabled;
+                DrawBool(new Rect(controlX, y, contentWidth, line), "Generate hydrological lakes", ref currentConfig.generateHydrologicalLakes);
+                y += line + gap;
+                GUI.enabled = oceanControlEnabled && currentConfig.generateHydrologicalLakes;
+                float lakePercent = currentConfig.minimumLakeBasinAreaFraction * 100f;
+                DrawFloat(new Rect(controlX, y, contentWidth, line), "Minimum lake basin area (% of planet)", ref lakePercent, 0f, 5f, labelAbove: true);
+                currentConfig.minimumLakeBasinAreaFraction = GeodesicLakeBasins.NormalizeArea(lakePercent / 100f);
+                y += line * 2f + gap;
+                DrawFloat(new Rect(controlX, y, contentWidth, line), "Minimum lake depth (planet units)", ref currentConfig.minimumLakeDepth, 0f, 1f, labelAbove: true);
+                y += line * 2f + gap;
+                GUI.enabled = oceanControlEnabled;
+                GUI.Label(new Rect(controlX, y, contentWidth, 52f), "Fills significant depressions to their spill elevation.\nSmall depressions remain resolved without visible water.", labelStyle);
+                y += 58f;
             }
             DrawFloat(new Rect(controlX, y, contentWidth, line), "Base Temperature (K)", ref currentConfig.baseTempKelvin, BaseTempMinKelvin, BaseTempMaxKelvin);
             y += line + gap;
@@ -1373,6 +1706,20 @@ public class SimulationStartupController : MonoBehaviour
             y += 30f;
             if (GUI.Button(new Rect(controlX, y, contentWidth, 30f), "Reset Advanced to Defaults", buttonStyle)) ResetAdvancedToDefaults();
             y += 38f;
+        }
+
+        if (GUI.Button(new Rect(controlX, y, contentWidth, 32f), debugSettingsExpanded ? "Debug Settings ▲" : "Debug Settings ▼", buttonStyle))
+            debugSettingsExpanded = !debugSettingsExpanded;
+        y += 40f;
+        if (debugSettingsExpanded)
+        {
+            GUI.Label(new Rect(controlX, y, contentWidth, line), "River Debug", labelStyle); y += line + gap;
+            DrawBool(new Rect(controlX, y, contentWidth, line), "Show rejected uphill river segments", ref currentConfig.showRejectedUphillRiverSegments); y += line + gap;
+            GUI.Label(new Rect(controlX, y, contentWidth, 64f), "Displays reaches omitted because they rise uphill.\nDiagnostic only; these do not become valid drainage routes.\nYellow → orange → red: increasing uphill slope (Geodesic only).", labelStyle); y += 72f;
+            DrawBool(new Rect(controlX, y, contentWidth, line), "Colour rendered rivers by visible terrain grade", ref currentConfig.colourRenderedRiversByVisibleTerrainGrade); y += line + gap;
+            GUI.Label(new Rect(controlX, y, contentWidth, 64f), "Audits every rendered segment against completed visible terrain.\nDownhill retains normal colour; uphill is yellow, orange or red.\nThis does not alter routing.", labelStyle); y += 72f;
+            DrawBool(new Rect(controlX, y, contentWidth, line), "Show river termination reasons", ref currentConfig.showRiverTerminationReasons); y += line + gap;
+            GUI.Label(new Rect(controlX, y, contentWidth, 28f), "Purple: closed basin. White: unexpected routing failure. No lakes created.", labelStyle); y += 36f;
         }
 
         float buttonWidth = (contentWidth - gap) * 0.5f;
@@ -1450,7 +1797,66 @@ public class SimulationStartupController : MonoBehaviour
         currentConfig.gridType = selected == 1 ? PlanetGridType.GeodesicIcosphere : PlanetGridType.LegacyCubeSphere;
     }
 
-    private void DrawFloat(Rect rect, string label, ref float value, float min, float max)
+    private void DrawValleyParameter(Rect rect, string label, ref float value, float fallback, float maximum)
+    {
+        value = GeodesicValleyCarving.Normalize(value, fallback, maximum);
+        string text = riverThresholdEdits.TryGetValue(label, out var edit) && edit.value == value
+            && GUI.GetNameOfFocusedControl() == label ? edit.text : value.ToString("G9");
+        GUI.Label(new Rect(rect.x, rect.y, rect.width * .78f, rect.height), label, labelStyle);
+        GUI.SetNextControlName(label);
+        string next = GUI.TextField(new Rect(rect.x + rect.width * .8f, rect.y, rect.width * .2f, rect.height), text);
+        if (float.TryParse(next, out float parsed) && !float.IsNaN(parsed) && !float.IsInfinity(parsed))
+            value = GeodesicValleyCarving.Normalize(parsed, fallback, maximum);
+        riverThresholdEdits[label] = (value, next);
+    }
+
+    private void DrawRiverThreshold(Rect rect, string label, ref float value, float fallback)
+    {
+        value = NormalizeRiverThreshold(value, fallback);
+        GUI.Label(new Rect(rect.x, rect.y, rect.width * 0.75f, rect.height), label, labelStyle);
+        // Preserve partial decimal input while typing; only finite positive values enter the config.
+        string text = riverThresholdEdits.TryGetValue(label, out var edit) && edit.value == value
+            && GUI.GetNameOfFocusedControl() == label ? edit.text : value.ToString("G9");
+        GUI.SetNextControlName(label);
+        string next = GUI.TextField(new Rect(rect.x + rect.width * 0.80f, rect.y, rect.width * 0.20f, rect.height), text);
+        if (float.TryParse(next, out float parsed) && parsed > 0f && !float.IsInfinity(parsed))
+            value = NormalizeRiverThreshold(parsed, fallback);
+        riverThresholdEdits[label] = (value, next);
+    }
+
+    private void DrawInlandElevationMagnitude(Rect rect)
+    {
+        const string label = "Inland elevation magnitude";
+        float value = GeodesicInlandUplift.NormalizeMagnitude(currentConfig.inlandElevationMagnitude);
+        if (!riverThresholdEdits.TryGetValue(label, out var edit) || edit.value != value)
+            edit = (value, value.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture));
+        GUI.Label(new Rect(rect.x, rect.y, rect.width * .8f, rect.height), label + " [0-0.05]", labelStyle);
+        string next = GUI.TextField(new Rect(rect.x + rect.width * .8f, rect.y, rect.width * .2f, rect.height), edit.text);
+        if (float.TryParse(next, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float parsed))
+            value = GeodesicInlandUplift.NormalizeMagnitude(parsed);
+        riverThresholdEdits[label] = (value, next);
+        currentConfig.inlandElevationMagnitude = value;
+    }
+
+    private void DrawBasinInfillLimits(float x, float width, float line, float gap, ref float y)
+    {
+        var limits = currentConfig.basinInfillLimits;
+        DrawPercent("Infill maximum affected area (% of planet)", ref limits.totalArea, GeodesicBasinInfillLimits.MaximumTotalArea, y);
+        y += 2f * line + gap;
+        DrawPercent("Infill maximum local lift (% of planet radius)", ref limits.liftFraction, GeodesicBasinInfillLimits.MaximumLiftFraction, y);
+        y += 2f * line + gap;
+        DrawPercent("Infill maximum new slope (%)", ref limits.transitionGrade, GeodesicBasinInfillLimits.MaximumGrade, y);
+        y += 2f * line + gap;
+        currentConfig.basinInfillLimits = limits.Normalized();
+
+        void DrawPercent(string label, ref float fraction, float maximum, float position)
+        {
+            float percent = fraction * 100f;
+            DrawFloat(new Rect(x, position, width, line), label, ref percent, 0f, maximum * 100f, labelAbove: true);
+            fraction = percent / 100f;
+        }
+    }
+    private void DrawFloat(Rect rect, string label, ref float value, float min, float max, bool labelAbove = false)
     {
         float clampedValue = Mathf.Clamp(value, min, max);
         if (!Mathf.Approximately(value, clampedValue))
@@ -1458,9 +1864,10 @@ public class SimulationStartupController : MonoBehaviour
             value = clampedValue;
         }
 
-        GUI.Label(new Rect(rect.x, rect.y, rect.width * 0.42f, rect.height), $"{label}: {value:0.###} [{min:0.###}-{max:0.###}]", labelStyle);
+        GUI.Label(new Rect(rect.x, rect.y, rect.width * (labelAbove ? 1f : 0.42f), rect.height), $"{label}: {value:0.###} [{min:0.###}-{max:0.###}]", labelStyle);
+        if (labelAbove) rect.y += rect.height;
 
-        Rect sliderRect = new Rect(rect.x + rect.width * 0.44f, rect.y + 8f, rect.width * 0.34f, rect.height);
+        Rect sliderRect = new Rect(rect.x + rect.width * (labelAbove ? 0f : 0.44f), rect.y + 8f, rect.width * (labelAbove ? 0.76f : 0.34f), rect.height);
         float sliderValue = GUI.HorizontalSlider(sliderRect, value, min, max);
         if (!Mathf.Approximately(value, sliderValue))
         {

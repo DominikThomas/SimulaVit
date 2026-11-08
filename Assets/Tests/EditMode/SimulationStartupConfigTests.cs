@@ -2,6 +2,101 @@ using NUnit.Framework;
 
 public class SimulationStartupConfigTests
 {
+    [Test]
+    public void GeologicalInfillIsOptInAndOlderRepairSettingsDoNotCarryOver()
+    {
+        var defaults = new SimulationStartupConfig();
+        Assert.That(defaults.infillExcludedInlandBasins, Is.False);
+        var old = SimulationStartupController.DeserializeSavedConfig(
+            "{\"version\":19,\"repairTinyInlandSeaDepressions\":true,\"excludeSmallDisconnectedSeas\":true,\"minimumOceanComponentAreaFraction\":0.01,\"depressionRepairLimits\":{\"totalArea\":0.0005}}", defaults);
+        Assert.That(old.infillExcludedInlandBasins, Is.False);
+        Assert.That(old.excludeSmallDisconnectedSeas, Is.True);
+        Assert.That(old.minimumOceanComponentAreaFraction, Is.EqualTo(.01f));
+        Assert.That(old.basinInfillLimits.totalArea, Is.EqualTo(GeodesicBasinInfillLimits.Defaults.totalArea));
+
+        var current = SimulationStartupController.DeserializeSavedConfig(
+            "{\"version\":20,\"infillExcludedInlandBasins\":true,\"basinInfillLimits\":{\"totalArea\":0.12,\"liftFraction\":0.35,\"transitionGrade\":0.45}}", defaults);
+        Assert.That(current.infillExcludedInlandBasins, Is.True);
+        Assert.That(current.basinInfillLimits.totalArea, Is.EqualTo(.12f));
+        Assert.That(current.basinInfillLimits.liftFraction, Is.EqualTo(.35f));
+        Assert.That(current.basinInfillLimits.transitionGrade, Is.EqualTo(.45f));
+    }
+
+    [TestCase(20)]
+    [TestCase(21)]
+    [TestCase(22)]
+    public void RetiredOutletSettingsDoNotChangeCarvingOrLakeSettings(int version)
+    {
+        string active = $"{{\"version\":{version},\"enableTerminationValleyCarving\":true,\"valleyCarvingPasses\":3," +
+            "\"maximumValleyCarveDepth\":0.025,\"minimumValleyCarveRunoff\":5,\"valleyCarveWidth\":0.009," +
+            "\"showValleyCarvingDebug\":true,\"generateHydrologicalLakes\":true,\"minimumLakeBasinAreaFraction\":0.000225," +
+            "\"minimumLakeDepth\":0,\"infillExcludedInlandBasins\":true,\"colourRiversByUltimateDestination\":true";
+        var loaded = SimulationStartupController.DeserializeSavedConfig(active +
+            ",\"enableMajorOutletBreaching\":true,\"maximumMajorOutletDepth\":0.5," +
+            "\"maximumMajorOutletVolume\":0.1,\"maximumMajorOutletDegrees\":35}", new SimulationStartupConfig());
+
+        Assert.That(loaded.enableTerminationValleyCarving, Is.True);
+        Assert.That(loaded.valleyCarvingPasses, Is.EqualTo(3));
+        Assert.That(loaded.maximumValleyCarveDepth, Is.EqualTo(.025f));
+        Assert.That(loaded.minimumValleyCarveRunoff, Is.EqualTo(5f));
+        Assert.That(loaded.valleyCarveWidth, Is.EqualTo(.009f));
+        Assert.That(loaded.showValleyCarvingDebug, Is.True);
+        Assert.That(loaded.generateHydrologicalLakes, Is.True);
+        Assert.That(loaded.minimumLakeBasinAreaFraction, Is.EqualTo(.000225f));
+        Assert.That(loaded.minimumLakeDepth, Is.Zero);
+        Assert.That(loaded.infillExcludedInlandBasins, Is.True);
+        Assert.That(loaded.colourRiversByUltimateDestination, Is.EqualTo(version >= 22));
+    }
+
+    [Test]
+    public void RiverThresholdDefaultsMigrationAndSaveLoad()
+    {
+        var defaults = new SimulationStartupConfig();
+        Assert.That(defaults.riverFlowThreshold, Is.EqualTo(8f));
+        Assert.That(defaults.majorRiverThreshold, Is.EqualTo(64f));
+        Assert.That(defaults.colourRiversByUltimateDestination, Is.False);
+        var custom = new SimulationStartupConfig { riverFlowThreshold = 2.5f, majorRiverThreshold = 90.25f, colourRiversByUltimateDestination = true };
+        foreach (string json in new[] { "{}", "{\"version\":14}", "{\"version\":15}" })
+        {
+            var migrated = SimulationStartupController.DeserializeSavedConfig(json, custom);
+            Assert.That(migrated.riverFlowThreshold, Is.EqualTo(8f));
+            Assert.That(migrated.majorRiverThreshold, Is.EqualTo(64f));
+            Assert.That(migrated.colourRiversByUltimateDestination, Is.False);
+        }
+        var type = typeof(SimulationStartupController).GetNestedType("SavedStartupConfig", System.Reflection.BindingFlags.NonPublic);
+        var saved = type.GetMethod("FromConfig").Invoke(null, new object[] { custom });
+        var loaded = SimulationStartupController.DeserializeSavedConfig(UnityEngine.JsonUtility.ToJson(saved), defaults);
+        Assert.That(loaded.riverFlowThreshold, Is.EqualTo(custom.riverFlowThreshold));
+        Assert.That(loaded.majorRiverThreshold, Is.EqualTo(custom.majorRiverThreshold));
+        Assert.That(loaded.colourRiversByUltimateDestination, Is.True);
+        Assert.That(loaded.Clone().riverFlowThreshold, Is.EqualTo(custom.riverFlowThreshold));
+        var invalid = SimulationStartupController.DeserializeSavedConfig("{\"version\":15,\"riverFlowThreshold\":0,\"majorRiverThreshold\":-1}", defaults);
+        Assert.That(invalid.riverFlowThreshold, Is.EqualTo(8f));
+        Assert.That(invalid.majorRiverThreshold, Is.EqualTo(64f));
+    }
+
+    [TestCase(0f)]
+    [TestCase(-1f)]
+    [TestCase(float.NaN)]
+    [TestCase(float.PositiveInfinity)]
+    [TestCase(float.NegativeInfinity)]
+    public void RiverThresholdRejectsNonPositiveOrNonFiniteValues(float value)
+    {
+        Assert.That(SimulationStartupController.NormalizeRiverThreshold(value, 8f), Is.EqualTo(8f));
+        Assert.That(SimulationStartupController.NormalizeRiverThreshold(value, 64f), Is.EqualTo(64f));
+    }
+
+    [Test]
+    public void RiverDebugDefaultsOffAndClonesIndependentlyOfAdvancedSettings()
+    {
+        var config = new SimulationStartupConfig();
+        Assert.That(config.showRejectedUphillRiverSegments, Is.False);
+        config.showRejectedUphillRiverSegments = true;
+        Assert.That(config.Clone().showRejectedUphillRiverSegments, Is.True);
+        SimulationStartupController.CopyAdvancedSettings(new SimulationStartupConfig(), config);
+        Assert.That(config.showRejectedUphillRiverSegments, Is.True);
+    }
+
     [TestCase(float.NaN, 2f)]
     [TestCase(float.PositiveInfinity, 2f)]
     [TestCase(0f, 2f)]
@@ -179,6 +274,7 @@ public class SimulationStartupConfigTests
             geodesicVentH2PhysicalPerSecond = 10.25f, geodesicVentH2SPhysicalPerSecond = 0.25f,
             geodesicVentCO2PhysicalPerSecond = 2f, geodesicVentFe2PhysicalPerSecond = 1f,
             geodesicSubdivisionLevel = 5, baseTempKelvin = 310f, terrestrialVentFraction = 0.7f,
+            riverFlowThreshold = 3.5f, majorRiverThreshold = 120f,
             allowDenseAtmosphere = true, atmosphereInventoryPerBar = 4321f,
             airSeaExchangeHalfLifeSeconds = 17f, approximateThermalIntervalSeconds = 5f,
             geodesicResourceTransportIntervalSeconds = 10f, chemistryTelemetryIntervalSimSeconds = 19f,
@@ -208,6 +304,8 @@ public class SimulationStartupConfigTests
 
     private static void AssertAdvancedSettingsEqual(SimulationStartupConfig expected, SimulationStartupConfig actual)
     {
+            Assert.That(actual.riverFlowThreshold, Is.EqualTo(expected.riverFlowThreshold));
+            Assert.That(actual.majorRiverThreshold, Is.EqualTo(expected.majorRiverThreshold));
             Assert.That(actual.geodesicSubdivisionLevel, Is.EqualTo(expected.geodesicSubdivisionLevel)); Assert.That(actual.baseTempKelvin, Is.EqualTo(expected.baseTempKelvin));
             Assert.That(actual.terrestrialVentFraction, Is.EqualTo(expected.terrestrialVentFraction)); Assert.That(actual.allowDenseAtmosphere, Is.EqualTo(expected.allowDenseAtmosphere));
             Assert.That(actual.atmosphereInventoryPerBar, Is.EqualTo(expected.atmosphereInventoryPerBar)); Assert.That(actual.airSeaExchangeHalfLifeSeconds, Is.EqualTo(expected.airSeaExchangeHalfLifeSeconds));

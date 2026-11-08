@@ -1,0 +1,855 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using UnityEngine;
+
+/// <summary>One immutable-input planning pass. This is a bounded saddle breach, not erosion.
+/// All heights and lengths are planet-local units; runoff uses the existing mean-cell-area units.
+/// The caller commits the resulting surface once and rebuilds the existing TIN once.</summary>
+public sealed class GeodesicValleyCarving
+{
+    public const float DefaultDepth = .005f, DefaultRunoff = 64f, DefaultWidth = .02f;
+    public const string Help = "1–5 passes on visible, unfiltered TIN terrain; flow and basins rebuild after each pass. Selects ocean-rooted natural spill connections by independent upstream runoff and bounded excavation cost. Depth is the maximum cut per pass; depth and width use planet-local units. Coastal spill breaches require proven retained-ocean drainage, stay within eight local edge lengths and submerge by at most min(depth, 0.005). Runoff uses mean-cell-area equivalents. Width controls lateral falloff. Scene gizmos: green accepted, red rejected, yellow termination, cyan target.";
+    private const int MaximumLabels = 8192, MaximumTargetProbes = 128, MaximumAffectedVertices = 8192;
+    private const int MaximumAffectedFacets = MaximumAffectedVertices * 6;
+    private const int MaximumCoastalEdges = 8;
+    private enum Target { River, LakeOutlet, OceanDrainage, Coastline, DownstreamBasin, None }
+
+    public sealed class Candidate
+    {
+        public Vector3 Origin, TargetPoint;
+        public Vector3[] Path = Array.Empty<Vector3>();
+        public string Rejection;
+        public string ProfileFailure;
+        public bool RequiresRetrace;
+        public bool RequiresCollectiveTrace;
+        public string VerificationFailure;
+        public bool Accepted => Rejection == null;
+        public double Length, MaximumCut, MeanCut;
+        public int AffectedVertices, AffectedFacets;
+        public bool SpillDirected;
+        public int BasinId = -1;
+        public double OriginalSpillBarrier;
+        public string FallbackReason;
+        public bool CoastalAttempt;
+        public double CoastalLengthLimit;
+        public double IndependentRunoff, TinyNoiseRunoff;
+        public int DownstreamBasinId = GeodesicOceanDrainagePlan.Unresolved;
+        public TinPoint SourceFloor;
+        public int[] ParcelIds = Array.Empty<int>();
+        internal int[] Vertices;
+        internal Dictionary<int, float> Surface;
+        internal TinPoint[] Continuation;
+        internal List<TinPoint[]> Incoming;
+        internal int TargetKind;
+    }
+
+    public sealed class Result
+    {
+        public float[] Heights;
+        public readonly List<Candidate> Candidates = new List<Candidate>();
+        public int Eligible, Searched, SkippedLake, SkippedDuplicate, SkippedUnsupported;
+        public int MatchedToBasin, SpillDirected, FallbackSearched, InvalidSpills;
+        public int AffectedVertices, AffectedFacets;
+        public double MaximumCut, MeanCut, PathLength;
+        public double CoastalSubmergenceLimit;
+        public int OceanRooted, Unrooted, SelectionConflicts, CandidateBudgetSkipped, VerificationBuilds;
+        public int UnrootedMissing, UnrootedMissingPhysical, UnrootedMissingBudget, UnrootedCycles, UnrootedUnknown, ChainBudgetRejected, PhysicalInvalidEdges;
+        public readonly List<GeodesicOceanDrainagePlan.Chain> Chains = new List<GeodesicOceanDrainagePlan.Chain>();
+        public IEnumerable<GeodesicOceanDrainagePlan.Chain> CompleteChains
+        {
+            get { var accepted = new HashSet<int>(Candidates.Where(c => c.Accepted).Select(c => c.BasinId));
+                return Chains.Where(chain => chain.Edges.All(accepted.Contains)); }
+        }
+        public IEnumerable<int> CompleteMultiChainParcels()
+        {
+            var ids = new HashSet<int>(CompleteChains.Where(c => c.Edges.Length > 1).SelectMany(c => c.Edges));
+            return Candidates.Where(c => c.Accepted && ids.Contains(c.BasinId)).SelectMany(c => c.ParcelIds);
+        }
+        public double EligibleIndependentRunoff, EligibleTinyNoiseRunoff;
+        public int Accepted => Candidates.Count(c => c.Accepted);
+        public string Summary(int pass = 1, int passes = 1) => $"[GeodesicValleyCarving] enabled=True pass={pass}/{passes} eligible={Eligible} matched-to-basin={MatchedToBasin} searched={Searched} " +
+            $"spill-directed={SpillDirected} fallback-searched={FallbackSearched} accepted-spill-carves={Candidates.Count(c => c.Accepted && c.SpillDirected)} accepted-fallback-carves={Candidates.Count(c => c.Accepted && !c.SpillDirected)} accepted={Accepted} " +
+            $"rejected-invalid-spill={InvalidSpills} invalid-spill-action=retain-inland rejected-lake-protected={SkippedLake + Rejected("lake")} " +
+            $"rejected-spill({Reasons(true)}) rejected-fallback({Reasons(false)}) " +
+            $"skipped(lake/duplicate/unsupported)={SkippedLake}/{SkippedDuplicate}/{SkippedUnsupported} " +
+            $"pathLength={PathLength:G6} affectedVertices={AffectedVertices} affectedFacets={AffectedFacets} maximumActualCut={MaximumCut:G6} meanActualCut={MeanCut:G6} " +
+            $"connectedTargets(river/lake-outlet/ocean-drainage/coastline/downstream-basin)={Connected(0)}/{Connected(1)}/{Connected(2)}/{Connected(3)}/{Connected(4)} " +
+            SpillStatistics() +
+            $"coastalAttempted={Candidates.Count(c => c.CoastalAttempt)} coastalAccepted={Candidates.Count(c => c.CoastalAttempt && c.Accepted)} " +
+            $"coastalRejectedNoOceanConnection={Rejected("coastal-no-ocean-connection")} coastalRejectedDepthOrDistance={Rejected("coastal-depth-limit") + Rejected("coastal-distance-limit")} coastalMaxSubmergence={CoastalSubmergenceLimit:G6} " +
+            $"oceanPlanVersion={GeodesicOceanDrainagePlan.Version} oceanRooted={OceanRooted} unrooted={Unrooted} selectionConflicts={SelectionConflicts} " +
+            $"candidateBudgetSkipped={CandidateBudgetSkipped} verificationBuilds={VerificationBuilds} independentRunoff={EligibleIndependentRunoff:R} tinyNoiseRunoff={EligibleTinyNoiseRunoff:R} " +
+            $"acceptedRetracedConnections={Candidates.Count(c => c.Accepted && c.RequiresRetrace)} " +
+            $"acceptedCollectiveJoins={Candidates.Count(c => c.Accepted && c.RequiresCollectiveTrace)} " +
+            $"unverifiedOcean={Rejected("proposed-no-ocean-connection")} selectionRejected={Rejected("selection-conflict-or-runoff")} downstreamRejected={Rejected("downstream-proposal-rejected")} verificationBudgetRejected={Rejected("verification-budget")} protectedOceanRejected={Rejected("existing-ocean-route-changed")} " +
+            $"unverifiedBoundary={Candidates.Count(c => c.VerificationFailure?.Contains(":OceanCoast:") == true)} unverifiedClosed={Candidates.Count(c => c.VerificationFailure?.Contains(":TrueClosedBasin:") == true || c.VerificationFailure?.Contains(":TinyNoiseDepression:") == true)} unverifiedRoutingFailure={Candidates.Count(c => c.VerificationFailure?.Contains(":RoutingFailure:") == true)} " +
+            $"directTargetCuts={Candidates.Count(c => c.Accepted && c.DownstreamBasinId == GeodesicOceanDrainagePlan.Ocean)} intermediateBasinCuts={Candidates.Count(c => c.Accepted && c.DownstreamBasinId >= 0)} " +
+            $"multiChainsProposed={Chains.Count(c => c.Edges.Length > 1)} multiChainsAccepted={CompleteChains.Count(c => c.Edges.Length > 1)} multiChainsVerificationRejected={Chains.Count(c => c.Edges.Length > 1) - CompleteChains.Count(c => c.Edges.Length > 1)} " +
+            $"unrootedMissing={UnrootedMissing} unrootedMissingPhysical={UnrootedMissingPhysical} unrootedMissingBudget={UnrootedMissingBudget} unrootedCycles={UnrootedCycles} unrootedUnknown={UnrootedUnknown} chainBudgetRejected={ChainBudgetRejected} physicalInvalidEdges={PhysicalInvalidEdges} " +
+            "connections=proposed-TIN-verified-final-delivery-authoritative";
+        private string Reasons(bool spill) => string.Join(" ", new[] { "too-deep", "below-sea-level", "coastal-no-ocean-connection", "coastal-depth-limit", "coastal-distance-limit", "invalid-spill", "no-downstream-side", "lake", "conflict", "no-target", "search-distance-limit", "footprint-limit", "search-budget" }
+            .Select(reason => $"{(reason == "lake" ? "lake-protected" : !spill && reason == "search-budget" ? "fallback-search-budget" : reason)}={Candidates.Count(c => c.SpillDirected == spill && c.Rejection == reason)}"));
+        private string SpillStatistics()
+        {
+            var accepted = Candidates.Where(c => c.Accepted && c.SpillDirected).ToArray();
+            return $"spill-original-barrier(mean/max)={accepted.Select(c => c.OriginalSpillBarrier).DefaultIfEmpty(0).Average():G6}/{accepted.Select(c => c.OriginalSpillBarrier).DefaultIfEmpty(0).Max():G6} " +
+                $"spill-required-cut(mean/max)={accepted.Sum(c => c.MeanCut * c.AffectedVertices) / Math.Max(1, accepted.Sum(c => c.AffectedVertices)):G6}/{accepted.Select(c => c.MaximumCut).DefaultIfEmpty(0).Max():G6} " +
+                $"spill-mean-path-length={accepted.Select(c => c.Length).DefaultIfEmpty(0).Average():G6} ";
+        }
+        private int Rejected(string reason) => Candidates.Count(c => c.Rejection == reason);
+        private int Connected(int kind) => Candidates.Count(c => c.Accepted && c.TargetKind == kind);
+
+        public string OceanRebuildSummary(GeodesicTinHydrology rebuilt, int pass, int passes)
+        {
+            int full = 0, partial = 0; double input = 0, delivered = 0, chainOcean = 0, reroutedClosed = 0;
+            var chainIds = new HashSet<int>(CompleteChains.Where(c => c.Edges.Length > 1).SelectMany(c => c.Edges));
+            foreach (var c in Candidates.Where(c => c.Accepted && c.ParcelIds.Length > 0))
+            {
+                double total = 0, ocean = 0;
+                foreach (int id in c.ParcelIds)
+                {
+                    double amount = rebuilt.ParcelRunoff(id); total += amount;
+                    if (rebuilt.ParcelDestinations != null && GeodesicOceanDrainagePlan.ConfirmedOcean(rebuilt, rebuilt.ParcelDestinations[id])) ocean += amount;
+                    if (rebuilt.ParcelDestinations != null && chainIds.Contains(c.BasinId))
+                    {
+                        var end = rebuilt.ParcelDestinations[id];
+                        if (GeodesicOceanDrainagePlan.ConfirmedOcean(rebuilt, end)) chainOcean += amount;
+                        else if (GeodesicOceanDrainagePlan.Closed(end.Termination))
+                        {
+                            var p = end.Point;
+                            int floor = p.A == 1 ? rebuilt.BasinVertex(p.Triangle, 0) : p.B == 1 ? rebuilt.BasinVertex(p.Triangle, 1) :
+                                p.C == 1 ? rebuilt.BasinVertex(p.Triangle, 2) : -1;
+                            if (floor >= 0 && floor != c.BasinId) reroutedClosed += amount;
+                        }
+                    }
+                }
+                input += total; delivered += ocean;
+                if (total > 0 && ocean == total) full++; else if (ocean > 0) partial++;
+            }
+            return FormattableString.Invariant($"[GeodesicOceanDrainagePlan] pass={pass}/{passes} authoritativeRawFullyConnectedCatchments={full} partialCatchments={partial} selectedIndependentRunoff={input:R} confirmedDirectOceanRunoff={delivered:R} newlyDirectOceanThroughChains={chainOcean:R} reroutedToStillClosedBasin={reroutedClosed:R} scope=selected-pre-pass-parcels excludesLakeOverflow=True finalDeliveryAuthoritative=True");
+        }
+
+        public string CoastalRebuildSummary(GeodesicTinHydrology rebuilt, int pass, int passes)
+        {
+            int resolved = 0, checkedTerminations = 0;
+            var sources = new HashSet<int>();
+            foreach (var c in Candidates.Where(c => c.CoastalAttempt && c.Accepted))
+                foreach (var incoming in c.Incoming)
+                {
+                    if (!sources.Add(incoming[0].Triangle)) continue;
+                    checkedTerminations++;
+                    if (GeodesicOceanDrainagePlan.TraceToOcean(rebuilt, incoming[0])) resolved++;
+                }
+            return $"[GeodesicValleyCarving] coastalVerification=authoritative-rebuild pass={pass}/{passes} " +
+                $"closedBasinTerminationsChecked={checkedTerminations} closedBasinTerminationsResolvedToRetainedOcean={resolved} " +
+                $"unresolved={checkedTerminations - resolved} frozenOcean=unchanged";
+        }
+    }
+
+    internal sealed class Label
+    {
+        public int Vertex, Id;
+        public double Floor, Length, Cost, MaxCut, Priority;
+        public Label Previous;
+    }
+    private sealed class LabelOrder : IComparer<Label>
+    {
+        public int Compare(Label a, Label b)
+        {
+            int c = a.Priority.CompareTo(b.Priority);
+            if (c == 0) c = a.Vertex.CompareTo(b.Vertex);
+            return c != 0 ? c : a.Id.CompareTo(b.Id);
+        }
+    }
+    private sealed class Escape
+    {
+        public Target Kind;
+        public TinPoint[] Path;
+    }
+
+    private readonly GeodesicTinHydrology tin;
+    private readonly GeodesicHydrologyTopology graph;
+    private readonly GeodesicTinLakeRouting lakes;
+    private readonly GeodesicTinBasins basins;
+    private readonly float[] original;
+    private readonly Vector3[] completedSurface;
+    private readonly int[] coastalHops;
+    private readonly bool[] ocean, protectedLake, protectedSubsea;
+    private readonly HashSet<int> riverFacets = new HashSet<int>();
+    private readonly Dictionary<int, TinLakeFlowNode> lakeNodes = new Dictionary<int, TinLakeFlowNode>();
+    private readonly Dictionary<int, Escape> escapes = new Dictionary<int, Escape>();
+    private readonly double radius, depth, width, seaFloor, step, maxLength, maxRadius;
+    private readonly double seaLevel, coastalFloor, coastalSubmergence;
+    private readonly double minimumEdgeLength;
+    private readonly float microBumpFraction;
+
+    private GeodesicValleyCarving(GeodesicTinHydrology drainage, GeodesicHydrologyTopology topology,
+        bool[] retainedOcean, GeodesicTinBasins basinTopology, GeodesicTinLakeGeometry geometry, GeodesicTinLakeRouting routing,
+        double planetRadius, double seaLevel, float maximumDepth, float carveWidth, Vector3[] renderedSurface, float visibleMicroBumpFraction)
+    {
+        tin = drainage; graph = topology; basins = basinTopology; lakes = routing; ocean = retainedOcean;
+        original = tin.VisibleHeight; radius = planetRadius; depth = maximumDepth; width = carveWidth;
+        this.seaLevel = seaLevel; completedSurface = renderedSurface;
+        microBumpFraction = Mathf.Clamp(visibleMicroBumpFraction, 0f, .002f);
+        step = Math.Max(tin.Epsilon * 8, radius * .000001);
+        // Include the spherical facet sagitta: vertices above sea alone do not protect facet interiors.
+        double maxEdge = 0, minEdge = double.PositiveInfinity;
+        for (int v = 0; v < graph.CellCount; v++)
+            for (int k = 0; k < graph.NeighborCounts[v]; k++)
+            {
+                double angle = Angle(v, graph.Neighbors6[v * 6 + k]);
+                maxEdge = Math.Max(maxEdge, angle);
+                minEdge = Math.Min(minEdge, angle);
+            }
+        minimumEdgeLength = radius * minEdge;
+        seaFloor = (seaLevel + step * 2) / Math.Cos(maxEdge);
+        // Reuse the existing incision setting, with the existing default depth as a hard
+        // shallow-water ceiling. This absolute floor cannot ratchet down across passes.
+        coastalSubmergence = Math.Min(depth, DefaultDepth);
+        coastalFloor = (seaLevel - coastalSubmergence + step * 2) / Math.Cos(maxEdge);
+        maxRadius = radius * 8 * Math.PI / 180; maxLength = radius * 12 * Math.PI / 180;
+        protectedLake = new bool[graph.CellCount];
+        protectedSubsea = new bool[graph.CellCount];
+        // Proximity only bounds the exception's search; it is NEVER ocean-connectivity proof.
+        coastalHops = new int[graph.CellCount]; Array.Fill(coastalHops, -1);
+        var coastalQueue = new Queue<int>();
+        for (int v = 0; v < graph.CellCount; v++) if (ocean[v]) { coastalHops[v] = 0; coastalQueue.Enqueue(v); }
+        while (coastalQueue.Count > 0)
+        {
+            int v = coastalQueue.Dequeue(); if (coastalHops[v] >= MaximumCoastalEdges) continue;
+            for (int k = 0; k < graph.NeighborCounts[v]; k++)
+            {
+                int next = graph.Neighbors6[v * 6 + k]; if (coastalHops[next] >= 0) continue;
+                coastalHops[next] = coastalHops[v] + 1; coastalQueue.Enqueue(next);
+            }
+        }
+        for (int v = 0; v < graph.CellCount; v++)
+        {
+            // The ordinary path protects excluded inland seas and their one-ring. Only
+            // a bounded coastal retry with proposed-TIN ocean proof may relax this mask.
+            if (ocean[v] || original[v] >= seaFloor) continue;
+            protectedSubsea[v] = true;
+            for (int k = 0; k < graph.NeighborCounts[v]; k++) protectedSubsea[graph.Neighbors6[v * 6 + k]] = true;
+        }
+        if (geometry != null)
+            foreach (var p in geometry.TerrainPoints)
+                for (int k = 0; k < 3; k++) protectedLake[tin.BasinVertex(p.Triangle, k)] = true;
+        if (lakes != null) foreach (var n in lakes.Lakes) lakeNodes[n.BasinId] = n;
+        foreach (var network in tin.Networks)
+            foreach (var p in network.Samples) riverFacets.Add(p.Triangle);
+    }
+
+    public static float Normalize(float value, float fallback, float maximum) =>
+        float.IsNaN(value) || float.IsInfinity(value) ? fallback : Mathf.Clamp(value, 0, maximum);
+
+    public static Result Plan(GeodesicTinHydrology tin, GeodesicHydrologyTopology graph, bool[] retainedOcean,
+        GeodesicTinLakeGeometry geometry, GeodesicTinLakeRouting routing, double radius, double seaLevel,
+        float maximumDepth, double minimumRunoff, float width, GeodesicTinBasins basinTopology = null,
+        Vector3[] completedSurface = null, float visibleMicroBumpFraction = .001f)
+    {
+        // Generation supplies raw basin topology from the active TIN, with no lake geometry
+        // or routing until all carving passes finish. The fallback only observes topology.
+        var planner = new GeodesicValleyCarving(tin, graph, retainedOcean, basinTopology ?? GeodesicTinBasins.Build(tin), geometry, routing, radius, seaLevel, maximumDepth, width, completedSurface, visibleMicroBumpFraction);
+        return planner.Build(minimumRunoff);
+    }
+
+    private Result Build(double minimumRunoff)
+    {
+        var result = new Result { Heights = (float[])original.Clone(), CoastalSubmergenceLimit = coastalSubmergence };
+        var catchments = GeodesicOceanDrainagePlan.CaptureCatchments(tin, basins);
+        var byId = catchments.ToDictionary(c => c.Id);
+        var incoming = new Dictionary<int, List<TinPoint[]>>();
+        foreach (var n in tin.Networks)
+        {
+            if (!GeodesicOceanDrainagePlan.Closed(n.Termination) || n.Samples == null || n.Samples.Length < 2) continue;
+            var end = n.Samples[n.Samples.Length - 1];
+            var basin = basins.Find(end);
+            if (basin == null) continue;
+            if (!incoming.TryGetValue(basin.Id, out var paths)) incoming.Add(basin.Id, paths = new List<TinPoint[]>());
+            paths.Add(n.Samples);
+        }
+        // Include low-runoff downstream connectors: their upstream benefit is known only
+        // after the witnessed graph has been rooted at the ocean. Never use footprint area
+        // or summed cumulative channel discharge as independent catchment runoff.
+        var descriptors = basins.Basins.ToDictionary(b => b.Id);
+        var built = new Dictionary<int, Candidate>();
+        int BuildDependency(int id)
+        {
+            if (built.TryGetValue(id, out var cached)) return cached.Accepted ? cached.DownstreamBasinId : GeodesicOceanDrainagePlan.Unresolved;
+            if (!descriptors.TryGetValue(id, out var basin)) return GeodesicOceanDrainagePlan.Unresolved;
+            int start = basin.Id;
+            result.Searched++;
+            Candidate c;
+            if (ocean[start] || protectedLake[start])
+            { result.SkippedLake++; c = new Candidate { BasinId = id, Rejection = "lake" }; }
+            else if (TrySpillVertex(basin, out int spill))
+            {
+                result.SpillDirected++;
+                c = PlanSpill(start, basin, spill);
+                if (c.Rejection == "below-sea-level")
+                {
+                    c = PlanSpill(start, basin, spill, coastal: true);
+                    if (c.Rejection == "too-deep" || c.Rejection == "below-sea-level") c.Rejection = "coastal-depth-limit";
+                    else if (c.Rejection == "search-distance-limit") c.Rejection = "coastal-distance-limit";
+                    else if (c.Rejection == "no-downstream-side" || c.Rejection == "no-target") c.Rejection = "coastal-no-ocean-connection";
+                }
+            }
+            else
+            {
+                // No arbitrary corridor search for an unproven basin-graph edge.
+                result.InvalidSpills++;
+                c = new Candidate { BasinId = basin.Id, Rejection = "invalid-spill" };
+            }
+            c.SourceFloor = basin.Floor;
+            c.Incoming = incoming.TryGetValue(basin.Id, out var paths) ? paths : new List<TinPoint[]>();
+            if (byId.TryGetValue(basin.Id, out var catchment))
+            {
+                c.IndependentRunoff = catchment.Runoff; c.TinyNoiseRunoff = catchment.TinyNoiseRunoff;
+                c.ParcelIds = catchment.Parcels.ToArray();
+                result.Eligible++; result.MatchedToBasin++;
+                result.EligibleIndependentRunoff += catchment.Runoff; result.EligibleTinyNoiseRunoff += catchment.TinyNoiseRunoff;
+            }
+            if (c.Accepted)
+            {
+                if (!ProfileValid(c, null, false)) c.Rejection = "conflict";
+                else c.RequiresRetrace = !ProfileValid(c, null);
+            }
+            c.Origin = tin.Direction(basin.Floor) * (float)tin.CompletedVisibleRadius(basin.Floor);
+            if (c.Accepted) c.DownstreamBasinId = ResolveDownstream(c);
+            result.Candidates.Add(c); built.Add(id, c);
+            return c.Accepted ? c.DownstreamBasinId : GeodesicOceanDrainagePlan.Unresolved;
+        }
+        GeodesicOceanDrainagePlan.ExpandDependencies(basins.Basins
+            .OrderByDescending(b => byId.TryGetValue(b.Id, out var c) ? c.Runoff : 0d).ThenBy(b => b.Id).Select(b => b.Id), BuildDependency);
+        result.CandidateBudgetSkipped = Math.Max(0, basins.Basins.Count - built.Count);
+        result.PhysicalInvalidEdges = built.Values.Count(c => !c.Accepted);
+
+        SelectOceanConnections(result, minimumRunoff);
+        VerifyOceanProposals(result);
+        var edges = new HashSet<ulong>();
+        foreach (var c in result.Candidates.Where(c => c.Accepted))
+        {
+            foreach (var cut in c.Surface) result.Heights[cut.Key] = Mathf.Min(result.Heights[cut.Key], cut.Value);
+            for (int i = 1; i < c.Vertices.Length; i++)
+            {
+                int a = c.Vertices[i - 1], b = c.Vertices[i];
+                ulong key = ((ulong)(uint)Math.Min(a, b) << 32) | (uint)Math.Max(a, b);
+                if (edges.Add(key)) result.PathLength += Angle(a, b) * radius;
+            }
+        }
+        var facets = new HashSet<int>(); double total = 0;
+        for (int v = 0; v < original.Length; v++)
+        {
+            double cut = original[v] - result.Heights[v]; if (cut <= 0) continue;
+            result.AffectedVertices++; total += cut; result.MaximumCut = Math.Max(result.MaximumCut, cut);
+            AddFacets(v, facets);
+        }
+        result.AffectedFacets = facets.Count; result.MeanCut = total / Math.Max(1, result.AffectedVertices);
+        return result;
+    }
+
+    private int ResolveDownstream(Candidate c)
+    {
+        int vertex = c.Vertices[c.Vertices.Length - 1];
+        int carrier = tin.BasinIncidentTriangle(tin.BasinIncidentStart(vertex));
+        var path = tin.TraceLakeOutlet(tin.BasinPoint(carrier, vertex), null, out var termination);
+        if (path.Length == 0) return GeodesicOceanDrainagePlan.Unresolved;
+        var end = path[path.Length - 1];
+        if (GeodesicOceanDrainagePlan.ConfirmedOcean(tin, new TinParcelDestination(end, termination))) return GeodesicOceanDrainagePlan.Ocean;
+        if (!GeodesicOceanDrainagePlan.Closed(termination)) return GeodesicOceanDrainagePlan.Unresolved;
+        return basins.Find(end)?.Id ?? GeodesicOceanDrainagePlan.Unresolved;
+    }
+
+    private void SelectOceanConnections(Result result, double minimumRunoff)
+    {
+        var proposals = result.Candidates.Where(c => c.Accepted).ToDictionary(c => c.BasinId);
+        var combined = new Dictionary<int, float>();
+        var selection = GeodesicOceanDrainagePlan.SelectChains(proposals.Values.Select(c => new GeodesicOceanDrainagePlan.Connection {
+            Id = c.BasinId, Downstream = c.DownstreamBasinId, LocalRunoff = c.IndependentRunoff,
+            Cost = Math.Max(step, c.Length) * (1 + 4 * c.MaximumCut / Math.Max(depth, step)) *
+                (1 + c.AffectedFacets / 64d) }), minimumRunoff, (package, selected) =>
+        {
+            var merged = new Dictionary<int, float>(combined);
+            foreach (int id in package)
+                foreach (var cut in proposals[id].Surface) merged[cut.Key] = merged.TryGetValue(cut.Key, out float h) ? Math.Min(h, cut.Value) : cut.Value;
+            int Root(int id) { while (proposals[id].DownstreamBasinId >= 0) id = proposals[id].DownstreamBasinId; return id; }
+            int root = Root(package[0]);
+            // Independently descending profiles can join the same downstream trunk by a
+            // different route after combining cuts. Defer those profiles to actual TIN
+            // proof of the COMPLETE package; retain strict checks for unrelated trunks.
+            foreach (int id in selected.Concat(package))
+                if (Root(id) != root && !ProfileValid(proposals[id], merged, false)) return false;
+            foreach (int id in selected.Concat(package).Where(id => Root(id) == root))
+                if (!ProfileValid(proposals[id], merged, false)) proposals[id].RequiresCollectiveTrace = true;
+            combined = merged; return true;
+        });
+        result.OceanRooted = selection.PotentialRunoff.Count; result.Unrooted = selection.Unrooted;
+        result.UnrootedMissing = selection.MissingDownstream; result.UnrootedCycles = selection.Cyclic;
+        result.UnrootedUnknown = selection.UnknownDestination; result.ChainBudgetRejected = selection.OverBudget;
+        var allCandidates = result.Candidates.ToDictionary(c => c.BasinId);
+        foreach (var rejection in selection.Rejections.Where(r => r.Value == "missing-downstream"))
+        {
+            int id = rejection.Key;
+            while (proposals.TryGetValue(id, out var edge)) id = edge.DownstreamBasinId;
+            if (allCandidates.TryGetValue(id, out var invalid) && !invalid.Accepted) result.UnrootedMissingPhysical++;
+            else result.UnrootedMissingBudget++;
+        }
+        result.SelectionConflicts = selection.Conflicts;
+        result.Chains.AddRange(selection.Chains);
+        var chosen = new HashSet<int>(selection.Ordered);
+        foreach (var c in proposals.Values)
+            if (!chosen.Contains(c.BasinId)) c.Rejection = selection.PotentialRunoff.ContainsKey(c.BasinId) ? "selection-conflict-or-runoff" : "no-ocean-route";
+    }
+
+    private bool TrySpillVertex(TinBasinDescriptor basin, out int vertex)
+    {
+        vertex = -1;
+        if (basin == null || !basin.Spill.HasValue) return false;
+        var p = basin.Spill.Value;
+        if (p.Triangle < 0 || p.Triangle >= tin.TriangleCount || !tin.BasinFaceValid(p.Triangle)) return false;
+        // The existing lower-star topology records exact mesh vertices, not snapped centroids.
+        // If a future descriptor uses another geometry, keep that case in the explicit fallback.
+        if (p.A == 1 && p.B == 0 && p.C == 0) vertex = tin.BasinVertex(p.Triangle, 0);
+        else if (p.A == 0 && p.B == 1 && p.C == 0) vertex = tin.BasinVertex(p.Triangle, 1);
+        else if (p.A == 0 && p.B == 0 && p.C == 1) vertex = tin.BasinVertex(p.Triangle, 2);
+        return vertex >= 0 && !double.IsNaN(basin.SpillElevation) && !double.IsInfinity(basin.SpillElevation)
+            && Math.Abs(tin.Height(p) - basin.SpillElevation) <= tin.Epsilon;
+    }
+
+    private Candidate PlanSpill(int start, TinBasinDescriptor basin, int spill, bool coastal = false)
+    {
+        var c = new Candidate {
+            SpillDirected = true, BasinId = basin.Id, OriginalSpillBarrier = Math.Max(0, basin.SpillElevation - original[start]),
+            Origin = graph.CellDirections[start] * original[start], TargetPoint = tin.Direction(basin.Spill.Value) * original[spill],
+            TargetKind = (int)Target.DownstreamBasin, CoastalAttempt = coastal,
+            CoastalLengthLimit = Math.Min(maxLength, MaximumCoastalEdges * LocalEdgeLength(start))
+        };
+        if (coastal && (coastalHops[start] < 0 || completedSurface == null))
+        { c.Rejection = "coastal-no-ocean-connection"; return c; }
+        double minimumFloor = coastal ? coastalFloor : seaFloor;
+        if (original[start] <= minimumFloor + step || basin.SpillElevation < minimumFloor)
+        { c.Rejection = "below-sea-level"; return c; }
+        if (c.OriginalSpillBarrier > depth) { c.Rejection = "too-deep"; return c; }
+        if (protectedLake[start] || protectedLake[spill]) { c.Rejection = "lake"; return c; }
+
+        int side = basin.DownstreamVertex, triangle = basin.DownstreamTriangle;
+        if (triangle < 0 || triangle >= tin.TriangleCount || !tin.BasinFaceValid(triangle) ||
+            side < 0 || side >= original.Length || side == spill ||
+            !Enumerable.Range(0, 3).Any(k => tin.BasinVertex(triangle, k) == spill) ||
+            !Enumerable.Range(0, 3).Any(k => tin.BasinVertex(triangle, k) == side) ||
+            original[side] >= basin.SpillElevation)
+        { c.Rejection = "no-downstream-side"; return c; }
+
+        // Search for geometry to ONE known saddle within the matched sublevel component.
+        // No target probes, Pareto-label explosion, ancestor traversal or ocean search.
+        var interior = new HashSet<int>();
+        foreach (int t in basin.MemberTriangles)
+            for (int k = 0; k < 3; k++)
+            {
+                int v = tin.BasinVertex(t, k);
+                if (original[v] < basin.SpillElevation) interior.Add(v);
+            }
+        interior.Remove(side); interior.Add(start); interior.Add(spill);
+        var first = new Label { Vertex = start, Floor = original[start] };
+        double lengthLimit = coastal ? c.CoastalLengthLimit : maxLength;
+        var saddle = RouteGeometry(first, spill, interior, start, lengthLimit, false, out string reason, coastal);
+        if (saddle == null) { c.Rejection = reason; return c; }
+        SetPath(c, saddle);
+
+        var witness = Extend(saddle, side, start, lengthLimit, out reason, coastal);
+        if (witness == null) { c.Rejection = reason; return c; }
+        SetPath(c, witness);
+
+        // Observe only a short existing TIN descent from the exact downstream witness.
+        // The corridor stops after eight local edge lengths; the tracer is also step-bounded.
+        // A lower basin is only a provisional graph edge. Selection must prove its chain
+        // reaches ocean; every chosen cut then passes the combined proposed-TIN check.
+        double downstreamLimit = Angle(spill, side) * radius * 8;
+        var trace = tin.TraceLakeOutlet(tin.BasinPoint(triangle, side), null, out _, maximumSteps: 64);
+        var corridor = new HashSet<int> { side };
+        double tracedLength = Angle(spill, side) * radius;
+        for (int i = 0; i < trace.Length; i++)
+        {
+            if (i > 0) tracedLength += Vector3.Distance(tin.Direction(trace[i - 1]), tin.Direction(trace[i])) * radius;
+            if (tracedLength > downstreamLimit) break;
+            for (int k = 0; k < 3; k++)
+            {
+                int v = tin.BasinVertex(trace[i].Triangle, k);
+                if (original[v] < basin.SpillElevation) corridor.Add(v);
+            }
+        }
+        foreach (int v in c.Vertices) if (v != side) corridor.Remove(v);
+        var end = RouteGeometry(witness, -1, corridor, start, Math.Min(lengthLimit, saddle.Length + downstreamLimit), true, out reason, coastal);
+        if (end == null) { c.Rejection = reason; return c; }
+        var chain = SetPath(c, end);
+        // Preserve the existing continuation as evidence for graph construction/retracing.
+        int carrier = tin.BasinIncidentTriangle(tin.BasinIncidentStart(end.Vertex));
+        var continuation = tin.TraceLakeOutlet(tin.BasinPoint(carrier, end.Vertex), null, out _, maximumSteps: 64);
+        BuildProfile(c, chain, new Escape { Kind = Target.DownstreamBasin, Path = continuation });
+
+        return c;
+    }
+
+    private List<Label> SetPath(Candidate c, Label end)
+    {
+        var chain = new List<Label>();
+        for (var l = end; l != null; l = l.Previous) chain.Add(l);
+        chain.Reverse();
+        c.Vertices = chain.Select(l => l.Vertex).ToArray(); c.Length = end.Length;
+        c.Path = chain.Select(l => graph.CellDirections[l.Vertex] * original[l.Vertex]).ToArray();
+        c.TargetPoint = c.Path[c.Path.Length - 1];
+        return chain;
+    }
+
+    // Geometric A* to the descriptor's spill, or a short descent inside its downstream
+    // TIN trace corridor. These temporary labels never become drainage receivers.
+    private Label RouteGeometry(Label first, int goal, HashSet<int> allowed, int origin,
+        double lengthLimit, bool descendingSide, out string rejection, bool coastal = false)
+    {
+        var frontier = new SortedSet<Label>(new LabelOrder());
+        var best = new Dictionary<int, Label> { [first.Vertex] = first };
+        first.Priority = first.Cost + (goal >= 0 ? Angle(first.Vertex, goal) * radius : 0);
+        frontier.Add(first); int serial = 1;
+        bool tooDeep = false, subsea = false, lake = false, limited = false;
+        while (frontier.Count > 0)
+        {
+            var current = frontier.Min; frontier.Remove(current);
+            if (best[current.Vertex] != current) continue;
+            if (current.Vertex == goal || (descendingSide && original[current.Vertex] <= current.Floor))
+            { rejection = null; return current; }
+            for (int k = 0; k < graph.NeighborCounts[current.Vertex]; k++)
+            {
+                int v = graph.Neighbors6[current.Vertex * 6 + k];
+                if (!allowed.Contains(v) || (descendingSide && original[v] >= original[current.Vertex])) continue;
+                var next = Extend(current, v, origin, lengthLimit, out string reason, coastal);
+                if (next == null)
+                {
+                    tooDeep |= reason == "too-deep"; subsea |= reason == "below-sea-level";
+                    lake |= reason == "lake"; limited |= reason == "search-distance-limit";
+                    continue;
+                }
+                if (best.TryGetValue(v, out var previous) && previous.Cost <= next.Cost) continue;
+                next.Id = serial++; next.Priority = next.Cost + (goal >= 0 ? Angle(v, goal) * radius : 0);
+                best[v] = next; frontier.Add(next);
+                if (serial >= MaximumLabels) { rejection = "search-budget"; return null; }
+            }
+        }
+        rejection = tooDeep ? "too-deep" : subsea ? "below-sea-level" : lake ? "lake" : limited ? "search-distance-limit" : "no-downstream-side";
+        return null;
+    }
+
+    private Label Extend(Label previous, int vertex, int origin, double lengthLimit, out string rejection, bool coastal = false)
+    {
+        rejection = null;
+        double angle = Angle(previous.Vertex, vertex), length = previous.Length + angle * radius;
+        if (length > lengthLimit || Angle(origin, vertex) * radius > maxRadius || (coastal && coastalHops[vertex] < 0))
+        { rejection = "search-distance-limit"; return null; }
+        double floor = Math.Min(original[vertex], previous.Floor * Math.Cos(angle) - step);
+        double cut = original[vertex] - floor;
+        // Retained ocean can only be an UNEDITED endpoint. Shallow coastal land receives
+        // a provisional exception, subject to complete proposed-TIN ocean verification.
+        if ((ocean[vertex] && (!coastal || cut > 0)) ||
+            (!ocean[vertex] && (floor < (coastal ? coastalFloor : seaFloor) || (!coastal && protectedSubsea[vertex] && cut > 0))))
+        { rejection = "below-sea-level"; return null; }
+        if (cut > depth) { rejection = "too-deep"; return null; }
+        if (protectedLake[vertex] && cut > 0) { rejection = "lake"; return null; }
+        double cost = previous.Cost + angle * radius * (1 + 4 * cut / Math.Max(depth, step));
+        return new Label { Vertex = vertex, Previous = previous, Floor = floor, Length = length,
+            MaxCut = Math.Max(previous.MaxCut, cut), Cost = cost, Priority = cost };
+    }
+
+    private Candidate Search(int start)
+    {
+        var c = new Candidate { Origin = graph.CellDirections[start] * original[start], TargetKind = (int)Target.None };
+        if (original[start] <= seaFloor + step) { c.Rejection = "below-sea-level"; return c; }
+        var frontier = new SortedSet<Label>(new LabelOrder());
+        var labels = new Dictionary<int, List<Label>>();
+        var first = new Label { Vertex = start, Floor = original[start] };
+        frontier.Add(first); labels[start] = new List<Label> { first };
+        int serial = 1, probes = 0; bool tooDeep = false, belowSea = false, distanceLimit = false, budget = false;
+        Label best = null; Escape target = null;
+        while (frontier.Count > 0)
+        {
+            var current = frontier.Min; frontier.Remove(current);
+            if (!labels[current.Vertex].Contains(current)) continue;
+            int v = current.Vertex;
+            // A target is untouched and lower, so its existing downhill continuation remains usable.
+            if (v != start && original[v] <= current.Floor && original[v] < original[start] - step)
+            {
+                if (!escapes.TryGetValue(v, out var escape))
+                {
+                    if (++probes > MaximumTargetProbes) { budget = true; break; }
+                    escape = FindEscape(v); escapes[v] = escape;
+                }
+                if (escape.Kind != Target.None)
+                {
+                    if (target == null || escape.Kind < target.Kind || (escape.Kind == target.Kind && current.Cost < best.Cost))
+                    { best = current; target = escape; }
+                    // Never continue a proposed incision through its already accepted outlet.
+                    continue;
+                }
+            }
+            for (int k = 0; k < graph.NeighborCounts[v]; k++)
+            {
+                int next = graph.Neighbors6[v * 6 + k]; if (ocean[next]) continue;
+                double angle = Angle(v, next), length = current.Length + angle * radius;
+                if (length > maxLength || Angle(start, next) * radius > maxRadius) { distanceLimit = true; continue; }
+                double floor = Math.Min(original[next], current.Floor * Math.Cos(angle) - step);
+                if (floor < seaFloor) { belowSea = true; continue; }
+                double cut = original[next] - floor, maxCut = Math.Max(current.MaxCut, cut);
+                if (maxCut > depth) { tooDeep = true; continue; }
+                if (protectedSubsea[next] && cut > 0) { belowSea = true; continue; }
+                if (protectedLake[next] && cut > 0) continue;
+                // Positive additive costs favor short shallow routes; Pareto labels retain a
+                // higher floor even if another route reached this vertex more cheaply.
+                double cost = current.Cost + angle * radius * (1 + 4 * cut / Math.Max(depth, step)) + Math.Max(0, maxCut - current.MaxCut) * 4;
+                var nextLabel = new Label { Vertex = next, Id = serial++, Floor = floor, Length = length, Cost = cost, Priority = cost, MaxCut = maxCut, Previous = current };
+                if (!labels.TryGetValue(next, out var list)) labels[next] = list = new List<Label>();
+                if (list.Any(l => l.Cost <= cost && l.Length <= length && l.Floor >= floor && l.MaxCut <= maxCut)) continue;
+                list.RemoveAll(l => cost <= l.Cost && length <= l.Length && floor >= l.Floor && maxCut <= l.MaxCut);
+                list.Add(nextLabel); frontier.Add(nextLabel);
+                if (serial >= MaximumLabels) { budget = true; break; }
+            }
+            if (budget) break;
+        }
+        if (best == null)
+        {
+            c.Rejection = budget ? "search-budget" : tooDeep ? "too-deep" : belowSea ? "below-sea-level" : distanceLimit ? "search-distance-limit" : "no-target";
+            return c;
+        }
+        var chain = new List<Label>(); for (var l = best; l != null; l = l.Previous) chain.Add(l); chain.Reverse();
+        c.Vertices = chain.Select(l => l.Vertex).ToArray(); c.Length = best.Length; c.TargetKind = (int)target.Kind;
+        c.Path = chain.Select(l => graph.CellDirections[l.Vertex] * original[l.Vertex]).ToArray();
+        c.TargetPoint = c.Path[c.Path.Length - 1];
+        BuildProfile(c, chain, target);
+        return c;
+    }
+
+    private Escape FindEscape(int vertex)
+    {
+        int triangle = tin.BasinIncidentTriangle(tin.BasinIncidentStart(vertex));
+        // The existing observational outlet tracer does not alter receivers, runoff or diagnostics.
+        var path = tin.TraceLakeOutlet(tin.BasinPoint(triangle, vertex), null, out var termination);
+        if (path.Length < 2) return new Escape { Kind = Target.None };
+        bool lakeEscape = lakes != null && lakes.FirstEntry(path, out var entry) && LakeEscapes(entry.BasinId, new HashSet<int>());
+        if (!lakeEscape && termination != TinTermination.OceanCoast) return new Escape { Kind = Target.None };
+        // Only a target already lying on a river-supporting facet gets river priority.
+        bool river = false;
+        for (int i = tin.BasinIncidentStart(vertex); i < tin.BasinIncidentEnd(vertex); i++)
+            river |= riverFacets.Contains(tin.BasinIncidentTriangle(i));
+        double distance = 0;
+        for (int i = 1; i < path.Length; i++) distance += Vector3.Distance(tin.Direction(path[i - 1]), tin.Direction(path[i])) * radius;
+        double localEdge = 0;
+        for (int k = 0; k < graph.NeighborCounts[vertex]; k++) localEdge = Math.Max(localEdge, Angle(vertex, graph.Neighbors6[vertex * 6 + k]) * radius);
+        return new Escape { Kind = river ? Target.River : lakeEscape ? Target.LakeOutlet : distance <= localEdge * 2 ? Target.Coastline : Target.OceanDrainage, Path = path };
+    }
+
+    private bool LakeEscapes(int id, HashSet<int> seen)
+    {
+        if (!seen.Add(id) || !lakeNodes.TryGetValue(id, out var node) || node.Terminal) return false;
+        if (node.DownstreamLakeId >= 0) return LakeEscapes(node.DownstreamLakeId, seen);
+        if (node.OutletTermination == TinTermination.OceanCoast) return true;
+        int network = node.JoinNetwork; var visited = new HashSet<int>();
+        while (network >= 0 && network < lakes.RiverReaches.Count && visited.Add(network))
+        {
+            var reach = lakes.RiverReaches[network];
+            if (reach.ReceivingLakeId >= 0) return LakeEscapes(reach.ReceivingLakeId, seen);
+            if (reach.Termination == TinTermination.OceanCoast) return true;
+            network = reach.JunctionNetwork;
+        }
+        return false;
+    }
+
+    private void BuildProfile(Candidate c, List<Label> chain, Escape escape, double? routeLengthLimit = null)
+    {
+        c.Surface = new Dictionary<int, float>();
+        var centre = new HashSet<int>(c.Vertices);
+        for (int i = 1; i < chain.Count; i++)
+        {
+            var a = chain[i - 1]; var b = chain[i];
+            if (width <= 0 || (original[a.Vertex] <= a.Floor && original[b.Vertex] <= b.Floor)) continue;
+            double edge = Angle(a.Vertex, b.Vertex) * radius;
+            var visited = new HashSet<int>(); var queue = new Queue<int>();
+            queue.Enqueue(a.Vertex); queue.Enqueue(b.Vertex);
+            Vector3 start = graph.CellDirections[a.Vertex], end = graph.CellDirections[b.Vertex];
+            Vector3 delta = end - start;
+            while (queue.Count > 0)
+            {
+                int v = queue.Dequeue(); if (!visited.Add(v)) continue;
+                Vector3 point = graph.CellDirections[v];
+                float t = Mathf.Clamp01(Vector3.Dot(point - start, delta) / delta.sqrMagnitude);
+                double distance = Vector3.Distance(point, (start + delta * t).normalized) * radius;
+                if (distance > width + edge) continue;
+                if (distance < width && !centre.Contains(v))
+                {
+                    double x = distance / width, falloff = 1 - x * x * (3 - 2 * x);
+                    double cut = ((original[a.Vertex] - a.Floor) * (1 - t) + (original[b.Vertex] - b.Floor) * t) * falloff;
+                    if (cut > step * .01)
+                    {
+                        if (protectedLake[v]) { c.Rejection = "lake"; return; }
+                        // Never lower retained ocean. Coastal margins obey the same shallow
+                        // floor and short footprint limit as the provisional centreline.
+                        if (!ocean[v])
+                        {
+                            if (!c.CoastalAttempt && protectedSubsea[v]) { c.Rejection = "below-sea-level"; return; }
+                            float h = (float)(original[v] - cut);
+                            if (h < (c.CoastalAttempt ? coastalFloor : seaFloor)) { c.Rejection = "below-sea-level"; return; }
+                            if (c.CoastalAttempt && (coastalHops[v] < 0 || Angle(c.Vertices[0], v) * radius > c.CoastalLengthLimit))
+                            { c.Rejection = "search-distance-limit"; return; }
+                            if (!c.Surface.TryGetValue(v, out float old) || h < old) c.Surface[v] = h;
+                            if (c.Surface.Count > MaximumAffectedVertices) { c.Rejection = "footprint-limit"; return; }
+                        }
+                    }
+                }
+                for (int k = 0; k < graph.NeighborCounts[v]; k++) queue.Enqueue(graph.Neighbors6[v * 6 + k]);
+            }
+        }
+        foreach (var l in chain)
+        {
+            float h = (float)l.Floor;
+            if (h < original[l.Vertex]) c.Surface[l.Vertex] = h;
+        }
+        var facets = new HashSet<int>(); double sum = 0;
+        foreach (var pair in c.Surface)
+        {
+            double cut = original[pair.Key] - pair.Value;
+            c.MaximumCut = Math.Max(c.MaximumCut, cut); sum += cut; AddFacets(pair.Key, facets);
+        }
+        c.AffectedVertices = c.Surface.Count; c.AffectedFacets = facets.Count; c.MeanCut = sum / Math.Max(1, c.AffectedVertices);
+        if (c.MaximumCut > depth || c.MeanCut > depth) { c.Rejection = "too-deep"; return; }
+        if (c.Length > (routeLengthLimit ?? (c.CoastalAttempt ? c.CoastalLengthLimit : maxLength))) { c.Rejection = "search-distance-limit"; return; }
+        if (c.AffectedVertices > MaximumAffectedVertices || c.AffectedFacets > MaximumAffectedFacets)
+        { c.Rejection = "footprint-limit"; return; }
+        if (c.AffectedVertices == 0) { c.Rejection = "no-target"; return; }
+        // Retain the old continuation for comparison. Actual reroutes must be proven on
+        // the combined TIN; a changed old polyline alone is not a geometric failure.
+        c.Continuation = escape.Path;
+        if (!ProfileValid(c, null, false)) c.Rejection = "conflict";
+    }
+
+    private bool ProfileValid(Candidate c, Dictionary<int, float> other, bool checkExistingPaths = true)
+    {
+        c.ProfileFailure = null;
+        double Height(int v)
+        {
+            double h = c.Surface.TryGetValue(v, out float own) ? own : original[v];
+            return other != null && other.TryGetValue(v, out float additional) ? Math.Min(h, additional) : h;
+        }
+        for (int i = 1; i < c.Vertices.Length; i++)
+        {
+            int a = c.Vertices[i - 1], b = c.Vertices[i];
+            if (Height(b) > Height(a) * Math.Cos(Angle(a, b)) - step * .5) { c.ProfileFailure = "centre-profile"; return false; }
+        }
+        bool Descent(TinPoint[] path)
+        {
+            double lowest = double.PositiveInfinity;
+            foreach (var p in path)
+            {
+                double h = p.A * Height(tin.BasinVertex(p.Triangle, 0)) + p.B * Height(tin.BasinVertex(p.Triangle, 1)) + p.C * Height(tin.BasinVertex(p.Triangle, 2));
+                if (h > lowest + tin.Epsilon) return false;
+                lowest = Math.Min(lowest, h);
+            }
+            return true;
+        }
+        if (checkExistingPaths && c.Continuation != null && !Descent(c.Continuation)) { c.ProfileFailure = "old-continuation"; return false; }
+        if (checkExistingPaths && c.Incoming != null && c.Incoming.Any(path => !Descent(path))) { c.ProfileFailure = "incoming-profile"; return false; }
+        return true;
+    }
+
+    private void VerifyOceanProposals(Result result)
+    {
+        // A fixed batch budget, never one full TIN per candidate. Removing a failed
+        // downstream edge also removes dependent upstream proposals before rechecking.
+        for (int attempt = 0; attempt < 3; attempt++)
+        {
+            Array.Copy(original, result.Heights, original.Length);
+            foreach (var c in result.Candidates.Where(c => c.Accepted))
+                foreach (var cut in c.Surface) result.Heights[cut.Key] = Math.Min(result.Heights[cut.Key], cut.Value);
+            var selected = result.Candidates.Where(c => c.Accepted).ToArray();
+            if (selected.Length == 0) return;
+            if (completedSurface == null)
+            { foreach (var c in selected) c.Rejection = "missing-completed-surface"; break; }
+
+            // Match ApplyGeodesicValleySurface's float projection, then the authoritative
+            // rebuild's magnitude sampling. Reuse untouched completed vertices exactly.
+            var proposed = ProjectProposedTin(result.Heights, requireSeaSphereCrossing: true);
+            result.VerificationBuilds++;
+            // Also protect known ocean-connected river sources, including tributaries
+            // whose original independent centroid parcel already reached retained ocean.
+            // This is bounded by the existing source set; it is not another accumulation.
+            foreach (int source in tin.Networks.Select(n => n.SourceTriangle).Distinct().OrderBy(t => t))
+                if (GeodesicOceanDrainagePlan.ConfirmedOcean(tin, tin.ParcelDestinations[source]) &&
+                    !GeodesicOceanDrainagePlan.TraceToOcean(proposed, proposed.Centroid(source)))
+                {
+                    foreach (var c in selected) c.Rejection = "existing-ocean-route-changed";
+                    Array.Copy(original, result.Heights, original.Length); return;
+                }
+            bool removed = false;
+            foreach (var c in selected)
+            {
+                bool Connected(TinPoint source, string kind)
+                {
+                    var path = proposed.TraceLakeOutlet(source, null, out var termination);
+                    bool ok = path.Length > 0 && GeodesicOceanDrainagePlan.ConfirmedOcean(proposed,
+                        new TinParcelDestination(path[path.Length - 1], termination));
+                    if (!ok) c.VerificationFailure = kind + ":" + termination + ":source=" + source.Triangle;
+                    return ok;
+                }
+                bool connected = Connected(c.SourceFloor, "floor");
+                // These exact sources previously terminated in the candidate's closed basin.
+                // Below sea alone is not sufficient: OceanCoast on this closed sphere can
+                // only be reported after the tracer encounters the frozen retained mask.
+                foreach (var incoming in c.Incoming)
+                {
+                    if (!connected || !Connected(incoming[0], "incoming")) { connected = false; break; }
+                }
+                if (!connected) { c.Rejection = c.CoastalAttempt ? "coastal-no-ocean-connection" : "proposed-no-ocean-connection"; removed = true; }
+                else c.TargetKind = (int)(c.DownstreamBasinId >= 0 ? Target.DownstreamBasin : c.CoastalAttempt ? Target.Coastline : Target.OceanDrainage);
+            }
+            if (!removed) return;
+            var verifiedIds = new HashSet<int>(result.Candidates.Where(c => c.Accepted).Select(c => c.BasinId));
+            var retained = GeodesicOceanDrainagePlan.CompleteChainEdges(result.Chains, verifiedIds.Contains);
+            foreach (var c in result.Candidates.Where(c => c.Accepted && !retained.Contains(c.BasinId)))
+                c.Rejection = "downstream-proposal-rejected";
+        }
+        // No unverified residual proposal can escape the bounded validation budget.
+        foreach (var c in result.Candidates.Where(c => c.Accepted)) c.Rejection = "verification-budget";
+        Array.Copy(original, result.Heights, original.Length);
+    }
+
+    private GeodesicTinHydrology ProjectProposedTin(float[] requestedHeights, bool requireSeaSphereCrossing)
+    {
+        var positions = (Vector3[])completedSurface.Clone(); var heights = new float[positions.Length];
+        float min = float.PositiveInfinity, max = float.NegativeInfinity;
+        for (int v = 0; v < positions.Length; v++)
+        {
+            if (requestedHeights[v] < original[v]) positions[v] = positions[v].normalized * requestedHeights[v];
+            heights[v] = positions[v].magnitude;
+            min = Math.Min(min, heights[v]); max = Math.Max(max, heights[v]);
+        }
+        double bump = (max - (double)min) * microBumpFraction;
+        return new GeodesicTinHydrology(graph.CellDirections, graph.Triangles, heights, heights,
+            ocean, (float)seaLevel, radius, tin.Epsilon, bump,
+            onSphere: true, allowBoundaryOutflow: false, subdivisionLevel: tin.SubdivisionLevel, completedSurface: positions,
+            requireSeaSphereCrossing: requireSeaSphereCrossing);
+    }
+
+    private double LocalEdgeLength(int vertex)
+    {
+        double length = 0;
+        for (int k = 0; k < graph.NeighborCounts[vertex]; k++)
+            length = Math.Max(length, Angle(vertex, graph.Neighbors6[vertex * 6 + k]) * radius);
+        return length;
+    }
+
+    private double Angle(int a, int b)
+    {
+        // Chord/asin is stable for adjacent vertices at high subdivisions.
+        return 2 * Math.Asin(Math.Min(1, Vector3.Distance(graph.CellDirections[a], graph.CellDirections[b]) * .5));
+    }
+    private void AddFacets(int vertex, HashSet<int> facets)
+    {
+        for (int i = tin.BasinIncidentStart(vertex); i < tin.BasinIncidentEnd(vertex); i++) facets.Add(tin.BasinIncidentTriangle(i));
+    }
+}

@@ -67,9 +67,55 @@ public class SimulationStartupConfig
     public float geodesicVentFe2PhysicalPerSecond = 0f;
     [Range(0f, 1f)] public float terrestrialVentFraction = 0.25f;
 
+    [Header("Debug Settings / River Debug")]
+    [Tooltip("Displays river reaches omitted because they rise uphill. Diagnostic only; these do not become valid drainage routes.")]
+    public bool showRejectedUphillRiverSegments;
+    [Tooltip("Audits every rendered river segment against the completed visible terrain. Downhill segments retain their normal colour; visually uphill sections are shown yellow, orange or red. This does not alter routing.")]
+    public bool colourRenderedRiversByVisibleTerrainGrade;
+    [Tooltip("Purple marks declared closed basins; white marks unexpected routing failures. Diagnostic only; no lakes are created.")]
+    public bool showRiverTerminationReasons;
+
     [Header("Population")]
     [Min(0)] public int initialSpawnCount = 100;
     public bool startPaused;
+
+    [Header("Advanced Geodesic Ocean")]
+    [Tooltip("Prevents small enclosed terrain depressions below global sea level from automatically becoming ocean. These basins can later support proper lakes.")]
+    public bool excludeSmallDisconnectedSeas;
+    [Range(0f, GeodesicOceanConnectivity.MaximumAreaFraction)]
+    public float minimumOceanComponentAreaFraction = GeodesicOceanConnectivity.DefaultMinimumAreaFraction;
+
+    [Header("Advanced Geodesic Terrain")]
+    [Tooltip("Experimental geological reconstruction of originally excluded inland basins.")]
+    public bool infillExcludedInlandBasins;
+    public GeodesicBasinInfillLimits basinInfillLimits = GeodesicBasinInfillLimits.Defaults;
+
+    [Tooltip(GeodesicInlandUplift.Help)]
+    [Range(0f, GeodesicInlandUplift.MaximumMagnitude)] public float inlandElevationMagnitude = 0f;
+
+    [Header("Advanced Geodesic Hydrology")]
+    [Tooltip(GeodesicValleyCarving.Help)] public bool enableTerminationValleyCarving;
+    [Range(1, 5)] public int valleyCarvingPasses = 1;
+    [Range(0f, 1f)] public float maximumValleyCarveDepth = GeodesicValleyCarving.DefaultDepth;
+    [Min(0f)] public float minimumValleyCarveRunoff = GeodesicValleyCarving.DefaultRunoff;
+    [Range(0f, 1f)] public float valleyCarveWidth = GeodesicValleyCarving.DefaultWidth;
+    public bool showValleyCarvingDebug;
+    [Min(0.01f)] public float riverFlowThreshold = GeodesicRiverSystem.DefaultRiverFlowThreshold;
+    [Min(0.01f)] public float majorRiverThreshold = GeodesicRiverSystem.DefaultMajorRiverThreshold;
+    public bool colourRiversByUltimateDestination;
+    public HydrologyTerrainMode hydrologyTerrainMode = HydrologyTerrainMode.Visible;
+    // Compatibility for the preserved first experiment and its capture/tests.
+    public bool useLowFrequencyTerrainForHydrology
+    {
+        get => hydrologyTerrainMode == HydrologyTerrainMode.ReducedRidgeAndFineDetail;
+        set => hydrologyTerrainMode = value ? HydrologyTerrainMode.ReducedRidgeAndFineDetail : HydrologyTerrainMode.Visible;
+    }
+
+    [Header("Advanced Geodesic Lakes")]
+    [Tooltip("Fill significant terrain depressions with static lakes at their spill elevation. Small depressions remain virtual hydrological fills.")]
+    public bool generateHydrologicalLakes;
+    [Range(0f, .05f)] public float minimumLakeBasinAreaFraction = GeodesicLakeBasins.DefaultMinimumAreaFraction;
+    [Range(0f, 1f)] public float minimumLakeDepth = GeodesicLakeBasins.DefaultMinimumDepth;
 
     [Header("Advanced Environment Timing")]
     [Tooltip("Fixed simulated-time interval used only by ApproximateEcologicalProfiles temperature updates.")]

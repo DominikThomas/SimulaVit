@@ -1,0 +1,18 @@
+2026-10-07 baseline restoration validation
+Reference: literal git commit 6f48085dea26a6f46cf215f7f026e66999208717
+Starting HEAD: 55e5cf4 + 13 preserved working files
+
+Tools/ValidateGeodesicLakes.ps1 -BaselineReference: 67 passed; 0 failed.
+Three additional tests compare current code with literal historical classes:
+- RestoredTerrainSamplingMatchesLiteral6f48085AtRenderSeven
+- RestoredS6DrainageMatchesLiteral6f48085IncludingSaddles
+- RestoredReachPlansMatchLiteral6f48085WithLakesOff
+
+Unity compiler: runtime, EditMode test and Editor capture assemblies compile.
+Native Unity integration tests: not yet executed.
+Unity visual acceptance: pending. A/B/C success is NOT claimed.
+Lakes: disabled by temporary baseline-validation gate; saved settings preserved.
+
+Older experiment output is preserved in Docs/Archive/GeodesicRiverRoutingValidation-20261002.txt.
+See Docs/GeodesicHighResolutionHydrology.md for the backup, restoration details and capture procedure.
+git diff --check: passed. Unity A/B request remained unconsumed at 2026-10-07 20:50 local time.
