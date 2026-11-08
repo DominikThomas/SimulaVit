@@ -9,7 +9,7 @@ internal sealed class GeodesicTinLakeCrossings
     {
         internal GeodesicTinLakeSediment.Footprint Bed;
         internal Vector2[] Path;
-        internal double Discharge, DischargeAtInlet;
+        internal double Discharge;
     }
 
     internal readonly List<Crossing> Paths = new List<Crossing>();
@@ -102,11 +102,7 @@ internal sealed class GeodesicTinLakeCrossings
                 }
                 if (path.Length < 2) continue;
                 tree.Add(path);
-                result.Paths.Add(new Crossing
-                {
-                    Bed = bed, Path = path, DischargeAtInlet = entry.Flow,
-                    Discharge = trunk ? Math.Max(lake.Discharge, entry.Flow) : entry.Flow
-                });
+                result.Paths.Add(new Crossing { Bed = bed, Path = path, Discharge = trunk ? lake.Discharge : entry.Flow });
                 if (direct) result.Direct++; else result.Interior++;
             }
             if (merged) result.Junctions++;
@@ -154,7 +150,7 @@ internal sealed class GeodesicTinLakeCrossings
     // Clip ribbon banks against the same facets as the sediment surface. The centreline
     // is accepted on topology and polygon containment alone, including zero gradient.
     internal static void AddRibbon(Crossing crossing, float angularWidth, float offset, Color color, bool lines,
-        List<Vector3> vertices, List<int> indices, List<Color> colors, float? inletAngularWidth = null)
+        List<Vector3> vertices, List<int> indices, List<Color> colors)
     {
         var bed = crossing.Bed;
         var path = crossing.Path;
@@ -175,17 +171,10 @@ internal sealed class GeodesicTinLakeCrossings
         }
 
         var banks = new Vector2[path.Length];
-        float length = 0f;
-        for (int i = 1; i < path.Length; i++) length += Vector2.Distance(path[i - 1], path[i]);
-        float travelled = 0f;
-        for (int i = 0; i < path.Length; i++)
+        for (int i = 1; i < path.Length - 1; i++)
         {
-            if (i > 0) travelled += Vector2.Distance(path[i - 1], path[i]);
-            bool cap = i == 0 || i == path.Length - 1;
-            if (cap && !inletAngularWidth.HasValue) continue;
-            Vector2 tangent = (path[Math.Min(i + 1, path.Length - 1)] - path[Math.Max(0, i - 1)]).normalized;
-            float width = Mathf.Lerp(inletAngularWidth ?? angularWidth, angularWidth, length > 0f ? travelled / length : 0f);
-            banks[i] = new Vector2(-tangent.y, tangent.x) * (width * .5f);
+            Vector2 tangent = (path[i + 1] - path[i - 1]).normalized;
+            banks[i] = new Vector2(-tangent.y, tangent.x) * (angularWidth * .5f);
         }
         var polygon = new List<Vector2>(8); var buffer = new List<Vector2>(8);
         void Strip(Vector2 a, Vector2 b, Vector2 c, Vector2 d)
@@ -208,7 +197,7 @@ internal sealed class GeodesicTinLakeCrossings
         for (int i = 1; i < path.Length; i++)
         {
             Vector2 a = path[i - 1], b = path[i];
-            if (path.Length == 2 && !inletAngularWidth.HasValue)
+            if (path.Length == 2)
             {
                 Vector2 middle = (a + b) * .5f, tangent = (b - a).normalized;
                 Vector2 side = new Vector2(-tangent.y, tangent.x) * (angularWidth * .5f);

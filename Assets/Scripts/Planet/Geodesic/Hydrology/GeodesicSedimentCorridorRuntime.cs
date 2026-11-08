@@ -65,20 +65,6 @@ public sealed partial class GeodesicRiverSystem
 
     private float RenderRadius(Vector3 direction) => (corridorTerrain ?? terrain).Radius(direction);
 
-    private Dictionary<int, List<(Vector3 Point, double Runoff)>> CorridorWidthReceivers()
-    {
-        if (drawRawTrianglePaths || SedimentCorridors == null) return null;
-        var receivers = new Dictionary<int, List<(Vector3, double)>>();
-        foreach (var corridor in SedimentCorridors.Connections.Values)
-        {
-            if (corridor.TargetNetwork < 0) continue;
-            if (!receivers.TryGetValue(corridor.TargetNetwork, out var inflows))
-                receivers.Add(corridor.TargetNetwork, inflows = new List<(Vector3, double)>());
-            inflows.Add((corridorTopology.CellDirections[corridor.Vertices[corridor.Vertices.Length - 1]], corridor.Runoff));
-        }
-        return receivers;
-    }
-
     private void DrawSedimentCorridors(bool[] rendered, HashSet<int> renderedLakeOutlets,
         List<Vector3> vertices, List<int> indices, List<Color> colors)
     {
@@ -102,7 +88,7 @@ public sealed partial class GeodesicRiverSystem
             if (corridor.Coast.HasValue) FitOceanOutlet(route, corridor.Coast.Value, ref samples, ref discharge);
             int firstVertex = vertices.Count;
             if (drawRawTrianglePaths) AddRawTinLine(samples, vertices, indices, colors);
-            else AddTinRibbon(samples, 0, vertices, indices, colors, discharge);
+            else AddTinRibbon(samples, 0, vertices, indices, colors, discharge, spillStart: true);
             OutletAudit?.Record(route, vertices, firstVertex, drawRawTrianglePaths);
             RecordRiverColour("corridor:" + corridor.BasinId, firstVertex, vertices.Count);
             visibleReaches++;
