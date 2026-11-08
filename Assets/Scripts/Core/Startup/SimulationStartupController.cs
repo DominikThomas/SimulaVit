@@ -34,7 +34,7 @@ public class SimulationStartupController : MonoBehaviour
     public const float GeodesicVentPhysicalMaxPerSecond = 1000f;
     private const int InitialSpawnMin = 0;
     private const int InitialSpawnMax = 10000;
-    private const int SavedStartupConfigVersion = 21;
+    private const int SavedStartupConfigVersion = 22;
     public const float NormalAtmospherePressureMaxBar = 5f;
     public const float DenseAtmospherePressureMaxBar = 600f;
     public const float DefaultApproximateThermalIntervalSeconds = 2f;
@@ -480,6 +480,7 @@ public class SimulationStartupController : MonoBehaviour
         destination.maximumMajorOutletDegrees = source.maximumMajorOutletDegrees;
         destination.riverFlowThreshold = source.riverFlowThreshold;
         destination.majorRiverThreshold = source.majorRiverThreshold;
+        destination.colourRiversByUltimateDestination = source.colourRiversByUltimateDestination;
         destination.generateHydrologicalLakes = source.generateHydrologicalLakes;
         destination.minimumLakeBasinAreaFraction = source.minimumLakeBasinAreaFraction;
         destination.minimumLakeDepth = source.minimumLakeDepth;
@@ -721,6 +722,7 @@ public class SimulationStartupController : MonoBehaviour
                 riverDebug.showRejectedUphillRiverSegments = config.showRejectedUphillRiverSegments;
                 riverDebug.colourRenderedRiversByVisibleTerrainGrade = config.colourRenderedRiversByVisibleTerrainGrade;
                 riverDebug.showRiverTerminationReasons = config.showRiverTerminationReasons;
+                riverDebug.SetRiverDestinationColours(config.colourRiversByUltimateDestination);
             }
             foreach (var progress in planetGenerator.InitializeAuthoritativePlanetStages("New Game startup selection"))
                 yield return progress;
@@ -1068,6 +1070,7 @@ public class SimulationStartupController : MonoBehaviour
         // Missing fields use the historical river defaults even with customized scene defaults.
         saved.riverFlowThreshold = GeodesicRiverSystem.DefaultRiverFlowThreshold;
         saved.majorRiverThreshold = GeodesicRiverSystem.DefaultMajorRiverThreshold;
+        saved.colourRiversByUltimateDestination = false;
         saved.infillExcludedInlandBasins = false;
         saved.basinInfillLimits = GeodesicBasinInfillLimits.Defaults;
         saved.inlandElevationMagnitude = 0f;
@@ -1111,6 +1114,7 @@ public class SimulationStartupController : MonoBehaviour
         public float valleyCarveWidth = GeodesicValleyCarving.DefaultWidth;
         public float riverFlowThreshold = GeodesicRiverSystem.DefaultRiverFlowThreshold;
         public float majorRiverThreshold = GeodesicRiverSystem.DefaultMajorRiverThreshold;
+        public bool colourRiversByUltimateDestination;
         public bool generateHydrologicalLakes;
         public float minimumLakeBasinAreaFraction, minimumLakeDepth;
         public float axisTiltDegrees;
@@ -1180,6 +1184,7 @@ public class SimulationStartupController : MonoBehaviour
                 valleyCarveWidth = config.valleyCarveWidth,
                 riverFlowThreshold = config.riverFlowThreshold,
                 majorRiverThreshold = config.majorRiverThreshold,
+                colourRiversByUltimateDestination = config.colourRiversByUltimateDestination,
                 generateHydrologicalLakes = config.generateHydrologicalLakes,
                 minimumLakeBasinAreaFraction = config.minimumLakeBasinAreaFraction,
                 minimumLakeDepth = config.minimumLakeDepth,
@@ -1244,6 +1249,7 @@ public class SimulationStartupController : MonoBehaviour
             config.showRejectedUphillRiverSegments = version >= 11 && showRejectedUphillRiverSegments;
             config.colourRenderedRiversByVisibleTerrainGrade = version >= 12 && colourRenderedRiversByVisibleTerrainGrade;
             config.showRiverTerminationReasons = version >= 12 && showRiverTerminationReasons;
+            config.colourRiversByUltimateDestination = version >= 22 && colourRiversByUltimateDestination;
             config.hydrologyTerrainMode = version >= 14 && System.Enum.IsDefined(typeof(HydrologyTerrainMode), hydrologyTerrainMode)
                 ? hydrologyTerrainMode : version == 13 && useLowFrequencyTerrainForHydrology
                     ? HydrologyTerrainMode.ReducedRidgeAndFineDetail : HydrologyTerrainMode.Visible;
@@ -1544,7 +1550,7 @@ public class SimulationStartupController : MonoBehaviour
         float contentWidth = Mathf.Max(1f, width - 20f);
         float infillHeight = currentConfig.gridType == PlanetGridType.GeodesicIcosphere
             ? 98f + (currentConfig.infillExcludedInlandBasins ? (line + gap) * 6f : 0f) : 0f;
-        float advancedHeight = advancedSettingsExpanded ? 1920f + infillHeight : 0f;
+        float advancedHeight = advancedSettingsExpanded ? 1920f + infillHeight + (currentConfig.gridType == PlanetGridType.GeodesicIcosphere ? line + gap + 78f : 0f) : 0f;
         float contentHeight = 44f + ((line + gap) * 25f) + advancedHeight + (debugSettingsExpanded ? 370f : 40f) + (gap * 2f) + 42f + 30f + 82f;
         Rect contentRect = GUILayoutUtility.GetRect(contentWidth, contentHeight, GUILayout.Width(contentWidth), GUILayout.Height(contentHeight));
         float controlX = contentRect.x;
@@ -1638,6 +1644,12 @@ public class SimulationStartupController : MonoBehaviour
                 y += line + gap;
                 GUI.Label(new Rect(controlX, y, contentWidth, 44f), "Accumulated runoff threshold used to classify/scale major rivers.", new GUIStyle(labelStyle) { wordWrap = true });
                 y += 50f;
+                DrawBool(new Rect(controlX, y, contentWidth, line), "Colour rivers by ultimate destination (debug)", ref currentConfig.colourRiversByUltimateDestination);
+                y += line + gap;
+                GUI.Label(new Rect(controlX, y, contentWidth, 72f),
+                    "Shows where each river ultimately drains.\nBlue = ocean • Red = closed inland basin\nPurple = terminal lake • Orange = unresolved",
+                    new GUIStyle(labelStyle) { wordWrap = true });
+                y += 78f;
                 GUI.Label(new Rect(controlX, y, contentWidth, line), "Hydrology terrain input", labelStyle);
                 y += line + gap;
                 currentConfig.hydrologyTerrainMode = (HydrologyTerrainMode)GUI.SelectionGrid(

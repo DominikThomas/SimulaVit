@@ -28,18 +28,21 @@ public class SimulationStartupConfigTests
         var defaults = new SimulationStartupConfig();
         Assert.That(defaults.riverFlowThreshold, Is.EqualTo(8f));
         Assert.That(defaults.majorRiverThreshold, Is.EqualTo(64f));
-        var custom = new SimulationStartupConfig { riverFlowThreshold = 2.5f, majorRiverThreshold = 90.25f };
+        Assert.That(defaults.colourRiversByUltimateDestination, Is.False);
+        var custom = new SimulationStartupConfig { riverFlowThreshold = 2.5f, majorRiverThreshold = 90.25f, colourRiversByUltimateDestination = true };
         foreach (string json in new[] { "{}", "{\"version\":14}", "{\"version\":15}" })
         {
             var migrated = SimulationStartupController.DeserializeSavedConfig(json, custom);
             Assert.That(migrated.riverFlowThreshold, Is.EqualTo(8f));
             Assert.That(migrated.majorRiverThreshold, Is.EqualTo(64f));
+            Assert.That(migrated.colourRiversByUltimateDestination, Is.False);
         }
         var type = typeof(SimulationStartupController).GetNestedType("SavedStartupConfig", System.Reflection.BindingFlags.NonPublic);
         var saved = type.GetMethod("FromConfig").Invoke(null, new object[] { custom });
         var loaded = SimulationStartupController.DeserializeSavedConfig(UnityEngine.JsonUtility.ToJson(saved), defaults);
         Assert.That(loaded.riverFlowThreshold, Is.EqualTo(custom.riverFlowThreshold));
         Assert.That(loaded.majorRiverThreshold, Is.EqualTo(custom.majorRiverThreshold));
+        Assert.That(loaded.colourRiversByUltimateDestination, Is.True);
         Assert.That(loaded.Clone().riverFlowThreshold, Is.EqualTo(custom.riverFlowThreshold));
         var invalid = SimulationStartupController.DeserializeSavedConfig("{\"version\":15,\"riverFlowThreshold\":0,\"majorRiverThreshold\":-1}", defaults);
         Assert.That(invalid.riverFlowThreshold, Is.EqualTo(8f));

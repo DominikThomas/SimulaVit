@@ -35,6 +35,9 @@ public sealed class GeodesicTinSedimentCorridorTests
         var final = f.AssertDelivery(plan);
         Assert.That(final.NetworkOutcome(connection.TargetNetwork).ViaCorridor, Is.False);
         Assert.That(connection.Coast, Is.Null);
+        Assert.That(final.RiverOutcome("corridor:" + connection.BasinId).RiverColour,
+            Is.EqualTo(GeodesicDrainageDelivery.RiverDestination.Ocean));
+        Assert.That(final.RiverDestinationAccountingPass, Is.True);
     }
 
     [Test]
@@ -89,6 +92,8 @@ public sealed class GeodesicTinSedimentCorridorTests
         var final = f.AssertDelivery(plan);
         foreach (int i in tributaries) Assert.That(final.NetworkOutcome(i).ViaCorridor, Is.True);
         Assert.That(final.CorridorOcean, Is.EqualTo(connection.Runoff).Within(final.Tolerance));
+        foreach (int i in tributaries)
+            Assert.That(final.RiverOutcome("network:" + i).RiverColour, Is.EqualTo(GeodesicDrainageDelivery.RiverDestination.Ocean));
     }
 
     [Test]

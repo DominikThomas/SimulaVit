@@ -21,6 +21,9 @@ public sealed class GeodesicDrainageDeliveryTests
         var tin = Plane(); var r = GeodesicDrainageDelivery.Analyze(tin);
         Assert.That(r.DirectOcean, Is.EqualTo(r.TotalRunoff).Within(1e-10)); Assert.That(r.TotalRunoff, Is.EqualTo(2).Within(1e-10));
         Assert.That(r.ViaLakesOcean, Is.Zero); Accounted(r);
+        Assert.That(r.RiverOutcome("network:0").RiverColour, Is.EqualTo(GeodesicDrainageDelivery.RiverDestination.Ocean));
+        Assert.That(r.RiverRunoff(GeodesicDrainageDelivery.RiverDestination.Ocean), Is.EqualTo(r.TotalRunoff).Within(r.Tolerance));
+        Assert.That(r.RiverDestinationAccountingPass, Is.True);
     }
     [Test] public void RenderedLakeOutletReachesOceanEvenBelowRibbonThreshold()
     {
@@ -41,6 +44,10 @@ public sealed class GeodesicDrainageDeliveryTests
         var lower = routing.Lakes.OrderBy(n => n.Basin.SpillElevation).First();
         var r = GeodesicDrainageDelivery.Analyze(tin, basins, routing.Lakes, routing.RiverReaches);
         Assert.That(r.ViaLakesOcean, Is.EqualTo(lower.Discharge).Within(1e-9)); Accounted(r);
+        foreach (var lake in routing.Lakes)
+            Assert.That(r.RiverOutcome("lake:" + lake.BasinId).RiverColour, Is.EqualTo(GeodesicDrainageDelivery.RiverDestination.Ocean));
+        foreach (var reach in routing.RiverReaches.Where(reach => reach.ReceivingLakeId >= 0))
+            Assert.That(r.RiverOutcome("network:" + reach.RawNetworkId).RiverColour, Is.EqualTo(GeodesicDrainageDelivery.RiverDestination.Ocean));
     }
     [Test] public void LegitimateClosedBowlRetainsRunoffAndRanksByIndependentInput()
     {
@@ -48,6 +55,8 @@ public sealed class GeodesicDrainageDeliveryTests
         var r = GeodesicDrainageDelivery.Analyze(tin, GeodesicTinBasins.Build(tin, 0, 0));
         Assert.That(r.InlandClosed, Is.EqualTo(r.TotalRunoff).Within(1e-9)); Assert.That(r.LargestDisconnected.First().Area, Is.GreaterThan(0));
         Assert.That(r.LargestDisconnected.First().Terminal.Type, Is.EqualTo("TrueClosedBasin")); Accounted(r);
+        Assert.That(r.RiverOutcome("network:0").RiverColour, Is.EqualTo(GeodesicDrainageDelivery.RiverDestination.ClosedBasin));
+        Assert.That(r.RiverRunoff(GeodesicDrainageDelivery.RiverDestination.ClosedBasin), Is.EqualTo(r.TotalRunoff).Within(r.Tolerance));
     }
     [Test] public void ClippedRibbonDoesNotChangeLogicalOceanDelivery()
     {
@@ -83,6 +92,10 @@ public sealed class GeodesicDrainageDeliveryTests
         var r = GeodesicDrainageDelivery.Analyze(tin, lakes: new[] { a, b }, reaches: reaches);
         Assert.That(r.ViaLakesOcean, Is.EqualTo(parcels.Sum(tin.ParcelRunoff)));
         Assert.That(r.TotalRunoff, Is.LessThan(tin.AccumulatedRunoff.Sum())); Accounted(r);
+        var trunk = r.RiverOutcome("network:0");
+        Assert.That(trunk.RiverColour, Is.EqualTo(GeodesicDrainageDelivery.RiverDestination.Ocean));
+        Assert.That(r.RiverOutcome("network:1"), Is.SameAs(trunk));
+        Assert.That(r.RiverOutcome("network:2"), Is.SameAs(trunk));
     }
     [Test] public void MissingDirectedLakeEdgeIsExplicitlyUnresolved()
     {
@@ -90,6 +103,8 @@ public sealed class GeodesicDrainageDeliveryTests
         var lake = new TinLakeFlowNode(10) { DownstreamLakeId = 99 }; lake.DirectParcels.Add(parcel);
         var r = GeodesicDrainageDelivery.Analyze(tin, lakes: new[] { lake });
         Assert.That(r.Unresolved, Is.EqualTo(tin.ParcelRunoff(parcel))); Assert.That(r.LargestDisconnected.First().Terminal.Type, Is.EqualTo("MissingDirectedConnection")); Accounted(r);
+        Assert.That(r.RiverOutcome("lake:10").RiverColour, Is.EqualTo(GeodesicDrainageDelivery.RiverDestination.Unresolved));
+        Assert.That(r.RiverOutcome("lake:10").Type, Is.EqualTo("MissingDirectedConnection"));
     }
     [Test] public void DiagnosticCyclesRemainUnresolvedAndProductionCycleExceptionRemainsActive()
     {
@@ -97,8 +112,38 @@ public sealed class GeodesicDrainageDeliveryTests
         int parcel = Enumerable.Range(0, tin.TriangleCount).First(t => tin.ParcelRunoff(t) > 0); a.DirectParcels.Add(parcel);
         var r = GeodesicDrainageDelivery.Analyze(tin, lakes: new[] { a, b });
         Assert.That(r.CycleNodes, Is.EqualTo(2)); Assert.That(r.Unresolved, Is.EqualTo(tin.ParcelRunoff(parcel)));
+        Assert.That(r.RiverOutcome("lake:10").RiverColour, Is.EqualTo(GeodesicDrainageDelivery.RiverDestination.Unresolved));
+        Assert.That(r.RiverOutcome("lake:20").Type, Is.EqualTo("DirectedCycle"));
         Assert.Throws<InvalidOperationException>(() => GeodesicTinLakeRouting.ResolveDischarge(new[] { a, b }, tin.ParcelRunoff, _ => { }));
     }
+    [Test] public void RiverAndTributaryInheritTerminalLakeWithNoOutlet()
+    {
+        var tin = Plane();
+        int parcel = Enumerable.Range(0, tin.TriangleCount).First(t => tin.ParcelRunoff(t) > 0);
+        var lake = new TinLakeFlowNode(10)
+        {
+            Basin = new TinBasinDescriptor(10, tin.Centroid(parcel), -1, 0, null, -1, -1, -1,
+                new[] { parcel }, 1, false, false, 0, 0)
+        };
+        lake.DirectParcels.Add(parcel);
+        var reaches = tin.Networks.Select(n => new TinLakeAdjustedReach
+        {
+            Samples = n.Samples, JunctionNetwork = n.JunctionNetwork, Termination = n.Termination
+        }).ToArray();
+        reaches[0].ReceivingLakeId = lake.BasinId;
+        reaches[1].Termination = TinTermination.Confluence;
+        reaches[1].JunctionNetwork = 0;
+        var delivery = GeodesicDrainageDelivery.Analyze(tin, lakes: new[] { lake }, reaches: reaches);
+        foreach (string route in new[] { "lake:10", "network:0", "network:1" })
+        {
+            var end = delivery.RiverOutcome(route);
+            Assert.That(end.RiverColour, Is.EqualTo(GeodesicDrainageDelivery.RiverDestination.TerminalLake));
+            Assert.That(end.TerminalLakeId, Is.EqualTo(lake.BasinId));
+        }
+        Assert.That(delivery.RiverRunoff(GeodesicDrainageDelivery.RiverDestination.TerminalLake), Is.EqualTo(tin.ParcelRunoff(parcel)));
+        Assert.That(delivery.RiverDestinationAccountingPass, Is.True);
+    }
+
     [Test] public void DuplicateLakeOwnershipIsNotDoubleCounted()
     {
         var tin = Plane(); var a = new TinLakeFlowNode(10); var b = new TinLakeFlowNode(20);

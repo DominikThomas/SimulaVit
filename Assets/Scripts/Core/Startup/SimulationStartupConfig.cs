@@ -108,6 +108,7 @@ public class SimulationStartupConfig
     [Range(0f, 45f)] public float maximumMajorOutletDegrees = GeodesicValleyCarving.DefaultMajorOutletDegrees;
     [Min(0.01f)] public float riverFlowThreshold = GeodesicRiverSystem.DefaultRiverFlowThreshold;
     [Min(0.01f)] public float majorRiverThreshold = GeodesicRiverSystem.DefaultMajorRiverThreshold;
+    public bool colourRiversByUltimateDestination;
     public HydrologyTerrainMode hydrologyTerrainMode = HydrologyTerrainMode.Visible;
     // Compatibility for the preserved first experiment and its capture/tests.
     public bool useLowFrequencyTerrainForHydrology

@@ -53,6 +53,21 @@ public sealed class GeodesicRiverVisibleGradeIntegrationTests
             var areas = rivers.TinDrainage.DrainageArea.ToArray(); var mouths = rivers.Mouths.ToArray();
             var paths = rivers.RiverPaths.ToDictionary(p => p.Key, p => p.Value.ToArray());
             string previousAudit = null;
+            var drainage = rivers.TinDrainage;
+            var rawRouting = drainage.Networks.Select(n => n.Samples).ToArray();
+            var lakeGeometry = rivers.TinLakeGeometry;
+            rivers.SetRiverDestinationColours(true);
+            Assert.That(field.GetValue(rivers), Is.SameAs(mesh));
+            Assert.That(mesh.colors.SequenceEqual(colors), Is.False);
+            CollectionAssert.AreEqual(vertices, mesh.vertices);
+            CollectionAssert.AreEqual(indices, mesh.GetIndices(0));
+            CollectionAssert.AreEqual(rawRouting, drainage.Networks.Select(n => n.Samples));
+            CollectionAssert.AreEqual(receivers, drainage.TriangleReceiver);
+            CollectionAssert.AreEqual(runoff, drainage.AccumulatedRunoff);
+            CollectionAssert.AreEqual(original, surface.vertices);
+            Assert.That(rivers.TinLakeGeometry, Is.SameAs(lakeGeometry));
+            rivers.SetRiverDestinationColours(false);
+            CollectionAssert.AreEqual(colors, mesh.colors);
             foreach (var toggles in new[] { (false,false), (true,false), (true,true), (false,true), (true,false), (false,false) })
             {
                 rivers.colourRenderedRiversByVisibleTerrainGrade = toggles.Item1;

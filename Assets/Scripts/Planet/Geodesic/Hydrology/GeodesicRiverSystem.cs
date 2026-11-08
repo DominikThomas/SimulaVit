@@ -806,6 +806,9 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
                 planet.OceanConnectivity?.PrimaryRetainedComponent ?? -1);
         if (delivery != null) DrainageDelivery = delivery;
         RefreshSedimentSurface();
+        riverColourDelivery = DrainageDelivery;
+        if (ColourRiversByUltimateDestination && riverColourDelivery == null)
+            riverColourDelivery = AnalyzeRiverColours();
         yield return new PlanetGenerationProgress(PlanetGenerationStage.BuildingRiverRibbons);
         var watch = System.Diagnostics.Stopwatch.StartNew();
         double threshold = ResolvedDrainageAreaThreshold;
@@ -869,6 +872,7 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
             VisibleGradeAudit?.ObserveEmittedPath(network.SourceTriangle, vertices, firstVertex, path.Length,
                 drawRawTrianglePaths, firstIndex, terrain, planet.BasePlanetRadius);
             visibleReaches++; rendered[id] = true;
+            RecordRiverColour("network:" + id, firstVertex, vertices.Count);
             if (!reuseRawNetworks && TinLakeRouting == null && network.Termination == TinTermination.Confluence && network.JunctionNetwork >= 0 && !rendered[network.JunctionNetwork])
             {
                 TinDiagnostics.Confluences--; TinDiagnostics.UnexpectedBrokenNetworks++; TinDiagnostics.UnexpectedInlandBreaks++;
@@ -907,11 +911,13 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
                 if (path.Length < 2) continue;
                 float? startLevel = lakeSediment?.Level(lake.BasinId, lake.OutletPath[0]);
                 float? endLevel = lake.DownstreamLakeEntry.HasValue ? lakeSediment?.Level(lake.DownstreamLakeId, lake.DownstreamLakeEntry.Value) : null;
+                int firstVertex = vertices.Count;
                 if (drawRawTrianglePaths) AddRawTinLine(path, vertices, indices, colors, startLevel, endLevel);
                 else AddTinRibbon(path, lake.OutletPath[0].Triangle, vertices, indices, colors,
                     Array.ConvertAll(path, _ => lake.Discharge), lake.DownstreamLakeId >= 0 && lake.JoinNetwork < 0, true, startLevel, endLevel);
                 visibleReaches++;
                 renderedLakeOutlets.Add(lake.BasinId);
+                RecordRiverColour("lake:" + lake.BasinId, firstVertex, vertices.Count);
             }
             if (crossings != null)
             {
@@ -922,11 +928,12 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
                         Mathf.Clamp(Mathf.Sqrt(strength), 1f, Mathf.Max(1f, maximumWidthMultiplier));
                     Color color = strength * riverFlowThreshold >= Math.Max(riverFlowThreshold, majorRiverThreshold)
                         ? Color.Lerp(riverColor, Color.cyan, .3f) : riverColor;
-                    int firstIndex = indices.Count;
+                    int firstIndex = indices.Count, firstVertex = vertices.Count;
                     GeodesicTinLakeCrossings.AddRibbon(crossing, width / crossing.Bed.Level, Mathf.Max(.000001f, surfaceOffset),
                         color, drawRawTrianglePaths, vertices, indices, colors);
                     if (indices.Count > firstIndex) visibleReaches++;
                     else crossings.Fail(crossing.Bed.Id, "interior path produced no visible ribbon geometry");
+                    RecordRiverColour("lake:" + crossing.Bed.Id, firstVertex, vertices.Count);
                 }
                 LogSediment(crossings);
             }
@@ -949,7 +956,8 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
         {
             riverMesh = new Mesh { name = drawRawTrianglePaths ? "Raw TIN Gradient Rivers" : "TIN River Ribbons", indexFormat = IndexFormat.UInt32 };
             riverMesh.SetVertices(vertices); riverMesh.SetIndices(indices.ToArray(), drawRawTrianglePaths ? MeshTopology.Lines : MeshTopology.Triangles, 0);
-            riverMesh.SetColors(colors);
+            normalRiverColours = colors;
+            ApplyRiverColours();
             if (!drawRawTrianglePaths) riverMesh.RecalculateNormals();
             else riverMesh.SetNormals(vertices.ConvertAll(v => v.normalized));
             riverMesh.RecalculateBounds();
@@ -1508,6 +1516,9 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
     }
     private void ClearVisual()
     {
+        riverColourSpans.Clear();
+        normalRiverColours = destinationRiverColours = null;
+        riverColourDelivery = null;
         if (terminationDebugRoot != null) terminationDebugRoot.SetActive(false);
         Release(terminationDebugRoot); Release(terminationDebugMesh); Release(terminationDebugMaterial);
         terminationDebugRoot = null; terminationDebugMesh = null; terminationDebugMaterial = null;

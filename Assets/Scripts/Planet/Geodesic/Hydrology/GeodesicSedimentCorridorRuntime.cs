@@ -84,9 +84,11 @@ public sealed partial class GeodesicRiverSystem
             if (corridor.Coast.HasValue) AddSegment(TinDrainage.Direction(corridor.Coast.Value));
             float seaLevel = TinDrainage.BasinSeaLevel;
             Vector3[] samples = path.ToArray();
+            int firstVertex = vertices.Count;
             if (drawRawTrianglePaths) AddRawTinLine(samples, vertices, indices, colors, minimumRadius: seaLevel);
             else AddTinRibbon(samples, 0, vertices, indices, colors, Array.ConvertAll(samples, _ => corridor.Runoff),
                 shorelineEnd: corridor.Coast.HasValue, spillStart: true, minimumRadius: seaLevel);
+            RecordRiverColour("corridor:" + corridor.BasinId, firstVertex, vertices.Count);
             visibleReaches++;
 
             void AddSegment(Vector3 next)

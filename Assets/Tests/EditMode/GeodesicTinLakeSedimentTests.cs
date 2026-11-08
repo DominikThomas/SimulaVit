@@ -225,6 +225,12 @@ public sealed class GeodesicTinLakeSedimentTests
             oceanComponentAt: _ => 0, primaryOceanComponent: 0);
         Assert.That(before.PrimaryOcean, Is.GreaterThan(0));
         Assert.That(after.PrimaryOcean, Is.EqualTo(before.PrimaryOcean));
+        foreach (var lake in routing.Lakes)
+        {
+            string route = "lake:" + lake.BasinId;
+            Assert.That(before.RiverOutcome(route).RiverColour, Is.EqualTo(GeodesicDrainageDelivery.RiverDestination.Ocean));
+            Assert.That(after.RiverOutcome(route).RiverColour, Is.EqualTo(before.RiverOutcome(route).RiverColour));
+        }
         Assert.That(after.DirectOcean + after.ViaLakesOcean, Is.EqualTo(before.DirectOcean + before.ViaLakesOcean));
         CollectionAssert.AreEqual(runoff, routing.Lakes.Select(l => (l.BasinId, l.Discharge, l.DownstreamLakeId)));
         for (int i = 0; i < tin.TriangleCount; i++)
