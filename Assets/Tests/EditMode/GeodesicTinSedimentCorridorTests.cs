@@ -7,13 +7,14 @@ using UnityEngine;
 public sealed class GeodesicTinSedimentCorridorTests
 {
     [Test]
-    public void BelowSeaBasinUsesRaisedSedimentAndAnExactPrimaryCoast()
+    public void BelowSeaBasinKeepsItsLowlandInletAndUsesAnExactPrimaryCoast()
     {
         var f = new Fixture(.98f, networkThreshold: .012);
         var plan = f.Plan();
         var connection = plan.Connections.Values.Single();
-        Assert.That(plan.Elevations[connection.BasinId], Is.GreaterThan(f.Tin.BasinSeaLevel));
         Assert.That(f.Tin.VisibleHeight[connection.BasinId], Is.LessThan(f.Tin.BasinSeaLevel));
+        Assert.That(plan.Elevations.ContainsKey(connection.BasinId), Is.False);
+        Assert.That(plan.Elevations.All(p => p.Value - f.Tin.VisibleHeight[p.Key] <= .001001f));
         Assert.That(connection.Coast.HasValue, Is.True);
         Assert.That(f.Tin.IsRetainedOceanBoundary(connection.Coast.Value));
         Assert.That(f.Tin.CompletedVisibleRadius(connection.Coast.Value), Is.EqualTo(f.Tin.BasinSeaLevel).Within(1e-9));
@@ -50,11 +51,46 @@ public sealed class GeodesicTinSedimentCorridorTests
         var connection = plan.Connections.Values.Single();
         Assert.That(connection.Length, Is.LessThan(.22f));
         Assert.That(connection.Volume, Is.GreaterThan(0));
-        Assert.That(plan.Elevations.Values.Distinct().Count(), Is.EqualTo(1));
+        Assert.That(plan.Elevations.ContainsKey(connection.Vertices.Last()), Is.False);
         Assert.That(plan.Elevations.Any(p => p.Value < heights[p.Key]));
         CollectionAssert.AreEqual(heights, f.Tin.VisibleHeight);
         CollectionAssert.AreEqual(raw, f.Tin.Networks.Select(n => n.Samples));
         f.AssertDelivery(plan);
+    }
+
+    [Test]
+    public void CorridorEndsAtTheEmittedReceiverRatherThanMerelySharingItsNetworkId()
+    {
+        var f = new Fixture(.98f);
+        var plan = f.Plan();
+        var connection = plan.Connections.Values.Single();
+        var delivery = f.AssertDelivery(plan);
+        Vector3 join = f.Graph.CellDirections[connection.Vertices.Last()];
+        string corridor = $"corridor:{connection.BasinId}", receiver = $"network:{connection.TargetNetwork}";
+
+        GeodesicRiverOutletAudit.Result Check(Vector3 offset)
+        {
+            var audit = new GeodesicRiverOutletAudit(delivery);
+            audit.Record(corridor, new List<Vector3> { f.Graph.CellDirections[connection.BasinId], join }, 0, true);
+            audit.Record(receiver, new List<Vector3> { join - Vector3.right * .01f + offset, join + Vector3.right * .01f + offset }, 0, true);
+            audit.Complete(f.Tin, null, _ => 1f, f.Lakes, 1f, .0003f);
+            return audit.Results[corridor];
+        }
+
+        Assert.That(Check(Vector3.zero).State, Is.EqualTo(GeodesicRiverOutletAudit.Status.Contact));
+        var gap = Check(Vector3.forward * .003f);
+        Assert.That(gap.State, Is.EqualTo(GeodesicRiverOutletAudit.Status.Gap));
+        Assert.That(gap.Distance, Is.EqualTo(.003f).Within(1e-6f));
+    }
+
+    [Test]
+    public void LevelLowlandNeedsNoRaisedCorridorOrDownhillGrade()
+    {
+        var f = new Fixture(.99f);
+        var path = f.Plan().Connections.Values.Single().Vertices;
+        float[] flat = Enumerable.Repeat(1.001f, f.Graph.CellCount).ToArray();
+        var profile = GeodesicTinSedimentCorridors.SurfaceProfile(path, flat, f.Graph, 1f, 1.004f, 1f, false);
+        Assert.That(profile, Is.All.EqualTo(1.001f));
     }
 
     [Test]

@@ -63,7 +63,7 @@ public sealed class GeodesicLakeIntegrationTests
             Assert.That(rivers.HydrologySubdivision, Is.EqualTo(4));
             Assert.That(rivers.Drainage, Is.Null);
             Assert.That(rivers.TinDrainage.TriangleCount, Is.EqualTo(geometry.TriangleCount));
-            Assert.That(rivers.drawRawTrianglePaths, Is.True);
+            Assert.That(rivers.drawRawTrianglePaths, Is.False);
             Assert.That(rivers.HydrologicalLakesPausedForBaselineValidation, Is.True);
             Assert.That(planet.generateHydrologicalLakes, Is.True, "Preserve the saved preference during the temporary validation gate.");
             Assert.That(rivers.Lakes, Is.Null);

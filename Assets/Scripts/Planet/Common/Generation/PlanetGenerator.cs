@@ -978,6 +978,9 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         if (meshRenderer != null) meshRenderer.enabled = true;
         LogStage("terrain mesh assignment/upload", stage);
 
+        // Prepare the same ocean facets for the river outlet queries and the renderer.
+        var oceanGeometry = PrepareGeodesicOceanGeometry(out var oceanMapping);
+
         stage = System.Diagnostics.Stopwatch.StartNew();
         if (enableGeodesicRivers || generateHydrologicalLakes || enableTerminationValleyCarving || GeodesicInfillOceanMask != null)
         {
@@ -1026,7 +1029,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         if (atmosphereMeshRenderer != null) atmosphereMeshRenderer.enabled = false;
 
         stage = System.Diagnostics.Stopwatch.StartNew();
-        IcosphereDirectionMapping oceanMapping = BuildGeodesicOceanVisual();
+        BuildGeodesicOceanVisual(oceanGeometry, oceanMapping);
         if (enableAtmosphere)
             yield return new PlanetGenerationProgress(PlanetGenerationStage.PreparingAtmosphere);
         BuildGeodesicAtmosphereVisual();
@@ -2645,7 +2648,9 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         if (land > 0) for (int i = 0; i < count; i++) if (!geodesicTerrainBathymetryMask[i] && !Mathf.Approximately(geodesicRawTerrainRadius[i], geodesicSeafloorRadius[i])) { Debug.LogWarning("[GeodesicBathymetryDiagnostics] Land cell was displaced by bathymetry pass.", this); break; }
     }
 
-    IcosphereDirectionMapping BuildGeodesicOceanVisual()
+    internal GeodesicRiverShoreline RiverShoreline { get; private set; }
+
+    IcosphereRenderGeometry PrepareGeodesicOceanGeometry(out IcosphereDirectionMapping oceanMapping)
     {
         int oceanSubdivision = Mathf.Clamp(
             geodesicOceanRenderSubdivisionLevel,
@@ -2653,8 +2658,8 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
             GeodesicGridTopology.MaxSupportedSubdivision);
 
         IcosphereRenderGeometry oceanGeometry;
-        IcosphereDirectionMapping oceanMapping;
-        if (IsGeodesicOceanConnectivityFilteringActive && OceanConnectivity.RetainedCells < GeodesicTopology.CellCount)
+        bool masked = IsGeodesicOceanConnectivityFilteringActive && OceanConnectivity.RetainedCells < GeodesicTopology.CellCount;
+        if (masked)
             oceanGeometry = GeodesicMaskedOceanGeometry.Build(GeodesicTopology, geodesicOceanMask, oceanSubdivision, out oceanMapping);
         else
         {
@@ -2662,10 +2667,18 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
             oceanMapping = GetOrBuildDirectionMapping(oceanGeometry);
         }
 
+        RiverShoreline = enableOcean && enableGeodesicRivers
+            ? new GeodesicRiverShoreline(GeodesicTopology, OceanConnectivity, oceanGeometry, resolvedGeodesicSeaLevelRadius, masked)
+            : null;
+        return oceanGeometry;
+    }
+
+    void BuildGeodesicOceanVisual(IcosphereRenderGeometry oceanGeometry, IcosphereDirectionMapping oceanMapping)
+    {
         geodesicOceanMesh = IcosphereRenderMeshBuilder.BuildSurfaceMesh(
             oceanGeometry,
             resolvedGeodesicSeaLevelRadius,
-            $"Geodesic Ocean Render L{oceanSubdivision}");
+            $"Geodesic Ocean Render L{geodesicOceanRenderSubdivisionLevel}");
 
         ApplyGeodesicOceanDepthColours(
             geodesicOceanMesh,
@@ -2703,7 +2716,6 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
             GetGeodesicOceanAppearanceSample(),
             false);
 
-        return oceanMapping;
     }
 
     void BuildGeodesicAtmosphereVisual()
@@ -3670,6 +3682,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         ReleaseGeodesicOceanMaterial();
         if (geodesicOceanMesh != null) Destroy(geodesicOceanMesh);
         geodesicOceanMesh = null;
+        RiverShoreline = null;
     }
 
     float CalculateNoiseThreshold(List<float> samples, float coveragePercent)

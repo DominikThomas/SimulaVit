@@ -14,6 +14,8 @@ public sealed class GeodesicTinSedimentCorridors
     private const float CutFraction = .0225f;
     private const float FillFraction = .04f;
     private const float LevelAboveSeaFraction = .004f;
+    private const float SurfaceFillFraction = .001f;
+    private const float BankFillRatio = .16f;
     private const double VolumeFraction = .00015;
     private const double BatchVolumeFraction = .0007;
     private const int MaximumConnections = 32;
@@ -42,6 +44,8 @@ public sealed class GeodesicTinSedimentCorridors
     private readonly Dictionary<int, Connection> connections = new Dictionary<int, Connection>();
     private readonly Dictionary<int, float> elevations = new Dictionary<int, float>();
     private readonly List<string> decisions = new List<string>();
+    private readonly Dictionary<int, string> rejected = new Dictionary<int, string>();
+    private readonly Dictionary<int, float> receiverApproaches = new Dictionary<int, float>();
     private readonly GeodesicDrainageDelivery baseline;
     private int candidates;
     private double area, volume, runoff;
@@ -49,6 +53,12 @@ public sealed class GeodesicTinSedimentCorridors
     internal IReadOnlyDictionary<int, float> Elevations => elevations;
     internal IEnumerable<string> Decisions => decisions;
     internal string Failure { get; private set; }
+    internal string DecisionFor(int basin) => Connections.ContainsKey(basin) ? "accepted" :
+        Failure ?? (rejected.TryGetValue(basin, out string reason) ? reason : "below runoff threshold or no extracted inlet");
+
+    internal float NearestReceiverDistance(Vector3 terminal, Vector3[] directions, float radius) =>
+        receiverApproaches.Count == 0 ? float.NaN : receiverApproaches.Min(r =>
+            (directions[r.Key] - terminal).magnitude * radius + r.Value);
 
     private GeodesicTinSedimentCorridors(GeodesicDrainageDelivery delivery) { baseline = delivery; }
 
@@ -156,6 +166,7 @@ public sealed class GeodesicTinSedimentCorridors
         for (int v = 0; v < count; v++)
         {
             if (receivers[v] == null || terminalVertices.Contains(v)) continue;
+            plan.receiverApproaches.Add(v, receivers[v].ApproachLength);
             cost[v] = length[v] = receivers[v].ApproachLength;
             frontier.Push(v, cost[v]);
         }
@@ -191,17 +202,23 @@ public sealed class GeodesicTinSedimentCorridors
             while (parent[path[path.Count - 1]] >= 0) path.Add(parent[path[path.Count - 1]]);
             int target = path[path.Count - 1];
             var receiver = receivers[target];
+            var profile = SurfaceProfile(path, tin.VisibleHeight, graph, sea, level, radius, tin.BasinOnSphere);
             var facets = new HashSet<int>();
             double volume = 0;
-            foreach (int v in path.Take(path.Count - 1))
+            bool excessiveCut = false;
+            for (int j = 0; j < path.Count - 1; j++)
             {
+                int v = path[j];
+                float delta = profile[j] - tin.VisibleHeight[v];
+                excessiveCut |= -delta > cutLimit;
                 for (int i = tin.BasinIncidentStart(v); i < tin.BasinIncidentEnd(v); i++)
                 {
                     int t = tin.BasinIncidentTriangle(i);
-                    volume += Math.Abs(tin.VisibleHeight[v] - level) * tin.LocalArea[t] / 3d;
+                    volume += Math.Abs(delta) * tin.LocalArea[t] / 3d;
                     facets.Add(t);
                 }
             }
+            if (excessiveCut) { Reject("lowland profile exceeds the cut limit"); continue; }
             if (occupiedReceivers.Contains(target) || facets.Overlaps(occupiedFacets))
             { Reject("overlaps an accepted corridor or receiver"); continue; }
             if (volume > volumeLimit || plan.volume + volume > batchVolumeLimit)
@@ -210,16 +227,55 @@ public sealed class GeodesicTinSedimentCorridors
             double area = facets.Sum(t => tin.LocalArea[t]);
             var connection = new Connection(start, receiver.Network, receiver.Coast, path.ToArray(), inlet.Networks.ToArray(),
                 inlet.Lakes.ToArray(), source.Runoff, length[start], area, volume);
-            foreach (int v in path.Take(path.Count - 1)) plan.elevations.Add(v, level);
+            for (int j = 0; j < path.Count - 1; j++)
+                if (profile[j] != tin.VisibleHeight[path[j]]) plan.elevations.Add(path[j], profile[j]);
             plan.connections.Add(start, connection);
             occupiedFacets.UnionWith(facets);
             occupiedReceivers.Add(target);
             plan.area += area; plan.volume += volume; plan.runoff += source.Runoff;
             plan.decisions.Add(FormattableString.Invariant($"basin={start} accepted receiverNetwork={receiver.Network} coastalFacet={receiver.Coast?.Triangle ?? -1} length={length[start]:R} area={area:R} volume={volume:R} runoff={source.Runoff:R} inletNetworks={inlet.Networks.Count} inletLakes={inlet.Lakes.Count}"));
 
-            void Reject(string reason) => plan.decisions.Add(FormattableString.Invariant($"basin={start} runoff={source.Runoff:R} rejected={reason}"));
+            void Reject(string reason)
+            {
+                plan.rejected.Add(start, reason);
+                plan.decisions.Add(FormattableString.Invariant($"basin={start} runoff={source.Runoff:R} rejected={reason}"));
+            }
         }
         return plan;
+    }
+
+    internal static float[] SurfaceProfile(IReadOnlyList<int> path, float[] original, IGeodesicHydrologyTopology graph,
+        float sea, float searchLevel, float radius, bool onSphere)
+    {
+        var heights = path.Select(v => original[v]).ToArray();
+        var ordered = (float[])heights.Clone();
+        Array.Sort(ordered);
+        float valleyLevel = Mathf.Max(sea, Mathf.Min(searchLevel, heights[heights.Length - 1], ordered[ordered.Length / 2]));
+        var center = new HashSet<int>(path);
+        var banks = new List<float>(6);
+        for (int i = 1; i < path.Count - 1; i++)
+        {
+            int v = path[i];
+            float maxFill = radius * SurfaceFillFraction;
+            banks.Clear();
+            for (int slot = 0; slot < graph.NeighborCounts[v]; slot++)
+            {
+                int bank = graph.Neighbors6[v * 6 + slot];
+                if (center.Contains(bank)) continue;
+                float width = (graph.CellDirections[v] - graph.CellDirections[bank]).magnitude * (onSphere ? radius : 1f);
+                maxFill = Mathf.Min(maxFill, BankFillRatio * width);
+                banks.Add(original[bank]);
+            }
+            banks.Sort();
+            float bankLevel = banks.Count == 0 ? original[v] : banks[(banks.Count - 1) / 2];
+            float upper = Mathf.Max(original[v], Mathf.Min(bankLevel, original[v] + maxFill));
+            float target = Mathf.Min(valleyLevel, upper);
+            // Both junctions keep their original elevations. Over the adjacent edge,
+            // blend the edit into the original lowland rather than add a step.
+            float blend = Mathf.Min(1f, .5f * Mathf.Min(i, path.Count - 1 - i));
+            heights[i] = Mathf.Lerp(original[v], target, blend);
+        }
+        return heights;
     }
 
     private static Dictionary<int, Inlets> CollectInlets(GeodesicTinHydrology tin, GeodesicTinBasins basins, GeodesicTinLakeRouting routing)

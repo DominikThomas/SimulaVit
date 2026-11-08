@@ -45,7 +45,7 @@ public sealed class GeodesicDrainageDelivery
         public int Parcels, SourcePaths;
         public bool ViaLake;
     }
-    private sealed class Link { public string Next; public Outcome End; public bool Lake, Corridor; }
+    internal sealed class Link { public string Next; public Outcome End; public TinPoint? Contact; public bool Lake, Corridor; }
     private Dictionary<string, Link> links = new Dictionary<string, Link>(StringComparer.Ordinal);
     private Dictionary<string, Outcome> resolved = new Dictionary<string, Outcome>(StringComparer.Ordinal);
     private readonly Dictionary<string, Catchment> catchments = new Dictionary<string, Catchment>(StringComparer.Ordinal);
@@ -90,6 +90,7 @@ public sealed class GeodesicDrainageDelivery
         return FormattableString.Invariant($"[GeodesicRiverDestinations] networks={networkOutcomes.Length} blue={counts[0]} red={counts[1]} purple={counts[2]} orange={counts[3]} blueRunoff={runoffByRiverDestination[0]:R} redRunoff={runoffByRiverDestination[1]:R} purpleRunoff={runoffByRiverDestination[2]:R} orangeRunoff={runoffByRiverDestination[3]:R} deliveryOcean={DirectOcean + ViaLakesOcean:R} deliveryClosed={InlandClosed:R} deliveryUnresolved={Unresolved:R} accountingPass={RiverDestinationAccountingPass} unresolvedNetworkReasons=[{unresolvedReasons}]");
     }
     internal Outcome NetworkOutcome(int network) => networkOutcomes[network];
+    internal IReadOnlyDictionary<string, Link> OutletLinks => links;
     private readonly byte[] confirmedOceanParcels;
     public bool IsConfirmedOceanParcel(int id) => id >= 0 && id < confirmedOceanParcels.Length && confirmedOceanParcels[id] != 0;
     public bool IsOceanViaLakesParcel(int id) => id >= 0 && id < confirmedOceanParcels.Length && confirmedOceanParcels[id] == 2;
@@ -191,7 +192,7 @@ public sealed class GeodesicDrainageDelivery
                 string id = "corridor:" + pair.Key;
                 r.links.Add(id, new Link { Corridor = true,
                     Next = connection.TargetNetwork >= 0 ? "network:" + connection.TargetNetwork : null,
-                    End = r.Terminal(TinTermination.OceanCoast, connection.Coast, id) });
+                    Contact = connection.Coast, End = r.Terminal(TinTermination.OceanCoast, connection.Coast, id) });
             }
         lakes = lakes ?? Array.Empty<TinLakeFlowNode>();
         for (int i = 0; i < tin.Networks.Count; i++)
@@ -199,8 +200,9 @@ public sealed class GeodesicDrainageDelivery
             var n = tin.Networks[i]; var reach = reaches != null && i < reaches.Count ? reaches[i] : null;
             int lake = reach?.ReceivingLakeId ?? -1, join = reach?.JunctionNetwork ?? n.JunctionNetwork;
             var type = reach?.Termination ?? n.Termination; string id = "network:" + i;
+            var contact = End(reach?.Samples ?? n.Samples);
             r.links.Add(id, new Link { Next = lake >= 0 ? "lake:" + lake : type == TinTermination.Confluence && join >= 0 ? "network:" + join : null,
-                End = r.Terminal(type, End(reach?.Samples ?? n.Samples), id) });
+                Contact = contact, End = r.Terminal(type, contact, id) });
         }
         var owners = new int[tin.TriangleCount]; Array.Fill(owners, -1);
         foreach (var lake in lakes)
@@ -213,6 +215,7 @@ public sealed class GeodesicDrainageDelivery
                 end.Destination == Destination.InlandClosed)
                 end = end.Through(true, false, lake.BasinId);
             r.links.Add(id, new Link { Lake = true, End = end,
+                Contact = lake.DownstreamLakeEntry ?? End(lake.OutletPath) ?? lake.CoastContactAtSpill ?? lake.Basin?.Floor,
                 Next = lake.DownstreamLakeId >= 0 ? "lake:" + lake.DownstreamLakeId : lake.JoinNetwork >= 0 ? "network:" + lake.JoinNetwork : null });
             foreach (int parcel in lake.DirectParcels)
             {
@@ -278,7 +281,8 @@ public sealed class GeodesicDrainageDelivery
         r.ApproximateMemoryBytes = (tin.ParcelDestinations == null ? 0L : 40L * tin.TriangleCount) +
             5L * tin.TriangleCount + 400L * r.links.Count + r.terminalCache.Values.Sum(o => 240L + 2L * o.TerminalId.Length) +
             r.catchments.Values.Sum(c => 320L + 2L * c.Terminal.TerminalId.Length);
-        r.oceanComponentAt = null; r.corridors = null; r.links = null; r.terminalCache = null; // Scratch only; reports retain their own outcomes.
+        foreach (var link in r.links.Values) link.Next ??= r.CorridorLink(link.End);
+        r.oceanComponentAt = null; r.corridors = null; r.terminalCache = null;
         r.AnalysisMilliseconds = watch.Elapsed.TotalMilliseconds; return r;
     }
     private void CountBreak(Outcome end)
