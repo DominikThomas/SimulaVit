@@ -553,6 +553,7 @@ public class SimulationStartupController : MonoBehaviour
             startupStages?.Dispose();
             startupStages = null;
             startupRoutine = null;
+            planetGenerator?.DiscardGeodesicSnapshot();
         }
     }
 
@@ -610,6 +611,8 @@ public class SimulationStartupController : MonoBehaviour
         RestoreWorldRoots();
         RestoreRuntimeHud();
         yield return new PlanetGenerationProgress(PlanetGenerationStage.AlmostReady);
+        if (planetGenerator != null)
+            foreach (var progress in planetGenerator.PublishGeodesicSnapshotStages()) yield return progress;
         CompleteGeneratedStartup(keepPaused);
     }
 
@@ -640,6 +643,7 @@ public class SimulationStartupController : MonoBehaviour
         startupRoutine = null;
         startupStages?.Dispose();
         startupStages = null;
+        planetGenerator?.DiscardGeodesicSnapshot();
         applyingConfig = false;
         generationFailed = false;
         RestoreStartupSun();
@@ -716,7 +720,7 @@ public class SimulationStartupController : MonoBehaviour
                 riverDebug.showRiverTerminationReasons = config.showRiverTerminationReasons;
                 riverDebug.SetRiverDestinationColours(config.colourRiversByUltimateDestination);
             }
-            foreach (var progress in planetGenerator.InitializeAuthoritativePlanetStages("New Game startup selection"))
+            foreach (var progress in planetGenerator.InitializeAuthoritativePlanetStages("New Game startup selection", deferSnapshot: true))
                 yield return progress;
         }
 

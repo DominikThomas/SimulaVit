@@ -6,7 +6,7 @@ using System.Security.Cryptography;
 using System.Text;
 using UnityEngine;
 
-public static class PlanetGenerationCache
+public static partial class PlanetGenerationCache
 {
     public const int PlanetCacheFormatVersion = 1;
     public const int ResourceCacheFormatVersion = 1;
@@ -496,10 +496,7 @@ public static class PlanetGenerationCache
                 return;
             }
 
-            FileInfo[] files = new DirectoryInfo(cacheDirectory)
-                .GetFiles("*.bin", SearchOption.TopDirectoryOnly)
-                .OrderBy(f => f.LastWriteTimeUtc)
-                .ToArray();
+            FileInfo[] files = CacheFilesByOldestUse(cacheDirectory);
             if (files.Length == 0)
             {
                 return;
@@ -561,6 +558,11 @@ public static class PlanetGenerationCache
             Debug.LogWarning($"[PlanetGenerationCache] Cache prune failed: {ex.Message}");
         }
     }
+
+    private static FileInfo[] CacheFilesByOldestUse(string directory) => new DirectoryInfo(directory)
+        .GetFiles("*.bin", SearchOption.TopDirectoryOnly)
+        .OrderBy(file => file.LastWriteTimeUtc)
+        .ToArray();
 
     private static void AppendKey(StringBuilder sb, string name, int value)
     {

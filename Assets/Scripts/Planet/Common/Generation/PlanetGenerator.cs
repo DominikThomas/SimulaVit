@@ -1,6 +1,8 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Serialization;
+using Random = UnityEngine.Random;
 
 public enum GeodesicSeaLevelControlMode
 {
@@ -88,6 +90,14 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     private GeodesicRenderTerrainData geodesicCurrentRenderTerrainData;
     private GeodesicInlandUplift geodesicInlandUplift;
     private GeodesicRiverTerrain geodesicCarvedSurface;
+    private Action pendingGeodesicSnapshot;
+    [SerializeField, Tooltip("Skip reading and writing the persistent geodesic valley-carving checkpoint.")]
+    private bool bypassGeodesicCarvingCache;
+    public bool BypassGeodesicCarvingCache
+    {
+        get => bypassGeodesicCarvingCache;
+        set => bypassGeodesicCarvingCache = value;
+    }
     private GeodesicRiverTerrain geodesicInfilledSurface;
     private bool[] geodesicInfilledFacets;
     internal bool[] GeodesicInfillOceanMask { get; private set; }
@@ -612,7 +622,10 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         foreach (var progress in InitializeAuthoritativePlanetStages(reason)) { }
     }
 
-    public IEnumerable<PlanetGenerationProgress> InitializeAuthoritativePlanetStages(string reason = null)
+    public IEnumerable<PlanetGenerationProgress> InitializeAuthoritativePlanetStages(string reason = null) =>
+        InitializeAuthoritativePlanetStages(reason, deferSnapshot: false);
+
+    internal IEnumerable<PlanetGenerationProgress> InitializeAuthoritativePlanetStages(string reason, bool deferSnapshot)
     {
         yield return new PlanetGenerationProgress(PlanetGenerationStage.BuildingPlanet);
         Debug.Log($"[StartupLifecycle] Final planet initialization requested. Reason: {reason ?? "unspecified"}, mode={generationMode}, seed={randomSeed}", this);
@@ -624,7 +637,16 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         ClearGeneratedPlanetRuntime();
         if (generationMode == PlanetGenerationMode.GeodesicPrototype)
         {
-            foreach (var progress in GenerateGeodesicPrototypeStages()) yield return progress;
+            bool generated = false;
+            try
+            {
+                foreach (var progress in GenerateGeodesicPrototypeStages()) yield return progress;
+                generated = true;
+            }
+            finally
+            {
+                if (!generated) DiscardGeodesicSnapshot();
+            }
         }
         else
         {
@@ -632,7 +654,22 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         }
         IsPlanetInitialized = true;
         Debug.Log($"[StartupLifecycle] Planet generation complete. Mode={generationMode}, seed={randomSeed}, resolution={resolution}, geodesicSimulationSubdivision={geodesicSimulationSubdivisionLevel}, geodesicRenderSubdivision={geodesicRenderSubdivisionLevel}", this);
+        if (!deferSnapshot)
+            foreach (var progress in PublishGeodesicSnapshotStages()) yield return progress;
     }
+
+    internal IEnumerable<PlanetGenerationProgress> PublishGeodesicSnapshotStages()
+    {
+        if (pendingGeodesicSnapshot == null) yield break;
+        try
+        {
+            yield return new PlanetGenerationProgress(PlanetGenerationStage.SavingPlanetSnapshot);
+            pendingGeodesicSnapshot?.Invoke();
+        }
+        finally { DiscardGeodesicSnapshot(); }
+    }
+
+    internal void DiscardGeodesicSnapshot() => pendingGeodesicSnapshot = null;
 
     public void RegeneratePlanet()
     {
@@ -755,6 +792,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
 
     public void ClearGeneratedPlanetRuntime()
     {
+        DiscardGeodesicSnapshot();
         IsPlanetInitialized = false;
         generatedSurfaceRadiusByCell = null;
         localOceanDepthByCell = null;
@@ -980,7 +1018,10 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         {
             try
             {
-                foreach (var progress in GetOrAddComponent<GeodesicRiverSystem>(gameObject).InitializeStages(this, renderGeometry, mesh))
+                Action<GeodesicCarvingCheckpoint, byte[], int> captureSnapshot = bypassGeodesicCarvingCache
+                    ? null : (snapshot, key, triangles) => pendingGeodesicSnapshot = () => snapshot.Save(key, triangles);
+                foreach (var progress in GetOrAddComponent<GeodesicRiverSystem>(gameObject).InitializeStages(
+                    this, renderGeometry, mesh, captureSnapshot))
                     yield return progress;
             }
             finally
@@ -1084,6 +1125,13 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     {
         GeodesicTopologyCache.Clear();
         Debug.Log("[GeodesicGenerationProfile] Cleared immutable geodesic simulation-topology cache.", this);
+    }
+
+    [ContextMenu("Clear Geodesic Planet Cache")]
+    public void ClearGeodesicPlanetCache()
+    {
+        DiscardGeodesicSnapshot();
+        PlanetGenerationCache.ClearGeodesicCacheFiles();
     }
 
 
@@ -1632,12 +1680,87 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         targetMesh.vertices = positions;
         targetMesh.RecalculateNormals(); targetMesh.RecalculateBounds();
         ApplyGeodesicSurfaceColours(targetMesh, geodesicCurrentRenderTerrainData);
-        geodesicCarvedSurface = new GeodesicRiverTerrain(geometry, positions);
+        var query = new GeodesicRiverTerrain(geometry, positions);
+        CacheVisibleGeodesicSeafloorAnchors(targetMesh, geometry, geodesicCurrentRenderMapping);
+        CompleteGeodesicCarvedSurface(geodesicCurrentRenderTerrainData, query);
+    }
+
+    internal void WriteGeodesicCarvingTerrainKey(System.IO.BinaryWriter writer)
+    {
+        writer.Write(GetGeodesicMinimumTerrainOffset());
+        writer.Write(GetGeodesicMaximumTerrainOffset());
+        var data = geodesicCurrentRenderTerrainData;
+        GeodesicCarvingCheckpoint.WriteFloats(writer, data.RawRadii);
+        GeodesicCarvingCheckpoint.WriteFloats(writer, data.HydrologicalRadii);
+        GeodesicCarvingCheckpoint.WriteFloats(writer, data.SurfaceRadii);
+        GeodesicCarvingCheckpoint.WriteFloats(writer, data.Heights);
+        GeodesicCarvingCheckpoint.WriteFloats(writer, data.NormalizedHeights);
+    }
+
+    internal GeodesicCarvingCheckpoint CaptureGeodesicCarvingSurface(Mesh targetMesh)
+    {
+        var data = geodesicCurrentRenderTerrainData;
+        return new GeodesicCarvingCheckpoint
+        {
+            Positions = targetMesh.vertices,
+            RawRadii = (float[])data.RawRadii.Clone(),
+            HydrologicalRadii = (float[])data.HydrologicalRadii.Clone(),
+            SurfaceRadii = (float[])data.SurfaceRadii.Clone(),
+            Heights = (float[])data.Heights.Clone(),
+            NormalizedHeights = (float[])data.NormalizedHeights.Clone(),
+            Attempted = GeodesicValleyCarvingAttempted,
+            AppliedEdits = geodesicCarvedSurface != null
+        };
+    }
+
+    internal bool TryRestoreGeodesicCarvingSurface(IcosphereRenderGeometry geometry, Mesh targetMesh,
+        Vector3[] input, GeodesicCarvingCheckpoint snapshot)
+    {
+        if (snapshot.AppliedEdits)
+        {
+            var previous = geodesicCurrentRenderTerrainData;
+            var normals = targetMesh.normals;
+            var colors = targetMesh.colors;
+            var bounds = targetMesh.bounds;
+            try
+            {
+                var query = new GeodesicRiverTerrain(geometry, snapshot.Positions);
+                targetMesh.vertices = snapshot.Positions;
+                targetMesh.RecalculateNormals();
+                targetMesh.RecalculateBounds();
+                var data = previous;
+                data.RawRadii = snapshot.RawRadii;
+                data.HydrologicalRadii = snapshot.HydrologicalRadii;
+                data.SurfaceRadii = snapshot.SurfaceRadii;
+                data.Heights = snapshot.Heights;
+                data.NormalizedHeights = snapshot.NormalizedHeights;
+                ApplyGeodesicSurfaceColours(targetMesh, data);
+                CacheVisibleGeodesicSeafloorAnchors(targetMesh, geometry, geodesicCurrentRenderMapping);
+                CompleteGeodesicCarvedSurface(data, query);
+            }
+            catch (Exception ex) when (ex is ArgumentException || ex is InvalidOperationException || ex is UnityException)
+            {
+                targetMesh.vertices = input;
+                targetMesh.normals = normals;
+                targetMesh.colors = colors;
+                targetMesh.bounds = bounds;
+                CacheVisibleGeodesicSeafloorAnchors(targetMesh, geometry, geodesicCurrentRenderMapping);
+                Debug.LogWarning($"[GeodesicPlanetCache] restore skipped: {ex.Message}", this);
+                return false;
+            }
+        }
+        GeodesicValleyCarvingAttempted = snapshot.Attempted;
+        return true;
+    }
+
+    private void CompleteGeodesicCarvedSurface(GeodesicRenderTerrainData data, GeodesicRiverTerrain query)
+    {
+        geodesicCurrentRenderTerrainData = data;
+        geodesicCarvedSurface = query;
         geodesicInfilledSurface = null;
         geodesicInfilledFacets = null;
         geodesicDebugSurfaceRadiusCache = null;
-        CacheVisibleGeodesicSeafloorAnchors(targetMesh, geometry, geodesicCurrentRenderMapping);
-        maximumGeneratedOpaqueSurfaceRadius = Mathf.Max(BasePlanetRadius, MaxRadiusFromTerrainData(geodesicCurrentRenderTerrainData));
+        maximumGeneratedOpaqueSurfaceRadius = Mathf.Max(BasePlanetRadius, MaxRadiusFromTerrainData(data));
     }
 
     GeodesicRenderTerrainData ApplyGeodesicTerrainDisplacement(Mesh targetMesh, IcosphereRenderGeometry geometry, IcosphereDirectionMapping mapping, bool recalculateNormals, bool recalculateBounds, bool captureTerrainData)

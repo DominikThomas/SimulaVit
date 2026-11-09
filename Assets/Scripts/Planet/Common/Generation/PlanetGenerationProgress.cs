@@ -15,7 +15,11 @@ public enum PlanetGenerationStage
     BuildingRiverRibbons = 11,
     PreparingAtmosphere = 12,
     PreparingPrimordialWorld = 13,
-    AlmostReady = 14
+    AlmostReady = 14,
+    CheckingSavedPlanet = 15,
+    LoadingSavedPlanet = 16,
+    RestoringSavedPlanet = 17,
+    SavingPlanetSnapshot = 18
 }
 
 /// <summary>

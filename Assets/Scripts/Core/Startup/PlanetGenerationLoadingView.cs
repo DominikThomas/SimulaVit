@@ -203,6 +203,10 @@ internal sealed class PlanetGenerationLoadingView : IDisposable
             case PlanetGenerationStage.PreparingAtmosphere: return ("Preparing the atmosphere", "Adding just enough gas to complicate everything.");
             case PlanetGenerationStage.PreparingPrimordialWorld: return ("Preparing the primordial world", "Setting the table for several billion years of bad decisions.");
             case PlanetGenerationStage.AlmostReady: return ("Almost ready", "Checking that the oceans are still on the outside.");
+            case PlanetGenerationStage.CheckingSavedPlanet: return ("Checking saved planet", "Looking for terrain generated with these settings.");
+            case PlanetGenerationStage.LoadingSavedPlanet: return ("Loading saved planet", "Reading and verifying saved terrain.");
+            case PlanetGenerationStage.RestoringSavedPlanet: return ("Restoring saved planet", "Rebuilding the surface from saved terrain.");
+            case PlanetGenerationStage.SavingPlanetSnapshot: return ("Saving planet snapshot", "Saving the carved terrain for the next game.");
             default: return ("Building the planet", "Starting with triangles. An unreasonable number of triangles.");
         }
     }
