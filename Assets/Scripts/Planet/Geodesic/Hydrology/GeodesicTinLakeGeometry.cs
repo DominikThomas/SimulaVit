@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using S = GeodesicSnapshotIO;
 using System.Diagnostics;
 using System.Linq;
 using UnityEngine;
@@ -57,6 +59,54 @@ public sealed class GeodesicTinLakeGeometry
         return result.Count < 3 ? Array.Empty<TinPoint>() : result.ToArray();
     }
     private static bool Same(TinPoint a, TinPoint b) => a.A == b.A && a.B == b.B && a.C == b.C;
+
+    internal void WriteSnapshot(BinaryWriter w)
+    {
+        S.Write(w, Vertices, S.Vector);
+        S.Ints(w, Triangles);
+        S.Write(w, TerrainPoints, S.Point);
+        w.Write(Bodies.Count);
+        foreach (var body in Bodies)
+        {
+            w.Write(body.BasinId); w.Write(body.WaterLevel); w.Write(body.Area);
+            w.Write(body.FirstVertex); w.Write(body.VertexCount); w.Write(body.FirstIndex); w.Write(body.IndexCount);
+        }
+        w.Write(RawBasins); w.Write(QualifyingBasins); w.Write(SkippedTerminal); w.Write(SkippedSubsea);
+        w.Write(NestedSuppressed); w.Write(TrianglesConsidered); w.Write(ClippedPolygons); w.Write(OceanFacetsSkipped);
+    }
+
+    internal static GeodesicTinLakeGeometry RestoreSnapshot(BinaryReader r, GeodesicTinHydrology tin, GeodesicTinBasins basins)
+    {
+        int triangles = tin.TriangleCount;
+        var vertices = S.Read(r, triangles * 12, 12, S.Vector);
+        var indices = S.Read(r, vertices.Length * 6, 4, b => S.Id(b, vertices.Length));
+        var carriers = S.Read(r, vertices.Length, 28, b => S.Point(b, triangles), true);
+        var ids = new HashSet<int>(basins.Basins.Select(b => b.Id));
+        int vertexOffset = 0, indexOffset = 0;
+        var bodies = S.Read(r, ids.Count, 36, b =>
+        {
+            var body = new TinLakeBody
+            {
+                BasinId = S.Id(b, tin.BasinVertexCount), WaterLevel = S.Double(b), Area = S.Double(b),
+                FirstVertex = b.ReadInt32(), VertexCount = S.Id(b, vertices.Length + 1, 1),
+                FirstIndex = b.ReadInt32(), IndexCount = S.Id(b, indices.Length + 1, 3)
+            };
+            S.Require(ids.Remove(body.BasinId) && body.FirstVertex == vertexOffset && body.FirstIndex == indexOffset &&
+                body.VertexCount <= vertices.Length - vertexOffset && body.IndexCount <= indices.Length - indexOffset &&
+                body.IndexCount % 3 == 0, "Invalid all-lakes geometry range.");
+            vertexOffset += body.VertexCount;
+            indexOffset += body.IndexCount;
+            return body;
+        });
+        S.Require(vertexOffset == vertices.Length && indexOffset == indices.Length, "Incomplete all-lakes geometry.");
+        return new GeodesicTinLakeGeometry
+        {
+            Vertices = vertices, Triangles = indices, TerrainPoints = carriers, Bodies = Array.AsReadOnly(bodies),
+            RawBasins = r.ReadInt32(), QualifyingBasins = r.ReadInt32(), SkippedTerminal = r.ReadInt32(),
+            SkippedSubsea = r.ReadInt32(), NestedSuppressed = r.ReadInt32(), TrianglesConsidered = r.ReadInt32(),
+            ClippedPolygons = r.ReadInt32(), OceanFacetsSkipped = r.ReadInt32()
+        };
+    }
 
     public static GeodesicTinLakeGeometry Build(GeodesicTinHydrology tin, GeodesicTinBasins topology)
     {

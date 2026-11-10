@@ -34,14 +34,20 @@ public static partial class PlanetGenerationCache
         Path.Combine(GeodesicDirectory, $"{stage}_{BitConverter.ToString(key).Replace("-", "").ToLowerInvariant()}.bin");
 
     internal static T LoadGeodesic<T>(string path, byte[] key, int stage, int schema, int vertices, int triangles,
-        Func<BinaryReader, T> decode) where T : class
+        Func<BinaryReader, T> decode) where T : class =>
+        LoadGeodesic(path, key, stage, schema, vertices, triangles, decode, out _);
+
+    internal static T LoadGeodesic<T>(string path, byte[] key, int stage, int schema, int vertices, int triangles,
+        Func<BinaryReader, T> decode, out byte[] payloadDigest) where T : class
     {
+        payloadDigest = null;
         var watch = Stopwatch.StartNew();
         long managedBefore = GC.GetTotalMemory(false);
         try
         {
             T result;
             long length;
+            byte[] expectedDigest;
             using (var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete))
             using (var reader = new BinaryReader(file))
             {
@@ -51,7 +57,7 @@ public static partial class PlanetGenerationCache
                     !reader.ReadBytes(DigestLength).AsSpan().SequenceEqual(key))
                     throw new InvalidDataException("Snapshot header does not match the requested stage.");
                 length = reader.ReadInt64();
-                var expectedDigest = reader.ReadBytes(DigestLength);
+                expectedDigest = reader.ReadBytes(DigestLength);
                 if (length <= 0 || length > MaximumGeodesicPayloadBytes || file.Length != GeodesicHeaderLength + length)
                     throw new InvalidDataException("Snapshot length is invalid.");
                 using var hash = SHA256.Create();
@@ -63,6 +69,7 @@ public static partial class PlanetGenerationCache
                     throw new InvalidDataException("Unexpected snapshot data after the payload.");
             }
             TouchCacheFile(path);
+            payloadDigest = expectedDigest;
             Debug.Log(FormattableString.Invariant($"[GeodesicPlanetCache] hit path={path} readMs={watch.Elapsed.TotalMilliseconds:F2} bytes={length + GeodesicHeaderLength} readManagedHeapDeltaBytes={GC.GetTotalMemory(false) - managedBefore}"));
             return result;
         }

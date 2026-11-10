@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using S = GeodesicSnapshotIO;
 using System.Linq;
 
 [Flags]
@@ -77,6 +79,59 @@ public sealed class GeodesicTinBasins
 
     internal GeodesicTinBasins WithVisibility(double areaFraction, double depth) => areaFraction == 0 && depth == 0 ? this :
         new GeodesicTinBasins(tin, Basins.Select(b => b.WithVisibility(totalArea * areaFraction, depth)).ToList(), totalArea);
+
+    internal void WriteSnapshot(BinaryWriter w)
+    {
+        w.Write(totalArea);
+        w.Write(Basins.Count);
+        foreach (var basin in Basins)
+        {
+            w.Write(basin.Id);
+            S.Point(w, basin.Floor);
+            w.Write(basin.FloorElevation);
+            w.Write(basin.SpillElevation);
+            S.OptionalPoint(w, basin.Spill);
+            w.Write(basin.DownstreamTriangle);
+            w.Write(basin.DownstreamVertex);
+            w.Write(basin.ParentBasinId);
+            w.Write(basin.MemberTriangles.Count);
+            foreach (int triangle in basin.MemberTriangles) w.Write(triangle);
+            w.Write(basin.Area);
+            w.Write(basin.TouchesRetainedOcean);
+            w.Write(basin.SubseaUnclassified);
+            w.Write((byte)basin.ExternalSource);
+        }
+    }
+
+    internal static GeodesicTinBasins RestoreSnapshot(BinaryReader r, GeodesicTinHydrology tin)
+    {
+        int vertices = tin.BasinVertexCount, triangles = tin.TriangleCount;
+        double totalArea = S.Double(r);
+        int count = S.Count(r, vertices, 60);
+        var basins = new List<TinBasinDescriptor>(count);
+        int previous = -1;
+        for (int i = 0; i < count; i++)
+        {
+            int id = S.Id(r, vertices, previous + 1);
+            previous = id;
+            var floor = S.Point(r, triangles);
+            double floorHeight = S.Double(r), spillHeight = r.ReadDouble();
+            var spill = S.OptionalPoint(r, triangles);
+            S.Require(spill.HasValue ? double.IsFinite(spillHeight) && spillHeight > floorHeight : double.IsNaN(spillHeight),
+                "Invalid basin spill.");
+            int downstreamTriangle = S.Id(r, triangles, -1), downstreamVertex = S.Id(r, vertices, -1);
+            int parent = S.Id(r, vertices, -1);
+            var members = S.Read(r, triangles, 4, b => S.Id(b, triangles));
+            double area = S.Double(r);
+            bool ocean = S.Flag(r), subsea = S.Flag(r);
+            int source = S.IdByte(r, 4);
+            S.Require(parent != id && area >= 0 && totalArea >= 0, "Invalid basin relationship.");
+            basins.Add(new TinBasinDescriptor(id, floor, floorHeight, spillHeight, spill,
+                downstreamTriangle, downstreamVertex, parent, Array.AsReadOnly(members), area, ocean, subsea, 0, 0,
+                (TinBasinExternalSource)source));
+        }
+        return new GeodesicTinBasins(tin, basins, totalArea);
+    }
 
     public static GeodesicTinBasins Build(GeodesicTinHydrology tin, double minimumAreaFraction = .0001d, double minimumDepth = .005d)
     {

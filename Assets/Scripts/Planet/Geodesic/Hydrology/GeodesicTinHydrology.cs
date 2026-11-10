@@ -29,6 +29,7 @@ public sealed class TinRiverNetwork
 
 public sealed class TinHydrologyDiagnostics
 {
+    internal TinHydrologyDiagnostics SnapshotCopy() => (TinHydrologyDiagnostics)MemberwiseClone();
     public int HydrologyTriangles, RiverTriangles, RiverNetworks, Sources, Confluences;
     public int OceanTerminations, ClosedBasinTerminations, NoiseDepressionTerminations, FlatTerminations;
     public int UnexpectedBrokenNetworks, UnexpectedInlandBreaks;
@@ -65,7 +66,7 @@ public sealed class TinHydrologyDiagnostics
 /// field, rather than assuming every entry into a facet has the centroid's exit edge.
 /// No priority filling, lake creation, terrain edits, or per-frame drainage is performed.
 /// </summary>
-public sealed class GeodesicTinHydrology
+public sealed partial class GeodesicTinHydrology
 {
     private readonly Vector3[] vertices;
     private readonly Vector3[] completedVertices;

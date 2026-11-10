@@ -671,6 +671,8 @@ public partial class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, IS
 
     internal void DiscardGeodesicSnapshot() => pendingGeodesicSnapshot = null;
 
+    internal void QueueGeodesicSnapshot(Action publish) => pendingGeodesicSnapshot += publish;
+
     public void RegeneratePlanet()
     {
         InitializeAuthoritativePlanet("RegeneratePlanet explicit request");

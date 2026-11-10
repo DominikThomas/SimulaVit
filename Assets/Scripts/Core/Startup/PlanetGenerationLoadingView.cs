@@ -206,7 +206,9 @@ internal sealed class PlanetGenerationLoadingView : IDisposable
             case PlanetGenerationStage.CheckingSavedPlanet: return ("Checking saved planet", "Looking for terrain generated with these settings.");
             case PlanetGenerationStage.LoadingSavedPlanet: return ("Loading saved planet", "Reading and verifying saved terrain.");
             case PlanetGenerationStage.RestoringSavedPlanet: return ("Restoring saved planet", "Rebuilding the surface from saved terrain.");
-            case PlanetGenerationStage.SavingPlanetSnapshot: return ("Saving planet snapshot", "Saving the carved terrain for the next game.");
+            case PlanetGenerationStage.SavingPlanetSnapshot: return ("Saving planet snapshot", "Saving completed generation data for the next game.");
+            case PlanetGenerationStage.LoadingSavedHydrology: return ("Loading saved hydrology", "Checking saved drainage and runoff data.");
+            case PlanetGenerationStage.RestoringSavedHydrology: return ("Restoring saved hydrology", "Connecting the saved routes to this planet.");
             default: return ("Building the planet", "Starting with triangles. An unreasonable number of triangles.");
         }
     }

@@ -47,7 +47,7 @@ public readonly struct TinLakeEntry
 /// <summary>Lake nodes inserted into the active continuous field. Raw receivers, sources,
 /// accumulation and networks stay intact. Discharge uses UNIQUE original centroid-parcel IDs;
 /// cumulative inlet values are diagnostic only and are never added together.</summary>
-public sealed class GeodesicTinLakeRouting
+public sealed partial class GeodesicTinLakeRouting
 {
     private readonly GeodesicTinHydrology tin;
     private readonly Dictionary<int, List<TinLakeFlowNode>> wetFacets = new Dictionary<int, List<TinLakeFlowNode>>();

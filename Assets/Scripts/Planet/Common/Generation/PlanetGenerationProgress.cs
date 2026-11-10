@@ -19,7 +19,9 @@ public enum PlanetGenerationStage
     CheckingSavedPlanet = 15,
     LoadingSavedPlanet = 16,
     RestoringSavedPlanet = 17,
-    SavingPlanetSnapshot = 18
+    SavingPlanetSnapshot = 18,
+    LoadingSavedHydrology = 19,
+    RestoringSavedHydrology = 20
 }
 
 /// <summary>
