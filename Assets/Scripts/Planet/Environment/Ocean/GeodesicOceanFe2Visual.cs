@@ -3,10 +3,8 @@ using UnityEngine.Serialization;
 
 /// <summary>
 /// Visual-only dissolved Fe2+ tint for the geodesic ocean surface. Each render vertex samples
-/// its authoritative GeodesicOceanResourceField column. Only the optically relevant L0 and L1
-/// layers contribute, so deeper enrichment must propagate upward before it becomes visible.
-/// It never reads PlanetResourceMap.
-/// Blue vertex data is a short-lived, visual-only memory of local Fe2 oxidation, not transported inventory.
+/// its authoritative GeodesicOceanResourceField column, with successively less weight on deeper layers.
+/// The separate blue vertex channel carries recent local Fe2 oxidation for the shader's rust tint.
 /// </summary>
 [DisallowMultipleComponent]
 public sealed class GeodesicOceanFe2Visual : MonoBehaviour
@@ -21,9 +19,9 @@ public sealed class GeodesicOceanFe2Visual : MonoBehaviour
     [SerializeField, Range(0f, 1f)] private float intensityMultiplier = 0.42f;
     [SerializeField, Min(0.1f), Tooltip("Real-time seconds between visual refresh checks. Mesh colours only upload after an authoritative transport tick changes.")]
     private float refreshIntervalSeconds = 0.5f;
-    [FormerlySerializedAs("deeperLayerWeightMultiplier")]
-    [SerializeField, Range(0f, 1f), Tooltip("Visual weight of ocean layer L1. Layers L2-L4 do not contribute to dissolved Fe2+ ocean colour.")]
-    private float layer1VisualWeight = 0.4f;
+    [FormerlySerializedAs("layer1VisualWeight")]
+    [SerializeField, Range(0f, 1f), Tooltip("Multiplies the visual weight at each successive depth layer. L0 has weight 1.")]
+    private float deeperLayerWeightMultiplier = 0.55f;
     [Header("Visual-only rusty oxidation turbidity")]
     [SerializeField, Min(0f)] private float maximumVisualizedRecentOxidation = 2f;
     [SerializeField] private Color rustyOxidationTint = new Color(0.72f, 0.30f, 0.08f, 1f);
@@ -44,6 +42,21 @@ public sealed class GeodesicOceanFe2Visual : MonoBehaviour
     private float nextRefreshTime;
     private long lastTransportTick = long.MinValue;
 
+    public bool IsInitialized => ColourUploadCount > 0 && oceanMesh != null && resourceField != null && resourceField.IsInitialized;
+    public bool HasColourMaterial
+    {
+        get
+        {
+            Material material = oceanRenderer != null ? oceanRenderer.sharedMaterial : null;
+            return material != null && material.shader != null && material.shader.isSupported
+                && material.HasProperty(IntensityId) && material.HasProperty(RustIntensityId);
+        }
+    }
+    public ulong ColourUploadCount { get; private set; }
+    public long LastColourTransportTick => lastTransportTick;
+    public float MinimumSampledFe2 { get; private set; }
+    public float MaximumSampledFe2 { get; private set; }
+
     public void Initialize(PlanetGenerator owner, GeodesicOceanResourceField field, Mesh mesh, MeshRenderer renderer, IcosphereDirectionMapping mapping)
     {
         ClearVisual();
@@ -56,6 +69,7 @@ public sealed class GeodesicOceanFe2Visual : MonoBehaviour
         ApplyMaterialSettings();
         RefreshColours();
         enabled = true;
+        Debug.Log($"[GeodesicOceanColour] initialized={IsInitialized}, shaderBound={HasColourMaterial}, vertices={vertexColours.Length}, Fe2=GeodesicOceanResourceField active L0-L4, deeperLayerWeight={deeperLayerWeightMultiplier:G6}, Fe2TintRange={minimumVisualizedFe2:G6}/{maximumVisualizedFe2:G6}, rust=recent GeodesicAbioticChemistry Fe2 oxidation", this);
     }
 
     private void Update()
@@ -83,10 +97,17 @@ public sealed class GeodesicOceanFe2Visual : MonoBehaviour
         if (vertexColours == null || directionMapping.Samples.Length != vertexColours.Length) return;
         float minimum = Mathf.Max(0f, minimumVisualizedFe2);
         float maximum = Mathf.Max(minimum + 1e-8f, maximumVisualizedFe2);
+        float sampledMinimum = float.PositiveInfinity, sampledMaximum = 0f;
+        GeodesicOceanLayerGrid grid = resourceField.SourceGrid;
         for (int vertex = 0; vertex < vertexColours.Length; vertex++)
         {
             int cell = directionMapping.Samples[vertex].NearestCell;
-            float concentration = GetSurfaceFacingColumnFe2(resourceField, cell, layer1VisualWeight);
+            float concentration = GetSurfaceFacingColumnFe2(resourceField, cell, deeperLayerWeightMultiplier);
+            if (grid.IsNodeActive(cell, 0))
+            {
+                sampledMinimum = Mathf.Min(sampledMinimum, concentration);
+                sampledMaximum = Mathf.Max(sampledMaximum, concentration);
+            }
             Color colour = vertexColours[vertex]; // red remains the existing bathymetric depth channel.
             colour.g = NormalizeVisualizedFe2(concentration, minimum, maximum);
             colour.b = NormalizeRustSignal(chemistry != null ? chemistry.GetRecentOxidizedIronSignal(cell) : 0f, maximumVisualizedRecentOxidation); colour.a = 1f;
@@ -94,17 +115,28 @@ public sealed class GeodesicOceanFe2Visual : MonoBehaviour
         }
         oceanMesh.colors = vertexColours;
         lastTransportTick = resourceField.CompletedTransportTicks;
+        ColourUploadCount++;
+        MinimumSampledFe2 = float.IsPositiveInfinity(sampledMinimum) ? 0f : sampledMinimum;
+        MaximumSampledFe2 = sampledMaximum;
     }
 
-    public static float GetSurfaceFacingColumnFe2(GeodesicOceanResourceField field, int cell, float layer1Weight)
+    public static float GetSurfaceFacingColumnFe2(GeodesicOceanResourceField field, int cell, float deeperWeightMultiplier)
     {
         if (field == null || !field.IsInitialized || field.SourceGrid == null || cell < 0 || cell >= field.CellCount ||
             !field.SourceGrid.SourceOceanMask[cell]) return 0f;
         int layers = field.SourceGrid.ActiveLayerCountByCell[cell];
-        if (layers < 1 || !field.TryGetConcentration(cell, 0, GeodesicOceanResource.Fe2, out float layer0Fe2)) return 0f;
-        float layer1Fe2 = 0f;
-        bool hasLayer1 = layers > 1 && field.TryGetConcentration(cell, 1, GeodesicOceanResource.Fe2, out layer1Fe2);
-        return CombineVisibleLayers(layer0Fe2, hasLayer1, layer1Fe2, layer1Weight);
+        double decay = Mathf.Clamp01(deeperWeightMultiplier);
+        double weight = 1d, weightedFe2 = 0d, weightSum = 0d;
+        for (int layer = 0; layer < layers && weight > 0d; layer++)
+        {
+            if (field.TryGetConcentration(cell, layer, GeodesicOceanResource.Fe2, out float fe2))
+            {
+                weightedFe2 += fe2 * weight;
+                weightSum += weight;
+            }
+            weight *= decay;
+        }
+        return weightSum > 0d ? (float)(weightedFe2 / weightSum) : 0f;
     }
 
     public static float CombineVisibleLayers(float layer0Fe2, bool hasLayer1, float layer1Fe2, float layer1Weight)
@@ -126,6 +158,8 @@ public sealed class GeodesicOceanFe2Visual : MonoBehaviour
     {
         if (oceanRenderer != null && oceanRenderer.sharedMaterial != null) { oceanRenderer.sharedMaterial.SetFloat(IntensityId, 0f); oceanRenderer.sharedMaterial.SetFloat(RustIntensityId, 0f); }
         generator = null; resourceField = null; chemistry = null; oceanMesh = null; oceanRenderer = null; directionMapping = null; vertexColours = null;
+        ColourUploadCount = 0UL;
+        MinimumSampledFe2 = MaximumSampledFe2 = 0f;
         lastTransportTick = long.MinValue; nextRefreshTime = 0f; enabled = false;
     }
 

@@ -277,7 +277,10 @@ public sealed class GeodesicOceanTemperatureField : MonoBehaviour
             int upper = sourceGrid.VerticalUpperNode[link];
             int cell = upper / sourceGrid.MaximumLayerCount;
             int layer = upper - cell * sourceGrid.MaximumLayerCount;
-            if (sourceGrid.VerticalCenterDistance[link] > 0f) columnInterfaceConductanceBase[cellColumnIndex(cell) * (sourceGrid.MaximumLayerCount - 1) + layer] = sourceGrid.VerticalInterfaceArea[link] / sourceGrid.VerticalCenterDistance[link];
+            // Express the effective interface geometry in the existing simulation-length unit
+            // used by verticalThermalDiffusivity. Subsurface capacity already uses physical volume.
+            double geometry = sourceGrid.GetPhysicalVerticalAreaOverDistanceKm(link) / GeodesicPhysicalScale.PhysicalKilometresPerUnityUnit;
+            columnInterfaceConductanceBase[cellColumnIndex(cell) * (sourceGrid.MaximumLayerCount - 1) + layer] = (float)geometry;
         }
         solvedSurfaceTemperatureByColumn = new float[surfaceCount];
         solvedSubsurfaceTemperatureByCompactNode = new float[subsurfaceCount];

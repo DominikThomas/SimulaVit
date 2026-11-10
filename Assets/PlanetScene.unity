@@ -1355,6 +1355,7 @@ MonoBehaviour:
   m_Name: GeodesicOceanLayerDomain
   m_EditorClassIdentifier: SimulaVit::GeodesicOceanLayerDomain
   enableGeodesicLayeredOcean: 1
+  physicalOceanDepthScale: 0.0175
   maximumLayerCount: 5
   secondLayerBeginsAtDepthFraction: 0.12
   thirdLayerBeginsAtDepthFraction: 0.32
@@ -1574,7 +1575,7 @@ MonoBehaviour:
   highFe2Tint: {r: 0.12156861, g: 0.5803922, b: 0.16663016, a: 1}
   intensityMultiplier: 0.42
   refreshIntervalSeconds: 0.5
-  layer1VisualWeight: 0.4
+  deeperLayerWeightMultiplier: 0.55
   maximumVisualizedRecentOxidation: 2
   rustyOxidationTint: {r: 0.72, g: 0.3, b: 0.08, a: 1}
   rustyOxidationIntensity: 0.65

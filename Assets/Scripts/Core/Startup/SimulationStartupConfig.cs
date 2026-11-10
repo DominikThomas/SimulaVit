@@ -5,6 +5,8 @@ using UnityEngine;
 public class SimulationStartupConfig
 {
     public const float DefaultAirSeaExchangeHalfLifeSeconds = 300f;
+    public const float DefaultVentProductionMultiplier = 1f;
+    public const float MaximumVentProductionMultiplier = 1000000f;
     [Header("Planet")]
     public int planetSeed = 12345;
     public bool useRandomSeed = true;
@@ -57,6 +59,8 @@ public class SimulationStartupConfig
     public float ventCO2PerTick = 0.02f;
     [Tooltip("Legacy Cube Sphere Fe2 vent rate. Geodesic uses its separate physical-rate field.")]
     public float ventFe2PerTick = 0.002f;
+    [Range(0f, MaximumVentProductionMultiplier)]
+    public float geodesicVentProductionMultiplier = DefaultVentProductionMultiplier;
     [Tooltip("Geodesic physical vent inventory rate in concentration*km3 per simulated second.")]
     public float geodesicVentH2PhysicalPerSecond = 10f;
     [Tooltip("Provisional uncalibrated Geodesic physical rate; zero disables this source.")]
@@ -130,6 +134,9 @@ public class SimulationStartupConfig
     public float airSeaExchangeHalfLifeSeconds = DefaultAirSeaExchangeHalfLifeSeconds;
     [Tooltip("Simulated-time environmental warmup before normal Geodesic founders appear. Zero preserves immediate spawning.")]
     public float geodesicBiologySpawnDelaySeconds = 0f;
+
+    internal static float NormalizeVentProductionMultiplier(float value) =>
+        float.IsFinite(value) ? Mathf.Clamp(value, 0f, MaximumVentProductionMultiplier) : DefaultVentProductionMultiplier;
 
     public SimulationStartupConfig Clone()
     {

@@ -92,6 +92,7 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     [SerializeField] private double physicalVentH2SInventoryRatePerSecond;
     [SerializeField] private double physicalVentCO2InventoryRatePerSecond;
     [SerializeField] private double physicalVentFe2InventoryRatePerSecond;
+    private float ventProductionMultiplier = SimulationStartupConfig.DefaultVentProductionMultiplier;
     [SerializeField] private double transportIntegrationCursorTime;
     [SerializeField] private double unconsumedTransportRemainderSeconds;
     [SerializeField] private long completedTransportTicks;
@@ -238,12 +239,14 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
         lastStartupConcentrationDiagnostic = $"CO2={initialCO2Concentration:G6}, O2={initialO2Concentration:G6}, CH4={initialCH4Concentration:G6}, Fe2={initialFe2Concentration:G6}";
     }
 
-    public void SetStartupPhysicalVentRates(double h2, double h2s, double co2, double fe2)
+    public void SetStartupPhysicalVentRates(double h2, double h2s, double co2, double fe2,
+        float productionMultiplier = SimulationStartupConfig.DefaultVentProductionMultiplier)
     {
-        physicalVentH2InventoryRatePerSecond = FiniteNonnegative(h2);
-        physicalVentH2SInventoryRatePerSecond = FiniteNonnegative(h2s);
-        physicalVentCO2InventoryRatePerSecond = FiniteNonnegative(co2);
-        physicalVentFe2InventoryRatePerSecond = FiniteNonnegative(fe2);
+        ventProductionMultiplier = SimulationStartupConfig.NormalizeVentProductionMultiplier(productionMultiplier);
+        physicalVentH2InventoryRatePerSecond = FiniteNonnegative(h2 * ventProductionMultiplier);
+        physicalVentH2SInventoryRatePerSecond = FiniteNonnegative(h2s * ventProductionMultiplier);
+        physicalVentCO2InventoryRatePerSecond = FiniteNonnegative(co2 * ventProductionMultiplier);
+        physicalVentFe2InventoryRatePerSecond = FiniteNonnegative(fe2 * ventProductionMultiplier);
     }
 
     private static double FiniteNonnegative(double value) => double.IsFinite(value) ? Math.Max(0d, value) : 0d;
@@ -431,20 +434,31 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
         {
             int a = grid.HorizontalNodeA[i], b = grid.HorizontalNodeB[i];
             int edge = grid.HorizontalSourceEdgeIndex[i];
+            // The common depth-to-km factor on horizontal overlap cancels in the normalization.
             float geometry = grid.SourceTransportGraph.EdgeConductanceBase[edge] * grid.HorizontalOverlapThickness[i];
             horizontalGeometry[i] = geometry; horizontalSum[a] += geometry; horizontalSum[b] += geometry;
         }
         // Geometry-weighted normalization guarantees each node's incident conductance sum is
         // at most its volume. Thus rate * dt <= 1 is a justified explicit stability bound.
-        for (int i = 0; i < horizontalLinkCount; i++) { int a = grid.HorizontalNodeA[i], b = grid.HorizontalNodeB[i]; float geometry = horizontalGeometry[i]; horizontalConductanceBase[i] = (float)(geometry * Mathf.Min(grid.LayerVolume[a] / horizontalSum[a], grid.LayerVolume[b] / horizontalSum[b]) * GeodesicPhysicalScale.PhysicalCubicKilometresPerUnityUnitCubed); }
+        for (int i = 0; i < horizontalLinkCount; i++)
+        {
+            int a = grid.HorizontalNodeA[i], b = grid.HorizontalNodeB[i];
+            horizontalConductanceBase[i] = (float)(horizontalGeometry[i] * Math.Min(
+                grid.PhysicalLayerVolumeKm3[a] / horizontalSum[a], grid.PhysicalLayerVolumeKm3[b] / horizontalSum[b]));
+        }
         float[] verticalGeometry = new float[verticalLinkCount], verticalSum = new float[nodeCapacity];
         for (int i = 0; i < verticalLinkCount; i++)
         {
             int a = grid.VerticalUpperNode[i], b = grid.VerticalLowerNode[i];
-            float geometry = grid.VerticalInterfaceArea[i] / grid.VerticalCenterDistance[i];
+            float geometry = (float)grid.GetPhysicalVerticalAreaOverDistanceKm(i);
             verticalGeometry[i] = geometry; verticalSum[a] += geometry; verticalSum[b] += geometry;
         }
-        for (int i = 0; i < verticalLinkCount; i++) { int a = grid.VerticalUpperNode[i], b = grid.VerticalLowerNode[i]; float geometry = verticalGeometry[i]; verticalConductanceBase[i] = (float)(geometry * Mathf.Min(grid.LayerVolume[a] / verticalSum[a], grid.LayerVolume[b] / verticalSum[b]) * GeodesicPhysicalScale.PhysicalCubicKilometresPerUnityUnitCubed); }
+        for (int i = 0; i < verticalLinkCount; i++)
+        {
+            int a = grid.VerticalUpperNode[i], b = grid.VerticalLowerNode[i];
+            verticalConductanceBase[i] = (float)(verticalGeometry[i] * Math.Min(
+                grid.PhysicalLayerVolumeKm3[a] / verticalSum[a], grid.PhysicalLayerVolumeKm3[b] / verticalSum[b]));
+        }
         var candidates = new System.Collections.Generic.List<GeodesicVentCandidate>();
         uint seed = unchecked((uint)generator.DerivedTerrainSeed) ^ 0x6A09E667u;
         uint threshold = (uint)(Mathf.Clamp01(ventColumnFraction) * uint.MaxValue);
@@ -499,7 +513,7 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
         normalizedSubmarineWeightSum = (float)normalized;
         int submarineOutletCount = 0; for (int i = 0; i < ventOutlets.Length; i++) if (ventOutlets[i].Habitat == GeodesicVentHabitat.Submarine) submarineOutletCount++;
         Debug.Log($"[GeodesicVentSystems] patchiness={geothermalPatchiness:F2}, rawCandidates={rawVentCandidateCount}, clusteredVents={ventCount} (submarine={submarineVentCount}, terrestrial={terrestrialVentCount}), compactOutlets={ventOutlets.Length}, normalizedSubmarineWeightSum={normalized:G9}, sourceDistribution=compactOutlets, physicalInventoryRates(H2/H2S/CO2/Fe2)={physicalVentH2InventoryRatePerSecond:G6}/{physicalVentH2SInventoryRatePerSecond:G6}/{physicalVentCO2InventoryRatePerSecond:G6}/{physicalVentFe2InventoryRatePerSecond:G6}, unit=concentration*km3/s, gasProductionSplit=submarine:{submarineGasProductionFraction:G9}/terrestrial:{terrestrialGasProductionFraction:G9}, Fe2=submarineOnly", this);
-        Debug.Log($"[GeodesicVentFlux] H2={physicalVentH2InventoryRatePerSecond:G6}, H2S={physicalVentH2SInventoryRatePerSecond:G6}, CO2={physicalVentCO2InventoryRatePerSecond:G6}, Fe2={physicalVentFe2InventoryRatePerSecond:G6}, unit=concentration*km3/s, conversion=none-already-physical", this);
+        Debug.Log($"[GeodesicVentFlux] productionMultiplier={ventProductionMultiplier:G9}, H2={physicalVentH2InventoryRatePerSecond:G9}, H2S={physicalVentH2SInventoryRatePerSecond:G9}, CO2={physicalVentCO2InventoryRatePerSecond:G9}, Fe2={physicalVentFe2InventoryRatePerSecond:G9}, unit=concentration*km3/s, conversion=none-already-physical", this);
         double[] diagnosticDurations = { 10d, 60d, 600d };
         for (int i = 0; i < diagnosticDurations.Length; i++)
         {

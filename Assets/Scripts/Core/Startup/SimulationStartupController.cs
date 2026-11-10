@@ -88,7 +88,7 @@ public class SimulationStartupController : MonoBehaviour
     private enum StartupUiState { MainMenu, ConfigScreen, SavePicker }
 
     private Vector2 setupGuiScrollPosition;
-    private readonly Dictionary<string, (float value, string text)> riverThresholdEdits = new();
+    private readonly Dictionary<string, (float value, string text)> numericFieldEdits = new();
     private Vector2 savePickerScrollPosition;
     private StartupUiState startupUiState;
     private IReadOnlyList<SimulationSaveLoadService.SaveFileInfo> cachedSaveFiles = Array.Empty<SimulationSaveLoadService.SaveFileInfo>();
@@ -451,6 +451,7 @@ public class SimulationStartupController : MonoBehaviour
         destination.ventH2SPerTick = source.ventH2SPerTick;
         destination.ventCO2PerTick = source.ventCO2PerTick;
         destination.ventFe2PerTick = source.ventFe2PerTick;
+        destination.geodesicVentProductionMultiplier = source.geodesicVentProductionMultiplier;
         destination.geodesicVentH2PhysicalPerSecond = source.geodesicVentH2PhysicalPerSecond;
         destination.geodesicVentH2SPhysicalPerSecond = source.geodesicVentH2SPhysicalPerSecond;
         destination.geodesicVentCO2PhysicalPerSecond = source.geodesicVentCO2PhysicalPerSecond;
@@ -692,7 +693,10 @@ public class SimulationStartupController : MonoBehaviour
                 planetGenerator.GetComponent<GeodesicSurfaceTemperatureField>()?.SetStartupTemperatureParameters(config.baseTempKelvin, config.insolationTempGain);
                 planetGenerator.GetComponent<GeodesicSurfaceTemperatureField>()?.SetStartupApproximateUpdateInterval(config.approximateThermalIntervalSeconds);
                 planetGenerator.GetComponent<GeodesicOceanResourceField>()?.SetStartupConcentrations(config.initialCO2, config.initialO2, config.initialCH4, config.initialDissolvedFe2Plus);
-                planetGenerator.GetComponent<GeodesicOceanResourceField>()?.SetStartupPhysicalVentRates(config.geodesicVentH2PhysicalPerSecond, config.geodesicVentH2SPhysicalPerSecond, config.geodesicVentCO2PhysicalPerSecond, config.geodesicVentFe2PhysicalPerSecond);
+                planetGenerator.GetComponent<GeodesicOceanResourceField>()?.SetStartupPhysicalVentRates(
+                    config.geodesicVentH2PhysicalPerSecond, config.geodesicVentH2SPhysicalPerSecond,
+                    config.geodesicVentCO2PhysicalPerSecond, config.geodesicVentFe2PhysicalPerSecond,
+                    config.geodesicVentProductionMultiplier);
                 planetGenerator.GetComponent<GeodesicOceanResourceField>()?.SetStartupVentGeography(config.ventClustering, config.terrestrialVentFraction);
                 planetGenerator.GetComponent<GeodesicOceanResourceField>()?.SetStartupTransportInterval(config.geodesicResourceTransportIntervalSeconds);
                 planetGenerator.GetComponent<GeodesicOceanResourceField>()?.SetStartupChemistryTelemetryInterval(config.chemistryTelemetryIntervalSimSeconds);
@@ -1066,6 +1070,8 @@ public class SimulationStartupController : MonoBehaviour
     {
         SimulationStartupConfig authoritativeFallback = fallback ?? new SimulationStartupConfig();
         SavedStartupConfig saved = SavedStartupConfig.FromDefaults(authoritativeFallback);
+        // Older startup files omit this field. An explicitly saved zero still disables production.
+        saved.geodesicVentProductionMultiplier = SimulationStartupConfig.DefaultVentProductionMultiplier;
         // Missing fields use the historical river defaults even with customized scene defaults.
         saved.riverFlowThreshold = GeodesicRiverSystem.DefaultRiverFlowThreshold;
         saved.majorRiverThreshold = GeodesicRiverSystem.DefaultMajorRiverThreshold;
@@ -1128,6 +1134,7 @@ public class SimulationStartupController : MonoBehaviour
         public float ventH2SPerTick;
         public float ventCO2PerTick;
         public float ventFe2PerTick;
+        public float geodesicVentProductionMultiplier;
         public float geodesicVentH2PhysicalPerSecond;
         public float geodesicVentH2SPhysicalPerSecond;
         public float geodesicVentCO2PhysicalPerSecond;
@@ -1199,6 +1206,7 @@ public class SimulationStartupController : MonoBehaviour
                 ventH2SPerTick = config.ventH2SPerTick,
                 ventCO2PerTick = config.ventCO2PerTick,
                 ventFe2PerTick = config.ventFe2PerTick,
+                geodesicVentProductionMultiplier = SimulationStartupConfig.NormalizeVentProductionMultiplier(config.geodesicVentProductionMultiplier),
                 geodesicVentH2PhysicalPerSecond = config.geodesicVentH2PhysicalPerSecond,
                 geodesicVentH2SPhysicalPerSecond = config.geodesicVentH2SPhysicalPerSecond,
                 geodesicVentCO2PhysicalPerSecond = config.geodesicVentCO2PhysicalPerSecond,
@@ -1276,6 +1284,7 @@ public class SimulationStartupController : MonoBehaviour
             config.ventH2SPerTick = ventH2SPerTick;
             config.ventCO2PerTick = ventCO2PerTick;
             config.ventFe2PerTick = ventFe2PerTick > 0f ? ventFe2PerTick : config.ventFe2PerTick;
+            config.geodesicVentProductionMultiplier = SimulationStartupConfig.NormalizeVentProductionMultiplier(geodesicVentProductionMultiplier);
             // Schema v7 and older have no Geodesic physical-rate fields. Keep the cloned new
             // defaults rather than reinterpreting their legacy/pre-physical vent values.
             if (version >= 8)
@@ -1537,7 +1546,8 @@ public class SimulationStartupController : MonoBehaviour
         float infillHeight = currentConfig.gridType == PlanetGridType.GeodesicIcosphere
             ? 98f + (currentConfig.infillExcludedInlandBasins ? (line + gap) * 6f : 0f) : 0f;
         float advancedHeight = advancedSettingsExpanded ? 1920f + infillHeight + (currentConfig.gridType == PlanetGridType.GeodesicIcosphere ? line + gap + 78f : 0f) : 0f;
-        float contentHeight = 44f + ((line + gap) * 25f) + advancedHeight + (debugSettingsExpanded ? 370f : 40f) + (gap * 2f) + 42f + 30f + 82f;
+        int normalRows = currentConfig.gridType == PlanetGridType.GeodesicIcosphere ? 26 : 25;
+        float contentHeight = 44f + ((line + gap) * normalRows) + advancedHeight + (debugSettingsExpanded ? 370f : 40f) + (gap * 2f) + 42f + 30f + 82f;
         Rect contentRect = GUILayoutUtility.GetRect(contentWidth, contentHeight, GUILayout.Width(contentWidth), GUILayout.Height(contentHeight));
         float controlX = contentRect.x;
         float y = contentRect.y;
@@ -1589,6 +1599,10 @@ public class SimulationStartupController : MonoBehaviour
         y += line + gap;
         if (currentConfig.gridType == PlanetGridType.GeodesicIcosphere)
         {
+            DrawNonnegativeFloatInput(new Rect(controlX, y, contentWidth, line), "Global Vent Production Multiplier",
+                ref currentConfig.geodesicVentProductionMultiplier, SimulationStartupConfig.DefaultVentProductionMultiplier,
+                SimulationStartupConfig.MaximumVentProductionMultiplier);
+            y += line + gap;
             GUI.Label(new Rect(controlX, y, contentWidth, line), "Physical inventory rates (concentration·km³/s)", labelStyle); y += line + gap;
             DrawFloat(new Rect(controlX, y, contentWidth, line), "Global Vent H2 / sim s", ref currentConfig.geodesicVentH2PhysicalPerSecond, 0f, GeodesicVentPhysicalMaxPerSecond); y += line + gap;
             DrawFloat(new Rect(controlX, y, contentWidth, line), "Global Vent H2S / sim s", ref currentConfig.geodesicVentH2SPhysicalPerSecond, 0f, GeodesicVentPhysicalMaxPerSecond); y += line + gap;
@@ -1646,11 +1660,11 @@ public class SimulationStartupController : MonoBehaviour
                 y += line + gap;
                 DrawInt(new Rect(controlX, y, contentWidth, line), "Valley carving passes", ref currentConfig.valleyCarvingPasses, true, 1, 5);
                 y += line + gap;
-                DrawValleyParameter(new Rect(controlX, y, contentWidth, line), "Maximum carve depth (planet units)", ref currentConfig.maximumValleyCarveDepth, GeodesicValleyCarving.DefaultDepth, 1f);
+                DrawNonnegativeFloatInput(new Rect(controlX, y, contentWidth, line), "Maximum carve depth (planet units)", ref currentConfig.maximumValleyCarveDepth, GeodesicValleyCarving.DefaultDepth, 1f);
                 y += line + gap;
-                DrawValleyParameter(new Rect(controlX, y, contentWidth, line), "Minimum river runoff for carving", ref currentConfig.minimumValleyCarveRunoff, GeodesicValleyCarving.DefaultRunoff, 1000000f);
+                DrawNonnegativeFloatInput(new Rect(controlX, y, contentWidth, line), "Minimum river runoff for carving", ref currentConfig.minimumValleyCarveRunoff, GeodesicValleyCarving.DefaultRunoff, 1000000f);
                 y += line + gap;
-                DrawValleyParameter(new Rect(controlX, y, contentWidth, line), "Carve width (planet units)", ref currentConfig.valleyCarveWidth, GeodesicValleyCarving.DefaultWidth, 1f);
+                DrawNonnegativeFloatInput(new Rect(controlX, y, contentWidth, line), "Carve width (planet units)", ref currentConfig.valleyCarveWidth, GeodesicValleyCarving.DefaultWidth, 1f);
                 y += line + gap;
                 currentConfig.showValleyCarvingDebug = GUI.Toggle(new Rect(controlX, y, contentWidth, line), currentConfig.showValleyCarvingDebug, "Show valley carving debug (Scene gizmos)");
                 y += line + gap;
@@ -1808,17 +1822,17 @@ public class SimulationStartupController : MonoBehaviour
         currentConfig.gridType = selected == 1 ? PlanetGridType.GeodesicIcosphere : PlanetGridType.LegacyCubeSphere;
     }
 
-    private void DrawValleyParameter(Rect rect, string label, ref float value, float fallback, float maximum)
+    private void DrawNonnegativeFloatInput(Rect rect, string label, ref float value, float fallback, float maximum)
     {
-        value = GeodesicValleyCarving.Normalize(value, fallback, maximum);
-        string text = riverThresholdEdits.TryGetValue(label, out var edit) && edit.value == value
+        value = float.IsFinite(value) ? Mathf.Clamp(value, 0f, maximum) : fallback;
+        string text = numericFieldEdits.TryGetValue(label, out var edit) && edit.value == value
             && GUI.GetNameOfFocusedControl() == label ? edit.text : value.ToString("G9");
         GUI.Label(new Rect(rect.x, rect.y, rect.width * .78f, rect.height), label, labelStyle);
         GUI.SetNextControlName(label);
         string next = GUI.TextField(new Rect(rect.x + rect.width * .8f, rect.y, rect.width * .2f, rect.height), text);
-        if (float.TryParse(next, out float parsed) && !float.IsNaN(parsed) && !float.IsInfinity(parsed))
-            value = GeodesicValleyCarving.Normalize(parsed, fallback, maximum);
-        riverThresholdEdits[label] = (value, next);
+        if (float.TryParse(next, out float parsed) && float.IsFinite(parsed))
+            value = Mathf.Clamp(parsed, 0f, maximum);
+        numericFieldEdits[label] = (value, next);
     }
 
     private void DrawRiverThreshold(Rect rect, string label, ref float value, float fallback)
@@ -1826,26 +1840,26 @@ public class SimulationStartupController : MonoBehaviour
         value = NormalizeRiverThreshold(value, fallback);
         GUI.Label(new Rect(rect.x, rect.y, rect.width * 0.75f, rect.height), label, labelStyle);
         // Preserve partial decimal input while typing; only finite positive values enter the config.
-        string text = riverThresholdEdits.TryGetValue(label, out var edit) && edit.value == value
+        string text = numericFieldEdits.TryGetValue(label, out var edit) && edit.value == value
             && GUI.GetNameOfFocusedControl() == label ? edit.text : value.ToString("G9");
         GUI.SetNextControlName(label);
         string next = GUI.TextField(new Rect(rect.x + rect.width * 0.80f, rect.y, rect.width * 0.20f, rect.height), text);
         if (float.TryParse(next, out float parsed) && parsed > 0f && !float.IsInfinity(parsed))
             value = NormalizeRiverThreshold(parsed, fallback);
-        riverThresholdEdits[label] = (value, next);
+        numericFieldEdits[label] = (value, next);
     }
 
     private void DrawInlandElevationMagnitude(Rect rect)
     {
         const string label = "Inland elevation magnitude";
         float value = GeodesicInlandUplift.NormalizeMagnitude(currentConfig.inlandElevationMagnitude);
-        if (!riverThresholdEdits.TryGetValue(label, out var edit) || edit.value != value)
+        if (!numericFieldEdits.TryGetValue(label, out var edit) || edit.value != value)
             edit = (value, value.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture));
         GUI.Label(new Rect(rect.x, rect.y, rect.width * .8f, rect.height), label + " [0-0.05]", labelStyle);
         string next = GUI.TextField(new Rect(rect.x + rect.width * .8f, rect.y, rect.width * .2f, rect.height), edit.text);
         if (float.TryParse(next, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float parsed))
             value = GeodesicInlandUplift.NormalizeMagnitude(parsed);
-        riverThresholdEdits[label] = (value, next);
+        numericFieldEdits[label] = (value, next);
         currentConfig.inlandElevationMagnitude = value;
     }
 

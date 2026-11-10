@@ -10,6 +10,8 @@ public sealed class GeodesicOceanLayerDomain : MonoBehaviour
 {
     [Header("Geodesic Layered Ocean")]
     [SerializeField, Tooltip("Builds the shared layered physical ocean domain after final geodesic bathymetry. No transported state is created.")] private bool enableGeodesicLayeredOcean = true;
+    [SerializeField, Min(1e-6f), Tooltip("Scales physical depths below sea level when the ocean domain is built. Terrain, visual water levels, and layer connectivity are unchanged.")]
+    private double physicalOceanDepthScale = GeodesicOceanLayerGrid.DefaultPhysicalOceanDepthScale;
     [SerializeField, Range(1, GeodesicOceanLayerGrid.AbsoluteMaximumLayerCount), Tooltip("Maximum globally aligned depth bands (one through five).")] private int maximumLayerCount = 5;
     [SerializeField, Range(0f, 1f), Tooltip("Normalized maximum-depth fraction at which global layer 1 ends and layer 2 begins.")] private float secondLayerBeginsAtDepthFraction = 0.12f;
     [SerializeField, Range(0f, 1f), Tooltip("Normalized maximum-depth fraction at which global layer 2 ends and layer 3 begins.")] private float thirdLayerBeginsAtDepthFraction = 0.32f;
@@ -40,7 +42,7 @@ public sealed class GeodesicOceanLayerDomain : MonoBehaviour
         if (!enableGeodesicLayeredOcean) return;
         if (!TryGetBoundaries(out float[] boundaries, out string error)) { UnityEngine.Debug.LogError($"[GeodesicOceanLayers] Invalid configuration: {error}", this); return; }
         Stopwatch watch = Stopwatch.StartNew();
-        try { grid = new GeodesicOceanLayerGrid(topology, graph, oceanMask, seafloorRadius, seaLevelRadius, maximumLayerCount, boundaries); }
+        try { grid = new GeodesicOceanLayerGrid(topology, graph, oceanMask, seafloorRadius, seaLevelRadius, maximumLayerCount, boundaries, physicalOceanDepthScale); }
         catch (Exception exception) { UnityEngine.Debug.LogError($"[GeodesicOceanLayers] Initialization failed: {exception.Message}", this); ClearGrid(); return; }
         watch.Stop(); sourceGenerator = generator; buildDurationMilliseconds = watch.Elapsed.TotalMilliseconds; initialized = true;
         CacheDiagnostics(); RefreshSampleDiagnostics();
@@ -57,7 +59,7 @@ public sealed class GeodesicOceanLayerDomain : MonoBehaviour
         {
             int layers = grid.ActiveLayerCountByCell[cell];
             if (layers == 0) continue;
-            double depthKm = GeodesicPhysicalScale.LengthKilometres(grid.OceanSurfaceRadius - grid.SourceSeafloorRadius[cell]);
+            double depthKm = grid.ToPhysicalDepthKm((double)grid.OceanSurfaceRadius - grid.SourceSeafloorRadius[cell]);
             physicalDepthTotal += depthKm; maxDepthKm = Math.Max(maxDepthKm, depthKm); columns++;
             for (int layer = 0; layer < layers; layer++)
             {
@@ -68,7 +70,7 @@ public sealed class GeodesicOceanLayerDomain : MonoBehaviour
         }
         if (nodes == 0) minVolume = minThickness = 0d;
         UnityEngine.Debug.Log($"[GeodesicPhysicalScale] unityRadius={GeodesicPhysicalScale.BasePlanetRadiusUnity:G6} physicalRadiusKm={GeodesicPhysicalScale.PhysicalPlanetRadiusKm:G6} kmPerUnityUnit={GeodesicPhysicalScale.PhysicalKilometresPerUnityUnit:G6} km2PerUnity2={GeodesicPhysicalScale.PhysicalSquareKilometresPerUnityUnitSquared:G6} km3PerUnity3={GeodesicPhysicalScale.PhysicalCubicKilometresPerUnityUnitCubed:G6}", this);
-        UnityEngine.Debug.Log($"[GeodesicOceanPhysicalVolume] geometricOceanVolumeUnity3={geometricTotal:G9} physicalOceanVolumeKm3={physicalTotal:G9} physicalLayerVolumeKm3(min/mean/max)={minVolume:G6}/{(nodes > 0 ? physicalTotal / nodes : 0d):G6}/{maxVolume:G6} physicalLayerThicknessKm(min/mean/max)={minThickness:G6}/{(nodes > 0 ? physicalThicknessTotal / nodes : 0d):G6}/{maxThickness:G6} physicalOceanDepthKm(mean/max)={(columns > 0 ? physicalDepthTotal / columns : 0d):G6}/{maxDepthKm:G6}", this);
+        UnityEngine.Debug.Log($"[GeodesicOceanPhysicalVolume] physicalOceanDepthScale={grid.PhysicalOceanDepthScale:G6} physicalSeaLevelRadiusKm={grid.PhysicalOceanSurfaceRadiusKm:G9} geometricOceanVolumeUnity3={geometricTotal:G9} physicalOceanVolumeKm3={physicalTotal:G9} physicalLayerVolumeKm3(min/mean/max)={minVolume:G6}/{(nodes > 0 ? physicalTotal / nodes : 0d):G6}/{maxVolume:G6} physicalLayerThicknessKm(min/mean/max)={minThickness:G6}/{(nodes > 0 ? physicalThicknessTotal / nodes : 0d):G6}/{maxThickness:G6} physicalOceanDepthKm(mean/max)={(columns > 0 ? physicalDepthTotal / columns : 0d):G6}/{maxDepthKm:G6}", this);
     }
 
     public void ClearGrid()
@@ -119,8 +121,20 @@ public sealed class GeodesicOceanLayerDomain : MonoBehaviour
         for (int i = 0; i < grid.HorizontalLinkCount; i++) { int a = grid.HorizontalNodeA[i], b = grid.HorizontalNodeB[i]; if (a / grid.MaximumLayerCount == cell) hd[a % grid.MaximumLayerCount]++; if (b / grid.MaximumLayerCount == cell) hd[b % grid.MaximumLayerCount]++; }
         for (int i = 0; i < grid.VerticalLinkCount; i++) { int a = grid.VerticalUpperNode[i], b = grid.VerticalLowerNode[i]; if (a / grid.MaximumLayerCount == cell) vd[a % grid.MaximumLayerCount]++; if (b / grid.MaximumLayerCount == cell) vd[b % grid.MaximumLayerCount]++; }
         var s = new StringBuilder(); bool ocean = grid.SourceOceanMask[cell]; float depth = ocean ? grid.OceanSurfaceRadius - grid.SourceSeafloorRadius[cell] : 0f;
-        s.AppendLine($"Cell {cell}: {(ocean ? "Ocean" : "Land")}; depth={depth:F6}; activeLayers={grid.ActiveLayerCountByCell[cell]}");
-        for (int layer = 0; layer < 5; layer++) { bool active = grid.IsNodeActive(cell, layer); int node = layer < grid.MaximumLayerCount ? grid.GetNodeIndex(cell, layer) : -1; s.AppendLine($"L{layer}: {(active ? "active" : "inactive")}; thickness={(active ? grid.LayerThickness[node] : 0f):F6}; geometricVolumeUnity3={(active ? grid.LayerVolume[node] : 0f):G6}; physicalVolumeKm3={(active ? grid.PhysicalLayerVolumeKm3[node] : 0d):G6}; centerDepth={(active ? grid.OceanSurfaceRadius - grid.LayerCenterRadius[node] : 0f):F6}; H/V degree={hd[layer]}/{vd[layer]}"); }
+        s.AppendLine($"Cell {cell}: {(ocean ? "Ocean" : "Land")}; visualDepthUnity={depth:F6}; physicalDepthKm={grid.ToPhysicalDepthKm(depth):G6}; activeLayers={grid.ActiveLayerCountByCell[cell]}");
+        for (int layer = 0; layer < GeodesicOceanLayerGrid.AbsoluteMaximumLayerCount; layer++)
+        {
+            if (!grid.IsNodeActive(cell, layer))
+            {
+                s.AppendLine($"L{layer}: inactive");
+                continue;
+            }
+            int node = grid.GetNodeIndex(cell, layer);
+            double centerDepth = (double)grid.OceanSurfaceRadius - grid.LayerCenterRadius[node];
+            s.AppendLine($"L{layer}: active; visualThicknessUnity={grid.LayerThickness[node]:F6}; physicalThicknessKm={grid.PhysicalLayerThicknessKm[node]:G6}; " +
+                $"geometricVolumeUnity3={grid.LayerVolume[node]:G6}; physicalVolumeKm3={grid.PhysicalLayerVolumeKm3[node]:G6}; " +
+                $"visualCenterDepthUnity={centerDepth:F6}; physicalCenterDepthKm={grid.ToPhysicalDepthKm(centerDepth):G6}; H/V degree={hd[layer]}/{vd[layer]}");
+        }
         sampleCellOutput = s.ToString();
     }
 

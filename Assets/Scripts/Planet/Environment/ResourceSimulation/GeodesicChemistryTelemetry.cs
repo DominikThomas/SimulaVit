@@ -168,6 +168,19 @@ public sealed class GeodesicChemistryTelemetry : MonoBehaviour
                 .Append(",FeSFractionBelowTintFloor=").Append((sedimentFeS > 0d ? feSBelowTintFloor / sedimentFeS : 0d).ToString("G6"));
         }
         text.Append('}');
+        var oceanColour = GetComponent<GeodesicOceanFe2Visual>();
+        bool colourInitialized = oceanColour != null && oceanColour.IsInitialized;
+        text.Append(" oceanColour={initialized=").Append(colourInitialized);
+        if (colourInitialized)
+        {
+            text.Append(",active=").Append(oceanColour.isActiveAndEnabled)
+                .Append(",shaderBound=").Append(oceanColour.HasColourMaterial)
+                .Append(",uploads=").Append(oceanColour.ColourUploadCount)
+                .Append(",sampledTransportTick=").Append(oceanColour.LastColourTransportTick)
+                .Append(",sampledFe2MinMax=").Append(oceanColour.MinimumSampledFe2.ToString("G9"))
+                .Append('/').Append(oceanColour.MaximumSampledFe2.ToString("G9"));
+        }
+        text.Append('}');
         AppendAtmosphere(text);
         return text.ToString();
     }

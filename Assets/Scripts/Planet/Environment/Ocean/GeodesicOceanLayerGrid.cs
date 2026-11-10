@@ -5,6 +5,7 @@ using UnityEngine;
 public sealed class GeodesicOceanLayerGrid
 {
     public const int AbsoluteMaximumLayerCount = 5;
+    public const double DefaultPhysicalOceanDepthScale = 0.0175d;
     private const float ActiveEpsilon = 1e-7f;
 
     public GeodesicGridTopology SourceTopology { get; }
@@ -20,6 +21,8 @@ public sealed class GeodesicOceanLayerGrid
     public int ActiveNodeCount { get; }
     public float OceanSurfaceRadius { get; }
     public float MaximumOceanDepth { get; }
+    public double PhysicalOceanSurfaceRadiusKm { get; }
+    public double PhysicalOceanDepthScale { get; }
 
     /// <summary>Compact runtime arrays are read-only by contract.</summary>
     public byte[] ActiveLayerCountByCell { get; }
@@ -28,7 +31,7 @@ public sealed class GeodesicOceanLayerGrid
     public float[] LayerCenterRadius { get; }
     /// <summary>Geometric thickness in Unity units. Rendering and mesh geometry remain in these units.</summary>
     public float[] LayerThickness { get; }
-    /// <summary>Geometric spherical-wedge volume in Unity cubed. Retained for geometry and normalized weighting.</summary>
+    /// <summary>Geometric spherical-wedge volume in Unity cubed.</summary>
     public float[] LayerVolume { get; }
     public float[] GeometricLayerVolumeUnity3 => LayerVolume;
     /// <summary>Authoritative environmental thickness in kilometres.</summary>
@@ -51,7 +54,8 @@ public sealed class GeodesicOceanLayerGrid
     public long ApproximateMemoryBytes { get; }
 
     public GeodesicOceanLayerGrid(GeodesicGridTopology topology, GeodesicTransportGraph graph,
-        bool[] oceanMask, float[] seafloorRadius, float oceanSurfaceRadius, int maximumLayers, float[] normalizedBoundaries)
+        bool[] oceanMask, float[] seafloorRadius, float oceanSurfaceRadius, int maximumLayers, float[] normalizedBoundaries,
+        double physicalOceanDepthScale = DefaultPhysicalOceanDepthScale)
     {
         SourceTopology = topology ?? throw new ArgumentNullException(nameof(topology));
         SourceTransportGraph = graph ?? throw new ArgumentNullException(nameof(graph));
@@ -62,7 +66,12 @@ public sealed class GeodesicOceanLayerGrid
         if (oceanMask.Length != CellCount || seafloorRadius.Length != CellCount) throw new ArgumentException("Ocean data count does not match topology.");
         MaximumLayerCount = Mathf.Clamp(maximumLayers, 1, AbsoluteMaximumLayerCount);
         if (normalizedBoundaries == null || normalizedBoundaries.Length != MaximumLayerCount + 1) throw new ArgumentException("Boundary count must be maximumLayers + 1.");
+        if (!float.IsFinite(oceanSurfaceRadius) || oceanSurfaceRadius <= 0f) throw new ArgumentOutOfRangeException(nameof(oceanSurfaceRadius));
+        if (!double.IsFinite(physicalOceanDepthScale) || physicalOceanDepthScale <= 0d)
+            throw new ArgumentOutOfRangeException(nameof(physicalOceanDepthScale), "Physical ocean depth scale must be finite and positive.");
         OceanSurfaceRadius = oceanSurfaceRadius;
+        PhysicalOceanSurfaceRadiusKm = GeodesicPhysicalScale.LengthKilometres(oceanSurfaceRadius);
+        PhysicalOceanDepthScale = physicalOceanDepthScale;
         NodeCapacity = CellCount * MaximumLayerCount;
 
         float maxDepth = 0f;
@@ -70,6 +79,8 @@ public sealed class GeodesicOceanLayerGrid
         for (int cell = 0; cell < CellCount; cell++) if (oceanMask[cell]) { oceanCells++; maxDepth = Mathf.Max(maxDepth, oceanSurfaceRadius - seafloorRadius[cell]); }
         OceanCellCount = oceanCells;
         MaximumOceanDepth = maxDepth;
+        if (ToPhysicalDepthKm(maxDepth) >= PhysicalOceanSurfaceRadiusKm)
+            throw new ArgumentOutOfRangeException(nameof(physicalOceanDepthScale), "Physical ocean depth must be less than the sea-level radius.");
         float[] depthBoundaries = new float[MaximumLayerCount + 1];
         for (int i = 0; i <= MaximumLayerCount; i++) depthBoundaries[i] = normalizedBoundaries[i] * maxDepth;
 
@@ -78,7 +89,8 @@ public sealed class GeodesicOceanLayerGrid
         LayerCenterRadius = new float[NodeCapacity]; LayerThickness = new float[NodeCapacity]; LayerVolume = new float[NodeCapacity];
         PhysicalLayerThicknessKm = new double[NodeCapacity]; PhysicalLayerVolumeKm3 = new double[NodeCapacity];
         PhysicalCellAreaKm2 = new double[CellCount];
-        for (int cell = 0; cell < CellCount; cell++) PhysicalCellAreaKm2[cell] = GeodesicPhysicalScale.AreaSquareKilometres(topology.UnitCellAreas[cell] * oceanSurfaceRadius * oceanSurfaceRadius);
+        double surfaceAreaPerSteradian = PhysicalOceanSurfaceRadiusKm * PhysicalOceanSurfaceRadiusKm;
+        for (int cell = 0; cell < CellCount; cell++) PhysicalCellAreaKm2[cell] = topology.UnitCellAreas[cell] * surfaceAreaPerSteradian;
         int activeNodes = 0, horizontalCapacity = graph.EdgeCount * MaximumLayerCount, verticalCapacity = CellCount * (MaximumLayerCount - 1);
         int[] hA = new int[horizontalCapacity], hB = new int[horizontalCapacity], hEdge = new int[horizontalCapacity];
         byte[] hLayer = new byte[horizontalCapacity]; float[] hOverlap = new float[horizontalCapacity];
@@ -99,8 +111,14 @@ public sealed class GeodesicOceanLayerGrid
                 LayerOuterRadius[node] = outer; LayerInnerRadius[node] = inner;
                 LayerCenterRadius[node] = (outer + inner) * 0.5f; LayerThickness[node] = thickness;
                 LayerVolume[node] = topology.UnitCellAreas[cell] * (outer * outer * outer - inner * inner * inner) / 3f;
-                PhysicalLayerThicknessKm[node] = GeodesicPhysicalScale.LengthKilometres(thickness);
-                PhysicalLayerVolumeKm3[node] = GeodesicPhysicalScale.VolumeCubicKilometres(LayerVolume[node]);
+                // Scale depth below the fixed sea-level radius. Factor the difference of cubes
+                // to retain precision in thin coastal layers.
+                double outerKm = GetPhysicalRadiusKm(outer);
+                double innerKm = GetPhysicalRadiusKm(inner);
+                double thicknessKm = ToPhysicalDepthKm((double)outer - inner);
+                PhysicalLayerThicknessKm[node] = thicknessKm;
+                PhysicalLayerVolumeKm3[node] = topology.UnitCellAreas[cell] * thicknessKm
+                    * (outerKm * outerKm + outerKm * innerKm + innerKm * innerKm) / 3d;
                 ActiveLayerCountByCell[cell]++; activeNodes++;
             }
         }
@@ -135,6 +153,21 @@ public sealed class GeodesicOceanLayerGrid
         VerticalInterfaceArea = Trim(vArea, vc); VerticalCenterDistance = Trim(vDistance, vc);
         ApproximateMemoryBytes = CellCount + (long)NodeCapacity * 36L + (long)CellCount * sizeof(double) + (long)hc * 17L + (long)vc * 16L;
     }
+
+    public double ToPhysicalDepthKm(double geometricDepthUnity) =>
+        GeodesicPhysicalScale.LengthKilometres(geometricDepthUnity) * PhysicalOceanDepthScale;
+
+    public double GetPhysicalVerticalAreaOverDistanceKm(int link)
+    {
+        int upper = VerticalUpperNode[link], lower = VerticalLowerNode[link];
+        double radiusKm = GetPhysicalRadiusKm(LayerInnerRadius[upper]);
+        double interfaceAreaKm2 = SourceTopology.UnitCellAreas[upper / MaximumLayerCount] * radiusKm * radiusKm;
+        double centerDistanceKm = 0.5d * (PhysicalLayerThicknessKm[upper] + PhysicalLayerThicknessKm[lower]);
+        return interfaceAreaKm2 / centerDistanceKm;
+    }
+
+    private double GetPhysicalRadiusKm(float geometricRadius) =>
+        PhysicalOceanSurfaceRadiusKm - ToPhysicalDepthKm((double)OceanSurfaceRadius - geometricRadius);
 
     public int GetNodeIndex(int cellIndex, int layerIndex) => cellIndex * MaximumLayerCount + layerIndex;
     public bool IsNodeActive(int cellIndex, int layerIndex) => cellIndex >= 0 && cellIndex < CellCount && layerIndex >= 0 && layerIndex < ActiveLayerCountByCell[cellIndex];
