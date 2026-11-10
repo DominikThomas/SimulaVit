@@ -9,7 +9,7 @@ public partial class PlanetGenerator
     // Bump for changes to canonical terrain topology, geology, ocean classification or infill.
     private const int PhysicalAlgorithm = 1;
 
-    private byte[] PhysicalKey(int simulation, int render) => PlanetGenerationCache.HashBinaryKey(w =>
+    internal byte[] PhysicalKey(int simulation, int render) => PlanetGenerationCache.HashBinaryKey(w =>
     {
         S.RuntimeKey(w);
         w.Write(PhysicalStage);

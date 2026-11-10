@@ -5,7 +5,7 @@ using UnityEngine;
 
 /// <summary>Bounded terrain edits and one new outgoing edge per accepted closed basin.
 /// The original TIN, lake routes, runoff parcels and ocean mask remain the flow authority.</summary>
-public sealed class GeodesicTinSedimentCorridors
+public sealed partial class GeodesicTinSedimentCorridors
 {
     // Distances are relative to planet radius. Each centreline uses render edges and
     // blends back into the original surface across the incident facet ring.

@@ -48,6 +48,7 @@ public static partial class PlanetGenerationCache
             T result;
             long length;
             byte[] expectedDigest;
+            double headerMs, checksumMs, decodeMs;
             using (var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete))
             using (var reader = new BinaryReader(file))
             {
@@ -60,17 +61,20 @@ public static partial class PlanetGenerationCache
                 expectedDigest = reader.ReadBytes(DigestLength);
                 if (length <= 0 || length > MaximumGeodesicPayloadBytes || file.Length != GeodesicHeaderLength + length)
                     throw new InvalidDataException("Snapshot length is invalid.");
+                headerMs = watch.Elapsed.TotalMilliseconds;
                 using var hash = SHA256.Create();
                 if (!hash.ComputeHash(file).AsSpan().SequenceEqual(expectedDigest))
                     throw new InvalidDataException("Snapshot checksum mismatch.");
+                checksumMs = watch.Elapsed.TotalMilliseconds - headerMs;
                 file.Position = GeodesicHeaderLength;
                 result = decode(reader);
+                decodeMs = watch.Elapsed.TotalMilliseconds - headerMs - checksumMs;
                 if (file.Position != file.Length)
                     throw new InvalidDataException("Unexpected snapshot data after the payload.");
             }
             TouchCacheFile(path);
             payloadDigest = expectedDigest;
-            Debug.Log(FormattableString.Invariant($"[GeodesicPlanetCache] hit path={path} readMs={watch.Elapsed.TotalMilliseconds:F2} bytes={length + GeodesicHeaderLength} readManagedHeapDeltaBytes={GC.GetTotalMemory(false) - managedBefore}"));
+            Debug.Log(FormattableString.Invariant($"[GeodesicPlanetCache] hit path={path} readMs={watch.Elapsed.TotalMilliseconds:F2} headerMs={headerMs:F2} checksumReadMs={checksumMs:F2} decodeAndBindMs={decodeMs:F2} bytes={length + GeodesicHeaderLength} readManagedHeapDeltaBytes={GC.GetTotalMemory(false) - managedBefore}"));
             return result;
         }
         catch (Exception ex) when (ex is FileNotFoundException || ex is DirectoryNotFoundException)

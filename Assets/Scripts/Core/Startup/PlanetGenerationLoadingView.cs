@@ -209,6 +209,7 @@ internal sealed class PlanetGenerationLoadingView : IDisposable
             case PlanetGenerationStage.SavingPlanetSnapshot: return ("Saving planet snapshot", "Saving completed generation data for the next game.");
             case PlanetGenerationStage.LoadingSavedHydrology: return ("Loading saved hydrology", "Checking saved drainage and runoff data.");
             case PlanetGenerationStage.RestoringSavedHydrology: return ("Restoring saved hydrology", "Connecting the saved routes to this planet.");
+            case PlanetGenerationStage.InitializingPlanetEnvironment: return ("Initializing the environment", "Preparing fresh ocean, resource, and temperature fields.");
             default: return ("Building the planet", "Starting with triangles. An unreasonable number of triangles.");
         }
     }

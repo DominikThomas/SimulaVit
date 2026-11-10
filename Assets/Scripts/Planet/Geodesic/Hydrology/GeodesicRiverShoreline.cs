@@ -13,6 +13,17 @@ internal sealed class GeodesicRiverShoreline
     private readonly float radius;
     private int lastCell;
 
+    internal int SearchHint { get => lastCell; set => lastCell = value; }
+
+    internal void WriteGeometryIdentity(System.IO.BinaryWriter writer)
+    {
+        writer.Write(radius);
+        writer.Write(cellStarts != null);
+        writer.Write(ocean.SubdivisionLevel);
+        GeodesicSnapshotIO.Write(writer, ocean.UnitVertices, GeodesicSnapshotIO.Vector);
+        GeodesicSnapshotIO.Ints(writer, ocean.Triangles);
+    }
+
     internal GeodesicRiverShoreline(GeodesicGridTopology simulation, GeodesicOceanConnectivity authority,
         IcosphereRenderGeometry ocean, float radius, bool masked)
     {

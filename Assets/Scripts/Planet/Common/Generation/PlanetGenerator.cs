@@ -962,8 +962,7 @@ public partial class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, IS
         if (infillBeforeFields)
             maximumGeneratedOpaqueSurfaceRadius = Mathf.Max(BasePlanetRadius, MaxRadiusFromTerrainData(geodesicCurrentRenderTerrainData));
 
-        if (enableOcean)
-            yield return new PlanetGenerationProgress(PlanetGenerationStage.MixingOceans);
+        yield return new PlanetGenerationProgress(PlanetGenerationStage.InitializingPlanetEnvironment);
         stage = System.Diagnostics.Stopwatch.StartNew();
         var oceanLayerDomain = GetComponent<GeodesicOceanLayerDomain>();
         if (oceanLayerDomain == null)

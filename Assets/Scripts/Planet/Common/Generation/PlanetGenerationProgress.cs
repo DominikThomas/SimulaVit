@@ -21,7 +21,8 @@ public enum PlanetGenerationStage
     RestoringSavedPlanet = 17,
     SavingPlanetSnapshot = 18,
     LoadingSavedHydrology = 19,
-    RestoringSavedHydrology = 20
+    RestoringSavedHydrology = 20,
+    InitializingPlanetEnvironment = 21
 }
 
 /// <summary>

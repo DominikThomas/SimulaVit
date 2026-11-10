@@ -508,6 +508,7 @@ public class SimulationStartupController : MonoBehaviour
     private IEnumerator ApplyAndStartRoutine(bool keepPaused)
     {
         if (applyingConfig) yield break;
+        var startupWatch = System.Diagnostics.Stopwatch.StartNew();
         applyingConfig = true;
         generationFailed = false;
         startupComplete = false;
@@ -543,7 +544,11 @@ public class SimulationStartupController : MonoBehaviour
                     ShowGenerationFailure(exception);
                     yield break;
                 }
-                if (!hasNext) break;
+                if (!hasNext)
+                {
+                    Debug.Log(FormattableString.Invariant($"[StartupLifecycle] startupReadyElapsedMs={startupWatch.Elapsed.TotalMilliseconds:F2} scope=coroutine-start-through-ready-includes-frame-yields-and-publication"), this);
+                    break;
+                }
                 // Report first, then repaint, then execute the next synchronous stage.
                 yield return null;
             }
@@ -589,6 +594,7 @@ public class SimulationStartupController : MonoBehaviour
         }
 
         yield return new PlanetGenerationProgress(PlanetGenerationStage.PreparingPrimordialWorld);
+        var biologyWatch = System.Diagnostics.Stopwatch.StartNew();
         if (currentConfig.gridType == PlanetGridType.LegacyCubeSphere && replicatorManager != null)
         {
             if (replicatorManager.InitializeForSimulation(false))
@@ -604,6 +610,7 @@ public class SimulationStartupController : MonoBehaviour
                 throw new InvalidOperationException("Geodesic biology initialization failed.");
             }
         }
+        Debug.Log(FormattableString.Invariant($"[StartupLifecycle] biologyInitializationMs={biologyWatch.Elapsed.TotalMilliseconds:F2}"), this);
 
         yield return new PlanetGenerationProgress(PlanetGenerationStage.AlmostReady);
         // Restore hidden roots under the opaque screen, then let their OnEnable/Start

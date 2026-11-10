@@ -8,7 +8,8 @@ using S = GeodesicSnapshotIO;
 public sealed partial class GeodesicTinHydrology
 {
     // Capture before ribbons annotate diagnostics or reclassify a missing visual trunk.
-    internal Action<BinaryWriter> CaptureSnapshot(IReadOnlyCollection<(int Source, TinPoint[] Samples)> rejected)
+    internal Action<BinaryWriter> CaptureSnapshot(IReadOnlyCollection<(int Source, TinPoint[] Samples)> rejected,
+        float[] selectedHeights)
     {
         var raw = networks.Select(n => new TinRiverNetwork
         {
@@ -19,6 +20,9 @@ public sealed partial class GeodesicTinHydrology
         var d = Diagnostics.SnapshotCopy();
         return w =>
         {
+            bool separateInput = !ReferenceEquals(selectedHeights, VisibleHeight);
+            w.Write(separateInput);
+            if (separateInput) S.Floats(w, selectedHeights);
             S.Floats(w, HydrologyHeight);
             w.Write(HasVisibleDisagreement);
             S.Ints(w, TriangleReceiver);
@@ -69,12 +73,15 @@ public sealed partial class GeodesicTinHydrology
     internal sealed class Restored
     {
         internal GeodesicTinHydrology Tin;
+        internal float[] SelectedHeights;
         internal (int Source, TinPoint[] Samples)[] Rejected;
     }
 
     internal static Restored RestoreSnapshot(BinaryReader r, IcosphereRenderGeometry geometry, Vector3[] positions,
-        float[] visible, bool[] ocean, float sea, float radius, double epsilon, double bump)
+        float[] visible, bool[] ocean, float sea, float radius, double epsilon, double bump, bool separateInput)
     {
+        S.Require(S.Flag(r) == separateInput, "Cached height input mode mismatch.");
+        var selectedHeights = separateInput ? S.Floats(r, geometry.VertexCount) : visible;
         var heights = S.Floats(r, geometry.VertexCount);
         // Recreate geometric facet/incident/flat indexes through the normal constructor.
         // The saved parcel accumulation and streamlines are installed without tracing.
@@ -136,6 +143,7 @@ public sealed partial class GeodesicTinHydrology
         return new Restored
         {
             Tin = tin,
+            SelectedHeights = selectedHeights,
             Rejected = S.Read(r, triangles * 8, 8, b =>
                 (S.Id(b, triangles), S.Read(b, 32769, 28, point => S.Point(point, triangles))))
         };

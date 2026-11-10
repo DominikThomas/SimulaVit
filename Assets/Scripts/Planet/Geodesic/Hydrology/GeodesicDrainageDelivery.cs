@@ -14,7 +14,7 @@ public readonly struct TinParcelDestination
 /// <summary>Observation only. Parcels are the original facet inputs, never accumulated reach
 /// discharge. Lake membership comes from the router's existing first-entry parcel sets.
 /// Graph traversal follows the published lake, river and sediment corridor edges.</summary>
-public sealed class GeodesicDrainageDelivery
+public sealed partial class GeodesicDrainageDelivery
 {
     public enum Destination { DirectOcean, OceanViaLakes, InlandClosed, Unresolved }
     internal enum RiverDestination { Ocean, ClosedBasin, TerminalLake, Unresolved }

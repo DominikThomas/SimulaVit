@@ -624,7 +624,18 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
         double bump = (max - (double)min) * Mathf.Clamp(visibleMicroBumpFraction, 0f, .002f);
         meanCellArea = SimulationMeanCellArea(owner);
         var terrainSettings = owner.GetGeodesicTerrainSettings();
-        float[] hydrologyTerrainHeight = GeodesicHydrologyTerrain.Build(geometry.UnitVertices, visible, ocean,
+        // L8 facet and ancestry sizes can exceed the supported restore working set.
+        SnapshotRecord tinRecord = allowAuthoritySnapshots && geometry.SubdivisionLevel <= 7
+            ? TinRecord(geometry, completedSurface, ocean, epsilon, bump) : null;
+        GeodesicTinHydrology.Restored restored = null;
+        if (tinRecord?.Exists == true)
+        {
+            yield return new PlanetGenerationProgress(PlanetGenerationStage.LoadingSavedHydrology);
+            restored = tinRecord.Load("TIN", reader => GeodesicTinHydrology.RestoreSnapshot(reader, geometry,
+                completedSurface, visible, ocean, owner.GeodesicSeaLevelRadius, owner.BasePlanetRadius, epsilon, bump,
+                owner.hydrologyTerrainMode != HydrologyTerrainMode.Visible));
+        }
+        float[] hydrologyTerrainHeight = restored?.SelectedHeights ?? GeodesicHydrologyTerrain.Build(geometry.UnitVertices, visible, ocean,
             owner.DerivedTerrainSeed, terrainSettings, owner.BasePlanetRadius,
             owner.hydrologyTerrainMode, owner.enableGeodesicTerrainDisplacement,
             owner.GeodesicHydrologicalRenderRadii, owner.GeodesicRawRenderRadii, owner.GeodesicInfilledRenderVertices);
@@ -634,16 +645,6 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
             owner.hydrologyTerrainMode == HydrologyTerrainMode.FineDetailRemoved && owner.GeodesicHydrologicalRenderRadii?.Length == visible.Length
                 && owner.GeodesicRawRenderRadii?.Length == visible.Length);
         Debug.Log(HydrologyTerrainSummary, this);
-        // L8 facet and ancestry sizes can exceed the supported restore working set.
-        SnapshotRecord tinRecord = allowAuthoritySnapshots && geometry.SubdivisionLevel <= 7
-            ? TinRecord(geometry, completedSurface, ocean, hydrologyTerrainHeight, epsilon, bump) : null;
-        GeodesicTinHydrology.Restored restored = null;
-        if (tinRecord?.Exists == true)
-        {
-            yield return new PlanetGenerationProgress(PlanetGenerationStage.LoadingSavedHydrology);
-            restored = tinRecord.Load("TIN", reader => GeodesicTinHydrology.RestoreSnapshot(reader, geometry,
-                completedSurface, visible, ocean, owner.GeodesicSeaLevelRadius, owner.BasePlanetRadius, epsilon, bump));
-        }
         if (restored != null)
         {
             yield return new PlanetGenerationProgress(PlanetGenerationStage.RestoringSavedHydrology);
@@ -760,7 +761,7 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
             TinLakeRouting = null;
             DrainageDelivery = null;
             SedimentCorridors = null;
-            if (tinRecord != null) tinRecord.Capture(TinDrainage.CaptureSnapshot(rejected));
+            if (tinRecord != null) tinRecord.Capture(TinDrainage.CaptureSnapshot(rejected, HydrologyTerrainInputHeights));
 
             void RecordRejected(int source, TinPoint[] samples)
             {
@@ -808,16 +809,41 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
                 routing?.WriteSnapshot(writer);
             });
         }
-        var delivery = ResolveSedimentCorridors();
+        var deliveryRecord = OceanDeliveryRecord(lakeRecord);
+        GeodesicTinSedimentCorridors.Restored restoredDelivery = null;
+        if (deliveryRecord?.Exists == true)
+        {
+            yield return new PlanetGenerationProgress(PlanetGenerationStage.LoadingSavedHydrology);
+            restoredDelivery = deliveryRecord.Load("ocean delivery", reader => GeodesicTinSedimentCorridors.RestoreSnapshot(
+                reader, TinDrainage, routingLakeBasins, TinLakeRouting, planet.OceanConnectivity, planet.GeodesicTopology.CellCount));
+        }
+        GeodesicDrainageDelivery delivery;
+        if (restoredDelivery != null)
+        {
+            yield return new PlanetGenerationProgress(PlanetGenerationStage.RestoringSavedHydrology);
+            SedimentCorridors = restoredDelivery.Plan;
+            delivery = restoredDelivery.Delivery;
+            if (planet.RiverShoreline != null) planet.RiverShoreline.SearchHint = restoredDelivery.ShorelineHint;
+        }
+        else
+        {
+            delivery = ResolveSedimentCorridors();
+            if (deliveryRecord != null && SedimentCorridors != null && delivery != null)
+                deliveryRecord.Capture(SedimentCorridors.CaptureSnapshot(delivery, planet.RiverShoreline?.SearchHint ?? 0));
+        }
         if (planet.generateHydrologicalLakes) yield return new PlanetGenerationProgress(PlanetGenerationStage.FillingLakes);
+        var visualWatch = System.Diagnostics.Stopwatch.StartNew();
         RefreshTinLakeVisuals();
+        double lakeVisualMs = visualWatch.Elapsed.TotalMilliseconds;
         if (delivery == null && collectDelivery)
             delivery = GeodesicDrainageDelivery.Analyze(TinDrainage, routingLakeBasins ?? TinLakeBasins, TinLakeRouting?.Lakes, TinLakeRouting?.RiverReaches,
                 TinLakeRouting == null && TinLakeGeometry != null && TinLakeGeometry.Bodies.Count > 0,
                 deliveryOceanComponentByVertex != null ? DeliveryOceanComponent : (Func<TinPoint, int>)null,
                 planet.OceanConnectivity?.PrimaryRetainedComponent ?? -1);
         if (delivery != null) DrainageDelivery = delivery;
+        visualWatch.Restart();
         RefreshSedimentSurface();
+        double sedimentVisualMs = visualWatch.Elapsed.TotalMilliseconds;
         riverColourDelivery = DrainageDelivery;
         if (ColourRiversByUltimateDestination && riverColourDelivery == null)
             riverColourDelivery = AnalyzeRiverColours();
@@ -1028,6 +1054,7 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
         if (showRiverTerminationReasons) BuildTerminationDebugVisual();
         if (VisibleGradeAudit != null) Debug.Log(VisibleGradeAudit.Summary(), this);
         TinDiagnostics.RibbonMilliseconds = watch.Elapsed.TotalMilliseconds;
+        Debug.Log(FormattableString.Invariant($"[GeodesicHydrologyVisuals] lakesMs={lakeVisualMs:F2} sedimentMs={sedimentVisualMs:F2} ribbonsAndOutletAuditMs={TinDiagnostics.RibbonMilliseconds:F2}"), this);
         visualMilliseconds = TinDiagnostics.TracingMilliseconds + TinDiagnostics.RibbonMilliseconds;
         riverCells = TinDiagnostics.RiverTriangles; visibleRiverChains = TinDiagnostics.RiverNetworks;
         confluences = TinDiagnostics.Confluences; unexpectedBrokenChains = TinDiagnostics.UnexpectedBrokenNetworks;
