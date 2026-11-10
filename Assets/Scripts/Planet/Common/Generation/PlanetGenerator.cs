@@ -40,7 +40,7 @@ public enum GeodesicShelfProfileType : byte
     OceanicIsland
 }
 
-public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializationCallbackReceiver
+public partial class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializationCallbackReceiver
 {
     /// <summary>
     /// PlanetGenerator is the authoritative source for terrain surface queries.
@@ -91,7 +91,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
     private GeodesicInlandUplift geodesicInlandUplift;
     private GeodesicRiverTerrain geodesicCarvedSurface;
     private Action pendingGeodesicSnapshot;
-    [SerializeField, Tooltip("Skip reading and writing the persistent geodesic valley-carving checkpoint.")]
+    [SerializeField, Tooltip("Skip reading and writing persistent geodesic generation snapshots.")]
     private bool bypassGeodesicCarvingCache;
     public bool BypassGeodesicCarvingCache
     {
@@ -886,14 +886,43 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         geodesicTransportGraphApproximateMemoryBytes = geodesicTransportGraph.ApproximateMemoryBytes;
         Debug.Log($"[GeodesicTransportGraph] subdivision={simulationSubdivision}, cells={geodesicTransportGraphCellCount}, uniqueEdges={geodesicTransportGraphEdgeCount}, buildMs={geodesicTransportGraphBuildMilliseconds:F2}, approximateMemory={geodesicTransportGraphApproximateMemoryBytes} bytes", this);
 
-        if (enableGeodesicTerrainDisplacement && geodesicMountainAmplitude > 0f)
-            yield return new PlanetGenerationProgress(PlanetGenerationStage.GrowingMountains);
-        stage = System.Diagnostics.Stopwatch.StartNew();
-        RebuildGeodesicCellTerrainCache();
-        LogStage("simulation-cell terrain cache", stage);
-        stage = System.Diagnostics.Stopwatch.StartNew();
-        foreach (var progress in RebuildGeodesicOceanClassificationStages()) yield return progress;
-        LogStage("bathymetry sampling/interpolation", stage);
+        PhysicalSnapshot physical = null;
+        byte[] physicalKey = null;
+        if (!bypassGeodesicCarvingCache)
+        {
+            yield return new PlanetGenerationProgress(PlanetGenerationStage.CheckingSavedPlanet);
+            stage = System.Diagnostics.Stopwatch.StartNew();
+            physicalKey = PhysicalKey(simulationSubdivision, renderSubdivision);
+            string path = PlanetGenerationCache.GeodesicPath(PhysicalStage, physicalKey);
+            bool available = System.IO.File.Exists(path);
+            LogStage("physical snapshot lookup", stage);
+            if (available)
+            {
+                yield return new PlanetGenerationProgress(PlanetGenerationStage.LoadingSavedPlanet);
+                physical = PlanetGenerationCache.LoadGeodesic(path, physicalKey, PhysicalStage, PhysicalSchema,
+                    GeodesicGridTopology.ExpectedCellCount(renderSubdivision), estimatedRenderTriangles,
+                    reader => PhysicalSnapshot.Read(reader, GeodesicTopology.CellCount,
+                        GeodesicGridTopology.ExpectedCellCount(renderSubdivision), estimatedRenderTriangles));
+            }
+        }
+        if (physical == null)
+        {
+            if (enableGeodesicTerrainDisplacement && geodesicMountainAmplitude > 0f)
+                yield return new PlanetGenerationProgress(PlanetGenerationStage.GrowingMountains);
+            stage = System.Diagnostics.Stopwatch.StartNew();
+            RebuildGeodesicCellTerrainCache();
+            LogStage("simulation-cell terrain cache", stage);
+            stage = System.Diagnostics.Stopwatch.StartNew();
+            foreach (var progress in RebuildGeodesicOceanClassificationStages()) yield return progress;
+            LogStage("bathymetry sampling/interpolation", stage);
+        }
+        else
+        {
+            yield return new PlanetGenerationProgress(PlanetGenerationStage.RestoringSavedPlanet);
+            stage = System.Diagnostics.Stopwatch.StartNew();
+            RestorePhysicalCells(physical);
+            LogStage("physical cell and ocean snapshot restore", stage);
+        }
 
         IcosphereRenderGeometry renderGeometry = default;
         IcosphereDirectionMapping renderMapping = null;
@@ -907,6 +936,12 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
             LogStage("render icosphere generation", renderWatch);
 
             renderWatch.Restart();
+            if (physical != null)
+            {
+                RestoreBaseSurface(physical, renderGeometry);
+                LogStage("base terrain snapshot restore", renderWatch);
+                return;
+            }
             geodesicCurrentRenderTerrainData = ApplyGeodesicTerrainDisplacement(mesh, renderGeometry, renderMapping, false, false, true);
             Debug.Log(geodesicCurrentRenderTerrainData.InlandDiagnostics.Describe(inlandElevationMagnitude,
                 GeodesicInlandUplift.DefaultScaleDegrees * Mathf.Deg2Rad, geodesicInlandUplift != null && geodesicInlandUplift.HasCoast), this);
@@ -918,7 +953,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
         {
             yield return new PlanetGenerationProgress(PlanetGenerationStage.PreparingSurface);
             BuildRenderSurface();
-            InfillGeodesicBasins(renderGeometry, renderMapping);
+            if (physical == null) InfillGeodesicBasins(renderGeometry, renderMapping);
         }
         else if (excludeSmallDisconnectedSeas || infillExcludedInlandBasins)
             LogUnchangedGeodesicInfill(infillExcludedInlandBasins ? "no-excluded-components" : "disabled");
@@ -994,6 +1029,13 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
             BuildRenderSurface();
             maximumGeneratedOpaqueSurfaceRadius = Mathf.Max(BasePlanetRadius, MaxRadiusFromTerrainData(geodesicCurrentRenderTerrainData));
         }
+        if (physical == null && physicalKey != null)
+        {
+            var captured = CapturePhysicalSnapshot();
+            pendingGeodesicSnapshot += () => PlanetGenerationCache.SaveGeodesic(
+                PlanetGenerationCache.GeodesicPath(PhysicalStage, physicalKey), physicalKey, PhysicalStage, PhysicalSchema,
+                renderGeometry.VertexCount, renderGeometry.TriangleCount, captured.Write);
+        }
         stage = System.Diagnostics.Stopwatch.StartNew();
         ApplyGeodesicSurfaceColours(mesh, geodesicCurrentRenderTerrainData);
         LogStage("vertex-colour generation", stage);
@@ -1019,7 +1061,7 @@ public class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, ISerializa
             try
             {
                 Action<GeodesicCarvingCheckpoint, byte[], int> captureSnapshot = bypassGeodesicCarvingCache
-                    ? null : (snapshot, key, triangles) => pendingGeodesicSnapshot = () => snapshot.Save(key, triangles);
+                    ? null : (snapshot, key, triangles) => pendingGeodesicSnapshot += () => snapshot.Save(key, triangles);
                 foreach (var progress in GetOrAddComponent<GeodesicRiverSystem>(gameObject).InitializeStages(
                     this, renderGeometry, mesh, captureSnapshot))
                     yield return progress;

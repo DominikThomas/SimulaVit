@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using UnityEngine;
+using S = GeodesicSnapshotIO;
 
 /// <summary>Generation-time submerged components. Arrays are immutable by contract.
 /// Areas are spherical surface areas, not cell counts; no terrain heights are modified.</summary>
@@ -125,6 +127,65 @@ public sealed class GeodesicOceanConnectivity
                 if (result.OceanMask[topology.Neighbors6[cell * 6 + n]]) result.OceanNeighborCounts[cell]++;
             result.CoastalLand[cell] = !result.OceanMask[cell] && result.OceanNeighborCounts[cell] > 0;
             result.CoastalOcean[cell] = result.OceanMask[cell] && result.OceanNeighborCounts[cell] < neighbors;
+        }
+        return result;
+    }
+
+    internal void WriteSnapshot(BinaryWriter w)
+    {
+        S.Flags(w, BelowSeaLevel);
+        S.Flags(w, OceanMask);
+        S.Flags(w, PotentialLakeBasin);
+        S.Flags(w, CoastalLand);
+        S.Flags(w, CoastalOcean);
+        S.Write(w, OceanNeighborCounts, (b, value) => b.Write(value));
+        S.Ints(w, ComponentId);
+        S.Write(w, Components, (b, basin) =>
+        {
+            b.Write(basin.CellCount); b.Write(basin.SurfaceArea); b.Write(basin.PlanetAreaFraction); b.Write(basin.Retained);
+        });
+        w.Write(BelowSeaCells);
+        w.Write(PrimaryRetainedComponent);
+        w.Write(RetainedComponents);
+        w.Write(ExcludedComponents);
+        w.Write(RetainedCells);
+        w.Write(ExcludedCells);
+        w.Write(LargestAreaFraction);
+        w.Write(TotalSurfaceArea);
+        w.Write(MinimumAreaFraction);
+        w.Write(FilterEnabled);
+    }
+
+    internal static GeodesicOceanConnectivity ReadSnapshot(BinaryReader r, int cells)
+    {
+        var result = new GeodesicOceanConnectivity
+        {
+            BelowSeaLevel = S.Flags(r, cells),
+            OceanMask = S.Flags(r, cells),
+            PotentialLakeBasin = S.Flags(r, cells),
+            CoastalLand = S.Flags(r, cells),
+            CoastalOcean = S.Flags(r, cells),
+            OceanNeighborCounts = S.Read(r, cells, 1, b => b.ReadByte(), true),
+            ComponentId = S.Read(r, cells, 4, b => S.Id(b, cells, -1), true),
+            Components = S.Read(r, cells, 21, b => new Basin(S.Id(b, cells + 1, 1), S.Double(b), S.Double(b), S.Flag(b)))
+        };
+        result.BelowSeaCells = S.Id(r, cells + 1);
+        result.PrimaryRetainedComponent = S.Id(r, result.Components.Length, -1);
+        result.RetainedComponents = S.Id(r, result.Components.Length + 1);
+        result.ExcludedComponents = S.Id(r, result.Components.Length + 1);
+        result.RetainedCells = S.Id(r, cells + 1);
+        result.ExcludedCells = S.Id(r, cells + 1);
+        result.LargestAreaFraction = S.Double(r);
+        result.TotalSurfaceArea = S.Double(r);
+        result.MinimumAreaFraction = S.Float(r);
+        result.FilterEnabled = S.Flag(r);
+        for (int i = 0; i < cells; i++)
+        {
+            int id = result.ComponentId[i];
+            S.Require(id < result.Components.Length && result.OceanNeighborCounts[i] <= 6 &&
+                result.OceanMask[i] == (id >= 0 && result.Components[id].Retained) &&
+                (!result.PotentialLakeBasin[i] || (id >= 0 && !result.OceanMask[i])),
+                "Ocean membership is inconsistent with its component.");
         }
         return result;
     }
