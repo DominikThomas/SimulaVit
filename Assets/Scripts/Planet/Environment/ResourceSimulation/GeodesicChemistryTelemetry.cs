@@ -160,6 +160,7 @@ public sealed class GeodesicChemistryTelemetry : MonoBehaviour
         if (visualInitialized)
         {
             text.Append(",active=").Append(sedimentVisual.isActiveAndEnabled)
+                .Append(",uploadedToLiveMesh=").Append(sedimentVisual.TintUploadedToLiveMesh)
                 .Append(",refreshes=").Append(sedimentVisual.FullVisualRefreshCount)
                 .Append(",appliedRevision=").Append(sedimentVisual.LastAppliedRevision)
                 .Append(",fieldRevision=").Append(sediments.VisualRevision)

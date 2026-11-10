@@ -1,4 +1,5 @@
 using NUnit.Framework;
+using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
 
@@ -20,26 +21,24 @@ public sealed class GeodesicOceanSedimentVisualTests
     }
 
     [Test]
-    public void FeSOverridesRustWithDistinctDarkDeposit()
+    public void FullFeSAndRustBothContributeToMixedTint()
     {
-        Color result = GeodesicOceanSedimentVisual.BlendSediments(Color.blue, 0d, 5d, 5d, 5f, Color.yellow, Color.red, Color.black);
-        Assert.That(result.r, Is.Zero.Within(1e-6f)); Assert.That(result.g, Is.Zero.Within(1e-6f)); Assert.That(result.b, Is.Zero.Within(1e-6f));
+        Vector4 result = GeodesicOceanSedimentVisual.ComposeTint(new Vector3(0f, 1f, 1f), Color.yellow, Color.red, Color.black);
+        Assert.That(result, Is.EqualTo(new Vector4(1f, 0.5f, 0f, 0f)));
     }
 
     [Test]
-    public void EmptyInventoryPreservesTerrainColour()
+    public void EmptyInventoryProducesTransparentTint()
     {
-        Color original = new Color(0.2f, 0.3f, 0.4f, 1f);
-        Assert.That(GeodesicOceanSedimentVisual.BlendSediments(original, 0d, 0d, 0d, 5f, Color.yellow, Color.red, Color.black), Is.EqualTo(original));
+        Assert.That(GeodesicOceanSedimentVisual.ComposeTint(Vector3.zero, Color.yellow, Color.red, Color.black), Is.EqualTo(Vector4.zero));
     }
 
     [Test]
     public void SedimentKindsProduceDistinctColours()
     {
-        Color original = Color.blue;
-        Color sulfur = GeodesicOceanSedimentVisual.BlendSediments(original, 5d, 0d, 0d, 5f, Color.yellow, Color.red, Color.black);
-        Color rust = GeodesicOceanSedimentVisual.BlendSediments(original, 0d, 5d, 0d, 5f, Color.yellow, Color.red, Color.black);
-        Color sulphide = GeodesicOceanSedimentVisual.BlendSediments(original, 0d, 0d, 5d, 5f, Color.yellow, Color.red, Color.black);
+        Vector4 sulfur = GeodesicOceanSedimentVisual.ComposeTint(Vector3.right, Color.yellow, Color.red, Color.black);
+        Vector4 rust = GeodesicOceanSedimentVisual.ComposeTint(Vector3.up, Color.yellow, Color.red, Color.black);
+        Vector4 sulphide = GeodesicOceanSedimentVisual.ComposeTint(Vector3.forward, Color.yellow, Color.red, Color.black);
 
         Assert.That(sulfur, Is.Not.EqualTo(rust));
         Assert.That(rust, Is.Not.EqualTo(sulphide));
@@ -90,15 +89,14 @@ public sealed class GeodesicOceanSedimentVisualTests
             GeodesicOceanSedimentField field = owner.AddComponent<GeodesicOceanSedimentField>();
             field.Initialize(1);
             GeodesicOceanSedimentVisual visual = owner.AddComponent<GeodesicOceanSedimentVisual>();
-            IcosphereDirectionMapping mapping = new IcosphereDirectionMapping(
-                0, 0, new[] { new IcosphereDirectionSample(0, 0, 0) }, new int[0], new float[0], true, 0);
+            MeshFilter terrainFilter = owner.AddComponent<MeshFilter>();
+            terrainFilter.sharedMesh = mesh;
 
             SetPrivate(visual, "sediments", field);
             SetPrivate(visual, "mesh", mesh);
-            SetPrivate(visual, "mapping", mapping);
+            SetPrivate(visual, "terrainFilter", terrainFilter);
             SetPrivate(visual, "oceanMask", new[] { true });
-            SetPrivate(visual, "baseColours", new[] { Color.blue });
-            SetPrivate(visual, "workingColours", new[] { Color.blue });
+            SetPrivate(visual, "tintStream", new List<Vector4> { Vector4.zero });
             InvokePrivate(visual, "Refresh");
             Assert.That(visual.FullVisualRefreshCount, Is.EqualTo(1UL));
 

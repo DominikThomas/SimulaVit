@@ -10,6 +10,7 @@ Shader "SimulaVit/GeodesicVertexColorURP"
         _NightAmbientStrength("Night Ambient Multiplier", Range(0,1)) = 0.5
         _TwilightTint("Twilight Light Tint", Color) = (1,0.8,0.6,1)
         _TwilightWarmth("Twilight Warmth", Range(0,0.3)) = 0.1
+        [HideInInspector] _SedimentSeaLevelRadius("Sediment Sea Level Radius", Float) = 0
     }
     SubShader
     {
@@ -32,6 +33,7 @@ Shader "SimulaVit/GeodesicVertexColorURP"
                 float4 positionOS : POSITION;
                 float3 normalOS : NORMAL;
                 float4 color : COLOR;
+                float4 sedimentTint : TEXCOORD2;
             };
 
             struct Varyings
@@ -40,6 +42,7 @@ Shader "SimulaVit/GeodesicVertexColorURP"
                 float3 normalWS : TEXCOORD0;
                 float3 positionWS : TEXCOORD1;
                 float4 color : COLOR;
+                half4 sedimentTint : TEXCOORD2;
             };
 
             CBUFFER_START(UnityPerMaterial)
@@ -51,6 +54,7 @@ Shader "SimulaVit/GeodesicVertexColorURP"
             float _NightAmbientStrength;
             float4 _TwilightTint;
             float _TwilightWarmth;
+            float _SedimentSeaLevelRadius;
             CBUFFER_END
 
             Varyings vert(Attributes IN)
@@ -60,6 +64,7 @@ Shader "SimulaVit/GeodesicVertexColorURP"
                 OUT.normalWS = TransformObjectToWorldNormal(IN.normalOS);
                 OUT.positionWS = TransformObjectToWorld(IN.positionOS.xyz);
                 OUT.color = IN.color;
+                OUT.sedimentTint = IN.sedimentTint;
                 return OUT;
             }
 
@@ -78,7 +83,14 @@ Shader "SimulaVit/GeodesicVertexColorURP"
                 half3 ambient = lerp(half3(1,1,1), _AmbientTint.rgb * lerp(_NightAmbientStrength, 1.0h, day), saturate(_DiffuseStrength));
                 half3 illumination = _AmbientStrength * ambient
                     + sunlight * (diffuse * _DiffuseStrength * _SunlightStrength * mainLight.distanceAttenuation * mainLight.shadowAttenuation);
-                half4 col = IN.color * _BaseColor;
+                float4 terrainColour = IN.color;
+                if (_SedimentSeaLevelRadius > 0.0 && IN.sedimentTint.x > 0.0h)
+                {
+                    float3 positionOS = TransformWorldToObject(IN.positionWS);
+                    if (dot(positionOS, positionOS) < _SedimentSeaLevelRadius * _SedimentSeaLevelRadius)
+                        terrainColour.rgb = terrainColour.rgb * (1.0h - IN.sedimentTint.x) + IN.sedimentTint.yzw;
+                }
+                half4 col = terrainColour * _BaseColor;
                 return half4(col.rgb * illumination, col.a);
             }
             ENDHLSL

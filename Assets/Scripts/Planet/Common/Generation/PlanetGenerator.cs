@@ -1114,8 +1114,8 @@ public partial class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, IS
         GetOrAddComponent<GeodesicOceanFe2Visual>(gameObject).Initialize(
             this, oceanResourceField, geodesicOceanMesh, geodesicOceanMeshRenderer, oceanMapping);
         GetOrAddComponent<GeodesicOceanSedimentVisual>(gameObject).Initialize(
-            this, GetComponent<GeodesicOceanSedimentField>(), mesh, renderMapping,
-            oceanResourceField.SourceGrid.SourceOceanMask, geodesicCurrentRenderTerrainData.SurfaceRadii);
+            this, GetComponent<GeodesicOceanSedimentField>(), renderMapping,
+            oceanResourceField.SourceGrid.SourceOceanMask, geodesicOceanMeshRenderer);
         LogStage("ocean mesh generation", stage);
         var picker = GetOrAddComponent<GeodesicCellPicker>(gameObject);
         picker.SetTemperatureDisplayAuthority(replicatorManager);

@@ -70,6 +70,7 @@ public class GeodesicCellPicker : MonoBehaviour
     private GeodesicOceanTemperatureField oceanTemperatureField;
     private GeodesicOceanResourceField oceanResourceField;
     private GeodesicOceanSedimentField oceanSedimentField;
+    private GeodesicOceanSedimentVisual oceanSedimentVisual;
     private GeodesicExperiencedTemperatureField experiencedTemperatureField;
     private GeodesicAtmosphereField atmosphereField;
     private GeodesicAirSeaGasExchange airSeaGasExchange;
@@ -118,6 +119,7 @@ public class GeodesicCellPicker : MonoBehaviour
         oceanTemperatureField = GetComponent<GeodesicOceanTemperatureField>();
         oceanResourceField = GetComponent<GeodesicOceanResourceField>();
         oceanSedimentField = GetComponent<GeodesicOceanSedimentField>();
+        oceanSedimentVisual = GetComponent<GeodesicOceanSedimentVisual>();
         experiencedTemperatureField = GetComponent<GeodesicExperiencedTemperatureField>();
         atmosphereField = GetComponent<GeodesicAtmosphereField>();
         airSeaGasExchange = GetComponent<GeodesicAirSeaGasExchange>();
@@ -757,6 +759,13 @@ public class GeodesicCellPicker : MonoBehaviour
             text.Append("\nS0: ").Append(oceanSedimentField != null && oceanSedimentField.IsInitialized ? oceanSedimentField.GetElementalSulfurInventory(selectedCellIndex).ToString("G6") : "--");
             text.Append("\nOxidized Fe(III): ").Append(oceanSedimentField != null && oceanSedimentField.IsInitialized ? oceanSedimentField.GetOxidizedIronInventory(selectedCellIndex).ToString("G6") : "--");
             text.Append("\nFeS: ").Append(oceanSedimentField != null && oceanSedimentField.IsInitialized ? oceanSedimentField.GetIronSulphideInventory(selectedCellIndex).ToString("G6") : "--");
+            if (oceanSedimentVisual != null && oceanSedimentVisual.TryGetColumnTint(selectedCellIndex, out Vector3 weights, out float coverage, out int vertices))
+            {
+                text.Append($"\nApplied intensity S0 / Fe(III) / FeS: {weights.x:P1} / {weights.y:P1} / {weights.z:P1}")
+                    .Append($"\nColumn tint coverage: {coverage:P1} | Affected render vertices: {vertices}")
+                    .Append($"\nTint uploaded to live terrain: yes | Applied revision: {oceanSedimentVisual.LastAppliedRevision} / {oceanSedimentField.VisualRevision}");
+            }
+            else text.Append("\nTint uploaded to live terrain: no");
         }
         return text.ToString();
     }
@@ -858,6 +867,11 @@ public class GeodesicCellPicker : MonoBehaviour
     private void DrawPopupFooter()
     {
         GUILayout.BeginHorizontal();
+        if (oceanSedimentVisual != null && oceanSedimentVisual.CanShowSeabed)
+        {
+            bool showSeabed = GUILayout.Toggle(oceanSedimentVisual.SeabedViewEnabled, "Seabed Sediment View", popupButtonStyle);
+            oceanSedimentVisual.SetSeabedView(showSeabed);
+        }
         GUILayout.FlexibleSpace();
         if (GUILayout.Button("Close", popupButtonStyle, GUILayout.Width(Mathf.Clamp(90f * GetUiScale(), 78f, 118f))))
         {
