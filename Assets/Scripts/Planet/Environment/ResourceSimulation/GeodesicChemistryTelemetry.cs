@@ -79,15 +79,27 @@ public sealed class GeodesicChemistryTelemetry : MonoBehaviour
     {
         ResetStatistics();
         GeodesicOceanLayerGrid grid = resources.SourceGrid;
+        var sedimentVisual = GetComponent<GeodesicOceanSedimentVisual>();
+        bool visualInitialized = sedimentVisual != null && sedimentVisual.IsInitialized;
+        double feSTintFloor = visualInitialized ? sedimentVisual.FeSTintFloor : 0d;
         double sedimentS0 = 0d, sedimentFe3 = 0d, sedimentFeS = 0d;
+        double minPositiveFeS = double.PositiveInfinity, maxFeS = 0d, feSBelowTintFloor = 0d;
         int columnsWithS0 = 0, columnsWithFe3 = 0, columnsWithFeS = 0;
+        int columnsAboveFeSTintFloor = 0;
         for (int cell = 0; cell < grid.CellCount; cell++)
         {
             double s0 = sediments.GetElementalSulfurInventory(cell), fe3 = sediments.GetOxidizedIronInventory(cell), feS = sediments.GetIronSulphideInventory(cell);
             sedimentS0 += s0; sedimentFe3 += fe3; sedimentFeS += feS;
             if (s0 > 0d) columnsWithS0++;
             if (fe3 > 0d) columnsWithFe3++;
-            if (feS > 0d) columnsWithFeS++;
+            if (feS > 0d)
+            {
+                columnsWithFeS++;
+                minPositiveFeS = Math.Min(minPositiveFeS, feS);
+                maxFeS = Math.Max(maxFeS, feS);
+                if (feS > feSTintFloor) columnsAboveFeSTintFloor++;
+                else feSBelowTintFloor += feS;
+            }
             int activeLayers = grid.ActiveLayerCountByCell[cell];
             for (int layer = 0; layer < activeLayers; layer++)
             {
@@ -118,7 +130,9 @@ public sealed class GeodesicChemistryTelemetry : MonoBehaviour
         text.Append(" resourceTicks=").Append(resources.CompletedTransportTicks);
         text.Append(" chemistryInterval=").Append(resources.TransportIntervalSeconds.ToString("G6"));
         text.Append(" telemetryInterval=").Append(chemistryTelemetryIntervalSimSeconds.ToString("G6"));
-        AppendAllResources(text, " oceanMean", ocean);
+        text.Append(" oceanVolumeKm3=").Append(ocean.Volume.ToString("G9"));
+        AppendAllResources(text, " oceanMean", ocean, false);
+        AppendAllResources(text, " oceanInventory", ocean, true);
         text.Append(" layers={");
         for (int layer = 0; layer < LayerCount; layer++) { if (layer > 0) text.Append(','); AppendLayer(text, layer, layers[layer]); }
         text.Append('}');
@@ -139,7 +153,21 @@ public sealed class GeodesicChemistryTelemetry : MonoBehaviour
                 .Append('}');
         }
         text.Append(" sediment={S0=").Append(sedimentS0.ToString("G9")).Append(",Fe3=").Append(sedimentFe3.ToString("G9")).Append(",FeS=").Append(sedimentFeS.ToString("G9"));
-        text.Append(",columnsWithS0=").Append(columnsWithS0).Append(",columnsWithFe3=").Append(columnsWithFe3).Append(",columnsWithFeS=").Append(columnsWithFeS).Append('}');
+        text.Append(",columnsWithS0=").Append(columnsWithS0).Append(",columnsWithFe3=").Append(columnsWithFe3).Append(",columnsWithFeS=").Append(columnsWithFeS)
+            .Append(",minPositiveFeSPerColumn=").Append((columnsWithFeS > 0 ? minPositiveFeS : 0d).ToString("G6"))
+            .Append(",maxFeSPerColumn=").Append(maxFeS.ToString("G6")).Append('}');
+        text.Append(" sedimentVisual={initialized=").Append(visualInitialized);
+        if (visualInitialized)
+        {
+            text.Append(",active=").Append(sedimentVisual.isActiveAndEnabled)
+                .Append(",refreshes=").Append(sedimentVisual.FullVisualRefreshCount)
+                .Append(",appliedRevision=").Append(sedimentVisual.LastAppliedRevision)
+                .Append(",fieldRevision=").Append(sediments.VisualRevision)
+                .Append(",FeSTintFloor=").Append(feSTintFloor.ToString("G6"))
+                .Append(",columnsAboveFeSTintFloor=").Append(columnsAboveFeSTintFloor)
+                .Append(",FeSFractionBelowTintFloor=").Append((sedimentFeS > 0d ? feSBelowTintFloor / sedimentFeS : 0d).ToString("G6"));
+        }
+        text.Append('}');
         AppendAtmosphere(text);
         return text.ToString();
     }
@@ -158,12 +186,16 @@ public sealed class GeodesicChemistryTelemetry : MonoBehaviour
 
     private ChemistryCounters ReadCounters() => chemistry == null ? default : new ChemistryCounters(chemistry.ReactedH2Inventory, chemistry.ReactedH2SInventory, chemistry.ReactedFe2Inventory, chemistry.ConsumedO2Inventory, chemistry.DepositedS0Inventory, chemistry.DepositedFe3Inventory, chemistry.DepositedFeSInventory);
 
-    private static void AppendAllResources(StringBuilder text, string name, WeightedChemistryStatistics value)
+    private static void AppendAllResources(StringBuilder text, string name, WeightedChemistryStatistics value, bool inventory)
     {
-        text.Append(name).Append("={CO2=").Append(value.Mean(0).ToString("G6")).Append(",O2=").Append(value.Mean(1).ToString("G6"));
-        text.Append(",CH4=").Append(value.Mean(2).ToString("G6")).Append(",H2=").Append(value.Mean(3).ToString("G6"));
-        text.Append(",H2S=").Append(value.Mean(4).ToString("G6")).Append(",Fe2=").Append(value.Mean(5).ToString("G6"));
-        text.Append(",OrganicC=").Append(value.Mean(6).ToString("G6")).Append('}');
+        text.Append(name).Append("={");
+        for (int resource = 0; resource < ResourceCount; resource++)
+        {
+            if (resource > 0) text.Append(',');
+            double amount = inventory ? value.Inventory(resource) : value.Mean(resource);
+            text.Append((GeodesicOceanResource)resource).Append('=').Append(amount.ToString("G6"));
+        }
+        text.Append('}');
     }
 
     private static void AppendLayer(StringBuilder text, int layer, WeightedChemistryStatistics value)
@@ -267,7 +299,8 @@ public sealed class WeightedChemistryStatistics
         o2Minimum = Mathf.Min(o2Minimum, o2); o2Maximum = Mathf.Max(o2Maximum, o2); NodeCount++;
     }
 
-    public double Mean(int resource) => Volume > 0d ? inventories[resource] / Volume : 0d;
+    public double Inventory(int resource) => inventories[resource];
+    public double Mean(int resource) => Volume > 0d ? Inventory(resource) / Volume : 0d;
 }
 
 public readonly struct ChemistryCounters

@@ -324,13 +324,21 @@ public class ReplicatorHudPresenter
 
         return
             "Ocean dissolved resources (volume-weighted mean)\n" +
-            $"CO2: {geodesicOceanResourceField.GetVolumeWeightedMeanConcentration(GeodesicOceanResource.CO2):0.###}\n" +
-            $"O2: {geodesicOceanResourceField.GetVolumeWeightedMeanConcentration(GeodesicOceanResource.O2):0.###}\n" +
-            $"CH4: {geodesicOceanResourceField.GetVolumeWeightedMeanConcentration(GeodesicOceanResource.CH4):0.###}\n" +
-            $"H2: {geodesicOceanResourceField.GetVolumeWeightedMeanConcentration(GeodesicOceanResource.H2):0.###}\n" +
-            $"H2S: {geodesicOceanResourceField.GetVolumeWeightedMeanConcentration(GeodesicOceanResource.H2S):0.###}\n" +
-            $"Fe2: {geodesicOceanResourceField.GetVolumeWeightedMeanConcentration(GeodesicOceanResource.Fe2):0.###}\n" +
-            $"OrganicC: {geodesicOceanResourceField.GetVolumeWeightedMeanConcentration(GeodesicOceanResource.OrganicC):0.###}\n";
+            $"CO2: {FormatOceanMean(GeodesicOceanResource.CO2)}\n" +
+            $"O2: {FormatOceanMean(GeodesicOceanResource.O2)}\n" +
+            $"CH4: {FormatOceanMean(GeodesicOceanResource.CH4)}\n" +
+            $"H2: {FormatOceanMean(GeodesicOceanResource.H2)}\n" +
+            $"H2S: {FormatOceanMean(GeodesicOceanResource.H2S)}\n" +
+            $"Fe2: {FormatOceanMean(GeodesicOceanResource.Fe2)}\n" +
+            $"OrganicC: {FormatOceanMean(GeodesicOceanResource.OrganicC)}\n";
+    }
+
+    private string FormatOceanMean(GeodesicOceanResource resource)
+    {
+        double concentration = geodesicOceanResourceField.GetVolumeWeightedMeanConcentration(resource);
+        return concentration > 0d && concentration < 0.001d
+            ? concentration.ToString("0.##e+0")
+            : concentration.ToString("0.###");
     }
 
     private string BuildGeodesicAtmosphereHudText(PlanetGenerator generator)
