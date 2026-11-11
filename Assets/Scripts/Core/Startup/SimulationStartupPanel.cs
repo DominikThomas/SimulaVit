@@ -1,0 +1,388 @@
+using TMPro;
+using UnityEngine;
+using UnityEngine.UI;
+
+public class SimulationStartupPanel : MonoBehaviour
+{
+    [SerializeField] private SimulationStartupController controller;
+
+    [Header("Inputs")]
+    [SerializeField] private Toggle useRandomSeedToggle;
+    [SerializeField] private TMP_InputField seedInput;
+    [SerializeField] private TMP_Dropdown planetGridDropdown;
+    [SerializeField] private TMP_InputField cubeSphereResolutionInput;
+    [SerializeField] private TMP_InputField geodesicSubdivisionInput;
+    [SerializeField] private GameObject[] cubeSphereOnlySettings;
+    [SerializeField] private GameObject[] geodesicOnlySettings;
+    [SerializeField] private Slider axisTiltSlider;
+    [SerializeField] private TMP_InputField dayLengthInput;
+    [SerializeField] private TMP_InputField yearLengthInput;
+    [SerializeField] private TMP_InputField baseTempInput;
+    [SerializeField] private TMP_InputField insolationGainInput;
+    [SerializeField] private TMP_InputField initialCO2Input;
+    [SerializeField] private TMP_InputField initialO2Input;
+    [SerializeField] private TMP_InputField initialCH4Input;
+    [SerializeField] private TMP_InputField initialFe2Input;
+    [SerializeField] private TMP_InputField ventH2Input;
+    [SerializeField] private TMP_InputField ventH2SInput;
+    [SerializeField] private TMP_InputField ventCO2Input;
+    [SerializeField] private TMP_InputField ventFe2Input;
+    [SerializeField] private TMP_InputField initialSpawnCountInput;
+
+    [Header("Debug Settings / River Debug")]
+    [SerializeField] private Button debugSettingsButton;
+    [SerializeField] private GameObject debugSettingsRoot;
+    [SerializeField] private Toggle showRejectedUphillRiverSegmentsToggle;
+    [SerializeField] private Toggle colourRenderedRiversByVisibleTerrainGradeToggle;
+    [SerializeField] private Toggle showRiverTerminationReasonsToggle;
+
+    [Header("Advanced")]
+    [SerializeField] private GameObject advancedSettingsRoot;
+    [SerializeField] private TMP_InputField riverFlowThresholdInput;
+    [SerializeField] private TMP_InputField majorRiverThresholdInput;
+    [Tooltip(GeodesicInlandUplift.Help)]
+    [SerializeField] private TMP_InputField inlandElevationMagnitudeInput;
+    [SerializeField] private Toggle terminationValleyCarvingToggle, valleyCarvingDebugToggle;
+    [SerializeField] private TMP_InputField maximumValleyCarveDepthInput, minimumValleyCarveRunoffInput, valleyCarveWidthInput;
+    [SerializeField] private TMP_InputField valleyCarvingPassesInput;
+    [SerializeField] private TMP_Text inlandElevationHelpText;
+    [SerializeField] private Toggle excludeSmallInlandSeasToggle;
+    [SerializeField] private TMP_InputField minimumOceanBasinPercentInput;
+    [SerializeField] private Dropdown hydrologyTerrainModeDropdown;
+    [SerializeField] private Toggle generateHydrologicalLakesToggle;
+    [SerializeField] private TMP_InputField minimumLakeBasinPercentInput;
+    [SerializeField] private TMP_InputField minimumLakeDepthInput;
+    [SerializeField] private TMP_Dropdown approximateThermalIntervalDropdown;
+    [SerializeField] private TMP_Dropdown resourceTransportIntervalDropdown;
+    [SerializeField] private TMP_InputField chemistryTelemetryIntervalInput;
+
+    [Header("Labels")]
+    [SerializeField] private TMP_Text axisTiltValueLabel;
+
+    [Header("Buttons")]
+    [SerializeField] private Button startSimulationButton;
+    [SerializeField] private Button startPausedButton;
+    [SerializeField] private Button randomizeSeedButton;
+    [SerializeField] private Button resetDefaultsButton;
+    [SerializeField] private Button backButton;
+    [SerializeField] private Button advancedButton;
+    [SerializeField] private Button resetAdvancedDefaultsButton;
+
+    private void Awake()
+    {
+        controller ??= FindFirstObjectByType<SimulationStartupController>();
+        WireButtons();
+    }
+
+    private void OnEnable()
+    {
+        if (advancedSettingsRoot != null) advancedSettingsRoot.SetActive(false);
+        if (debugSettingsRoot != null) debugSettingsRoot.SetActive(false);
+        RefreshFromConfig();
+    }
+
+    private void OnDestroy()
+    {
+        if (startSimulationButton != null) startSimulationButton.onClick.RemoveListener(StartSimulation);
+        if (startPausedButton != null) startPausedButton.onClick.RemoveListener(StartSimulationPaused);
+        if (randomizeSeedButton != null) randomizeSeedButton.onClick.RemoveListener(RandomizeSeed);
+        if (resetDefaultsButton != null) resetDefaultsButton.onClick.RemoveListener(ResetDefaults);
+        if (backButton != null) backButton.onClick.RemoveListener(BackToMainMenu);
+        if (advancedButton != null) advancedButton.onClick.RemoveListener(ToggleAdvanced);
+        if (debugSettingsButton != null) debugSettingsButton.onClick.RemoveListener(ToggleDebug);
+        if (resetAdvancedDefaultsButton != null) resetAdvancedDefaultsButton.onClick.RemoveListener(ResetAdvancedDefaults);
+        if (excludeSmallInlandSeasToggle != null) excludeSmallInlandSeasToggle.onValueChanged.RemoveListener(OnOceanFilterChanged);
+        if (generateHydrologicalLakesToggle != null) generateHydrologicalLakesToggle.onValueChanged.RemoveListener(OnLakeFilterChanged);
+        if (axisTiltSlider != null) axisTiltSlider.onValueChanged.RemoveListener(OnAxisTiltChanged);
+        if (planetGridDropdown != null) planetGridDropdown.onValueChanged.RemoveListener(OnPlanetGridChanged);
+    }
+
+    private void WireButtons()
+    {
+        if (startSimulationButton != null) startSimulationButton.onClick.AddListener(StartSimulation);
+        if (startPausedButton != null) startPausedButton.onClick.AddListener(StartSimulationPaused);
+        if (randomizeSeedButton != null) randomizeSeedButton.onClick.AddListener(RandomizeSeed);
+        if (resetDefaultsButton != null) resetDefaultsButton.onClick.AddListener(ResetDefaults);
+        if (backButton != null) backButton.onClick.AddListener(BackToMainMenu);
+        if (advancedButton != null) advancedButton.onClick.AddListener(ToggleAdvanced);
+        if (debugSettingsButton != null) debugSettingsButton.onClick.AddListener(ToggleDebug);
+        if (resetAdvancedDefaultsButton != null) resetAdvancedDefaultsButton.onClick.AddListener(ResetAdvancedDefaults);
+        if (excludeSmallInlandSeasToggle != null) excludeSmallInlandSeasToggle.onValueChanged.AddListener(OnOceanFilterChanged);
+        if (generateHydrologicalLakesToggle != null) generateHydrologicalLakesToggle.onValueChanged.AddListener(OnLakeFilterChanged);
+        if (axisTiltSlider != null) axisTiltSlider.onValueChanged.AddListener(OnAxisTiltChanged);
+        if (planetGridDropdown != null) planetGridDropdown.onValueChanged.AddListener(OnPlanetGridChanged);
+    }
+
+    public void RefreshFromConfig()
+    {
+        if (controller == null || controller.CurrentConfig == null)
+        {
+            return;
+        }
+
+        SimulationStartupConfig config = controller.CurrentConfig;
+        SetText(riverFlowThresholdInput, config.riverFlowThreshold.ToString("G9"));
+        SetText(majorRiverThresholdInput, config.majorRiverThreshold.ToString("G9"));
+        SetText(inlandElevationMagnitudeInput, config.inlandElevationMagnitude.ToString("G9"));
+        SetToggle(terminationValleyCarvingToggle, config.enableTerminationValleyCarving);
+        SetText(valleyCarvingPassesInput, config.valleyCarvingPasses.ToString());
+        SetToggle(valleyCarvingDebugToggle, config.showValleyCarvingDebug);
+        SetText(maximumValleyCarveDepthInput, config.maximumValleyCarveDepth.ToString("G9"));
+        SetText(minimumValleyCarveRunoffInput, config.minimumValleyCarveRunoff.ToString("G9"));
+        SetText(valleyCarveWidthInput, config.valleyCarveWidth.ToString("G9"));
+        if (inlandElevationHelpText != null) inlandElevationHelpText.text = GeodesicInlandUplift.Help;
+        SetToggle(showRejectedUphillRiverSegmentsToggle, config.showRejectedUphillRiverSegments);
+        SetToggle(colourRenderedRiversByVisibleTerrainGradeToggle, config.colourRenderedRiversByVisibleTerrainGrade);
+        SetToggle(showRiverTerminationReasonsToggle, config.showRiverTerminationReasons);
+        SetToggle(useRandomSeedToggle, config.useRandomSeed);
+        SetText(seedInput, config.planetSeed.ToString());
+        if (planetGridDropdown != null) planetGridDropdown.SetValueWithoutNotify(config.gridType == PlanetGridType.GeodesicIcosphere ? 1 : 0);
+        SetText(cubeSphereResolutionInput, config.cubeSphereResolution.ToString());
+        SetText(geodesicSubdivisionInput, config.geodesicSubdivisionLevel.ToString());
+        SetToggle(excludeSmallInlandSeasToggle, config.excludeSmallDisconnectedSeas);
+        SetText(minimumOceanBasinPercentInput, (config.minimumOceanComponentAreaFraction * 100f).ToString("0.###"));
+        OnOceanFilterChanged(config.excludeSmallDisconnectedSeas);
+        if (hydrologyTerrainModeDropdown != null)
+        {
+            hydrologyTerrainModeDropdown.ClearOptions();
+            hydrologyTerrainModeDropdown.AddOptions(new System.Collections.Generic.List<string> { "Visible", "Fine detail removed", "Reduced ridge + fine detail (reference)" });
+            hydrologyTerrainModeDropdown.SetValueWithoutNotify((int)config.hydrologyTerrainMode);
+        }
+        SetToggle(generateHydrologicalLakesToggle, config.generateHydrologicalLakes);
+        SetText(minimumLakeBasinPercentInput, (config.minimumLakeBasinAreaFraction * 100f).ToString("0.####"));
+        SetText(minimumLakeDepthInput, config.minimumLakeDepth.ToString("0.####"));
+        OnLakeFilterChanged(config.generateHydrologicalLakes);
+        ApplyGridSpecificVisibility(config.gridType);
+        SetSlider(axisTiltSlider, config.axisTiltDegrees);
+        SetText(dayLengthInput, config.dayLengthSeconds.ToString("0.###"));
+        SetText(yearLengthInput, config.yearLengthInDays.ToString("0.###"));
+        SetText(baseTempInput, config.baseTempKelvin.ToString("0.###"));
+        SetText(insolationGainInput, config.insolationTempGain.ToString("0.###"));
+        SetText(initialCO2Input, config.initialCO2.ToString("0.###"));
+        SetText(initialO2Input, config.initialO2.ToString("0.###"));
+        SetText(initialCH4Input, config.initialCH4.ToString("0.###"));
+        SetText(initialFe2Input, config.initialDissolvedFe2Plus.ToString("0.###"));
+        bool geodesic = config.gridType == PlanetGridType.GeodesicIcosphere;
+        SetText(ventH2Input, (geodesic ? config.geodesicVentH2PhysicalPerSecond : config.ventH2PerTick).ToString("0.######"));
+        SetText(ventH2SInput, (geodesic ? config.geodesicVentH2SPhysicalPerSecond : config.ventH2SPerTick).ToString("0.######"));
+        SetText(ventCO2Input, (geodesic ? config.geodesicVentCO2PhysicalPerSecond : config.ventCO2PerTick).ToString("0.######"));
+        SetText(ventFe2Input, (geodesic ? config.geodesicVentFe2PhysicalPerSecond : config.ventFe2PerTick).ToString("0.######"));
+        SetText(initialSpawnCountInput, config.initialSpawnCount.ToString());
+        SetPresetDropdown(approximateThermalIntervalDropdown, config.approximateThermalIntervalSeconds, SimulationStartupController.ApproximateThermalIntervalPresets);
+        SetPresetDropdown(resourceTransportIntervalDropdown, config.geodesicResourceTransportIntervalSeconds, SimulationStartupController.ResourceTransportIntervalPresets);
+        SetText(chemistryTelemetryIntervalInput, config.chemistryTelemetryIntervalSimSeconds.ToString("0.###"));
+        OnAxisTiltChanged(config.axisTiltDegrees);
+    }
+
+    public void PushToConfig()
+    {
+        if (controller == null || controller.CurrentConfig == null)
+        {
+            return;
+        }
+
+        SimulationStartupConfig config = controller.CurrentConfig;
+        if (showRejectedUphillRiverSegmentsToggle != null) config.showRejectedUphillRiverSegments = showRejectedUphillRiverSegmentsToggle.isOn;
+        if (colourRenderedRiversByVisibleTerrainGradeToggle != null) config.colourRenderedRiversByVisibleTerrainGrade = colourRenderedRiversByVisibleTerrainGradeToggle.isOn;
+        if (showRiverTerminationReasonsToggle != null) config.showRiverTerminationReasons = showRiverTerminationReasonsToggle.isOn;
+        config.useRandomSeed = useRandomSeedToggle == null ? config.useRandomSeed : useRandomSeedToggle.isOn;
+        config.planetSeed = ReadInt(seedInput, config.planetSeed);
+        config.riverFlowThreshold = SimulationStartupController.NormalizeRiverThreshold(ReadFloat(riverFlowThresholdInput, config.riverFlowThreshold), GeodesicRiverSystem.DefaultRiverFlowThreshold);
+        config.majorRiverThreshold = SimulationStartupController.NormalizeRiverThreshold(ReadFloat(majorRiverThresholdInput, config.majorRiverThreshold), GeodesicRiverSystem.DefaultMajorRiverThreshold);
+        config.inlandElevationMagnitude = GeodesicInlandUplift.NormalizeMagnitude(ReadFloat(inlandElevationMagnitudeInput, config.inlandElevationMagnitude));
+        if (terminationValleyCarvingToggle != null) config.enableTerminationValleyCarving = terminationValleyCarvingToggle.isOn;
+        config.valleyCarvingPasses = Mathf.Clamp(ReadInt(valleyCarvingPassesInput, config.valleyCarvingPasses), 1, 5);
+        if (valleyCarvingDebugToggle != null) config.showValleyCarvingDebug = valleyCarvingDebugToggle.isOn;
+        config.maximumValleyCarveDepth = GeodesicValleyCarving.Normalize(ReadFloat(maximumValleyCarveDepthInput, config.maximumValleyCarveDepth), GeodesicValleyCarving.DefaultDepth, 1f);
+        config.minimumValleyCarveRunoff = GeodesicValleyCarving.Normalize(ReadFloat(minimumValleyCarveRunoffInput, config.minimumValleyCarveRunoff), GeodesicValleyCarving.DefaultRunoff, 1000000f);
+        config.valleyCarveWidth = GeodesicValleyCarving.Normalize(ReadFloat(valleyCarveWidthInput, config.valleyCarveWidth), GeodesicValleyCarving.DefaultWidth, 1f);
+        if (planetGridDropdown != null) config.gridType = planetGridDropdown.value == 1 ? PlanetGridType.GeodesicIcosphere : PlanetGridType.LegacyCubeSphere;
+        config.cubeSphereResolution = Mathf.Clamp(ReadInt(cubeSphereResolutionInput, config.cubeSphereResolution), 3, 240);
+        config.geodesicSubdivisionLevel = Mathf.Clamp(ReadInt(geodesicSubdivisionInput, config.geodesicSubdivisionLevel), 0, GeodesicGridTopology.MaxSupportedSubdivision);
+        config.axisTiltDegrees = axisTiltSlider == null ? config.axisTiltDegrees : axisTiltSlider.value;
+        config.dayLengthSeconds = Mathf.Max(0.01f, ReadFloat(dayLengthInput, config.dayLengthSeconds));
+        config.yearLengthInDays = Mathf.Max(1f, ReadFloat(yearLengthInput, config.yearLengthInDays));
+        config.baseTempKelvin = ReadFloat(baseTempInput, config.baseTempKelvin);
+        config.insolationTempGain = ReadFloat(insolationGainInput, config.insolationTempGain);
+        config.initialCO2 = Mathf.Max(0f, ReadFloat(initialCO2Input, config.initialCO2));
+        config.initialO2 = Mathf.Max(0f, ReadFloat(initialO2Input, config.initialO2));
+        config.initialCH4 = Mathf.Max(0f, ReadFloat(initialCH4Input, config.initialCH4));
+        config.initialDissolvedFe2Plus = Mathf.Max(0f, ReadFloat(initialFe2Input, config.initialDissolvedFe2Plus));
+        if (config.gridType == PlanetGridType.GeodesicIcosphere)
+        {
+            config.geodesicVentH2PhysicalPerSecond = Mathf.Clamp(ReadFloat(ventH2Input, config.geodesicVentH2PhysicalPerSecond), 0f, SimulationStartupController.GeodesicVentPhysicalMaxPerSecond);
+            config.geodesicVentH2SPhysicalPerSecond = Mathf.Clamp(ReadFloat(ventH2SInput, config.geodesicVentH2SPhysicalPerSecond), 0f, SimulationStartupController.GeodesicVentPhysicalMaxPerSecond);
+            config.geodesicVentCO2PhysicalPerSecond = Mathf.Clamp(ReadFloat(ventCO2Input, config.geodesicVentCO2PhysicalPerSecond), 0f, SimulationStartupController.GeodesicVentPhysicalMaxPerSecond);
+            config.geodesicVentFe2PhysicalPerSecond = Mathf.Clamp(ReadFloat(ventFe2Input, config.geodesicVentFe2PhysicalPerSecond), 0f, SimulationStartupController.GeodesicVentPhysicalMaxPerSecond);
+        }
+        else
+        {
+            config.ventH2PerTick = Mathf.Max(0f, ReadFloat(ventH2Input, config.ventH2PerTick));
+            config.ventH2SPerTick = Mathf.Max(0f, ReadFloat(ventH2SInput, config.ventH2SPerTick));
+            config.ventCO2PerTick = Mathf.Max(0f, ReadFloat(ventCO2Input, config.ventCO2PerTick));
+            config.ventFe2PerTick = Mathf.Max(0f, ReadFloat(ventFe2Input, config.ventFe2PerTick));
+        }
+        config.initialSpawnCount = Mathf.Max(0, ReadInt(initialSpawnCountInput, config.initialSpawnCount));
+        config.approximateThermalIntervalSeconds = ReadPresetDropdown(approximateThermalIntervalDropdown, config.approximateThermalIntervalSeconds, SimulationStartupController.ApproximateThermalIntervalPresets);
+        config.geodesicResourceTransportIntervalSeconds = ReadPresetDropdown(resourceTransportIntervalDropdown, config.geodesicResourceTransportIntervalSeconds, SimulationStartupController.ResourceTransportIntervalPresets);
+        config.chemistryTelemetryIntervalSimSeconds = ReadFloat(chemistryTelemetryIntervalInput, config.chemistryTelemetryIntervalSimSeconds);
+        if (hydrologyTerrainModeDropdown != null) config.hydrologyTerrainMode = (HydrologyTerrainMode)hydrologyTerrainModeDropdown.value;
+        if (generateHydrologicalLakesToggle != null) config.generateHydrologicalLakes = generateHydrologicalLakesToggle.isOn;
+        config.minimumLakeBasinAreaFraction = GeodesicLakeBasins.NormalizeArea(ReadFloat(minimumLakeBasinPercentInput, config.minimumLakeBasinAreaFraction * 100f) / 100f);
+        config.minimumLakeDepth = GeodesicLakeBasins.NormalizeDepth(ReadFloat(minimumLakeDepthInput, config.minimumLakeDepth));
+        if (excludeSmallInlandSeasToggle != null) config.excludeSmallDisconnectedSeas = excludeSmallInlandSeasToggle.isOn;
+        config.minimumOceanComponentAreaFraction = GeodesicOceanConnectivity.NormalizeThreshold(ReadFloat(minimumOceanBasinPercentInput, config.minimumOceanComponentAreaFraction * 100f) / 100f);
+    }
+
+    private void StartSimulation()
+    {
+        PushToConfig();
+        controller?.StartSimulation();
+    }
+
+    private void StartSimulationPaused()
+    {
+        PushToConfig();
+        controller?.StartSimulationPaused();
+    }
+
+    private void RandomizeSeed()
+    {
+        controller?.RandomizeSeed();
+        RefreshFromConfig();
+    }
+
+    private void ResetDefaults()
+    {
+        PushToConfig();
+        controller?.ResetDefaults();
+        RefreshFromConfig();
+    }
+
+    private void BackToMainMenu()
+    {
+        controller?.BackToStartMenu();
+    }
+
+    private void ToggleDebug()
+    {
+        if (debugSettingsRoot != null) debugSettingsRoot.SetActive(!debugSettingsRoot.activeSelf);
+    }
+
+    private void ToggleAdvanced()
+    {
+        if (advancedSettingsRoot != null) advancedSettingsRoot.SetActive(!advancedSettingsRoot.activeSelf);
+    }
+
+    private void ResetAdvancedDefaults()
+    {
+        PushToConfig();
+        controller?.ResetAdvancedToDefaults();
+        RefreshFromConfig();
+    }
+
+    private void OnAxisTiltChanged(float value)
+    {
+        if (axisTiltValueLabel != null)
+        {
+            axisTiltValueLabel.text = $"{value:0.#}°";
+        }
+    }
+
+    private void OnPlanetGridChanged(int value)
+    {
+        if (controller?.CurrentConfig != null)
+        {
+            controller.CurrentConfig.gridType = value == 1 ? PlanetGridType.GeodesicIcosphere : PlanetGridType.LegacyCubeSphere;
+            ApplyGridSpecificVisibility(controller.CurrentConfig.gridType);
+            RefreshFromConfig();
+        }
+    }
+
+    private void OnLakeFilterChanged(bool enabledLakes)
+    {
+        if (minimumLakeBasinPercentInput != null) minimumLakeBasinPercentInput.interactable = enabledLakes;
+        if (minimumLakeDepthInput != null) minimumLakeDepthInput.interactable = enabledLakes;
+    }
+
+    private void OnOceanFilterChanged(bool enabledFilter)
+    {
+        if (minimumOceanBasinPercentInput != null) minimumOceanBasinPercentInput.interactable = enabledFilter;
+    }
+
+    private void ApplyGridSpecificVisibility(PlanetGridType gridType)
+    {
+        if (excludeSmallInlandSeasToggle != null) excludeSmallInlandSeasToggle.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
+        if (minimumOceanBasinPercentInput != null) minimumOceanBasinPercentInput.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
+        if (hydrologyTerrainModeDropdown != null) hydrologyTerrainModeDropdown.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
+        if (riverFlowThresholdInput != null) riverFlowThresholdInput.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
+        if (majorRiverThresholdInput != null) majorRiverThresholdInput.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
+        if (inlandElevationMagnitudeInput != null) inlandElevationMagnitudeInput.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
+        if (terminationValleyCarvingToggle != null) terminationValleyCarvingToggle.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
+        if (valleyCarvingPassesInput != null) valleyCarvingPassesInput.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
+        if (valleyCarvingDebugToggle != null) valleyCarvingDebugToggle.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
+        if (maximumValleyCarveDepthInput != null) maximumValleyCarveDepthInput.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
+        if (minimumValleyCarveRunoffInput != null) minimumValleyCarveRunoffInput.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
+        if (valleyCarveWidthInput != null) valleyCarveWidthInput.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
+        if (inlandElevationHelpText != null) inlandElevationHelpText.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
+        if (generateHydrologicalLakesToggle != null) generateHydrologicalLakesToggle.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
+        if (minimumLakeBasinPercentInput != null) minimumLakeBasinPercentInput.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
+        if (minimumLakeDepthInput != null) minimumLakeDepthInput.gameObject.SetActive(gridType == PlanetGridType.GeodesicIcosphere);
+        SetRoots(cubeSphereOnlySettings, gridType == PlanetGridType.LegacyCubeSphere);
+        SetRoots(geodesicOnlySettings, gridType == PlanetGridType.GeodesicIcosphere);
+    }
+
+    private static void SetRoots(GameObject[] roots, bool active)
+    {
+        if (roots == null) return;
+        foreach (GameObject root in roots)
+        {
+            if (root != null) root.SetActive(active);
+        }
+    }
+
+    private static void SetText(TMP_InputField input, string value)
+    {
+        if (input != null) input.SetTextWithoutNotify(value);
+    }
+
+    private static void SetToggle(Toggle toggle, bool value)
+    {
+        if (toggle != null) toggle.SetIsOnWithoutNotify(value);
+    }
+
+    private static void SetSlider(Slider slider, float value)
+    {
+        if (slider != null) slider.SetValueWithoutNotify(value);
+    }
+
+    private static void SetPresetDropdown(TMP_Dropdown dropdown, float value, float[] presets)
+    {
+        if (dropdown == null) return;
+        dropdown.ClearOptions();
+        var labels = new System.Collections.Generic.List<string>(presets.Length);
+        int selected = 0;
+        for (int i = 0; i < presets.Length; i++)
+        {
+            labels.Add($"{presets[i]:0.#} s simulated time");
+            if (Mathf.Approximately(value, presets[i])) selected = i;
+        }
+        dropdown.AddOptions(labels);
+        dropdown.SetValueWithoutNotify(selected);
+    }
+
+    private static float ReadPresetDropdown(TMP_Dropdown dropdown, float fallback, float[] presets)
+    {
+        return dropdown != null && dropdown.value >= 0 && dropdown.value < presets.Length ? presets[dropdown.value] : fallback;
+    }
+
+    private static float ReadFloat(TMP_InputField input, float fallback)
+    {
+        return input != null && float.TryParse(input.text, out float parsed) ? parsed : fallback;
+    }
+
+    private static int ReadInt(TMP_InputField input, int fallback)
+    {
+        return input != null && int.TryParse(input.text, out int parsed) ? parsed : fallback;
+    }
+}

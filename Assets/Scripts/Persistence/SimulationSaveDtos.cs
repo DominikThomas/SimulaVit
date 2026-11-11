@@ -5,7 +5,7 @@ using UnityEngine;
 [Serializable]
 public class SimulationSaveFile
 {
-    public const int CurrentSchemaVersion = 2;
+    public const int CurrentSchemaVersion = 3;
 
     public int schemaVersion = CurrentSchemaVersion;
     public string applicationVersion;
@@ -14,9 +14,20 @@ public class SimulationSaveFile
     public SimulationClockSnapshot clock;
     public SunSkySnapshot sun;
     public PlanetGeneratorSnapshot planetGenerator;
+    public PlanetGridMetadata grid;
     public PlanetResourceMapSnapshot resourceMap;
     public ReplicatorPopulationSnapshot population;
     public SimulationSaveDiagnostics diagnostics;
+}
+
+[Serializable]
+public class PlanetGridMetadata
+{
+    public PlanetGridType gridType = PlanetGridType.LegacyCubeSphere;
+    public int cubeSphereResolution;
+    public int geodesicSubdivisionLevel;
+    public int gridTopologyVersion = 1;
+    public string gridTopologyHash;
 }
 
 [Serializable]
@@ -60,6 +71,12 @@ public class PlanetGeneratorSnapshot
     public int resolution;
     public float radius;
     public float seaLevel;
+    public int masterSeed;
+    public int generationVersion;
+    public bool usePlanetSeedForTerrain;
+    public int customTerrainSeed;
+    public bool usePlanetSeedForVisuals;
+    public int customVisualSeed;
 }
 
 [Serializable]
