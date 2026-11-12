@@ -131,6 +131,7 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     private bool warnedTransportBacklog;
     private GeodesicAbioticChemistry abioticChemistry;
     private GeodesicOceanSedimentField sedimentField;
+    private GeodesicOceanSuspendedField suspendedField;
     private GeodesicChemistryTelemetry chemistryTelemetry;
     private GeodesicAtmosphereField atmosphereField;
     private GeodesicAirSeaGasExchange airSeaGasExchange;
@@ -142,6 +143,7 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     public double ActiveOceanVolume => activeOceanVolume;
     public long ApproximateRuntimeMemoryBytes => approximateRuntimeMemoryBytes;
     public GeodesicOceanLayerGrid SourceGrid => sourceGrid;
+    public GeodesicOceanSuspendedField SuspendedMinerals => suspendedField;
     public GeodesicOceanResourceInitializationFailure LastInitializationFailure => lastInitializationFailure;
     public string LastInitializationFailureMessage => lastInitializationFailureMessage;
     public string LastStartupConcentrationDiagnostic => lastStartupConcentrationDiagnostic;
@@ -276,7 +278,7 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
             try
             {
             sourceGrid = grid; cellCount = grid.CellCount; nodeCapacity = grid.NodeCapacity; activeNodeCount = grid.ActiveNodeCount;
-            ResolveChemistryComponents(); ResolveAtmosphereComponents(); sedimentField.Initialize(cellCount); abioticChemistry.ResetCounters();
+            ResolveChemistryComponents(); ResolveAtmosphereComponents(); sedimentField.Initialize(cellCount); suspendedField.Initialize(grid); abioticChemistry.ResetCounters();
             concentrationsByResourceThenNode = new float[ResourceCount * nodeCapacity];
             activeNodeIndices = new int[activeNodeCount]; activeNodeVolumes = new double[activeNodeCount];
             chemistryCandidateNodes = new int[activeNodeCount]; chemistryCandidateCount = 0;
@@ -322,7 +324,7 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
                 $"feS={feSStatus}, " +
                 $"feSHalfLife={abioticChemistry.FeSPrecipitationHalfLifeSeconds:G6}, " +
                 $"products=S0/Fe3Precipitate/FeS, " +
-                $"settling=sameColumnImmediate, " +
+                $"settling=physicalLayerResidence, suspendedBytes={suspendedField.ApproximateRuntimeMemoryBytes}, " +
                 $"sedimentBytes={sedimentField.ApproximateRuntimeMemoryBytes}, " +
                 $"rustyWater=visual-only recent-oxidation proxy",
                 this);
@@ -412,7 +414,7 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     public void ClearField() => ClearField(true);
     private void ClearField(bool countClear)
     {
-        sedimentField?.Clear(); abioticChemistry?.ResetCounters();
+        sedimentField?.Clear(); suspendedField?.Clear(); abioticChemistry?.ResetCounters();
         chemistryTelemetry?.ClearWorld(); airSeaGasExchange?.ClearWorld(); atmosphereField?.ClearField(); concentrationsByResourceThenNode = null; activeNodeIndices = null; activeNodeVolumes = null; chemistryCandidateNodes = null; chemistryCandidateCount = 0; sourceGrid = null; stagedInventoryDelta = null; horizontalTickCoefficients = null; verticalTickCoefficients = null; resourceMayHaveSpatialVariation = null; preparedTickDeltaTime = 0f; horizontalConductanceBase = null; verticalConductanceBase = null; ventSystems = null; ventOutlets = null; submarineThermalInfluenceByCell = terrestrialThermalInfluenceByCell = null; directThermalSourceByCell = null; initialized = false; cellCount = nodeCapacity = activeNodeCount = horizontalLinkCount = verticalLinkCount = ventCount = rawVentCandidateCount = submarineVentCount = terrestrialVentCount = resourceTicksExecutedThisFrame = horizontalActiveResourceChannelsLastTick = horizontalSkippedUniformChannelsLastTick = horizontalLinkResourceEvaluationsLastTick = 0; resourceSimSecondsProcessedThisFrame = normalizedSubmarineWeightSum = 0f; submarineGasProductionFraction = terrestrialGasProductionFraction = 0d; activeOceanVolume = 0d; approximateRuntimeMemoryBytes = transportCacheMemoryBytes = stagingBufferMemoryBytes = 0; transportIntegrationCursorTime = lastObservedSimulationTime = unconsumedTransportRemainderSeconds = 0d; completedTransportTicks = 0; ResetDiagnostics(); if (countClear) clearCount++;
     }
 
@@ -614,7 +616,8 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
         using (TransportMarker.Auto())
         {
             // Deterministic operator split: sources, L0 air-sea exchange, dissolved transport,
-            // staged application, local chemistry, and chemistry-owned sediment deposition.
+            // staged application, existing-particle transport/settling, then local precipitation.
+            // New precipitates remain suspended until the next transport tick.
             // Historically named "Per Tick" startup values are rates per simulated second.
             InjectVentSources(dt);
             airSeaGasExchange.Step(this, dt);
@@ -623,6 +626,7 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
             AccumulateHorizontalAllResources();
             AccumulateVerticalAllResources();
             ApplyStagedAllResources();
+            suspendedField.Step(this, sedimentField, dt);
             abioticChemistry.Step(this, sedimentField, dt);
         }
         if ((completedTransportTicks + 1) % Math.Max(1, (long)Math.Round(5f / TransportIntervalSeconds)) == 0)
@@ -793,6 +797,49 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
         return removalFraction > 1f ? 1f / removalFraction : 1f;
     }
 
+    /// <summary>Mix one particulate inventory channel using the existing bulk-water links and conductance caches.</summary>
+    internal void MixSuspendedInventory(double[] inventory, int offset, double[] incoming, double[] outgoing, float dt)
+    {
+        Array.Clear(incoming, 0, incoming.Length);
+        Array.Clear(outgoing, 0, outgoing.Length);
+        double horizontal = Math.Max(0d, horizontalMixingRate) * dt;
+        double vertical = Math.Max(0d, defaultVerticalMixingRate) * dt;
+        double scale = 1d / Math.Max(1d, horizontal + vertical);
+        horizontal *= scale; vertical *= scale;
+        // First collect total requested outflow. Then bound every link by its donor's
+        // available fraction, so unequal volumes and roundoff cannot overdraw a node.
+        // Only incoming material is staged; subtraction is bounded once per donor.
+        for (int pass = 0; pass < 2; pass++)
+        {
+            for (int link = 0; link < horizontalLinkCount; link++)
+                StageSuspendedPair(inventory, offset, incoming, outgoing,
+                    sourceGrid.HorizontalNodeA[link], sourceGrid.HorizontalNodeB[link],
+                    horizontalConductanceBase[link] * horizontal, pass == 0);
+            for (int link = 0; link < verticalLinkCount; link++)
+                StageSuspendedPair(inventory, offset, incoming, outgoing,
+                    sourceGrid.VerticalUpperNode[link], sourceGrid.VerticalLowerNode[link],
+                    verticalConductanceBase[link] * vertical, pass == 0);
+        }
+        for (int i = 0; i < activeNodeCount; i++)
+        {
+            int node = activeNodeIndices[i];
+            double before = inventory[offset + node];
+            inventory[offset + node] = before - Math.Min(before, outgoing[node]) + incoming[node];
+        }
+    }
+
+    private void StageSuspendedPair(double[] inventory, int offset, double[] incoming, double[] outgoing,
+        int a, int b, double coefficient, bool collectOutgoing)
+    {
+        double transfer = coefficient * (inventory[offset + a] / sourceGrid.PhysicalLayerVolumeKm3[a]
+            - inventory[offset + b] / sourceGrid.PhysicalLayerVolumeKm3[b]);
+        if (transfer == 0d) return;
+        int donor = transfer > 0d ? a : b, receiver = transfer > 0d ? b : a;
+        double requested = Math.Abs(transfer);
+        if (collectOutgoing) outgoing[donor] += requested;
+        else incoming[receiver] += requested * Math.Min(1d, inventory[offset + donor] / outgoing[donor]);
+    }
+
     public bool TryGetCachedMeanO2ByLayer(int layer, out float mean)
     { mean = float.NaN; if (!initialized || layer < 0 || layer >= sourceGrid.MaximumLayerCount || cachedMeanO2ByLayer == null) return false; mean = cachedMeanO2ByLayer[layer]; return !float.IsNaN(mean); }
 
@@ -839,6 +886,8 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
         if (abioticChemistry == null) abioticChemistry = gameObject.AddComponent<GeodesicAbioticChemistry>();
         sedimentField = GetComponent<GeodesicOceanSedimentField>();
         if (sedimentField == null) sedimentField = gameObject.AddComponent<GeodesicOceanSedimentField>();
+        suspendedField = GetComponent<GeodesicOceanSuspendedField>();
+        if (suspendedField == null) suspendedField = gameObject.AddComponent<GeodesicOceanSuspendedField>();
         chemistryTelemetry = GetComponent<GeodesicChemistryTelemetry>();
         if (chemistryTelemetry == null) chemistryTelemetry = gameObject.AddComponent<GeodesicChemistryTelemetry>();
     }

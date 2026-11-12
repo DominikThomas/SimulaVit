@@ -46,9 +46,9 @@ public sealed class GeodesicAbioticChemistry : MonoBehaviour
     [SerializeField] private double reactedH2S;
     [SerializeField] private double reactedFe2;
     [SerializeField] private double consumedO2;
-    [SerializeField] private double depositedS0;
-    [SerializeField] private double depositedFe3;
-    [SerializeField] private double depositedFeS;
+    [SerializeField] private double precipitatedS0;
+    [SerializeField] private double precipitatedFe3;
+    [SerializeField] private double precipitatedFeS;
     [Header("Last chemistry tick diagnostics (read only)")]
     [SerializeField] private int activeNodesTotal;
     [SerializeField] private int chemistryCandidateNodes;
@@ -71,9 +71,9 @@ public sealed class GeodesicAbioticChemistry : MonoBehaviour
     public double ReactedH2SInventory => reactedH2S;
     public double ReactedFe2Inventory => reactedFe2;
     public double ConsumedO2Inventory => consumedO2;
-    public double DepositedS0Inventory => depositedS0;
-    public double DepositedFe3Inventory => depositedFe3;
-    public double DepositedFeSInventory => depositedFeS;
+    public double PrecipitatedS0Inventory => precipitatedS0;
+    public double PrecipitatedFe3Inventory => precipitatedFe3;
+    public double PrecipitatedFeSInventory => precipitatedFeS;
     public int ActiveNodesTotal => activeNodesTotal;
     public int ChemistryCandidateNodes => chemistryCandidateNodes;
     public int NodesProcessed => nodesProcessed;
@@ -91,7 +91,7 @@ public sealed class GeodesicAbioticChemistry : MonoBehaviour
     public float GetRecentOxidizedIronSignal(int cell) => recentOxidizedIronByCell != null && cell >= 0 && cell < recentOxidizedIronByCell.Length ? recentOxidizedIronByCell[cell] : 0f;
 
     public void ResetCounters()
-    { reactedH2 = reactedH2S = reactedFe2 = consumedO2 = depositedS0 = depositedFe3 = depositedFeS = 0d; activeNodesTotal = chemistryCandidateNodes = nodesProcessed = oxidationCandidateNodes = feSCandidateNodes = sedimentProducingNodes = reactiveNodes = reactionsApplied = skippedNoReactants = 0; chemistryTicks = denseFallbackTicks = 0; recentOxidizedIronByCell = null; }
+    { reactedH2 = reactedH2S = reactedFe2 = consumedO2 = precipitatedS0 = precipitatedFe3 = precipitatedFeS = 0d; activeNodesTotal = chemistryCandidateNodes = nodesProcessed = oxidationCandidateNodes = feSCandidateNodes = sedimentProducingNodes = reactiveNodes = reactionsApplied = skippedNoReactants = 0; chemistryTicks = denseFallbackTicks = 0; recentOxidizedIronByCell = null; }
 
     internal void Step(GeodesicOceanResourceField resources, GeodesicOceanSedimentField sediments, float simulatedDeltaTime)
     {
@@ -153,11 +153,11 @@ public sealed class GeodesicAbioticChemistry : MonoBehaviour
                 concentrations[h2Offset + node] = (float)(Math.Max(0d, h2) / volume);
                 concentrations[h2sOffset + node] = (float)(Math.Max(0d, h2s) / volume);
                 concentrations[fe2Offset + node] = (float)(Math.Max(0d, fe2) / volume);
-                sediments.DepositSameColumn(cell, result.reactedH2S, result.reactedFe2, result.precipitatedFeS);
+                resources.SuspendedMinerals.AddPrecipitate(cell, node % layersPerCell, result.reactedH2S, result.reactedFe2, result.precipitatedFeS);
                 recentOxidizedIronByCell[cell] += (float)(result.reactedFe2 / Math.Max(1e-12d, volume));
                 reactedH2 += result.reactedH2; reactedH2S += result.reactedH2S; reactedFe2 += result.reactedFe2;
-                consumedO2 += result.consumedO2; depositedS0 += result.reactedH2S; depositedFe3 += result.reactedFe2;
-                depositedFeS += result.precipitatedFeS;
+                consumedO2 += result.consumedO2; precipitatedS0 += result.reactedH2S; precipitatedFe3 += result.reactedFe2;
+                precipitatedFeS += result.precipitatedFeS;
             }
             nodesProcessed = candidateCount; oxidationCandidateNodes = oxidationCandidates; feSCandidateNodes = feSCandidates; sedimentProducingNodes = sedimentNodes;
             chemistryTicks++;

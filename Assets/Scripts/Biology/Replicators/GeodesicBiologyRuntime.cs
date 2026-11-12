@@ -42,7 +42,7 @@ public sealed class GeodesicBiologyRuntime
 
     private PlanetGenerator planet;
     private GeodesicOceanResourceField resources;
-    private GeodesicOceanSedimentField sediment;
+    private GeodesicOceanSuspendedField suspended;
     private GeodesicOceanTemperatureField oceanTemperature;
     private GeodesicExperiencedTemperatureField experiencedTemperature;
     private GeodesicSurfaceTemperatureField surfaceTemperature;
@@ -68,6 +68,14 @@ public sealed class GeodesicBiologyRuntime
     private long deaths;
     private long starvationDeaths;
     private long lifespanDeaths;
+    private readonly long[] recycledDeathsByCause = new long[Enum.GetValues(typeof(DeathCause)).Length];
+    private readonly double[] deathCarbonByCause = new double[Enum.GetValues(typeof(DeathCause)).Length];
+    private readonly double[] deathDissolvedCarbonByLayer = new double[GeodesicOceanLayerGrid.AbsoluteMaximumLayerCount];
+    private double deathCarbonTotal, deathDissolvedCarbon, unplacedDeathCarbon, deathTransferRoundingResidual;
+    private long invalidDeathCarbonStates;
+    private int lastDeathCell = -1, lastDeathLayer = -1;
+    private DeathCause lastRecycledDeathCause;
+    private double lastDeathCarbon, lastDeathDissolvedCarbon;
     private long zeroAchieved;
     private long resourceLimited;
     private long invalidHabitats;
@@ -154,12 +162,12 @@ public sealed class GeodesicBiologyRuntime
         Clear();
         planet = generator;
         resources = generator != null ? generator.GetComponent<GeodesicOceanResourceField>() : null;
-        sediment = generator != null ? generator.GetComponent<GeodesicOceanSedimentField>() : null;
+        suspended = resources != null ? resources.SuspendedMinerals : null;
         oceanTemperature = generator != null ? generator.GetComponent<GeodesicOceanTemperatureField>() : null;
         experiencedTemperature = generator != null ? generator.GetComponent<GeodesicExperiencedTemperatureField>() : null;
         surfaceTemperature = generator != null ? generator.GetComponent<GeodesicSurfaceTemperatureField>() : null;
         grid = resources != null ? resources.SourceGrid : null;
-        if (grid == null || !resources.IsInitialized || oceanTemperature == null || !oceanTemperature.IsInitialized
+        if (grid == null || !resources.IsInitialized || suspended == null || !suspended.IsInitialized || oceanTemperature == null || !oceanTemperature.IsInitialized
             || experiencedTemperature == null || !experiencedTemperature.IsInitialized)
         {
             Debug.LogError("[GeodesicBiology] Required layered ocean/resource/temperature authority is not initialized.");
@@ -538,7 +546,7 @@ public sealed class GeodesicBiologyRuntime
             delta[(int)r.A*grid.NodeCapacity+r.Node] -= r.NeedA*r.Actual;
             if (r.NeedB > 0) delta[(int)r.B*grid.NodeCapacity+r.Node] -= r.NeedB*r.Actual;
             if (r.ProductCoefficient > 0) delta[(int)r.Product*grid.NodeCapacity+r.Node] += r.ProductCoefficient*r.Actual;
-            if (r.SulfurProduct) sediment.DepositSameColumn(r.Cell,r.NeedB*r.Actual,0);
+            if (r.SulfurProduct) suspended.AddPrecipitate(r.Cell,r.Layer,r.NeedB*r.Actual,0);
             float gained = r.EnergyPerExtent*(float)r.Actual;
             state.Energy[i] += gained;
             state.OrganicCStore[i] = Mathf.Min(maxStore,state.OrganicCStore[i]+r.StorePerExtent*(float)r.Actual);
@@ -568,6 +576,7 @@ public sealed class GeodesicBiologyRuntime
             DeathCause cause = ClassifyLifecycleDeath(state.Energy[i], state.Age[i], state.MaxLifespan[i]);
             if (cause != DeathCause.Unknown)
             {
+                RecycleDeathInventory(i, agents[i], state, cause);
                 deaths++;
                 if (cause == DeathCause.EnergyDepletion) starvationDeaths++; else lifespanDeaths++;
                 registerDeathCause?.Invoke(state.Metabolism[i], cause);
@@ -597,6 +606,73 @@ public sealed class GeodesicBiologyRuntime
             births++;
         }
     }
+
+    private void RecycleDeathInventory(int index, Replicator companion, ReplicatorPopulationState state, DeathCause cause)
+    {
+        float stored = state.OrganicCStore[index];
+        if (!float.IsFinite(stored) || stored < 0f) invalidDeathCarbonStates++;
+        double carbon = float.IsFinite(stored) ? Math.Max(0d, stored) : 0d;
+        int cell = state.GeodesicCellIndex[index], layer = state.CurrentOceanLayerIndex[index];
+        lastDeathCell = cell; lastDeathLayer = layer; lastRecycledDeathCause = cause;
+        lastDeathCarbon = carbon; lastDeathDissolvedCarbon = 0d;
+        recycledDeathsByCause[(int)cause]++;
+        deathCarbonByCause[(int)cause] += carbon;
+        deathCarbonTotal += carbon;
+
+        // organicCStore is the only tracked carbon inventory. biomassTarget is a
+        // division threshold, and size/energy do not represent additional carbon.
+        // Clear both representations before swap-back removal; cleanup itself never releases carbon.
+        state.OrganicCStore[index] = 0f;
+        companion.organicCStore = 0f;
+        if (!grid.IsNodeActive(cell, layer))
+        {
+            // No terrestrial reservoir exists. Do not redirect a land/invalid death into ocean water.
+            unplacedDeathCarbon += carbon;
+            return;
+        }
+        if (carbon <= 0d) return;
+        int node = grid.GetNodeIndex(cell, layer);
+        // Metabolism withdraws concentration*km3 inventories and stores carbon in
+        // those same units. Add inventory (not concentration) to the exact death node.
+        double actual = resources.ApplyDirectExchangeInventory(GeodesicOceanResource.OrganicC, node, carbon);
+        lastDeathDissolvedCarbon = actual;
+        deathDissolvedCarbon += actual;
+        deathDissolvedCarbonByLayer[layer] += actual;
+        // Dissolved storage is float. Report its measured rounding error instead of hiding it.
+        deathTransferRoundingResidual += carbon - actual;
+    }
+
+    private void LogDeathRecycling()
+    {
+        var text = new System.Text.StringBuilder(700);
+        text.Append("[GeodesicDeathRecycling] cumulative=true unit=concentration*km3 reasons={");
+        bool first = true;
+        for (int cause = 0; cause < recycledDeathsByCause.Length; cause++)
+        {
+            if (recycledDeathsByCause[cause] == 0) continue;
+            if (!first) text.Append(',');
+            first = false;
+            text.Append((DeathCause)cause).Append("={count=").Append(recycledDeathsByCause[cause])
+                .Append(",carbon=").Append(deathCarbonByCause[cause].ToString("G9")).Append('}');
+        }
+        text.Append("} dissolvedByLayer=[");
+        for (int layer = 0; layer < deathDissolvedCarbonByLayer.Length; layer++)
+        {
+            if (layer > 0) text.Append(',');
+            text.Append(deathDissolvedCarbonByLayer[layer].ToString("G9"));
+        }
+        text.Append("] remainingCarbonTotal=").Append(deathCarbonTotal.ToString("G9"))
+            .Append(" dissolvedTransferredTotal=").Append(deathDissolvedCarbon.ToString("G9"))
+            .Append(" particulate=unsupported organicSediment=unsupported unplacedCarbon=").Append(unplacedDeathCarbon.ToString("G9"))
+            .Append(" transferRoundingResidual=").Append(deathTransferRoundingResidual.ToString("G9"))
+            .Append(" accountingResidual=").Append((deathCarbonTotal - deathDissolvedCarbon - unplacedDeathCarbon - deathTransferRoundingResidual).ToString("G9"))
+            .Append(" invalidCarbonStates=").Append(invalidDeathCarbonStates)
+            .Append(" lastDeath={reason=").Append(lastRecycledDeathCause).Append(",cell=").Append(lastDeathCell)
+            .Append(",layer=").Append(lastDeathLayer).Append(",remainingCarbon=").Append(lastDeathCarbon.ToString("G9"))
+            .Append(",dissolvedTransferred=").Append(lastDeathDissolvedCarbon.ToString("G9")).Append('}');
+        Debug.Log(text.ToString());
+    }
+
     public static void RemoveAgentAtSwapBack(int i,List<Replicator>a,ReplicatorPopulationState s){int last=a.Count-1;if(i<0||i>last)return;if(i!=last)a[i]=a[last];a.RemoveAt(last);s.RemoveAgentAtSwapBack(i);}
     private void RunPassiveMovement(float dt, List<Replicator> agents, ReplicatorPopulationState state)
     {
@@ -997,6 +1073,7 @@ public sealed class GeodesicBiologyRuntime
     private void LogDiagnostics(ReplicatorPopulationState state, List<Replicator> agents, bool carbonDivision,
         float divisionCost, float replicationCost, float divisionMultiple)
     {
+        LogDeathRecycling();
         int hydrogen=0,sulfur=0,methanogenesis=0,photosynthesis=0,methanotrophy=0,passive=0,amoeboid=0,flagellum=0,anchored=0;
         float organicMin=float.PositiveInfinity,organicMax=float.NegativeInfinity,thresholdMin=float.PositiveInfinity,thresholdMax=float.NegativeInfinity,maxDivisionCarbonFraction=0f;double organicSum=0d,thresholdSum=0d;int divisionEligible=0,occupiedNodeCount=0;
         for(int i=0;i<state.Count;i++){switch(state.Metabolism[i]){case MetabolismType.Hydrogenotrophy:hydrogen++;break;case MetabolismType.SulfurChemosynthesis:sulfur++;break;case MetabolismType.Methanogenesis:methanogenesis++;break;case MetabolismType.Photosynthesis:photosynthesis++;break;case MetabolismType.Methanotrophy:methanotrophy++;break;}switch(state.Locomotion[i]){case LocomotionType.PassiveDrift:passive++;break;case LocomotionType.Amoeboid:amoeboid++;break;case LocomotionType.Flagellum:flagellum++;break;case LocomotionType.Anchored:anchored++;break;}float store=Mathf.Max(0f,state.OrganicCStore[i]);float threshold=Mathf.Max(1f,divisionMultiple)*Mathf.Max(0.0001f,state.BiomassTarget[i]);organicMin=Mathf.Min(organicMin,store);organicMax=Mathf.Max(organicMax,store);organicSum+=store;thresholdMin=Mathf.Min(thresholdMin,threshold);thresholdMax=Mathf.Max(thresholdMax,threshold);thresholdSum+=threshold;maxDivisionCarbonFraction=Mathf.Max(maxDivisionCarbonFraction,store/threshold);bool energyReady=state.Energy[i]>=(carbonDivision?divisionCost:replicationCost);if(energyReady&&(!carbonDivision||store>=threshold))divisionEligible++;int cell=state.GeodesicCellIndex[i];int layer=state.CurrentOceanLayerIndex[i];if(grid.IsNodeActive(cell,layer)){int node=grid.GetNodeIndex(cell,layer);if(MarkTouchedNode(node,-generation,lightStamps))touched[occupiedNodeCount++]=node;}}
@@ -1011,5 +1088,30 @@ public sealed class GeodesicBiologyRuntime
         biologySteps=agentEvaluations=habitatSamples=oceanTemperatureReads=photosyntheticLightReads=resourceInventoryReads=competitionPairs=movementUpdates=wanderStateRefreshes=continuousKinematicUpdates=horizontalBoundaryCrossings=verticalTransitions=landBoundaryRejections=invalidLayerCorrections=0;
     }
     public static float ResolvePhotosyntheticLight(float daylight, int layer) => Mathf.Clamp01(daylight) * (layer == 0 ? 1f : layer == 1 ? 0.55f : 0f);
-    public void Clear(){planet=null;resources=null;sediment=null;oceanTemperature=null;experiencedTemperature=null;surfaceTemperature=null;grid=null;requests=Array.Empty<Request>();demand=availabilityFactor=delta=Array.Empty<double>();touched=stamps=lightStamps=Array.Empty<int>();temperatureByNode=lightByNode=oxygenByNode=Array.Empty<float>();touchedCount=0;Array.Clear(requestedByMetabolism,0,requestedByMetabolism.Length);Array.Clear(achievedByMetabolism,0,achievedByMetabolism.Length);Array.Clear(extentByMetabolism,0,extentByMetabolism.Length);Array.Clear(energyByMetabolism,0,energyByMetabolism.Length);births=deaths=starvationDeaths=lifespanDeaths=zeroAchieved=resourceLimited=invalidHabitats=invalidBiologicalStates=zeroTemperaturePerformance=temperatureSamples=biologySteps=agentEvaluations=habitatSamples=oceanTemperatureReads=photosyntheticLightReads=resourceInventoryReads=competitionPairs=movementUpdates=wanderStateRefreshes=continuousKinematicUpdates=horizontalBoundaryCrossings=verticalTransitions=landBoundaryRejections=invalidLayerCorrections=0;maintenancePaid=diagnosticElapsed=temperatureSum=performanceSum=0d;lastBiologyStepSeconds=passiveMovementTime=passiveKinematicsAccumulator=reactionAccumulator=0f;hydrogenotrophyConfigLogged=false;biologySeed=0;founderMinLife=founderMaxLife=founderBiomassTarget=founderLethalMargin=0f;founderColor=default;founderHydrogenTemperatureRange=default;temperatureMin=performanceMin=float.PositiveInfinity;temperatureMax=performanceMax=float.NegativeInfinity;}
+    public void Clear()
+    {
+        planet = null; resources = null; suspended = null; oceanTemperature = null;
+        experiencedTemperature = null; surfaceTemperature = null; grid = null;
+        requests = Array.Empty<Request>(); demand = availabilityFactor = delta = Array.Empty<double>();
+        touched = stamps = lightStamps = Array.Empty<int>();
+        temperatureByNode = lightByNode = oxygenByNode = Array.Empty<float>(); touchedCount = 0;
+        Array.Clear(requestedByMetabolism, 0, requestedByMetabolism.Length);
+        Array.Clear(achievedByMetabolism, 0, achievedByMetabolism.Length);
+        Array.Clear(extentByMetabolism, 0, extentByMetabolism.Length);
+        Array.Clear(energyByMetabolism, 0, energyByMetabolism.Length);
+        Array.Clear(recycledDeathsByCause, 0, recycledDeathsByCause.Length);
+        Array.Clear(deathCarbonByCause, 0, deathCarbonByCause.Length);
+        Array.Clear(deathDissolvedCarbonByLayer, 0, deathDissolvedCarbonByLayer.Length);
+        deathCarbonTotal = deathDissolvedCarbon = unplacedDeathCarbon = deathTransferRoundingResidual = 0d;
+        lastDeathCarbon = lastDeathDissolvedCarbon = 0d; invalidDeathCarbonStates = 0;
+        lastDeathCell = lastDeathLayer = -1; lastRecycledDeathCause = DeathCause.Unknown;
+        births=deaths=starvationDeaths=lifespanDeaths=zeroAchieved=resourceLimited=invalidHabitats=invalidBiologicalStates=zeroTemperaturePerformance=temperatureSamples=biologySteps=agentEvaluations=habitatSamples=oceanTemperatureReads=photosyntheticLightReads=resourceInventoryReads=competitionPairs=movementUpdates=wanderStateRefreshes=continuousKinematicUpdates=horizontalBoundaryCrossings=verticalTransitions=landBoundaryRejections=invalidLayerCorrections=0;
+        maintenancePaid = diagnosticElapsed = temperatureSum = performanceSum = 0d;
+        lastBiologyStepSeconds = passiveMovementTime = passiveKinematicsAccumulator = reactionAccumulator = 0f;
+        hydrogenotrophyConfigLogged = false; biologySeed = 0;
+        founderMinLife = founderMaxLife = founderBiomassTarget = founderLethalMargin = 0f;
+        founderColor = default; founderHydrogenTemperatureRange = default;
+        temperatureMin = performanceMin = float.PositiveInfinity;
+        temperatureMax = performanceMax = float.NegativeInfinity;
+    }
 }

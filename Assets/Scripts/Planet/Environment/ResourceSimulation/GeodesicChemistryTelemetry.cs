@@ -85,7 +85,8 @@ public sealed class GeodesicChemistryTelemetry : MonoBehaviour
         double sedimentS0 = 0d, sedimentFe3 = 0d, sedimentFeS = 0d;
         double minPositiveFeS = double.PositiveInfinity, maxFeS = 0d, feSBelowTintFloor = 0d;
         int columnsWithS0 = 0, columnsWithFe3 = 0, columnsWithFeS = 0;
-        int columnsAboveFeSTintFloor = 0;
+        int columnsAboveFeSTintFloor = 0, nodesWithOrganicC = 0;
+        double maximumOrganicC = 0d;
         for (int cell = 0; cell < grid.CellCount; cell++)
         {
             double s0 = sediments.GetElementalSulfurInventory(cell), fe3 = sediments.GetOxidizedIronInventory(cell), feS = sediments.GetIronSulphideInventory(cell);
@@ -112,6 +113,8 @@ public sealed class GeodesicChemistryTelemetry : MonoBehaviour
                 float h2s = resources.GetConcentrationForTelemetry(node, GeodesicOceanResource.H2S);
                 float fe2 = resources.GetConcentrationForTelemetry(node, GeodesicOceanResource.Fe2);
                 float organicC = resources.GetConcentrationForTelemetry(node, GeodesicOceanResource.OrganicC);
+                if (organicC > 0f) nodesWithOrganicC++;
+                maximumOrganicC = Math.Max(maximumOrganicC, organicC);
                 ocean.Add(volume, co2, o2, ch4, h2, h2s, fe2, organicC, telemetryAnoxicO2Threshold);
                 layers[layer].Add(volume, co2, o2, ch4, h2, h2s, fe2, organicC, telemetryAnoxicO2Threshold);
                 if (layer == activeLayers - 1)
@@ -133,6 +136,8 @@ public sealed class GeodesicChemistryTelemetry : MonoBehaviour
         text.Append(" oceanVolumeKm3=").Append(ocean.Volume.ToString("G9"));
         AppendAllResources(text, " oceanMean", ocean, false);
         AppendAllResources(text, " oceanInventory", ocean, true);
+        text.Append(" organicCDistribution={positiveNodes=").Append(nodesWithOrganicC)
+            .Append(",maxConcentration=").Append(maximumOrganicC.ToString("G9")).Append('}');
         text.Append(" layers={");
         for (int layer = 0; layer < LayerCount; layer++) { if (layer > 0) text.Append(','); AppendLayer(text, layer, layers[layer]); }
         text.Append('}');
@@ -156,6 +161,7 @@ public sealed class GeodesicChemistryTelemetry : MonoBehaviour
         text.Append(",columnsWithS0=").Append(columnsWithS0).Append(",columnsWithFe3=").Append(columnsWithFe3).Append(",columnsWithFeS=").Append(columnsWithFeS)
             .Append(",minPositiveFeSPerColumn=").Append((columnsWithFeS > 0 ? minPositiveFeS : 0d).ToString("G6"))
             .Append(",maxFeSPerColumn=").Append(maxFeS.ToString("G6")).Append('}');
+        resources.SuspendedMinerals?.AppendTelemetry(text, sedimentS0, sedimentFe3, sedimentFeS);
         text.Append(" sedimentVisual={initialized=").Append(visualInitialized);
         if (visualInitialized)
         {
@@ -198,7 +204,7 @@ public sealed class GeodesicChemistryTelemetry : MonoBehaviour
     private void ResetStatistics()
     { ocean.Reset(); bottom.Reset(); ventBottom.Reset(); for (int i = 0; i < layers.Length; i++) layers[i].Reset(); }
 
-    private ChemistryCounters ReadCounters() => chemistry == null ? default : new ChemistryCounters(chemistry.ReactedH2Inventory, chemistry.ReactedH2SInventory, chemistry.ReactedFe2Inventory, chemistry.ConsumedO2Inventory, chemistry.DepositedS0Inventory, chemistry.DepositedFe3Inventory, chemistry.DepositedFeSInventory);
+    private ChemistryCounters ReadCounters() => chemistry == null ? default : new ChemistryCounters(chemistry.ReactedH2Inventory, chemistry.ReactedH2SInventory, chemistry.ReactedFe2Inventory, chemistry.ConsumedO2Inventory, chemistry.PrecipitatedS0Inventory, chemistry.PrecipitatedFe3Inventory, chemistry.PrecipitatedFeSInventory);
 
     private static void AppendAllResources(StringBuilder text, string name, WeightedChemistryStatistics value, bool inventory)
     {
@@ -224,7 +230,7 @@ public sealed class GeodesicChemistryTelemetry : MonoBehaviour
     { text.Append(name).Append("={activeNodes=").Append(value.NodeCount).Append(",physicalVolumeKm3=").Append(value.Volume.ToString("G6")).Append(",O2Mean=").Append(value.Mean(1).ToString("G6")).Append(",H2Mean=").Append(value.Mean(3).ToString("G6")).Append(",H2SMean=").Append(value.Mean(4).ToString("G6")).Append(",Fe2Mean=").Append(value.Mean(5).ToString("G6")).Append(",anoxicFraction=").Append(value.AnoxicFraction.ToString("G6")).Append('}'); }
 
     private static void AppendCounters(StringBuilder text, string name, ChemistryCounters value)
-    { text.Append(name).Append("={reactedH2=").Append(value.H2.ToString("G9")).Append(",reactedH2S=").Append(value.H2S.ToString("G9")).Append(",reactedFe2=").Append(value.Fe2.ToString("G9")).Append(",consumedO2=").Append(value.O2.ToString("G9")).Append(",depositedS0=").Append(value.S0.ToString("G9")).Append(",depositedFe3=").Append(value.Fe3.ToString("G9")).Append(",depositedFeS=").Append(value.FeS.ToString("G9")).Append('}'); }
+    { text.Append(name).Append("={reactedH2=").Append(value.H2.ToString("G9")).Append(",reactedH2S=").Append(value.H2S.ToString("G9")).Append(",reactedFe2=").Append(value.Fe2.ToString("G9")).Append(",consumedO2=").Append(value.O2.ToString("G9")).Append(",precipitatedS0=").Append(value.S0.ToString("G9")).Append(",precipitatedFe3=").Append(value.Fe3.ToString("G9")).Append(",precipitatedFeS=").Append(value.FeS.ToString("G9")).Append('}'); }
 
     private void AppendAtmosphere(StringBuilder text)
     {
