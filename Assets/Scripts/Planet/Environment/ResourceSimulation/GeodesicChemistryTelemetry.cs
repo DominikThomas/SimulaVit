@@ -167,10 +167,16 @@ public sealed class GeodesicChemistryTelemetry : MonoBehaviour
         {
             text.Append(",active=").Append(sedimentVisual.isActiveAndEnabled)
                 .Append(",uploadedToLiveMesh=").Append(sedimentVisual.TintUploadedToLiveMesh)
+                .Append(",terrainTintRenderingActive=").Append(sedimentVisual.TerrainTintRenderingActive)
                 .Append(",refreshes=").Append(sedimentVisual.FullVisualRefreshCount)
                 .Append(",appliedRevision=").Append(sedimentVisual.LastAppliedRevision)
                 .Append(",fieldRevision=").Append(sediments.VisualRevision)
                 .Append(",FeSTintFloor=").Append(feSTintFloor.ToString("G6"))
+                .Append(",FeSFullTintReference=").Append(sedimentVisual.IronSulphideFullTintReference.ToString("G6"))
+                .Append(",S0TintFloor=").Append(sedimentVisual.SulfurTintFloor.ToString("G6"))
+                .Append(",S0FullTintReference=").Append(sedimentVisual.SulfurFullTintReference.ToString("G6"))
+                .Append(",Fe3TintFloor=").Append(sedimentVisual.OxidizedIronTintFloor.ToString("G6"))
+                .Append(",Fe3FullTintReference=").Append(sedimentVisual.OxidizedIronFullTintReference.ToString("G6"))
                 .Append(",columnsAboveFeSTintFloor=").Append(columnsAboveFeSTintFloor)
                 .Append(",FeSFractionBelowTintFloor=").Append((sedimentFeS > 0d ? feSBelowTintFloor / sedimentFeS : 0d).ToString("G6"));
         }

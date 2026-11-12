@@ -761,9 +761,15 @@ public class GeodesicCellPicker : MonoBehaviour
             text.Append("\nFeS: ").Append(oceanSedimentField != null && oceanSedimentField.IsInitialized ? oceanSedimentField.GetIronSulphideInventory(selectedCellIndex).ToString("G6") : "--");
             if (oceanSedimentVisual != null && oceanSedimentVisual.TryGetColumnTint(selectedCellIndex, out Vector3 weights, out float coverage, out int vertices))
             {
-                text.Append($"\nApplied intensity S0 / Fe(III) / FeS: {weights.x:P1} / {weights.y:P1} / {weights.z:P1}")
-                    .Append($"\nColumn tint coverage: {coverage:P1} | Affected render vertices: {vertices}")
+                text.Append($"\nColumn source weights S0 / Fe(III) / FeS: {weights.x:P1} / {weights.y:P1} / {weights.z:P1}")
+                    .Append($"\nColumn source coverage: {coverage:P1} | Contributing to render vertices: {vertices}")
+                    .Append($"\nDisplay floor / full tint: S0 {oceanSedimentVisual.SulfurTintFloor:G6}/{oceanSedimentVisual.SulfurFullTintReference:G6}, Fe(III) {oceanSedimentVisual.OxidizedIronTintFloor:G6}/{oceanSedimentVisual.OxidizedIronFullTintReference:G6}, FeS {oceanSedimentVisual.FeSTintFloor:G6}/{oceanSedimentVisual.IronSulphideFullTintReference:G6}")
                     .Append($"\nTint uploaded to live terrain: yes | Applied revision: {oceanSedimentVisual.LastAppliedRevision} / {oceanSedimentField.VisualRevision}");
+                if (oceanSedimentVisual.TryGetRenderedColumnTint(selectedCellIndex, out var rendered))
+                    text.Append($"\nUploaded mineral coverage (vertex mean) S0 / Fe(III) / FeS: {rendered.MeanMineralCoverage.x:P1} / {rendered.MeanMineralCoverage.y:P1} / {rendered.MeanMineralCoverage.z:P1}")
+                        .Append($"\nUploaded coverage min / mean / max: {rendered.MinimumCoverage:P1} / {rendered.MeanCoverage:P1} / {rendered.MaximumCoverage:P1} | Local seabed vertices: {rendered.VertexCount}");
+                else text.Append("\nUploaded coverage: no local seabed render vertices");
+                text.Append($"\nTerrain tint rendering active: {oceanSedimentVisual.TerrainTintRenderingActive} | Coverage is before lighting and water blending");
             }
             else text.Append("\nTint uploaded to live terrain: no");
         }

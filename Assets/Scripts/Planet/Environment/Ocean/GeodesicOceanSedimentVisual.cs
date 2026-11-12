@@ -8,21 +8,23 @@ using UnityEngine.Rendering;
 public sealed class GeodesicOceanSedimentVisual : MonoBehaviour
 {
     private const int TintUvChannel = 2;
-    private const double TintFloorFraction = 0.01d;
-    private const float DefaultSulfurReference = 10000f;
-    private const float DefaultOxidizedIronReference = 10000f;
-    private const float DefaultIronSulphideReference = 1000000f;
+    // Fixed per-species display scales for gradually deposited inventories, not ocean-wide peak normalization.
+    private const double TintFloorFraction = 0.002d;
+    private const float DefaultSulfurReference = 50f;
+    private const float DefaultOxidizedIronReference = 50f;
+    private const float DefaultIronSulphideReference = 500f;
     private static readonly int SeaLevelId = Shader.PropertyToID("_SedimentSeaLevelRadius");
 
     [SerializeField] private Color sulfurTint = new Color(0.88f, 0.72f, 0.12f, 1f);
     [SerializeField] private Color oxidizedIronTint = new Color(0.62f, 0.20f, 0.06f, 1f);
     [SerializeField] private Color ironSulphideTint = new Color(0.035f, 0.04f, 0.045f, 1f);
-    [SerializeField, Min(1e-8f), Tooltip("Visual-only S0 inventory per column at full tint.")]
+    [SerializeField, Min(1e-8f), Tooltip("Deposited S0 inventory per column at full tint (concentration*km3). Tint starts above 0.2% of this value.")]
     private float sulfurReference = DefaultSulfurReference;
-    [SerializeField, Min(1e-8f), Tooltip("Visual-only Fe(III) inventory per column at full tint.")]
+    [SerializeField, Min(1e-8f), Tooltip("Deposited Fe(III) inventory per column at full tint (concentration*km3). Tint starts above 0.2% of this value.")]
     private float oxidizedIronReference = DefaultOxidizedIronReference;
-    [SerializeField, Min(1e-8f), Tooltip("Visual-only FeS inventory per column at full tint.")]
+    [SerializeField, Min(1e-8f), Tooltip("Deposited FeS inventory per column at full tint (concentration*km3). Tint starts above 0.2% of this value.")]
     private float ironSulphideReference = DefaultIronSulphideReference;
+    [SerializeField, HideInInspector] private int tintCalibrationVersion;
     [SerializeField, Min(0.1f)] private float refreshIntervalSeconds = 1f;
 
     private GeodesicOceanSedimentField sediments;
@@ -39,6 +41,7 @@ public sealed class GeodesicOceanSedimentVisual : MonoBehaviour
     private List<Vector4> tintStream;
     private Vector3[] tintWeightsByCell;
     private int[] tintedVerticesByCell;
+    private RenderedColumnTint[] renderedTintsByCell;
     private float nextRefresh;
     private ulong lastAppliedRevision;
     private bool refreshRequested;
@@ -51,12 +54,41 @@ public sealed class GeodesicOceanSedimentVisual : MonoBehaviour
     public bool SeabedViewEnabled { get; private set; }
     public ulong LastAppliedRevision => lastAppliedRevision;
     public ulong FullVisualRefreshCount { get; private set; }
-    public double FeSTintFloor { get; private set; }
+    public double SulfurFullTintReference { get; private set; }
+    public double OxidizedIronFullTintReference { get; private set; }
+    public double IronSulphideFullTintReference { get; private set; }
+    public double SulfurTintFloor => SulfurFullTintReference * TintFloorFraction;
+    public double OxidizedIronTintFloor => OxidizedIronFullTintReference * TintFloorFraction;
+    public double FeSTintFloor => IronSulphideFullTintReference * TintFloorFraction;
     public float RefreshIntervalSeconds => Mathf.Max(0.1f, refreshIntervalSeconds);
+
+    /// <summary>Statistics of the last uploaded tint at seabed vertices whose nearest simulation cell is this column.</summary>
+    public struct RenderedColumnTint
+    {
+        public int VertexCount;
+        // Contributions sum to coverage, matching the premultiplied colour sent to the shader.
+        public Vector3 MeanMineralCoverage;
+        public float MinimumCoverage, MeanCoverage, MaximumCoverage;
+    }
+
+    public bool TerrainTintRenderingActive
+    {
+        get
+        {
+            if (!TintUploadedToLiveMesh || terrainRenderer == null || !terrainRenderer.enabled ||
+                terrainRenderer.forceRenderingOff || !terrainRenderer.gameObject.activeInHierarchy) return false;
+            Material material = terrainRenderer.sharedMaterial;
+            if (material == null || !material.HasProperty(SeaLevelId) || !material.shader.isSupported) return false;
+            terrainProperties ??= new MaterialPropertyBlock();
+            terrainRenderer.GetPropertyBlock(terrainProperties);
+            return terrainProperties.GetFloat(SeaLevelId) > 0f;
+        }
+    }
 
     public void Initialize(PlanetGenerator owner, GeodesicOceanSedimentField field,
         IcosphereDirectionMapping terrainMapping, bool[] underwaterCells, MeshRenderer waterRenderer)
     {
+        UpgradeLegacyTintReferences();
         ClearVisual();
         if (owner == null || owner.CurrentGridType != PlanetGridType.GeodesicIcosphere) return;
         if (field == null || !field.IsInitialized || owner.GeodesicTopology?.CellCount != field.CellCount ||
@@ -112,7 +144,7 @@ public sealed class GeodesicOceanSedimentVisual : MonoBehaviour
         Refresh();
         SetTerrainTintRadius(seaLevelRadius);
         nextRefresh = Time.unscaledTime + RefreshIntervalSeconds;
-        Debug.Log($"[GeodesicSedimentVisual] bound live mesh={mesh.name} vertices={vertices.Length} seabedSamples={submergedVertices.Count} FeSTintFloor={FeSTintFloor:G6}", this);
+        Debug.Log($"[GeodesicSedimentVisual] bound live mesh={mesh.name} vertices={vertices.Length} seabedSamples={submergedVertices.Count} inventoryFloor/fullTint S0={SulfurTintFloor:G6}/{SulfurFullTintReference:G6} Fe3={OxidizedIronTintFloor:G6}/{OxidizedIronFullTintReference:G6} FeS={FeSTintFloor:G6}/{IronSulphideFullTintReference:G6}", this);
     }
 
     // Project the render direction onto its simulation triangle for a continuous tint across cell boundaries.
@@ -146,7 +178,21 @@ public sealed class GeodesicOceanSedimentVisual : MonoBehaviour
         }
     }
 
-    private void OnValidate() => refreshRequested = true;
+    private void UpgradeLegacyTintReferences()
+    {
+        if (tintCalibrationVersion >= 1) return;
+        // Keep serialized field names and custom references. Migrate only the previous stock calibration.
+        if (sulfurReference == 10000f) sulfurReference = DefaultSulfurReference;
+        if (oxidizedIronReference == 10000f) oxidizedIronReference = DefaultOxidizedIronReference;
+        if (ironSulphideReference == 1000000f) ironSulphideReference = DefaultIronSulphideReference;
+        tintCalibrationVersion = 1;
+    }
+
+    private void OnValidate()
+    {
+        UpgradeLegacyTintReferences();
+        refreshRequested = true;
+    }
 
     private void Update()
     {
@@ -168,15 +214,34 @@ public sealed class GeodesicOceanSedimentVisual : MonoBehaviour
         if (!IsInitialized) return;
         UpdateColumnTintWeights();
         Array.Clear(tintedVerticesByCell, 0, tintedVerticesByCell.Length);
+        Array.Clear(renderedTintsByCell, 0, renderedTintsByCell.Length);
         foreach (var sample in submergedVertices)
         {
             Vector3 a = tintWeightsByCell[sample.a] * sample.weights.x;
             Vector3 b = tintWeightsByCell[sample.b] * sample.weights.y;
             Vector3 c = tintWeightsByCell[sample.c] * sample.weights.z;
-            tintStream[sample.vertex] = ComposeTint(a + b + c, sulfurTint, oxidizedIronTint, ironSulphideTint);
+            Vector3 mixedWeights = a + b + c;
+            Vector4 tint = ComposeTint(mixedWeights, sulfurTint, oxidizedIronTint, ironSulphideTint);
+            tintStream[sample.vertex] = tint;
+            // Diagnose the actual interpolated upload, including zero-coverage vertices.
+            // Source weights alone overstate local coverage and each mineral's share of a mixed deposit.
+            ref RenderedColumnTint rendered = ref renderedTintsByCell[sample.a];
+            rendered.MinimumCoverage = rendered.VertexCount == 0 ? tint.x : Mathf.Min(rendered.MinimumCoverage, tint.x);
+            rendered.MaximumCoverage = Mathf.Max(rendered.MaximumCoverage, tint.x);
+            rendered.MeanCoverage += tint.x;
+            float sum = mixedWeights.x + mixedWeights.y + mixedWeights.z;
+            if (sum > 0f) rendered.MeanMineralCoverage += mixedWeights * (tint.x / sum);
+            rendered.VertexCount++;
             if (a != Vector3.zero) tintedVerticesByCell[sample.a]++;
             if (b != Vector3.zero) tintedVerticesByCell[sample.b]++;
             if (c != Vector3.zero) tintedVerticesByCell[sample.c]++;
+        }
+        for (int cell = 0; cell < renderedTintsByCell.Length; cell++)
+        {
+            ref RenderedColumnTint rendered = ref renderedTintsByCell[cell];
+            if (rendered.VertexCount == 0) continue;
+            rendered.MeanCoverage /= rendered.VertexCount;
+            rendered.MeanMineralCoverage /= rendered.VertexCount;
         }
         // Keep the source palette intact when another system clones or clips the terrain mesh.
         mesh.SetUVs(TintUvChannel, tintStream);
@@ -190,10 +255,13 @@ public sealed class GeodesicOceanSedimentVisual : MonoBehaviour
         int count = sediments.CellCount;
         tintWeightsByCell ??= new Vector3[count];
         tintedVerticesByCell ??= new int[count];
+        renderedTintsByCell ??= new RenderedColumnTint[count];
         double s0Reference = TintReference(sulfurReference, DefaultSulfurReference);
         double fe3Reference = TintReference(oxidizedIronReference, DefaultOxidizedIronReference);
         double feSReference = TintReference(ironSulphideReference, DefaultIronSulphideReference);
-        FeSTintFloor = feSReference * TintFloorFraction;
+        SulfurFullTintReference = s0Reference;
+        OxidizedIronFullTintReference = fe3Reference;
+        IronSulphideFullTintReference = feSReference;
         for (int cell = 0; cell < count; cell++)
         {
             if (!oceanMask[cell]) continue;
@@ -237,6 +305,14 @@ public sealed class GeodesicOceanSedimentVisual : MonoBehaviour
         return true;
     }
 
+    public bool TryGetRenderedColumnTint(int cell, out RenderedColumnTint tint)
+    {
+        tint = default;
+        if (!TintUploadedToLiveMesh || renderedTintsByCell == null || cell < 0 || cell >= renderedTintsByCell.Length) return false;
+        tint = renderedTintsByCell[cell];
+        return tint.VertexCount > 0;
+    }
+
     public void SetSeabedView(bool show)
     {
         if (show == SeabedViewEnabled) return;
@@ -277,8 +353,8 @@ public sealed class GeodesicOceanSedimentVisual : MonoBehaviour
         ClearTerrainTint();
         terrainFilter = null; terrainRenderer = null; oceanRenderer = null;
         sediments = null; topology = null; baseMapping = null; oceanMask = null;
-        tintWeightsByCell = null; tintedVerticesByCell = null;
-        FeSTintFloor = 0d;
+        tintWeightsByCell = null; tintedVerticesByCell = null; renderedTintsByCell = null;
+        SulfurFullTintReference = OxidizedIronFullTintReference = IronSulphideFullTintReference = 0d;
         nextRefresh = 0f; lastAppliedRevision = 0UL; FullVisualRefreshCount = 0UL; enabled = false;
     }
 
