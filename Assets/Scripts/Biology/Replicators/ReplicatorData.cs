@@ -99,6 +99,8 @@ public class Replicator
     public float optimalTempMin;
     public float optimalTempMax;
     public float lethalTempMargin;
+    public float coldTemperatureExposureSeconds;
+    public float heatTemperatureExposureSeconds;
     public float starveCo2Seconds;
     public float starveH2sSeconds;
     public float starveH2Seconds;
@@ -225,6 +227,8 @@ public class Replicator
         agent.optimalTempMin = snapshot.optimalTempMin;
         agent.optimalTempMax = snapshot.optimalTempMax;
         agent.lethalTempMargin = snapshot.lethalTempMargin;
+        agent.coldTemperatureExposureSeconds = Mathf.Max(0f, snapshot.coldTemperatureExposureSeconds);
+        agent.heatTemperatureExposureSeconds = Mathf.Max(0f, snapshot.heatTemperatureExposureSeconds);
         agent.starveCo2Seconds = snapshot.starveCo2Seconds;
         agent.starveH2sSeconds = snapshot.starveH2sSeconds;
         agent.starveH2Seconds = snapshot.starveH2Seconds;

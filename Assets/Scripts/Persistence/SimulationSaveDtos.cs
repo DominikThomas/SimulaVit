@@ -210,6 +210,8 @@ public class ReplicatorSnapshot
     public float optimalTempMin;
     public float optimalTempMax;
     public float lethalTempMargin;
+    public float coldTemperatureExposureSeconds;
+    public float heatTemperatureExposureSeconds;
     public float starveCo2Seconds;
     public float starveH2sSeconds;
     public float starveH2Seconds;

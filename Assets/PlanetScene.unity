@@ -2148,6 +2148,10 @@ MonoBehaviour:
   coldDamageStartTempKelvin: 253.15
   tempMutationChance: 0.02
   tempMutationScale: 2
+  geodesicTemperatureStressMaintenanceMultiplier: 1
+  geodesicColdExposureDeathSeconds: 120
+  geodesicHeatExposureDeathSeconds: 60
+  geodesicTemperatureExposureRecoveryPerSecond: 1
   temperatureDisplayUnit: 1
   steerTempWeight: 5
   steerFoodWeight: 1

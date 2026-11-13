@@ -55,11 +55,17 @@ public sealed class GeodesicBiologyRuntime
     private int[] stamps = Array.Empty<int>();
     private int[] lightStamps = Array.Empty<int>();
     private float[] temperatureByNode = Array.Empty<float>();
+    private int[] temperatureStamps = Array.Empty<int>();
+    private int temperatureGeneration = 1;
+    private double cachedOceanTemperatureTick = double.NaN;
     private float[] lightByNode = Array.Empty<float>();
     private float[] oxygenByNode = Array.Empty<float>();
     private int generation = 1;
     private int touchedCount;
     private System.Random reproductionRandom;
+    private System.Random temperatureMutationRandom;
+    private GeodesicBiologyTemperatureSettings temperatureSettings = GeodesicBiologyTemperatureSettings.Default;
+    private readonly GeodesicBiologyTemperatureTelemetry temperatureTelemetry = new GeodesicBiologyTemperatureTelemetry();
     private readonly long[] requestedByMetabolism = new long[Enum.GetValues(typeof(MetabolismType)).Length];
     private readonly long[] achievedByMetabolism = new long[Enum.GetValues(typeof(MetabolismType)).Length];
     private readonly double[] extentByMetabolism = new double[Enum.GetValues(typeof(MetabolismType)).Length];
@@ -184,6 +190,7 @@ public sealed class GeodesicBiologyRuntime
         stamps = new int[grid.NodeCapacity];
         lightStamps = new int[grid.NodeCapacity];
         temperatureByNode = new float[grid.NodeCapacity];
+        temperatureStamps = new int[grid.NodeCapacity];
         lightByNode = new float[grid.NodeCapacity];
         oxygenByNode = new float[grid.NodeCapacity];
         requests = new Request[Mathf.Max(1, requestedFounders)];
@@ -194,6 +201,8 @@ public sealed class GeodesicBiologyRuntime
         var random = new System.Random(biologySeed);
         var visualRandom = new System.Random(biologySeed ^ 0x3419A7D);
         reproductionRandom = new System.Random(biologySeed ^ 0x5EED123);
+        temperatureMutationRandom = new System.Random(biologySeed ^ 0x54454D50);
+        temperatureTelemetry.Initialize(grid, resources, biologySeed);
         int spawned = SpawnFounders(requestedFounders, random, visualRandom, agents, state, minLife, maxLife, color, biomassTarget,
             hydrogenTemperatureRange, lethalTemperatureMargin, false);
         int occupiedCells = 0, occupiedLayers = 0;
@@ -384,11 +393,15 @@ public sealed class GeodesicBiologyRuntime
         float sulfurCo2, float sulfurH2s, float sulfurEnergy, float methaneCo2, float methaneH2, float methaneEnergy,
         float methanotrophyCh4, float methanotrophyO2, float methanotrophyEnergy, float photoCo2, float photoEnergy,
         float maxStore, float reproductionRate, bool carbonDivision, float divisionCost, float replicationCost,
-        float divisionMultiple, float childSplit, int maxPopulation, Action<MetabolismType, DeathCause> registerDeathCause)
+        float divisionMultiple, float childSplit, int maxPopulation, Action<MetabolismType, DeathCause> registerDeathCause,
+        GeodesicBiologyTemperatureSettings? configuredTemperatureSettings = null)
     {
+        temperatureSettings = configuredTemperatureSettings ?? GeodesicBiologyTemperatureSettings.Default;
+        RefreshTemperatureCache();
         if (!hydrogenotrophyConfigLogged)
         {
             Debug.Log($"[GeodesicHydrogenotrophyConfig] H2PerTick={hydrogenH2:G6} CO2PerTick={hydrogenCo2:G6} EnergyPerTick={hydrogenEnergy:G6} StoreFraction={hydrogenStoreFraction:G6} BasalEnergyCostPerSecond={maintenance:G6} ReferenceTickSeconds={ReferenceTickSeconds:G6}");
+            Debug.Log($"[GeodesicTemperatureConfig] authority=coarseOceanCellLayer dormancyFloor={temperatureSettings.DormancyFloor:G6} reproductionMinEfficiency={temperatureSettings.ReplicationMinEfficiency:G6} reproductionChance=rate*dt*performance directDamage={temperatureSettings.DirectDamageEnabled} coldExposureSeconds={temperatureSettings.ColdExposureDeathSeconds:G6} heatExposureSeconds={temperatureSettings.HeatExposureDeathSeconds:G6} recoveryPerSecond={temperatureSettings.ExposureRecoveryPerSecond:G6} extraStressMaintenanceMultiplier={temperatureSettings.StressMaintenanceMultiplier:G6} mutationChance={temperatureSettings.MutationChance:G6} mutationScaleK={temperatureSettings.MutationScale:G6} divisionEnergy=conservative-half-split");
             hydrogenotrophyConfigLogged = true;
         }
         biologySteps++;
@@ -397,7 +410,7 @@ public sealed class GeodesicBiologyRuntime
         if (agents.Count == 0)
         {
             diagnosticElapsed += dt;
-            if (diagnosticElapsed >= 10d) { LogDiagnostics(state, agents, carbonDivision, divisionCost, replicationCost, divisionMultiple); diagnosticElapsed = 0d; }
+            if (diagnosticElapsed >= 10d) { LogDiagnostics(state, agents, carbonDivision, divisionCost, replicationCost, divisionMultiple, maxPopulation); diagnosticElapsed = 0d; }
             return;
         }
         state.EnsureMatchesAgentCount(agents);
@@ -425,7 +438,7 @@ public sealed class GeodesicBiologyRuntime
         diagnosticElapsed += dt;
         if (diagnosticElapsed >= 10d)
         {
-            LogDiagnostics(state, agents, carbonDivision, divisionCost, replicationCost, divisionMultiple);
+            LogDiagnostics(state, agents, carbonDivision, divisionCost, replicationCost, divisionMultiple, maxPopulation);
             diagnosticElapsed = 0d;
         }
     }
@@ -461,14 +474,12 @@ public sealed class GeodesicBiologyRuntime
         }
         r.Supported = true;
         EnsureHabitatSample(r.Node, cell, layer);
-        // Replicator.position is visual-only in Geodesic mode. Until biology owns an
-        // authoritative sub-cell coordinate, feeding that position into the vent-core
-        // query would make rendering placement control biology and can expose founders
-        // to source-fluid temperature. Cell/layer temperature is the authoritative
-        // organism temperature for this foundation.
+        // Habitat temperature is the authoritative ocean cell/layer value. The separate
+        // vent-core query can approach source-fluid temperature and is not a biology input.
         float temperature = temperatureByNode[r.Node];
         float optimumMin = state.OptimalTempMin[i], optimumMax = state.OptimalTempMax[i];
-        float temperatureScale = CalculateTemperaturePerformance(temperature, optimumMin, optimumMax, state.LethalTempMargin[i]);
+        float temperatureScale = CalculateTemperaturePerformance(temperature, optimumMin, optimumMax,
+            state.LethalTempMargin[i], temperatureSettings.DormancyFloor);
         float oxygenEfficiency = state.Metabolism[i] == MetabolismType.Hydrogenotrophy && hO2InhibitionEnabled
             ? CalculateAnaerobeO2Efficiency(oxygenByNode[r.Node], o2ComfortMax, o2StressMax, hMinimumO2Efficiency)
             : 1f;
@@ -573,23 +584,35 @@ public sealed class GeodesicBiologyRuntime
         for (int i = state.Count - 1; i >= 0; i--)
         {
             state.Age[i] += dt;
-            float paid = Mathf.Max(0f, maintenance * dt);
+            float temperature = GetHabitatTemperature(state.GeodesicCellIndex[i], state.CurrentOceanLayerIndex[i]);
+            float performance = CalculateTemperaturePerformance(temperature, state.OptimalTempMin[i],
+                state.OptimalTempMax[i], state.LethalTempMargin[i], temperatureSettings.DormancyFloor);
+            state.CanReplicate[i] = GeodesicBiologyTemperaturePolicy.CanReproduce(performance, temperatureSettings);
+            DeathCause exposureCause = GeodesicBiologyTemperaturePolicy.AdvanceExposure(temperature,
+                state.OptimalTempMin[i], state.OptimalTempMax[i], state.LethalTempMargin[i], dt, temperatureSettings,
+                ref state.ColdTemperatureExposureSeconds[i], ref state.HeatTemperatureExposureSeconds[i]);
+            float paid = Mathf.Max(0f, maintenance * dt) * GeodesicBiologyTemperaturePolicy.MaintenanceMultiplier(performance, temperatureSettings);
             state.Energy[i] -= paid;
             maintenancePaid += paid;
             DeathCause cause = ClassifyLifecycleDeath(state.Energy[i], state.Age[i], state.MaxLifespan[i]);
+            if (cause == DeathCause.Unknown) cause = exposureCause;
             if (cause != DeathCause.Unknown)
             {
                 RecycleDeathInventory(i, agents[i], state, cause);
                 deaths++;
-                if (cause == DeathCause.EnergyDepletion) starvationDeaths++; else lifespanDeaths++;
+                if (cause == DeathCause.EnergyDepletion) starvationDeaths++;
+                else if (cause == DeathCause.OldAge) lifespanDeaths++;
+                temperatureTelemetry.RecordDeath(cause);
                 registerDeathCause?.Invoke(state.Metabolism[i], cause);
                 RemoveAgentAtSwapBack(i, agents, state);
                 continue;
             }
 
-            bool eligible = state.Energy[i] >= (carbon ? divisionCost : replicationCost)
+            float energyCost = Mathf.Max(0f, carbon ? divisionCost : replicationCost);
+            bool eligible = state.Energy[i] > energyCost
                 && (!carbon || state.OrganicCStore[i] >= Mathf.Max(1, multiple) * state.BiomassTarget[i]);
-            if (!eligible || agents.Count >= maxPopulation || reproductionRandom.NextDouble() >= rate * dt) continue;
+            if (!eligible || !state.CanReplicate[i] || agents.Count >= maxPopulation
+                || reproductionRandom.NextDouble() >= Mathf.Clamp01(rate * dt * performance)) continue;
             Replicator parent = agents[i];
             float childMovementSeed = (float)reproductionRandom.NextDouble();
             var child = new Replicator(state.Position[i], state.Rotation[i], state.MaxLifespan[i], parent.color, parent.traits,
@@ -601,12 +624,17 @@ public sealed class GeodesicBiologyRuntime
             child.optimalTempMin = state.OptimalTempMin[i];
             child.optimalTempMax = state.OptimalTempMax[i];
             child.lethalTempMargin = state.LethalTempMargin[i];
-            state.Energy[i] -= carbon ? divisionCost : replicationCost;
-            child.energy = Mathf.Max(0.1f, state.Energy[i] * 0.5f);
+            GeodesicBiologyTemperaturePolicy.MutateInheritedTraits(child, temperatureMutationRandom, temperatureSettings);
+            child.canReplicate = GeodesicBiologyTemperaturePolicy.CanReproduce(CalculateTemperaturePerformance(temperature,
+                child.optimalTempMin, child.optimalTempMax, child.lethalTempMargin, temperatureSettings.DormancyFloor), temperatureSettings);
+            SplitDivisionEnergy(state.Energy[i], energyCost, out float parentEnergy, out float childEnergy);
+            state.Energy[i] = parentEnergy;
+            child.energy = childEnergy;
             if (carbon) { child.organicCStore = state.OrganicCStore[i] * Mathf.Clamp01(split); state.OrganicCStore[i] -= child.organicCStore; }
             agents.Add(child);
             state.AddAgentFromReplicatorData(child);
             births++;
+            temperatureTelemetry.RecordBirth(performance, temperatureSettings);
         }
     }
 
@@ -966,10 +994,9 @@ public sealed class GeodesicBiologyRuntime
     {
         if (!MarkTouchedNode(node, generation, stamps)) return;
         touched[touchedCount++] = node;
-        temperatureByNode[node] = oceanTemperature.GetLayerTemperatureKelvin(cell, layer);
+        GetHabitatTemperature(cell, layer);
         resources.TryGetConcentration(cell, layer, GeodesicOceanResource.O2, out oxygenByNode[node]);
         habitatSamples++;
-        oceanTemperatureReads++;
         for (int resource = 0; resource < ResourceCount; resource++)
         {
             int scratch = resource * grid.NodeCapacity + node;
@@ -996,13 +1023,48 @@ public sealed class GeodesicBiologyRuntime
     }
     private void BeginSparseStep(){touchedCount=0;if(++generation==int.MaxValue){Array.Clear(stamps,0,stamps.Length);Array.Clear(lightStamps,0,lightStamps.Length);generation=1;}}
     private void EnsureRequestCapacity(int count){if(requests.Length<count)Array.Resize(ref requests,Mathf.NextPowerOfTwo(count));}
-    public static float CalculateTemperaturePerformance(float temperature, float optimumMin, float optimumMax, float lethalMargin)
+    private void RefreshTemperatureCache()
+    {
+        if (oceanTemperature == null || cachedOceanTemperatureTick == oceanTemperature.LastCompletedOceanTemperatureTick) return;
+        cachedOceanTemperatureTick = oceanTemperature.LastCompletedOceanTemperatureTick;
+        if (++temperatureGeneration == int.MaxValue)
+        {
+            Array.Clear(temperatureStamps, 0, temperatureStamps.Length);
+            temperatureGeneration = 1;
+        }
+    }
+
+    private float GetHabitatTemperature(int cell, int layer)
+    {
+        if (grid == null || !grid.IsNodeActive(cell, layer)) return float.NaN;
+        int node = grid.GetNodeIndex(cell, layer);
+        if (temperatureStamps[node] != temperatureGeneration)
+        {
+            temperatureByNode[node] = oceanTemperature.GetLayerTemperatureKelvin(cell, layer);
+            temperatureStamps[node] = temperatureGeneration;
+            oceanTemperatureReads++;
+        }
+        return temperatureByNode[node];
+    }
+
+    public static float CalculateTemperaturePerformance(float temperature, float optimumMin, float optimumMax, float lethalMargin,
+        float dormancyFloor = 0f)
     {
         if (!float.IsFinite(temperature) || !float.IsFinite(optimumMin) || !float.IsFinite(optimumMax)
             || !float.IsFinite(lethalMargin) || optimumMax < optimumMin || lethalMargin <= 0f) return 0f;
         if (temperature >= optimumMin && temperature <= optimumMax) return 1f;
         float distance = temperature < optimumMin ? optimumMin - temperature : temperature - optimumMax;
-        return Mathf.Clamp01(1f - distance / lethalMargin);
+        float performance = Mathf.Clamp01(1f - distance / lethalMargin);
+        // As in legacy biology, the floor supports residual activity only within the
+        // tolerance shoulders; it never restores metabolism beyond zero performance.
+        return performance > 0f ? Mathf.Max(performance, Mathf.Clamp01(dormancyFloor)) : 0f;
+    }
+
+    public static void SplitDivisionEnergy(float energy, float divisionCost, out float parentEnergy, out float childEnergy)
+    {
+        float remaining = Mathf.Max(0f, energy - Mathf.Max(0f, divisionCost));
+        childEnergy = remaining * 0.5f;
+        parentEnergy = remaining - childEnergy;
     }
     public static void InitializeFounderBiologicalState(Replicator agent, int cell, int layer, Vector2 thermalRange,
         float lethalMargin, float energy, float age, float biomassTarget)
@@ -1078,12 +1140,44 @@ public sealed class GeodesicBiologyRuntime
         temperatureSamples++; if (performance <= 0f) zeroTemperaturePerformance++;
     }
     private void LogDiagnostics(ReplicatorPopulationState state, List<Replicator> agents, bool carbonDivision,
-        float divisionCost, float replicationCost, float divisionMultiple)
+        float divisionCost, float replicationCost, float divisionMultiple, int maxPopulation)
     {
         LogDeathRecycling();
+        temperatureTelemetry.Log(state, oceanTemperature, temperatureSettings, carbonDivision,
+            divisionCost, replicationCost, divisionMultiple, maxPopulation, GetHabitatTemperature);
         int hydrogen=0,sulfur=0,methanogenesis=0,photosynthesis=0,methanotrophy=0,passive=0,amoeboid=0,flagellum=0,anchored=0;
         float organicMin=float.PositiveInfinity,organicMax=float.NegativeInfinity,thresholdMin=float.PositiveInfinity,thresholdMax=float.NegativeInfinity,maxDivisionCarbonFraction=0f;double organicSum=0d,thresholdSum=0d;int divisionEligible=0,occupiedNodeCount=0;
-        for(int i=0;i<state.Count;i++){switch(state.Metabolism[i]){case MetabolismType.Hydrogenotrophy:hydrogen++;break;case MetabolismType.SulfurChemosynthesis:sulfur++;break;case MetabolismType.Methanogenesis:methanogenesis++;break;case MetabolismType.Photosynthesis:photosynthesis++;break;case MetabolismType.Methanotrophy:methanotrophy++;break;}switch(state.Locomotion[i]){case LocomotionType.PassiveDrift:passive++;break;case LocomotionType.Amoeboid:amoeboid++;break;case LocomotionType.Flagellum:flagellum++;break;case LocomotionType.Anchored:anchored++;break;}float store=Mathf.Max(0f,state.OrganicCStore[i]);float threshold=Mathf.Max(1f,divisionMultiple)*Mathf.Max(0.0001f,state.BiomassTarget[i]);organicMin=Mathf.Min(organicMin,store);organicMax=Mathf.Max(organicMax,store);organicSum+=store;thresholdMin=Mathf.Min(thresholdMin,threshold);thresholdMax=Mathf.Max(thresholdMax,threshold);thresholdSum+=threshold;maxDivisionCarbonFraction=Mathf.Max(maxDivisionCarbonFraction,store/threshold);bool energyReady=state.Energy[i]>=(carbonDivision?divisionCost:replicationCost);if(energyReady&&(!carbonDivision||store>=threshold))divisionEligible++;int cell=state.GeodesicCellIndex[i];int layer=state.CurrentOceanLayerIndex[i];if(grid.IsNodeActive(cell,layer)){int node=grid.GetNodeIndex(cell,layer);if(MarkTouchedNode(node,-generation,lightStamps))touched[occupiedNodeCount++]=node;}}
+        for (int i = 0; i < state.Count; i++)
+        {
+            switch (state.Metabolism[i])
+            {
+                case MetabolismType.Hydrogenotrophy: hydrogen++; break;
+                case MetabolismType.SulfurChemosynthesis: sulfur++; break;
+                case MetabolismType.Methanogenesis: methanogenesis++; break;
+                case MetabolismType.Photosynthesis: photosynthesis++; break;
+                case MetabolismType.Methanotrophy: methanotrophy++; break;
+            }
+            switch (state.Locomotion[i])
+            {
+                case LocomotionType.PassiveDrift: passive++; break;
+                case LocomotionType.Amoeboid: amoeboid++; break;
+                case LocomotionType.Flagellum: flagellum++; break;
+                case LocomotionType.Anchored: anchored++; break;
+            }
+            float store = Mathf.Max(0f, state.OrganicCStore[i]);
+            float threshold = Mathf.Max(1f, divisionMultiple) * Mathf.Max(0.0001f, state.BiomassTarget[i]);
+            organicMin = Mathf.Min(organicMin, store); organicMax = Mathf.Max(organicMax, store); organicSum += store;
+            thresholdMin = Mathf.Min(thresholdMin, threshold); thresholdMax = Mathf.Max(thresholdMax, threshold); thresholdSum += threshold;
+            maxDivisionCarbonFraction = Mathf.Max(maxDivisionCarbonFraction, store / threshold);
+            bool energyReady = state.Energy[i] > Mathf.Max(0f, carbonDivision ? divisionCost : replicationCost);
+            if (energyReady && state.CanReplicate[i] && (!carbonDivision || store >= threshold)) divisionEligible++;
+            int cell = state.GeodesicCellIndex[i], layer = state.CurrentOceanLayerIndex[i];
+            if (grid.IsNodeActive(cell, layer))
+            {
+                int node = grid.GetNodeIndex(cell, layer);
+                if (MarkTouchedNode(node, -generation, lightStamps)) touched[occupiedNodeCount++] = node;
+            }
+        }
         float occupiedH2Min=float.PositiveInfinity,occupiedH2Max=float.NegativeInfinity,occupiedCo2Min=float.PositiveInfinity,occupiedCo2Max=float.NegativeInfinity;double occupiedH2Sum=0d,occupiedCo2Sum=0d;int occupiedSamples=0;
         for(int t=0;t<occupiedNodeCount;t++){int node=touched[t];int cell=node/grid.MaximumLayerCount;int layer=node%grid.MaximumLayerCount;if(resources.TryGetConcentration(cell,layer,GeodesicOceanResource.H2,out float h2Value)&&resources.TryGetConcentration(cell,layer,GeodesicOceanResource.CO2,out float co2Value)){occupiedH2Min=Mathf.Min(occupiedH2Min,h2Value);occupiedH2Max=Mathf.Max(occupiedH2Max,h2Value);occupiedH2Sum+=h2Value;occupiedCo2Min=Mathf.Min(occupiedCo2Min,co2Value);occupiedCo2Max=Mathf.Max(occupiedCo2Max,co2Value);occupiedCo2Sum+=co2Value;occupiedSamples++;}}
         if(state.Count==0){organicMin=organicMax=thresholdMin=thresholdMax=float.NaN;}if(occupiedSamples==0){occupiedH2Min=occupiedH2Max=occupiedCo2Min=occupiedCo2Max=float.NaN;}
@@ -1102,6 +1196,10 @@ public sealed class GeodesicBiologyRuntime
         requests = Array.Empty<Request>(); demand = availabilityFactor = delta = Array.Empty<double>();
         touched = stamps = lightStamps = Array.Empty<int>();
         temperatureByNode = lightByNode = oxygenByNode = Array.Empty<float>(); touchedCount = 0;
+        temperatureStamps = Array.Empty<int>(); temperatureGeneration = 1; cachedOceanTemperatureTick = double.NaN;
+        temperatureSettings = GeodesicBiologyTemperatureSettings.Default;
+        temperatureMutationRandom = null;
+        temperatureTelemetry.Clear();
         Array.Clear(requestedByMetabolism, 0, requestedByMetabolism.Length);
         Array.Clear(achievedByMetabolism, 0, achievedByMetabolism.Length);
         Array.Clear(extentByMetabolism, 0, extentByMetabolism.Length);

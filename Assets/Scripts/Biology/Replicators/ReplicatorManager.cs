@@ -311,7 +311,7 @@ public class ReplicatorManager : MonoBehaviour
     public Vector2 fermentationTempRange = new Vector2(285.15f, 330.15f);
     public Vector2 methanogenesisTempRange = new Vector2(305.15f, 355.15f);
     public Vector2 methanotrophyTempRange = new Vector2(280.15f, 320.15f);
-    public float defaultLethalMargin = 20f; // Kelvin (~20 °C beyond optimal range before death)
+    public float defaultLethalMargin = 20f; // Inherited Kelvin scale for thermal tolerance shoulders.
     [Range(0f, 1f)] public float temperatureDormancyFloor = 0.02f;
     [Range(0f, 1f)] public float temperatureReplicationMinEfficiency = 0.15f;
     public bool temperatureDirectDamageEnabled = true;
@@ -321,6 +321,16 @@ public class ReplicatorManager : MonoBehaviour
     public float coldDamageStartTempKelvin = 253.15f; // -20 °C debug/dormancy marker
     [Range(0f, 1f)] public float tempMutationChance = 0.02f;
     public float tempMutationScale = 2f; // Kelvin mutation scale
+
+    [Header("Geodesic Temperature Stress")]
+    [Min(0f), Tooltip("Extra basal maintenance at zero temperature performance. 1 matches legacy's maximum doubling; 0 retains flat maintenance.")]
+    public float geodesicTemperatureStressMaintenanceMultiplier = 1f;
+    [Min(0f), Tooltip("Accumulated equivalent seconds at extreme cold before death. Milder exposure outside inherited tolerance accumulates more slowly; 0 disables cold exposure death.")]
+    public float geodesicColdExposureDeathSeconds = 120f;
+    [Min(0f), Tooltip("Accumulated equivalent seconds at extreme heat before death; 0 disables heat exposure death. Uses temperatureDirectDamageEnabled.")]
+    public float geodesicHeatExposureDeathSeconds = 60f;
+    [Min(0f), Tooltip("Exposure seconds recovered per simulation second after returning inside the individual's thermal tolerance.")]
+    public float geodesicTemperatureExposureRecoveryPerSecond = 1f;
 
     [Header("Temperature Display")]
     public TemperatureDisplayUnit temperatureDisplayUnit = TemperatureDisplayUnit.Celsius;
@@ -524,6 +534,8 @@ public class ReplicatorManager : MonoBehaviour
                 optimalTempMin = populationState.OptimalTempMin[i],
                 optimalTempMax = populationState.OptimalTempMax[i],
                 lethalTempMargin = populationState.LethalTempMargin[i],
+                coldTemperatureExposureSeconds = populationState.ColdTemperatureExposureSeconds[i],
+                heatTemperatureExposureSeconds = populationState.HeatTemperatureExposureSeconds[i],
                 starveCo2Seconds = populationState.StarveCo2Seconds[i],
                 starveH2sSeconds = populationState.StarveH2sSeconds[i],
                 starveH2Seconds = populationState.StarveH2Seconds[i],
@@ -947,7 +959,19 @@ public class ReplicatorManager : MonoBehaviour
             methanotrophyCH4PerTick, methanotrophyO2PerTick, methanotrophyEnergyPerTick,
             photosynthesisCo2PerTickAtFullInsolation, photosynthesisEnergyPerCo2, maxOrganicCStore,
             reproductionRate, enableCarbonLimitedDivision, divisionEnergyCost, replicationEnergyCost,
-            divisionBiomassMultiple, divisionCarbonSplitToChild, maxPopulation, RegisterDeathCause);
+            divisionBiomassMultiple, divisionCarbonSplitToChild, maxPopulation, RegisterDeathCause,
+            new GeodesicBiologyTemperatureSettings
+            {
+                DormancyFloor = temperatureDormancyFloor,
+                ReplicationMinEfficiency = temperatureReplicationMinEfficiency,
+                DirectDamageEnabled = temperatureDirectDamageEnabled,
+                ExtremeColdKelvin = extremeColdDeathTempKelvin, ExtremeHeatKelvin = extremeHeatDeathTempKelvin,
+                StressMaintenanceMultiplier = geodesicTemperatureStressMaintenanceMultiplier,
+                ColdExposureDeathSeconds = geodesicColdExposureDeathSeconds,
+                HeatExposureDeathSeconds = geodesicHeatExposureDeathSeconds,
+                ExposureRecoveryPerSecond = geodesicTemperatureExposureRecoveryPerSecond,
+                MutationChance = tempMutationChance, MutationScale = tempMutationScale
+            });
         if (geodesicFounderSpawnSchedule.TryConsume(simulationTimeSeconds, out int requestedFounders))
         {
             int spawned = geodesicBiology.SpawnDeferredFounders(requestedFounders, agents, populationState,

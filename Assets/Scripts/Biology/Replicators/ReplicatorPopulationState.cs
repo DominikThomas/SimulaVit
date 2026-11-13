@@ -38,6 +38,9 @@ public class ReplicatorPopulationState
     public float[] OptimalTempMin = new float[0];
     public float[] OptimalTempMax = new float[0];
     public float[] LethalTempMargin = new float[0];
+    // Geodesic accumulated full-severity-equivalent exposure, owned by this organism.
+    public float[] ColdTemperatureExposureSeconds = new float[0];
+    public float[] HeatTemperatureExposureSeconds = new float[0];
 
     public float[] StarveCo2Seconds = new float[0];
     public float[] StarveH2sSeconds = new float[0];
@@ -159,6 +162,8 @@ public class ReplicatorPopulationState
         agent.energy = Energy[index];
         agent.organicCStore = OrganicCStore[index];
         agent.age = Age[index];
+        agent.coldTemperatureExposureSeconds = ColdTemperatureExposureSeconds[index];
+        agent.heatTemperatureExposureSeconds = HeatTemperatureExposureSeconds[index];
         agent.attackCooldown = AttackCooldown[index];
         agent.starveCo2Seconds = StarveCo2Seconds[index];
         agent.starveH2sSeconds = StarveH2sSeconds[index];
@@ -220,6 +225,8 @@ public class ReplicatorPopulationState
         agent.velocity = Velocity[index];
         agent.energy = Energy[index];
         agent.age = Age[index];
+        agent.coldTemperatureExposureSeconds = ColdTemperatureExposureSeconds[index];
+        agent.heatTemperatureExposureSeconds = HeatTemperatureExposureSeconds[index];
         agent.organicCStore = OrganicCStore[index];
         agent.speedFactor = SpeedFactor[index];
         agent.attackCooldown = AttackCooldown[index];
@@ -291,6 +298,8 @@ public class ReplicatorPopulationState
         OptimalTempMin[index] = agent.optimalTempMin;
         OptimalTempMax[index] = agent.optimalTempMax;
         LethalTempMargin[index] = agent.lethalTempMargin;
+        ColdTemperatureExposureSeconds[index] = agent.coldTemperatureExposureSeconds;
+        HeatTemperatureExposureSeconds[index] = agent.heatTemperatureExposureSeconds;
         StarveCo2Seconds[index] = agent.starveCo2Seconds;
         StarveH2sSeconds[index] = agent.starveH2sSeconds;
         StarveH2Seconds[index] = agent.starveH2Seconds;
@@ -336,6 +345,8 @@ public class ReplicatorPopulationState
         OptimalTempMin[dstIndex] = OptimalTempMin[srcIndex];
         OptimalTempMax[dstIndex] = OptimalTempMax[srcIndex];
         LethalTempMargin[dstIndex] = LethalTempMargin[srcIndex];
+        ColdTemperatureExposureSeconds[dstIndex] = ColdTemperatureExposureSeconds[srcIndex];
+        HeatTemperatureExposureSeconds[dstIndex] = HeatTemperatureExposureSeconds[srcIndex];
         StarveCo2Seconds[dstIndex] = StarveCo2Seconds[srcIndex];
         StarveH2sSeconds[dstIndex] = StarveH2sSeconds[srcIndex];
         StarveH2Seconds[dstIndex] = StarveH2Seconds[srcIndex];
@@ -385,6 +396,8 @@ public class ReplicatorPopulationState
         GeodesicCellIndex[index] = 0;
         MaxLifespan[index] = 0f;
         BiomassTarget[index] = 0f;
+        ColdTemperatureExposureSeconds[index] = 0f;
+        HeatTemperatureExposureSeconds[index] = 0f;
         Metabolism[index] = default;
         Locomotion[index] = default;
         ResetPassiveMovementEntry(index);
@@ -434,6 +447,8 @@ public class ReplicatorPopulationState
         Array.Resize(ref OptimalTempMin, newCapacity);
         Array.Resize(ref OptimalTempMax, newCapacity);
         Array.Resize(ref LethalTempMargin, newCapacity);
+        Array.Resize(ref ColdTemperatureExposureSeconds, newCapacity);
+        Array.Resize(ref HeatTemperatureExposureSeconds, newCapacity);
         Array.Resize(ref StarveCo2Seconds, newCapacity);
         Array.Resize(ref StarveH2sSeconds, newCapacity);
         Array.Resize(ref StarveH2Seconds, newCapacity);
