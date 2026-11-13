@@ -128,6 +128,7 @@ public sealed class GeodesicTinLakeSediment
         private readonly Vector3 origin, east, north;
         private readonly Vector2 minimum, maximum;
         private const float Tolerance = 0.0000002f;
+        internal long QueryTicks { get; private set; }
 
         internal Footprint(GeodesicTinHydrology tin, GeodesicTinLakeGeometry geometry, TinLakeBody body)
         {
@@ -173,6 +174,12 @@ public sealed class GeodesicTinLakeSediment
 
         internal bool Covers(Vector2 a, Vector2 b)
         {
+            long started = System.Diagnostics.Stopwatch.GetTimestamp();
+            try { return CoversCore(a, b); }
+            finally { QueryTicks += System.Diagnostics.Stopwatch.GetTimestamp() - started; }
+        }
+        private bool CoversCore(Vector2 a, Vector2 b)
+        {
             var intervals = new List<(float Start, float End)>();
             foreach (var facet in Facets.Values)
                 if (facet.Clip(a, b, Tolerance, out float start, out float end)) intervals.Add((start, end));
@@ -192,6 +199,12 @@ public sealed class GeodesicTinLakeSediment
         // its actual tapered width than the original course at the same station.
         internal float Coverage(Vector2 a, Vector2 b, Vector2 c, Vector2 d)
         {
+            long started = System.Diagnostics.Stopwatch.GetTimestamp();
+            try { return CoverageCore(a, b, c, d); }
+            finally { QueryTicks += System.Diagnostics.Stopwatch.GetTimestamp() - started; }
+        }
+        private float CoverageCore(Vector2 a, Vector2 b, Vector2 c, Vector2 d)
+        {
             double expected = Mathf.Abs(Cross(b - a, c - a)) + Mathf.Abs(Cross(c - a, d - a));
             if (!(expected > 0d)) return 0f;
             double covered = 0d;
@@ -207,6 +220,12 @@ public sealed class GeodesicTinLakeSediment
         }
 
         internal void LateralRoom(Vector2 point, Vector2 direction, out float negative, out float positive)
+        {
+            long started = System.Diagnostics.Stopwatch.GetTimestamp();
+            try { LateralRoomCore(point, direction, out negative, out positive); }
+            finally { QueryTicks += System.Diagnostics.Stopwatch.GetTimestamp() - started; }
+        }
+        private void LateralRoomCore(Vector2 point, Vector2 direction, out float negative, out float positive)
         {
             negative = positive = 0f;
             float reach = (maximum - minimum).magnitude;

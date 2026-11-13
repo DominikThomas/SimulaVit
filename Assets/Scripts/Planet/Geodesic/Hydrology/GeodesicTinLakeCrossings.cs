@@ -5,6 +5,8 @@ using UnityEngine;
 
 internal sealed class GeodesicTinLakeCrossings
 {
+    internal const int AlgorithmVersion = 1; // Presentation cache only; bump when the winding mathematics change.
+    internal long CollisionTicks { get; private set; }
     internal sealed class Crossing
     {
         internal GeodesicTinLakeSediment.Footprint Bed;
@@ -373,6 +375,7 @@ internal sealed class GeodesicTinLakeCrossings
                             if (fraction + 1e-5f < originalFraction) Mark(i, MeanderRejection.Containment);
                         }
                     }
+                    long collisionStarted = System.Diagnostics.Stopwatch.GetTimestamp();
                     bool coincidentPins = step.sqrMagnitude <= GeometryTolerance * GeometryTolerance &&
                         a.Equals(baseline[i - 1]) && b.Equals(baseline[i]);
                     if (!coincidentPins && (Vector2.Dot(step, step + bankStep) <= 0f || Vector2.Dot(step, step - bankStep) <= 0f))
@@ -405,6 +408,7 @@ internal sealed class GeodesicTinLakeCrossings
                         if (separation < clearance * clearance && (arc[i - 1] - arc[j] > clearance * 2f || separation == 0f))
                         { Mark(i, MeanderRejection.Topology); Mark(j, MeanderRejection.Topology); }
                     }
+                    CollisionTicks += System.Diagnostics.Stopwatch.GetTimestamp() - collisionStarted;
                 }
                 if (bad.All(p => p == MeanderRejection.None)) { safe = true; break; }
                 bool changed = false;

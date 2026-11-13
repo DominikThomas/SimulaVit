@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.IO;
 using UnityEngine;
+using S = GeodesicSnapshotIO;
 
 /// <summary>Checks the emitted river geometry against the directed outlet graph.</summary>
 internal sealed class GeodesicRiverOutletAudit
@@ -37,21 +39,26 @@ internal sealed class GeodesicRiverOutletAudit
             (end.Basin != null ? c.Terminal.Basin?.Id == end.Basin.Id : c.Terminal.TerminalId == end.TerminalId))
         .Sum(c => c.Runoff);
     internal string Summary { get; private set; }
+    internal long CaptureTicks { get; private set; }
+    private bool completedSnapshot;
 
     internal GeodesicRiverOutletAudit(GeodesicDrainageDelivery delivery) { this.delivery = delivery; }
 
     internal void Record(string route, List<Vector3> vertices, int first, bool lines)
     {
         if (vertices.Count - first < (lines ? 2 : 6)) return;
+        long started = System.Diagnostics.Stopwatch.GetTimestamp();
         var reach = new Reach { Vertices = new Vector3[vertices.Count - first], Lines = lines };
         vertices.CopyTo(first, reach.Vertices, 0, reach.Vertices.Length);
         Add(route, reach);
+        CaptureTicks += System.Diagnostics.Stopwatch.GetTimestamp() - started;
     }
 
     internal void RecordBed(string route, List<Vector3> vertices, int first, List<int> indices, int firstIndex,
         GeodesicTinLakeCrossings.Crossing crossing, float offset, bool lines)
     {
         if (lines) { Record(route, vertices, first, true); return; }
+        long started = System.Diagnostics.Stopwatch.GetTimestamp();
         var reach = new Reach
         {
             Vertices = new Vector3[vertices.Count - first],
@@ -61,6 +68,7 @@ internal sealed class GeodesicRiverOutletAudit
         vertices.CopyTo(first, reach.Vertices, 0, reach.Vertices.Length);
         for (int i = 0; i < reach.Triangles.Length; i++) reach.Triangles[i] = indices[firstIndex + i] - first;
         Add(route, reach);
+        CaptureTicks += System.Diagnostics.Stopwatch.GetTimestamp() - started;
     }
 
     private void Add(string route, Reach reach)
@@ -77,6 +85,7 @@ internal sealed class GeodesicRiverOutletAudit
     internal void Complete(GeodesicTinHydrology tin, GeodesicRiverShoreline shoreline, Func<Vector3, float> terrain,
         GeodesicTinLakeGeometry lakes, float radius, float offset)
     {
+        if (completedSnapshot) throw new InvalidOperationException("Rebuild river presentation to repeat a cached geometric outlet audit.");
         var retained = lakes?.Bodies.ToDictionary(l => l.BasinId) ?? new Dictionary<int, TinLakeBody>();
         // This is a numerical contact margin, about 0.02% of an L7 edge.
         float tolerance = radius * .000002f;
@@ -195,6 +204,60 @@ internal sealed class GeodesicRiverOutletAudit
             }
             return false;
         }
+    }
+
+    // Only completed results and diagnostic centrelines are persisted. The parent
+    // delivery graph and the exact mesh digest bind this proof to its geometry.
+    internal void WritePresentation(BinaryWriter w)
+    {
+        S.Text(w, Summary);
+        S.Write(w, Results.OrderBy(p => p.Key, StringComparer.Ordinal).ToArray(), (b, item) =>
+        {
+            var r = item.Value;
+            S.Text(b, r.Route); S.Text(b, r.Receiver); S.Text(b, r.Reason); b.Write((byte)r.State);
+            Optional(b, r.End); Optional(b, r.Expected); Optional(b, r.Logical);
+        });
+        S.Write(w, geometry.Keys.OrderBy(p => p, StringComparer.Ordinal).ToArray(), (b, route) =>
+        {
+            S.Text(b, route);
+            S.Write(b, Centerlines(route).ToArray(), (writer, points) => S.Write(writer, points, S.Vector));
+        });
+
+        void Optional(BinaryWriter b, Vector3? value) { b.Write(value.HasValue); if (value.HasValue) S.Vector(b, value.Value); }
+    }
+
+    internal static GeodesicRiverOutletAudit ReadPresentation(BinaryReader r, GeodesicDrainageDelivery delivery,
+        HashSet<string> bedRoutes, int maximumPoints)
+    {
+        var result = new GeodesicRiverOutletAudit(delivery) { Summary = S.Text(r), completedSnapshot = true };
+        S.Require(result.Summary != null, "Missing completed outlet audit.");
+        int count = S.Count(r, delivery.OutletLinks.Count, 7);
+        S.Require(count == delivery.OutletLinks.Count, "Outlet audit does not cover the authority graph.");
+        for (int i = 0; i < count; i++)
+        {
+            var value = new Result { Route = S.Text(r), Receiver = S.Text(r), Reason = S.Text(r), State = (Status)S.IdByte(r, 5),
+                End = Optional(r), Expected = Optional(r), Logical = Optional(r) };
+            S.Require(value.Route != null, "Missing cached outlet route.");
+            S.Require(delivery.OutletLinks.TryGetValue(value.Route, out var link), "Unknown cached outlet route.");
+            S.Require(value.Receiver == (link.Next ?? link.End.TerminalId) && value.Reason != null, "Cached outlet receiver mismatch.");
+            result.Results.Add(value.Route, value);
+        }
+        count = S.Count(r, delivery.OutletLinks.Count + bedRoutes.Count, 5);
+        for (int i = 0; i < count; i++)
+        {
+            string route = S.Text(r);
+            S.Require(route != null && (delivery.OutletLinks.ContainsKey(route) || bedRoutes.Contains(route)) && !result.geometry.ContainsKey(route), "Unknown or duplicate emitted outlet route.");
+            var reaches = S.Read(r, maximumPoints, 4, b => S.Read(b, maximumPoints, 12, S.Vector));
+            S.Require(reaches.Length > 0, "Empty cached outlet geometry.");
+            foreach (var points in reaches)
+            {
+                S.Require(points.Length >= 2, "Invalid cached diagnostic centreline.");
+                result.Add(route, new Reach { Path = points, Vertices = Array.Empty<Vector3>() });
+            }
+        }
+        return result;
+
+        Vector3? Optional(BinaryReader b) => S.Flag(b) ? S.Vector(b) : (Vector3?)null;
     }
 
     private Vector3? Closest(string route, Vector3 endpoint)

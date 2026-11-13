@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -743,6 +744,8 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
     {
         if (intermediateTinCarving) yield break;
         ClearVisual(); paths.Clear(); mouths.Clear();
+        presentationTimes = new PresentationTimings();
+        var authorityWatch = System.Diagnostics.Stopwatch.StartNew();
         visibleReaches = riverCells = riverMouths = 0;
         if (TinDrainage == null || planet == null) yield break;
         if (colourRenderedRiversByVisibleTerrainGrade || showRiverTerminationReasons)
@@ -755,6 +758,7 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
             yield return new PlanetGenerationProgress(PlanetGenerationStage.RoutingRivers);
         if (!reuseRawNetworks)
         {
+            presentationAuthority = null;
             var rejected = tinRecord != null ? new List<(int Source, TinPoint[] Samples)>() : null;
             TinDrainage.ExtractNetworks(ResolvedDrainageAreaThreshold, planet.BasePlanetRadius,
                 rejected != null || showRejectedUphillRiverSegments ? RecordRejected : (Action<int, TinPoint[]>)null);
@@ -845,15 +849,33 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
         visualWatch.Restart();
         RefreshSedimentSurface();
         double sedimentVisualMs = visualWatch.Elapsed.TotalMilliseconds;
+        BindPresentationAuthority(deliveryRecord);
+        presentationTimes.Authority = authorityWatch.Elapsed.TotalMilliseconds;
         riverColourDelivery = DrainageDelivery;
         if (ColourRiversByUltimateDestination && riverColourDelivery == null)
             riverColourDelivery = AnalyzeRiverColours();
-        BeginOutletAudit();
         yield return new PlanetGenerationProgress(PlanetGenerationStage.BuildingRiverRibbons);
         var watch = System.Diagnostics.Stopwatch.StartNew();
         double threshold = ResolvedDrainageAreaThreshold;
         for (int t = 0; t < RiverStrength.Length; t++) RiverStrength[t] = (float)(TinDrainage.AccumulatedRunoff[t] / threshold);
+        var presentationRecord = RiverPresentationRecord();
+        if (TryRestoreRiverPresentation(presentationRecord, delivery))
+        {
+            var restoredDiagnosticsWatch = System.Diagnostics.Stopwatch.StartNew();
+            if (showRiverTerminationReasons) BuildTerminationDebugVisual();
+            if (VisibleGradeAudit != null) Debug.Log(VisibleGradeAudit.Summary(), this);
+            presentationTimes.Diagnostics += restoredDiagnosticsWatch.Elapsed.TotalMilliseconds;
+            FinishRiverPresentation(watch.Elapsed.TotalMilliseconds, lakeVisualMs, sedimentVisualMs, true);
+            yield break;
+        }
+        BeginOutletAudit();
+        int[] diagnosticBase = { TinDiagnostics.RejectedPostProcessing, TinDiagnostics.UnexpectedBrokenNetworks,
+            TinDiagnostics.UnexpectedInlandBreaks, TinDiagnostics.Confluences };
         var vertices = new List<Vector3>(); var indices = new List<int>(); var colors = new List<Color>();
+        presentationBuildColours = colors; presentationBuildBands = new List<byte>();
+        var networkWatch = System.Diagnostics.Stopwatch.StartNew();
+        long networkRibbonBefore = presentationTimes.RibbonTicks, networkAuditBefore = OutletAudit?.CaptureTicks ?? 0;
+        double networkDiagnosticsBefore = presentationTimes.Diagnostics;
         var rendered = new bool[TinDrainage.Networks.Count];
         var corridorReceivers = CorridorWidthReceivers();
         for (int id = 0; id < TinDrainage.Networks.Count; id++)
@@ -862,13 +884,13 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
             var lakeReach = TinLakeRouting != null ? TinLakeRouting.RiverReaches[id] : null;
             bool lakeAffected = lakeReach != null && (lakeReach.Changed || TinLakeRouting.HasAddedDischarge(id));
             if (lakeAffected) raw = TinLakeRouting.Directions(lakeReach.Samples);
-            if (raw.Length < 2) { delivery?.ObserveShortLink(lakeReach != null && lakeReach.ReceivingLakeId >= 0); continue; }
+            if (raw.Length < 2) { ObservePresentationBreak(delivery, id, lakeReach != null && lakeReach.ReceivingLakeId >= 0 ? (byte)1 : (byte)0); continue; }
             // Resample all crossed TIN facets after float conversion, interpolation and
             // projection. Optional aesthetics must retain this validated raw fallback.
-            if (!terrain.IsCentrelineValid(raw, TinDrainage.Epsilon, TinDrainage.VisibleBumpTolerance))
+            if (!PresentationCentrelineValid(raw))
             {
                 TinDiagnostics.RejectedPostProcessing++; TinDiagnostics.UnexpectedBrokenNetworks++;
-                delivery?.ObserveVisualBreak(id, "centreline");
+                ObservePresentationBreak(delivery, id, 2);
                 TinDiagnostics.UnexpectedInlandBreaks++;
                 CaptureRejectedPath(network.SourceTriangle, raw, RiverDebugRejection.CentrelineGrade); continue;
             }
@@ -880,13 +902,13 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
                     for (int s = 0; s < 3; s++) interpolated.Add(Vector3.Lerp(raw[i - 1], raw[i], s / 3f).normalized);
                 interpolated.Add(raw[raw.Length - 1]);
                 var candidate = interpolated.ToArray();
-                if (terrain.IsCentrelineValid(candidate, TinDrainage.Epsilon, TinDrainage.VisibleBumpTolerance)) path = candidate;
+                if (PresentationCentrelineValid(candidate)) path = candidate;
                 else TinDiagnostics.RejectedPostProcessing++;
             }
             var projectedDirections = new Vector3[path.Length];
             for (int i = 0; i < path.Length; i++) projectedDirections[i] =
                 (path[i] * (terrain.Radius(path[i]) + Mathf.Max(.000001f, surfaceOffset))).normalized;
-            if (!terrain.IsCentrelineValid(projectedDirections, TinDrainage.Epsilon, TinDrainage.VisibleBumpTolerance))
+            if (!PresentationCentrelineValid(projectedDirections))
             {
                 // Fall back to projection of the unsmoothed path, then fail closed if even
                 // that cannot be represented at float precision. No later reach is restarted.
@@ -894,9 +916,9 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
                 for (int i = 0; i < raw.Length; i++) projectedDirections[i] =
                     (raw[i] * (terrain.Radius(raw[i]) + Mathf.Max(.000001f, surfaceOffset))).normalized;
                 TinDiagnostics.RejectedPostProcessing++;
-                if (!terrain.IsCentrelineValid(projectedDirections, TinDrainage.Epsilon, TinDrainage.VisibleBumpTolerance))
+                if (!PresentationCentrelineValid(projectedDirections))
                 { TinDiagnostics.UnexpectedBrokenNetworks++; TinDiagnostics.UnexpectedInlandBreaks++;
-                    delivery?.ObserveVisualBreak(id, "projection");
+                    ObservePresentationBreak(delivery, id, 3);
                     CaptureRejectedPath(network.SourceTriangle, projectedDirections, RiverDebugRejection.ProjectionGrade); continue; }
             }
             paths[network.SourceTriangle] = path;
@@ -931,21 +953,22 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
             if (drawRawTrianglePaths) AddRawTinLine(path, vertices, indices, colors, endLevel: endLevel);
             else AddTinRibbon(path, network.SourceTriangle, vertices, indices, colors, discharge, lakeInlet && !endLevel.HasValue, endLevel: endLevel);
             OutletAudit?.Record(route, vertices, firstVertex, drawRawTrianglePaths);
+            presentationReaches.Add((network.SourceTriangle, firstVertex, path.Length, firstIndex));
+            long gradeStarted = System.Diagnostics.Stopwatch.GetTimestamp();
             VisibleGradeAudit?.ObserveEmittedPath(network.SourceTriangle, vertices, firstVertex, path.Length,
                 drawRawTrianglePaths, firstIndex, terrain, planet.BasePlanetRadius);
+            presentationTimes.Diagnostics += PresentationTimings.Milliseconds(System.Diagnostics.Stopwatch.GetTimestamp() - gradeStarted);
             visibleReaches++; rendered[id] = true;
             RecordRiverColour("network:" + id, firstVertex, vertices.Count);
             if ((!reuseRawNetworks || restoredTin != null) && TinLakeRouting == null && network.Termination == TinTermination.Confluence && network.JunctionNetwork >= 0 && !rendered[network.JunctionNetwork])
             {
                 TinDiagnostics.Confluences--; TinDiagnostics.UnexpectedBrokenNetworks++; TinDiagnostics.UnexpectedInlandBreaks++;
-                delivery?.ObserveVisualBreak(id, "missing-trunk");
+                ObservePresentationBreak(delivery, id, 4);
                 if (SedimentCorridors == null) { network.Termination = TinTermination.RoutingFailure; network.JunctionNetwork = -1; }
             }
-            if (riverTerminationPoints != null)
-            {
-                int finalCentre = firstVertex + (path.Length - 1) * (drawRawTrianglePaths ? 1 : 3) + (drawRawTrianglePaths ? 0 : 1);
-                riverTerminationPoints.Add(new RiverTerminationDebugPoint(network.SourceTriangle, network.Termination, vertices[finalCentre]));
-            }
+            int finalCentre = firstVertex + (path.Length - 1) * (drawRawTrianglePaths ? 1 : 3) + (drawRawTrianglePaths ? 0 : 1);
+            var endPoint = new RiverTerminationDebugPoint(network.SourceTriangle, network.Termination, vertices[finalCentre]);
+            presentationTerminations.Add(endPoint); riverTerminationPoints?.Add(endPoint);
             if (termination == TinTermination.OceanCoast && !lakeInlet)
             {
                 var coastSamples = lakeReach?.Samples ?? network.Samples;
@@ -960,13 +983,19 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
                 riverMouths++;
             }
         }
+        presentationTimes.Paths = networkWatch.Elapsed.TotalMilliseconds - PresentationTimings.Milliseconds(presentationTimes.RibbonTicks - networkRibbonBefore) -
+            PresentationTimings.Milliseconds((OutletAudit?.CaptureTicks ?? 0) - networkAuditBefore) - (presentationTimes.Diagnostics - networkDiagnosticsBefore);
         var corridorInletLakes = new HashSet<int>();
         if (SedimentCorridors != null)
             foreach (var connection in SedimentCorridors.Connections.Values) corridorInletLakes.UnionWith(connection.InletLakes);
         var renderedLakeOutlets = new HashSet<int>();
         if (TinLakeRouting != null)
         {
+            var crossingWatch = System.Diagnostics.Stopwatch.StartNew();
             var crossings = lakeSediment != null ? GeodesicTinLakeCrossings.Build(TinDrainage, TinLakeRouting, lakeSediment, rendered) : null;
+            presentationTimes.CrossingBuild = crossingWatch.Elapsed.TotalMilliseconds;
+            var lakePathWatch = System.Diagnostics.Stopwatch.StartNew();
+            long lakeRibbonBefore = presentationTimes.RibbonTicks, lakeAuditBefore = OutletAudit?.CaptureTicks ?? 0;
             foreach (var lake in TinLakeRouting.Lakes)
             {
                 if (lake.OutletReachId < 0 && crossings?.VisibleOutlets.Contains(lake.BasinId) != true && !corridorInletLakes.Contains(lake.BasinId)) continue;
@@ -987,20 +1016,30 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
                 renderedLakeOutlets.Add(lake.BasinId);
                 RecordRiverColour("lake:" + lake.BasinId, firstVertex, vertices.Count);
             }
+            presentationTimes.Paths += lakePathWatch.Elapsed.TotalMilliseconds - PresentationTimings.Milliseconds(presentationTimes.RibbonTicks - lakeRibbonBefore) -
+                PresentationTimings.Milliseconds((OutletAudit?.CaptureTicks ?? 0) - lakeAuditBefore);
             if (crossings != null)
             {
+                crossingWatch.Restart();
                 if (!drawRawTrianglePaths) crossings.AddMeanders(planet.DerivedVisualSeed, WidthProfile, Mathf.Max(.000001f, surfaceOffset));
+                presentationTimes.Meanders = crossingWatch.Elapsed.TotalMilliseconds;
+                presentationTimes.Collisions = PresentationTimings.Milliseconds(crossings.CollisionTicks);
+                presentationTimes.Containment = PresentationTimings.Milliseconds(lakeSediment.Lakes.Values.Sum(p => p.QueryTicks));
                 foreach (var crossing in crossings.Paths)
                 {
                     float strength = (float)(crossing.Discharge / threshold);
                     var widthProfile = WidthProfile;
                     float width = widthProfile.Width(crossing.Discharge);
                     float inletWidth = widthProfile.Width(crossing.DischargeAtInlet);
-                    Color color = strength * riverFlowThreshold >= Math.Max(riverFlowThreshold, majorRiverThreshold)
+                    bool major = strength * riverFlowThreshold >= Math.Max(riverFlowThreshold, majorRiverThreshold);
+                    Color color = major
                         ? Color.Lerp(riverColor, Color.cyan, .3f) : riverColor;
                     int firstIndex = indices.Count, firstVertex = vertices.Count;
+                    long ribbonStarted = System.Diagnostics.Stopwatch.GetTimestamp();
                     GeodesicTinLakeCrossings.AddRibbon(crossing, inletWidth / crossing.Bed.Level, width / crossing.Bed.Level,
                         Mathf.Max(.000001f, surfaceOffset), color, drawRawTrianglePaths, vertices, indices, colors, RecordMeanderDiagnosticSpan);
+                    presentationTimes.RibbonTicks += System.Diagnostics.Stopwatch.GetTimestamp() - ribbonStarted;
+                    RecordPresentationColour(colors, major, vertices.Count - firstVertex);
                     if (indices.Count > firstIndex)
                     {
                         visibleReaches++;
@@ -1014,8 +1053,15 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
             }
             Debug.Log(TinLakeRouting.Summary(), this);
         }
+        var corridorWatch = System.Diagnostics.Stopwatch.StartNew();
+        long corridorRibbonBefore = presentationTimes.RibbonTicks, corridorAuditBefore = OutletAudit?.CaptureTicks ?? 0;
         DrawSedimentCorridors(rendered, renderedLakeOutlets, vertices, indices, colors);
+        presentationTimes.Paths += corridorWatch.Elapsed.TotalMilliseconds - PresentationTimings.Milliseconds(presentationTimes.RibbonTicks - corridorRibbonBefore) -
+            PresentationTimings.Milliseconds((OutletAudit?.CaptureTicks ?? 0) - corridorAuditBefore);
+        long auditStarted = System.Diagnostics.Stopwatch.GetTimestamp();
         CompleteOutletAudit();
+        presentationTimes.AuditCompleteTicks = System.Diagnostics.Stopwatch.GetTimestamp() - auditStarted;
+        var diagnosticsWatch = System.Diagnostics.Stopwatch.StartNew();
         if (VisibleGradeAudit != null)
         {
             VisibleGradeAudit.Resolve(planet.BasePlanetRadius);
@@ -1026,42 +1072,27 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
                 if (end.Reason == TinTermination.TrueClosedBasin) VisibleGradeAudit.ClosedBasinMarkers++;
                 if (end.Reason == TinTermination.RoutingFailure) VisibleGradeAudit.UnexpectedMarkers++;
             }
-            if (colourRenderedRiversByVisibleTerrainGrade) VisibleGradeAudit.ApplyColours(vertices, indices, colors);
         }
+        presentationTimes.Diagnostics += diagnosticsWatch.Elapsed.TotalMilliseconds;
+        var meshWatch = System.Diagnostics.Stopwatch.StartNew();
         if (vertices.Count > 0 && planet.enableGeodesicRivers)
         {
-            riverMesh = new Mesh { name = drawRawTrianglePaths ? "Raw TIN Gradient Rivers" : "TIN River Ribbons", indexFormat = IndexFormat.UInt32 };
-            riverMesh.SetVertices(vertices); riverMesh.SetIndices(indices.ToArray(), drawRawTrianglePaths ? MeshTopology.Lines : MeshTopology.Triangles, 0);
             normalRiverColours = colors;
-            ApplyRiverColours();
-            if (!drawRawTrianglePaths) riverMesh.RecalculateNormals();
-            else riverMesh.SetNormals(vertices.ConvertAll(v => v.normalized));
-            riverMesh.RecalculateBounds();
-            visualRoot = new GameObject(drawRawTrianglePaths ? "Raw TIN Gradient Rivers" : "TIN River Ribbons");
-            visualRoot.layer = gameObject.layer; visualRoot.transform.SetParent(transform, false);
-            visualRoot.AddComponent<MeshFilter>().sharedMesh = riverMesh;
-            var renderer = visualRoot.AddComponent<MeshRenderer>();
-            Shader shader = Shader.Find("SimulaVit/GeodesicVertexColorURP");
-            if (shader != null)
-            {
-                riverMaterial = new Material(shader) { name = "TIN Rivers (Runtime)" };
-                riverMaterial.SetFloat("_AmbientStrength", 1f); riverMaterial.SetFloat("_DiffuseStrength", 0f);
-                renderer.sharedMaterial = riverMaterial;
-            }
-            else Debug.LogError("[GeodesicTIN] River shader is missing.", this);
-            renderer.shadowCastingMode = ShadowCastingMode.Off;
-            visualRoot.SetActive(showRivers && planet.enableGeodesicRivers && isActiveAndEnabled);
+            presentationBands = presentationBuildBands.ToArray(); presentationBaseColour = riverColor;
+            BuildRiverPresentationMesh(vertices.ToArray(), indices.ToArray());
         }
+        presentationTimes.Mesh = meshWatch.Elapsed.TotalMilliseconds;
+        try { SaveRiverPresentation(presentationRecord, diagnosticBase); }
+        catch (Exception ex) when (ex is System.IO.IOException || ex is ArgumentException)
+        { Debug.LogWarning("[GeodesicRiverPresentationCache] capture skipped: " + ex.Message, this); }
+        presentationBuildColours = null; presentationBuildBands = null;
+        diagnosticsWatch.Restart();
+        ApplyPresentationGradeOverlay();
         if (showRejectedUphillRiverSegments) BuildUphillDebugVisual();
         if (showRiverTerminationReasons) BuildTerminationDebugVisual();
         if (VisibleGradeAudit != null) Debug.Log(VisibleGradeAudit.Summary(), this);
-        TinDiagnostics.RibbonMilliseconds = watch.Elapsed.TotalMilliseconds;
-        Debug.Log(FormattableString.Invariant($"[GeodesicHydrologyVisuals] lakesMs={lakeVisualMs:F2} sedimentMs={sedimentVisualMs:F2} ribbonsAndOutletAuditMs={TinDiagnostics.RibbonMilliseconds:F2}"), this);
-        visualMilliseconds = TinDiagnostics.TracingMilliseconds + TinDiagnostics.RibbonMilliseconds;
-        riverCells = TinDiagnostics.RiverTriangles; visibleRiverChains = TinDiagnostics.RiverNetworks;
-        confluences = TinDiagnostics.Confluences; unexpectedBrokenChains = TinDiagnostics.UnexpectedBrokenNetworks;
-        basinTerminatedChains = TinDiagnostics.ClosedBasinTerminations; OceanConnectedChains = TinDiagnostics.OceanTerminations;
-        visibleUphillSegments = TinDiagnostics.VisibleMaterialUphillSegments; ridgeCrossings = TinDiagnostics.VisibleRidgeCrossings;
+        presentationTimes.Diagnostics += diagnosticsWatch.Elapsed.TotalMilliseconds;
+        FinishRiverPresentation(watch.Elapsed.TotalMilliseconds, lakeVisualMs, sedimentVisualMs, false);
     }
 
     private void BuildTerminationDebugVisual()
@@ -1179,6 +1210,7 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
     private void AddRawTinLine(Vector3[] path, List<Vector3> vertices, List<int> indices, List<Color> colors,
         float? startLevel = null, float? endLevel = null, float minimumRadius = 0)
     {
+        long started = System.Diagnostics.Stopwatch.GetTimestamp();
         int first = vertices.Count;
         for (int i = 0; i < path.Length; i++)
         {
@@ -1186,6 +1218,8 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
             vertices.Add(path[i] * (Mathf.Max(minimumRadius, level ?? RenderRadius(path[i])) + Mathf.Max(.000001f, surfaceOffset))); colors.Add(riverColor);
             if (i > 0) { indices.Add(first + i - 1); indices.Add(first + i); }
         }
+        RecordPresentationColour(colors, false, path.Length);
+        if (ReferenceEquals(colors, presentationBuildColours)) presentationTimes.RibbonTicks += System.Diagnostics.Stopwatch.GetTimestamp() - started;
     }
 
     private double[] DistinctReachDischarge(TinPoint[] samples, double[] discharge, bool joinsRiver)
@@ -1228,6 +1262,7 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
         double[] discharge = null, bool shorelineEnd = false, bool spillStart = false, float? startLevel = null, float? endLevel = null,
         float minimumRadius = 0)
     {
+        long started = System.Diagnostics.Stopwatch.GetTimestamp();
         // A short lake-to-lake reach needs an interior cross-section when both ends
         // taper to exact shore points; two collapsed caps alone have zero area.
         if (path.Length == 2 && shorelineEnd && spillStart)
@@ -1262,9 +1297,11 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
             vertices.Add(left * (Mathf.Max(bankMinimum, RenderRadius(left)) + offset));
             vertices.Add(path[i] * (Mathf.Max(minimumRadius, centreRadius) + offset));
             vertices.Add(right * (Mathf.Max(bankMinimum, RenderRadius(right)) + offset));
-            Color color = flow >= meanCellArea * Math.Max(riverFlowThreshold, majorRiverThreshold)
+            bool major = flow >= meanCellArea * Math.Max(riverFlowThreshold, majorRiverThreshold);
+            Color color = major
                 ? Color.Lerp(riverColor, Color.cyan, .3f) : riverColor;
             colors.Add(color); colors.Add(color); colors.Add(color);
+            RecordPresentationColour(colors, major, 3);
             if (i == 0) continue;
             int p = first + (i - 1) * 3;
             indices.Add(p); indices.Add(p + 3); indices.Add(p + 1);
@@ -1272,6 +1309,7 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
             indices.Add(p + 1); indices.Add(p + 4); indices.Add(p + 2);
             indices.Add(p + 2); indices.Add(p + 4); indices.Add(p + 5);
         }
+        if (ReferenceEquals(colors, presentationBuildColours)) presentationTimes.RibbonTicks += System.Diagnostics.Stopwatch.GetTimestamp() - started;
     }
 
     private int RetainedOceanCellAtCoast(Vector3 coast, int seed)
@@ -1362,8 +1400,9 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
         foreach (string failure in crossings.Failures) Debug.LogWarning("[GeodesicTinLakeSediment] " + failure, this);
         if (!drawRawTrianglePaths)
         {
-            Debug.Log(crossings.MeanderSummary(), this);
-            Debug.Log(crossings.DisplacementSummary(), this);
+            string summary = crossings.MeanderSummary(), longest = crossings.DisplacementSummary();
+            Debug.Log(summary, this); Debug.Log(longest, this);
+            presentationMessages.Add(summary); presentationMessages.Add(longest);
         }
     }
 
@@ -1588,12 +1627,16 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
         HydrologyTerrainSummary = null; HydrologyTerrainInputHeights = null;
         landCells = riverCells = visibleReaches = suppressedUphillReaches = riverMouths = unresolvedSinks = filledCells = majorBasinCells = 0;
         topologyMilliseconds = visualMilliseconds = 0d;
+        presentationAuthority = null; presentationTin = null; presentationRouting = null; presentationCorridors = null;
+        lastPresentationKey = lastPresentationHash = null;
     }
     private void ClearVisual()
     {
         riverColourSpans.Clear();
         normalRiverColours = destinationRiverColours = null;
         meanderDiagnosticSpans.Clear(); meanderDiagnosticColours = null;
+        presentationBands = null; presentationBuildColours = null; presentationBuildBands = null;
+        presentationReaches.Clear(); presentationTerminations.Clear(); presentationObservations.Clear(); presentationMessages.Clear();
         riverColourDelivery = null;
         if (terminationDebugRoot != null) terminationDebugRoot.SetActive(false);
         Release(terminationDebugRoot); Release(terminationDebugMesh); Release(terminationDebugMaterial);

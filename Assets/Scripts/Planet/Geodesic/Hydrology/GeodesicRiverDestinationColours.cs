@@ -93,6 +93,8 @@ public sealed partial class GeodesicRiverSystem
 
     private void ApplyRiverColours()
     {
+        if (presentationBands != null && presentationBaseColour != riverColor)
+        { RecolourPresentation(); destinationRiverColours = null; }
         if (ColourRiversBySedimentMeanders)
         {
             if (meanderDiagnosticColours == null)
