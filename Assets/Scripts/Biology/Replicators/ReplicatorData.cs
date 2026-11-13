@@ -59,6 +59,10 @@ public enum LocomotionType
 [System.Serializable]
 public class Replicator
 {
+    private static long nextDiagnosticId;
+    // Runtime identity follows this companion through packed swap-back moves. Reloads get new IDs.
+    public long DiagnosticId { get; } = System.Threading.Interlocked.Increment(ref nextDiagnosticId);
+
     [System.Serializable]
     public struct Traits
     {

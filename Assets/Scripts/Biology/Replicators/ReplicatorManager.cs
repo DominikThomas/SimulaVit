@@ -449,9 +449,6 @@ public class ReplicatorManager : MonoBehaviour
     public bool showSimulationHud = true;
     [Header("Runtime Simulation Timing")]
     [SerializeField] private int runtimeSimulationStepsPerFrame = 1;
-    [SerializeField] private bool allowRenderFrameSkippingAtHighSpeed = false;
-    [SerializeField, Min(1)] private int renderEveryNFramesAtHighSpeed = 2;
-    [SerializeField, Min(1)] private int renderSkipMinStepsPerFrame = 20;
     [Header("Locomotion Debug")]
     public bool enableRunAndTumbleDebug = false;
     public float runAndTumbleDebugWindowSeconds = 2f;
@@ -459,6 +456,8 @@ public class ReplicatorManager : MonoBehaviour
     public bool debugSessileMovement = false;
     [Range(0.5f, 30f)] public float debugSessileMovementWindowSeconds = 3f;
     [Range(0.00001f, 0.1f)] public float debugSessileMovementEpsilon = 0.001f;
+    [Header("Geodesic Movement Diagnostics")]
+    [SerializeField] private ReplicatorMovementDiagnostics movementDiagnostics = new ReplicatorMovementDiagnostics();
 
     public int RuntimeSimulationStepsPerFrame => runtimeSimulationStepsPerFrame;
     public int ConfiguredSimulationStepsPerFrame => runtimeSimulationStepsPerFrame;
@@ -603,6 +602,7 @@ public class ReplicatorManager : MonoBehaviour
 
         agents.Clear();
         populationState.Reset();
+        movementDiagnostics.Reset();
 
         for (int i = 0; i < loadedAgents.Count; i++)
         {
@@ -891,6 +891,7 @@ public class ReplicatorManager : MonoBehaviour
     {
         agents.Clear();
         populationState.Reset();
+        movementDiagnostics.Reset();
         preyAgentsBySpatialBin.Clear();
         spontaneousHydrogenSpawnCandidateCells.Clear();
         spontaneousSpawnCandidateCacheLastRefreshStep = -1;
@@ -953,6 +954,10 @@ public class ReplicatorManager : MonoBehaviour
                 simulationTimeSeconds);
             Debug.Log($"[GeodesicBiology] deferred founder spawn simTime={simulationTimeSeconds:G6} requested={requestedFounders} spawned={spawned}", this);
         }
+        movementDiagnostics.ObserveSimulationStep(agents, populationState, planetGenerator.transform,
+            geodesicBiology.MovementGrid, simulationStepCount, simulationTimeSeconds, stepDeltaTime,
+            geodesicBiology.LastMovementKinematicsSeconds);
+        if (!enableRendering) movementDiagnostics.LogIfDue(this);
         return true;
     }
 
@@ -964,17 +969,6 @@ public class ReplicatorManager : MonoBehaviour
             && HasPredatorsThisStep();
     }
 
-
-    internal bool ShouldRenderThisFrame(int stepsPerFrame)
-    {
-        if (!allowRenderFrameSkippingAtHighSpeed || stepsPerFrame < renderSkipMinStepsPerFrame)
-        {
-            return true;
-        }
-
-        int interval = Mathf.Max(1, renderEveryNFramesAtHighSpeed);
-        return Time.frameCount % interval == 0;
-    }
 
     internal void ResetScentDebugState()
     {
@@ -3493,6 +3487,13 @@ public class ReplicatorManager : MonoBehaviour
             agents,
             populationState,
             replicatorMesh,
-            replicatorMaterial);
+            replicatorMaterial,
+            geodesicBiology != null && movementDiagnostics.Enabled ? movementDiagnostics : null);
+        movementDiagnostics.LogIfDue(this);
     }
+
+    private void OnDrawGizmos() => movementDiagnostics?.DrawSelectedTrail();
+
+    [ContextMenu("Movement Diagnostics/Frame Selected Organism")]
+    private void FrameMovementDiagnosticOrganism() => movementDiagnostics?.FrameSelectedOrganism();
 }

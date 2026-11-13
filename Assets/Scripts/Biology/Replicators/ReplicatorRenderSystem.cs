@@ -17,7 +17,8 @@ public class ReplicatorRenderSystem
     // Higher = snappier. Lower = smoother.
     private const float FlagellumVisualTurnSharpness = 28f;
 
-    public void RenderAgents(List<Replicator> agents, ReplicatorPopulationState populationState, Mesh replicatorMesh, Material replicatorMaterial)
+    public void RenderAgents(List<Replicator> agents, ReplicatorPopulationState populationState, Mesh replicatorMesh,
+        Material replicatorMaterial, ReplicatorMovementDiagnostics diagnostics = null)
     {
         if (agents == null || replicatorMesh == null || replicatorMaterial == null)
         {
@@ -42,6 +43,7 @@ public class ReplicatorRenderSystem
 
                 AppendReplicatorVisual(
                     i,
+                    agents[i],
                     position,
                     rotation,
                     currentDirection,
@@ -52,7 +54,8 @@ public class ReplicatorRenderSystem
                     movementSeed,
                     ref batchCount,
                     replicatorMesh,
-                    replicatorMaterial);
+                    replicatorMaterial,
+                    diagnostics);
             }
         }
         else
@@ -63,6 +66,7 @@ public class ReplicatorRenderSystem
 
                 AppendReplicatorVisual(
                     i,
+                    a,
                     a.position,
                     a.rotation,
                     a.currentDirection,
@@ -73,7 +77,8 @@ public class ReplicatorRenderSystem
                     a.movementSeed,
                     ref batchCount,
                     replicatorMesh,
-                    replicatorMaterial);
+                    replicatorMaterial,
+                    diagnostics);
             }
         }
 
@@ -85,6 +90,7 @@ public class ReplicatorRenderSystem
 
     private void AppendReplicatorVisual(
         int agentIndex,
+        Replicator agent,
         Vector3 position,
         Quaternion fallbackRotation,
         Vector3 currentDirection,
@@ -95,7 +101,8 @@ public class ReplicatorRenderSystem
         float movementSeed,
         ref int batchCount,
         Mesh replicatorMesh,
-        Material replicatorMaterial)
+        Material replicatorMaterial,
+        ReplicatorMovementDiagnostics diagnostics)
     {
         float baseScale = 0.1f * Mathf.Max(0.1f, size);
         // Passive bodies are isotropic. Avoid normal/tangent reconstruction for the dominant
@@ -104,8 +111,9 @@ public class ReplicatorRenderSystem
         {
             // Position is authoritative packed world-space state. In particular, do not retain an
             // index-keyed position from an old population or reconstruct a surface-shell radius.
-            AddInstance(Matrix4x4.TRS(ResolvePassiveRenderPosition(position), fallbackRotation, Vector3.one * baseScale * 0.50f),
-                color, ref batchCount, replicatorMesh, replicatorMaterial);
+            Matrix4x4 matrix = Matrix4x4.TRS(ResolvePassiveRenderPosition(position), fallbackRotation, Vector3.one * baseScale * 0.50f);
+            AddInstance(matrix, color, ref batchCount, replicatorMesh, replicatorMaterial);
+            diagnostics?.ObserveRenderedPosition(agent, matrix.MultiplyPoint3x4(Vector3.zero));
             return;
         }
 

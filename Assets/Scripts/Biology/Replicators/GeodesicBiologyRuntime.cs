@@ -118,6 +118,8 @@ public sealed class GeodesicBiologyRuntime
     public long ResourceInventoryReads => resourceInventoryReads;
     public long CompetitionPairs => competitionPairs;
     public float LastBiologyStepSeconds => lastBiologyStepSeconds;
+    public float LastMovementKinematicsSeconds { get; private set; }
+    public GeodesicOceanLayerGrid MovementGrid => grid;
     public static MetabolismType NormalFounderMetabolism => MetabolismType.Hydrogenotrophy;
     public static LocomotionType NormalFounderLocomotion => LocomotionType.PassiveDrift;
 
@@ -391,6 +393,7 @@ public sealed class GeodesicBiologyRuntime
         }
         biologySteps++;
         lastBiologyStepSeconds = dt;
+        LastMovementKinematicsSeconds = 0f;
         if (agents.Count == 0)
         {
             diagnosticElapsed += dt;
@@ -679,6 +682,7 @@ public sealed class GeodesicBiologyRuntime
         if (!(dt > 0f) || state.Count == 0) return;
         passiveMovementTime += dt;
         float kinematicsDt = ConsumeFixedInterval(ref passiveKinematicsAccumulator, dt, PassiveKinematicsIntervalSeconds);
+        LastMovementKinematicsSeconds = kinematicsDt;
         GeodesicGridTopology topology = grid.SourceTopology;
         Vector3[] cellDirections = topology.CellDirections;
         Matrix4x4 worldToLocal = planet.transform.worldToLocalMatrix;
@@ -808,6 +812,9 @@ public sealed class GeodesicBiologyRuntime
             for (int i = 0; i < state.Count; i++)
             {
                 if (state.Locomotion[i] != LocomotionType.PassiveDrift) continue;
+                // Newborns can reach this visual update before the next kinematic tick.
+                // Recover their local direction/radius while the inherited world position is valid.
+                EnsurePassiveKinematicState(i, state, worldToLocal);
                 int cell = state.GeodesicCellIndex[i];
                 int layer = state.CurrentOceanLayerIndex[i];
                 float targetRadius = grid.LayerCenterRadius[grid.GetNodeIndex(cell, layer)];
@@ -1107,7 +1114,7 @@ public sealed class GeodesicBiologyRuntime
         lastDeathCell = lastDeathLayer = -1; lastRecycledDeathCause = DeathCause.Unknown;
         births=deaths=starvationDeaths=lifespanDeaths=zeroAchieved=resourceLimited=invalidHabitats=invalidBiologicalStates=zeroTemperaturePerformance=temperatureSamples=biologySteps=agentEvaluations=habitatSamples=oceanTemperatureReads=photosyntheticLightReads=resourceInventoryReads=competitionPairs=movementUpdates=wanderStateRefreshes=continuousKinematicUpdates=horizontalBoundaryCrossings=verticalTransitions=landBoundaryRejections=invalidLayerCorrections=0;
         maintenancePaid = diagnosticElapsed = temperatureSum = performanceSum = 0d;
-        lastBiologyStepSeconds = passiveMovementTime = passiveKinematicsAccumulator = reactionAccumulator = 0f;
+        LastMovementKinematicsSeconds = lastBiologyStepSeconds = passiveMovementTime = passiveKinematicsAccumulator = reactionAccumulator = 0f;
         hydrogenotrophyConfigLogged = false; biologySeed = 0;
         founderMinLife = founderMaxLife = founderBiomassTarget = founderLethalMargin = 0f;
         founderColor = default; founderHydrogenTemperatureRange = default;

@@ -191,8 +191,7 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
             ResetFrameTiming();
             if (replicatorManager.IsInitializedForSimulation
                 && !pauseDetected
-                && replicatorManager.enableRendering
-                && replicatorManager.ShouldRenderThisFrame(simulationStepsPerFrame))
+                && replicatorManager.enableRendering)
             {
                 using (VisualSyncMarker.Auto())
                 {
@@ -251,9 +250,10 @@ public class ReplicatorSimulationPipeline : MonoBehaviour
         }
 
         if (replicatorManager.IsInitializedForSimulation
-            && replicatorManager.enableRendering
-            && replicatorManager.ShouldRenderThisFrame(simulationStepsPerFrame))
+            && replicatorManager.enableRendering)
         {
+            // DrawMeshInstanced submissions last one frame. Skipping a submission hides
+            // the whole population on that frame rather than retaining the last visual.
             using (VisualSyncMarker.Auto())
             {
                 replicatorManager.RenderAgents();
