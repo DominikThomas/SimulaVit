@@ -126,6 +126,7 @@ public sealed class GeodesicTinLakeSediment
         internal readonly bool HasChart;
         private readonly GeodesicTinHydrology tin;
         private readonly Vector3 origin, east, north;
+        private readonly Vector2 minimum, maximum;
         private const float Tolerance = 0.0000002f;
 
         internal Footprint(GeodesicTinHydrology tin, GeodesicTinLakeGeometry geometry, TinLakeBody body)
@@ -141,6 +142,11 @@ public sealed class GeodesicTinLakeSediment
             HasChart = !tin.BasinOnSphere || points.All(p => Vector3.Dot(tin.Direction(p), origin) > .01f);
             Facets = points.GroupBy(p => p.Triangle)
                 .ToDictionary(g => g.Key, g => new Facet(g.ToArray(), g.Select(p => Project(tin.Direction(p))).ToArray()));
+            minimum = new Vector2(float.PositiveInfinity, float.PositiveInfinity);
+            maximum = new Vector2(float.NegativeInfinity, float.NegativeInfinity);
+            foreach (var facet in Facets.Values)
+            foreach (var point in facet.Polygon)
+            { minimum = Vector2.Min(minimum, point); maximum = Vector2.Max(maximum, point); }
         }
 
         // A gnomonic chart maps great-circle segments onto straight lines. The footprint
@@ -181,6 +187,96 @@ public sealed class GeodesicTinLakeSediment
             return false;
         }
 
+        // Coverage of the complete polygon union, not a per-facet corridor.
+        // A ribbon may retain existing shoreline clipping, but not lose more of
+        // its actual tapered width than the original course at the same station.
+        internal float Coverage(Vector2 a, Vector2 b, Vector2 c, Vector2 d)
+        {
+            double expected = Mathf.Abs(Cross(b - a, c - a)) + Mathf.Abs(Cross(c - a, d - a));
+            if (!(expected > 0d)) return 0f;
+            double covered = 0d;
+            var polygon = new List<Vector2>(8); var buffer = new List<Vector2>(8);
+            foreach (var facet in Facets.Values)
+            {
+                polygon.Clear(); polygon.Add(a); polygon.Add(b); polygon.Add(c); polygon.Add(d);
+                facet.ClipPolygon(polygon, buffer);
+                for (int i = 1; i + 1 < polygon.Count; i++)
+                    covered += Mathf.Abs(Cross(polygon[i] - polygon[0], polygon[i + 1] - polygon[0]));
+            }
+            return (float)(covered / expected);
+        }
+
+        internal void LateralRoom(Vector2 point, Vector2 direction, out float negative, out float positive)
+        {
+            negative = positive = 0f;
+            float reach = (maximum - minimum).magnitude;
+            if (!(reach > 0f) || direction.sqrMagnitude == 0f) return;
+            var intervals = new List<(float Start, float End)>();
+            Vector2 a = point - direction * reach, b = point + direction * reach;
+            foreach (var facet in Facets.Values)
+                if (facet.Clip(a, b, 0f, out float start, out float end)) intervals.Add((start, end));
+            intervals.Sort((x, y) => x.Start.CompareTo(y.Start));
+            float low = -1f, high = -1f, tolerance = Tolerance / (reach * 2f);
+            foreach (var interval in intervals)
+            {
+                if (low < 0f) { low = interval.Start; high = interval.End; }
+                else if (interval.Start <= high + tolerance) high = Mathf.Max(high, interval.End);
+                else
+                {
+                    if (low <= .5f + tolerance && high >= .5f - tolerance) break;
+                    low = interval.Start; high = interval.End;
+                }
+            }
+            if (low > .5f + tolerance || high < .5f - tolerance) return;
+            negative = Mathf.Max(0f, (.5f - low) * reach * 2f);
+            positive = Mathf.Max(0f, (high - .5f) * reach * 2f);
+        }
+
+        internal void LateralExtent(Vector2 direction, out float low, out float high)
+        {
+            low = float.PositiveInfinity; high = float.NegativeInfinity;
+            foreach (var facet in Facets.Values)
+            foreach (var point in facet.Polygon)
+            { float value = Vector2.Dot(point, direction); low = Mathf.Min(low, value); high = Mathf.Max(high, value); }
+        }
+
+        internal Facet[] SurfaceTriangles(Facet facet)
+        {
+            if (facet.SurfaceTriangles == null)
+            {
+                facet.SurfaceTriangles = new Facet[facet.Points.Length - 2];
+                for (int i = 1; i + 1 < facet.Points.Length; i++)
+                    facet.SurfaceTriangles[i - 1] = new Facet(new[] { facet.Points[0], facet.Points[i], facet.Points[i + 1] },
+                        new[] { facet.Polygon[0], facet.Polygon[i], facet.Polygon[i + 1] });
+            }
+            return facet.SurfaceTriangles;
+        }
+
+        // Match the exact triangle fans emitted by BuildSurface. Constant radial
+        // placement over a coarse fan would otherwise float above its plane.
+        internal Vector3 SurfacePosition(Vector2 point, Facet triangle, float offset)
+        {
+            if (!tin.BasinOnSphere) return Position(point, offset);
+            if (!triangle.SurfacePlane.HasValue)
+            {
+                Vector3 a = tin.Direction(triangle.Points[0]);
+                Vector3 normal = Vector3.Cross(tin.Direction(triangle.Points[1]) - a, tin.Direction(triangle.Points[2]) - a);
+                float denominator = Vector3.Dot(normal, a) * Level;
+                triangle.SurfacePlane = denominator != 0f ? normal / denominator : Vector3.zero;
+            }
+            Vector3 direction = Direction(point);
+            float scale = Vector3.Dot(triangle.SurfacePlane.Value, direction);
+            return scale > 0f && float.IsFinite(scale) ? direction * (1f / scale + offset) : Position(point, offset);
+        }
+
+        internal Vector3 SurfacePosition(Vector2 point, float offset)
+        {
+            foreach (var facet in Facets.Values)
+                if (facet.Clip(point, point, Tolerance, out _, out _))
+                    foreach (var triangle in SurfaceTriangles(facet))
+                        if (triangle.Clip(point, point, Tolerance, out _, out _)) return SurfacePosition(point, triangle, offset);
+            return Position(point, offset);
+        }
         internal Vector2[] Route(Vector2 inlet, Vector2 outlet, out bool direct)
         {
             direct = Covers(inlet, outlet);
@@ -222,6 +318,8 @@ public sealed class GeodesicTinLakeSediment
     {
         internal readonly TinPoint[] Points;
         internal readonly Vector2[] Polygon;
+        internal Facet[] SurfaceTriangles;
+        internal Vector3? SurfacePlane;
         private readonly float winding;
         internal Facet(TinPoint[] points, Vector2[] polygon)
         {

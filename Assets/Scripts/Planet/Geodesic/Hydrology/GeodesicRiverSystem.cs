@@ -571,7 +571,8 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
         if (vertices.Count > 0 && planet.enableGeodesicRivers)
         {
             riverMesh = new Mesh { name = "Geodesic River Ribbons", indexFormat = IndexFormat.UInt32 };
-            riverMesh.SetVertices(vertices); riverMesh.SetTriangles(triangles, 0); riverMesh.SetColors(colors);
+            riverMesh.SetVertices(vertices); riverMesh.SetTriangles(triangles, 0);
+            normalRiverColours = colors; ApplyRiverColours();
             riverMesh.RecalculateNormals(); riverMesh.RecalculateBounds();
             visualRoot = new GameObject("Geodesic Rivers"); visualRoot.layer = gameObject.layer;
             visualRoot.transform.SetParent(transform, false);
@@ -988,6 +989,7 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
             }
             if (crossings != null)
             {
+                if (!drawRawTrianglePaths) crossings.AddMeanders(planet.DerivedVisualSeed, WidthProfile, Mathf.Max(.000001f, surfaceOffset));
                 foreach (var crossing in crossings.Paths)
                 {
                     float strength = (float)(crossing.Discharge / threshold);
@@ -998,7 +1000,7 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
                         ? Color.Lerp(riverColor, Color.cyan, .3f) : riverColor;
                     int firstIndex = indices.Count, firstVertex = vertices.Count;
                     GeodesicTinLakeCrossings.AddRibbon(crossing, inletWidth / crossing.Bed.Level, width / crossing.Bed.Level,
-                        Mathf.Max(.000001f, surfaceOffset), color, drawRawTrianglePaths, vertices, indices, colors);
+                        Mathf.Max(.000001f, surfaceOffset), color, drawRawTrianglePaths, vertices, indices, colors, RecordMeanderDiagnosticSpan);
                     if (indices.Count > firstIndex)
                     {
                         visibleReaches++;
@@ -1006,7 +1008,7 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
                             crossing, Mathf.Max(.000001f, surfaceOffset), drawRawTrianglePaths);
                     }
                     else crossings.Fail(crossing.Bed.Id, "interior path produced no visible ribbon geometry");
-                    RecordRiverColour("lake:" + crossing.Bed.Id, firstVertex, vertices.Count);
+                    RecordRiverColour("lake:" + crossing.Bed.Id, firstVertex, vertices.Count, crossing);
                 }
                 LogSediment(crossings);
             }
@@ -1355,8 +1357,14 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
             $"originalPrimaryOcean={delivery.PrimaryOcean:R} finalPrimaryOcean={delivery.PrimaryOcean:R} originalTotalOcean={delivery.DirectOcean + delivery.ViaLakesOcean:R} finalTotalOcean={delivery.DirectOcean + delivery.ViaLakesOcean:R}");
         Debug.Log($"[GeodesicTinLakeSediment] routedLakes={TinLakeRouting.Lakes.Count} visibleLakes={TinLakeGeometry.Bodies.Count} sedimentLakes={lakeSediment.LakeCount} " +
             $"directCrossings={crossings.Direct} interiorCrossings={crossings.Interior} multipleInletJunctions={crossings.Junctions} " +
+            $"meanderedCrossings={crossings.MeanderedCrossings} " +
             $"failedOrUnsupportedCrossings={crossings.Failures.Count} logicalConnectionsPreserved={crossings.LogicalConnections} remainingVisualGaps={crossings.Gaps} {ocean}", this);
         foreach (string failure in crossings.Failures) Debug.LogWarning("[GeodesicTinLakeSediment] " + failure, this);
+        if (!drawRawTrianglePaths)
+        {
+            Debug.Log(crossings.MeanderSummary(), this);
+            Debug.Log(crossings.DisplacementSummary(), this);
+        }
     }
 
     [ContextMenu("Refresh TIN Lake Surfaces Only")]
@@ -1585,6 +1593,7 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
     {
         riverColourSpans.Clear();
         normalRiverColours = destinationRiverColours = null;
+        meanderDiagnosticSpans.Clear(); meanderDiagnosticColours = null;
         riverColourDelivery = null;
         if (terminationDebugRoot != null) terminationDebugRoot.SetActive(false);
         Release(terminationDebugRoot); Release(terminationDebugMesh); Release(terminationDebugMaterial);
