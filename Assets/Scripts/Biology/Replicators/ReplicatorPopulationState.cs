@@ -72,6 +72,8 @@ public class ReplicatorPopulationState
     public float[] NextPassiveVerticalDriftTime = new float[0];
     public float[] PassiveVisualRadius = new float[0];
     public float[] Size = new float[0];
+    // Presentation state follows the same copy/clear/capacity lifecycle as biological state.
+    public ReplicatorVisualState[] VisualGrowth = new ReplicatorVisualState[0];
     public Color[] Color = new Color[0];
     public int[] CurrentOceanLayerIndex = new int[0];
     public int[] PreferredOceanLayerIndex = new int[0];
@@ -145,6 +147,7 @@ public class ReplicatorPopulationState
         agent.currentDirection = CurrentDirection[index];
         agent.moveDirection = MoveDirection[index];
         agent.size = Size[index];
+        agent.visualGrowth = VisualGrowth[index];
         agent.color = Color[index];
     }
 
@@ -179,6 +182,7 @@ public class ReplicatorPopulationState
         agent.geodesicCellIndex = GeodesicCellIndex[index];
         agent.maxLifespan = MaxLifespan[index];
         agent.biomassTarget = BiomassTarget[index];
+        agent.visualGrowth = VisualGrowth[index];
         agent.color = Color[index];
     }
 
@@ -253,6 +257,7 @@ public class ReplicatorPopulationState
         agent.biomassTarget = BiomassTarget[index];
         agent.color = Color[index];
         agent.size = Size[index];
+        agent.visualGrowth = VisualGrowth[index];
     }
 
     // Compatibility-only broad mirror. Do not use in hot simulation systems.
@@ -317,6 +322,9 @@ public class ReplicatorPopulationState
         NextSenseTime[index] = agent.nextSenseTime;
         MovementSeed[index] = agent.movementSeed;
         Size[index] = agent.size;
+        VisualGrowth[index] = agent.visualGrowth;
+        if (!VisualGrowth[index].initialized)
+            ReplicatorVisualGrowth.InitializeCycle(ref VisualGrowth[index], agent.organicCStore, ReplicatorVisualGrowthSettings.Default);
         Color[index] = agent.color;
         CurrentOceanLayerIndex[index] = agent.currentOceanLayerIndex;
         PreferredOceanLayerIndex[index] = agent.preferredOceanLayerIndex;
@@ -373,6 +381,7 @@ public class ReplicatorPopulationState
         NextPassiveVerticalDriftTime[dstIndex] = NextPassiveVerticalDriftTime[srcIndex];
         PassiveVisualRadius[dstIndex] = PassiveVisualRadius[srcIndex];
         Size[dstIndex] = Size[srcIndex];
+        VisualGrowth[dstIndex] = VisualGrowth[srcIndex];
         Color[dstIndex] = Color[srcIndex];
         CurrentOceanLayerIndex[dstIndex] = CurrentOceanLayerIndex[srcIndex];
         PreferredOceanLayerIndex[dstIndex] = PreferredOceanLayerIndex[srcIndex];
@@ -389,6 +398,7 @@ public class ReplicatorPopulationState
         Energy[index] = 0f;
         Age[index] = 0f;
         OrganicCStore[index] = 0f;
+        VisualGrowth[index] = default;
         SpeedFactor[index] = 0f;
         AttackCooldown[index] = 0f;
         FearCooldown[index] = 0f;
@@ -475,6 +485,7 @@ public class ReplicatorPopulationState
         Array.Resize(ref NextPassiveVerticalDriftTime, newCapacity);
         Array.Resize(ref PassiveVisualRadius, newCapacity);
         Array.Resize(ref Size, newCapacity);
+        Array.Resize(ref VisualGrowth, newCapacity);
         Array.Resize(ref Color, newCapacity);
         Array.Resize(ref CurrentOceanLayerIndex, newCapacity);
         Array.Resize(ref PreferredOceanLayerIndex, newCapacity);

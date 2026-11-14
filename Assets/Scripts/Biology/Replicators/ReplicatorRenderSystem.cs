@@ -17,8 +17,24 @@ public class ReplicatorRenderSystem
     // Higher = snappier. Lower = smoother.
     private const float FlagellumVisualTurnSharpness = 28f;
 
+    public float MinimumVisualDiameter { get; private set; }
+    public float AverageVisualDiameter { get; private set; }
+    public float MaximumVisualDiameter { get; private set; }
+    public int CurrentlyDividing { get; private set; }
+    public long InvalidVisualStateCorrections { get; private set; }
+
+    public void ResetVisualDiagnostics()
+    {
+        MinimumVisualDiameter = AverageVisualDiameter = MaximumVisualDiameter = 0f;
+        CurrentlyDividing = 0;
+        InvalidVisualStateCorrections = 0;
+        smoothedForwardByIndex.Clear();
+    }
+
     public void RenderAgents(List<Replicator> agents, ReplicatorPopulationState populationState, Mesh replicatorMesh,
-        Material replicatorMaterial, ReplicatorMovementDiagnostics diagnostics = null)
+        Material replicatorMaterial, ReplicatorMovementDiagnostics diagnostics = null,
+        bool geodesicVisualGrowth = false, ReplicatorVisualGrowthSettings? growthSettings = null,
+        float divisionBiomassMultiple = 2f, Transform planet = null)
     {
         if (agents == null || replicatorMesh == null || replicatorMaterial == null)
         {
@@ -27,6 +43,13 @@ public class ReplicatorRenderSystem
 
         int batchCount = 0;
         int totalAgents = agents.Count;
+        ReplicatorVisualGrowthSettings settings = (growthSettings ?? ReplicatorVisualGrowthSettings.Default).Sanitized();
+        Matrix4x4 worldToLocal = planet != null ? planet.worldToLocalMatrix : Matrix4x4.identity;
+        Matrix4x4 localToWorld = planet != null ? planet.localToWorldMatrix : Matrix4x4.identity;
+        int visualCount = 0;
+        double diameterSum = 0d;
+        float diameterMin = float.PositiveInfinity, diameterMax = 0f;
+        CurrentlyDividing = 0;
 
         if (populationState != null && populationState.Count == totalAgents)
         {
@@ -40,6 +63,33 @@ public class ReplicatorRenderSystem
                 Color color = populationState.Color[i];
                 LocomotionType locomotion = populationState.Locomotion[i];
                 float movementSeed = populationState.MovementSeed[i];
+                float diameter = 1f;
+                Vector3 presentationOffset = Vector3.zero;
+                if (geodesicVisualGrowth && locomotion == LocomotionType.PassiveDrift)
+                {
+                    if (!float.IsFinite(size) || size <= 0f)
+                    {
+                        size = populationState.Size[i] = 1f;
+                        InvalidVisualStateCorrections++;
+                    }
+                    ref ReplicatorVisualState visual = ref populationState.VisualGrowth[i];
+                    float threshold = Mathf.Max(1f, divisionBiomassMultiple) * populationState.BiomassTarget[i];
+                    if (ReplicatorVisualGrowth.Update(ref visual, populationState.OrganicCStore[i], threshold, settings))
+                        InvalidVisualStateCorrections++;
+                    diameter = visual.diameterMultiplier;
+                    if (visual.IsDividing)
+                    {
+                        Vector3 local = worldToLocal.MultiplyPoint3x4(position);
+                        Vector3 displayed = localToWorld.MultiplyPoint3x4(ReplicatorVisualGrowth.ResolveLocalPosition(visual, local));
+                        presentationOffset = displayed - position;
+                        position = displayed;
+                        CurrentlyDividing++;
+                    }
+                    visualCount++;
+                    diameterSum += diameter;
+                    diameterMin = Mathf.Min(diameterMin, diameter);
+                    diameterMax = Mathf.Max(diameterMax, diameter);
+                }
 
                 AppendReplicatorVisual(
                     i,
@@ -52,6 +102,8 @@ public class ReplicatorRenderSystem
                     color,
                     locomotion,
                     movementSeed,
+                    diameter,
+                    presentationOffset,
                     ref batchCount,
                     replicatorMesh,
                     replicatorMaterial,
@@ -75,6 +127,8 @@ public class ReplicatorRenderSystem
                     a.color,
                     a.locomotion,
                     a.movementSeed,
+                    1f,
+                    Vector3.zero,
                     ref batchCount,
                     replicatorMesh,
                     replicatorMaterial,
@@ -82,6 +136,9 @@ public class ReplicatorRenderSystem
             }
         }
 
+        MinimumVisualDiameter = visualCount > 0 ? diameterMin : 0f;
+        AverageVisualDiameter = visualCount > 0 ? (float)(diameterSum / visualCount) : 0f;
+        MaximumVisualDiameter = visualCount > 0 ? diameterMax : 0f;
         if (batchCount > 0)
         {
             FlushBatch(batchCount, replicatorMesh, replicatorMaterial);
@@ -99,21 +156,23 @@ public class ReplicatorRenderSystem
         Color color,
         LocomotionType locomotion,
         float movementSeed,
+        float diameterMultiplier,
+        Vector3 presentationOffset,
         ref int batchCount,
         Mesh replicatorMesh,
         Material replicatorMaterial,
         ReplicatorMovementDiagnostics diagnostics)
     {
-        float baseScale = 0.1f * Mathf.Max(0.1f, size);
+        float baseScale = 0.1f * Mathf.Max(0.1f, size) * diameterMultiplier;
         // Passive bodies are isotropic. Avoid normal/tangent reconstruction for the dominant
         // founder population; their authoritative continuous position is already render-ready.
         if (locomotion == LocomotionType.PassiveDrift)
         {
-            // Position is authoritative packed world-space state. In particular, do not retain an
-            // index-keyed position from an old population or reconstruct a surface-shell radius.
+            // Position is packed world-space state plus the explicit, short-lived division offset.
+            // Never retain an index-keyed position or reconstruct a surface-shell radius here.
             Matrix4x4 matrix = Matrix4x4.TRS(ResolvePassiveRenderPosition(position), fallbackRotation, Vector3.one * baseScale * 0.50f);
             AddInstance(matrix, color, ref batchCount, replicatorMesh, replicatorMaterial);
-            diagnostics?.ObserveRenderedPosition(agent, matrix.MultiplyPoint3x4(Vector3.zero));
+            diagnostics?.ObserveRenderedPosition(agent, matrix.MultiplyPoint3x4(Vector3.zero), presentationOffset);
             return;
         }
 

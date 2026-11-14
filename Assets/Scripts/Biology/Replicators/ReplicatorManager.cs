@@ -471,6 +471,16 @@ public class ReplicatorManager : MonoBehaviour
     [Header("Geodesic Growth and Accounting Diagnostics")]
     [SerializeField] private GeodesicBiologyDiagnostics biologyDiagnostics = new GeodesicBiologyDiagnostics();
 
+    [Header("Geodesic Visual Growth and Division")]
+    public ReplicatorVisualGrowthSettings visualGrowthSettings = ReplicatorVisualGrowthSettings.Default;
+    [SerializeField, Tooltip("Diameter multipliers relative to mature Size, from the latest rendered population.")]
+    private float minimumVisualDiameter, averageVisualDiameter, maximumVisualDiameter;
+    [SerializeField] private int currentlyDividing;
+    [SerializeField] private long invalidVisualStateCorrections;
+    [SerializeField] private long replacedDivisionTransitions, constrainedDaughterSeparations, failedDaughterSeparations;
+    [SerializeField] private bool divisionParentFound, divisionDaughterFound;
+    [SerializeField] private GeodesicGrowthSnapshot divisionParentVisual, divisionDaughterVisual;
+
     public int RuntimeSimulationStepsPerFrame => runtimeSimulationStepsPerFrame;
     public int ConfiguredSimulationStepsPerFrame => runtimeSimulationStepsPerFrame;
     public int SimulationStepsPerFrame => simulationPipeline != null ? simulationPipeline.SimulationStepsPerFrame : runtimeSimulationStepsPerFrame;
@@ -555,6 +565,9 @@ public class ReplicatorManager : MonoBehaviour
                 nextSenseTime = populationState.NextSenseTime[i],
                 movementSeed = populationState.MovementSeed[i],
                 size = populationState.Size[i],
+                visualGrowth = populationState.VisualGrowth[i],
+                hasGeodesicHabitat = populationState.GeodesicCellIndex[i] >= 0,
+                geodesicCellIndex = populationState.GeodesicCellIndex[i],
                 color = new SerializableColor(populationState.Color[i]),
                 currentOceanLayerIndex = populationState.CurrentOceanLayerIndex[i],
                 preferredOceanLayerIndex = populationState.PreferredOceanLayerIndex[i],
@@ -567,7 +580,7 @@ public class ReplicatorManager : MonoBehaviour
                     moveOnlyInSea = traits.moveOnlyInSea,
                     surfaceMoveSpeedMultiplier = traits.surfaceMoveSpeedMultiplier
                 },
-                biomassTarget = companion != null ? companion.biomassTarget : 0f,
+                biomassTarget = populationState.BiomassTarget[i],
                 locomotionSkill = companion != null ? companion.locomotionSkill : 0f
             });
         }
@@ -617,6 +630,7 @@ public class ReplicatorManager : MonoBehaviour
         agents.Clear();
         populationState.Reset();
         movementDiagnostics.Reset();
+        ResetVisualGrowthReadouts();
 
         for (int i = 0; i < loadedAgents.Count; i++)
         {
@@ -908,6 +922,7 @@ public class ReplicatorManager : MonoBehaviour
         populationState.Reset();
         movementDiagnostics.Reset();
         biologyDiagnostics.Reset();
+        ResetVisualGrowthReadouts();
         preyAgentsBySpatialBin.Clear();
         spontaneousHydrogenSpawnCandidateCells.Clear();
         spontaneousSpawnCandidateCacheLastRefreshStep = -1;
@@ -955,6 +970,7 @@ public class ReplicatorManager : MonoBehaviour
     public bool TryGetGeodesicGrowthSnapshot(int packedIndex, out GeodesicGrowthSnapshot snapshot)
     {
         snapshot = default;
+        geodesicBiology?.SetVisualGrowthSettings(visualGrowthSettings);
         return geodesicBiology != null && geodesicBiology.TryGetGrowthSnapshot(packedIndex, agents, populationState,
             enableCarbonLimitedDivision, divisionEnergyCost, replicationEnergyCost, divisionBiomassMultiple,
             maxPopulation, reproductionRate, currentStepDeltaTime, out snapshot);
@@ -983,9 +999,22 @@ public class ReplicatorManager : MonoBehaviour
     [ContextMenu("Biology Diagnostics/Reset Accounting Readouts")]
     private void ResetGeodesicAccountingReadouts() => biologyDiagnostics.Reset();
 
+    [ContextMenu("Biology Diagnostics/Refresh Latest Division Visuals")]
+    private void RefreshLatestDivisionVisuals()
+    {
+        // Explicit inspection only. IDs follow companions through swap-back; no pair-index cache.
+        divisionParentVisual = divisionDaughterVisual = default;
+        GeodesicBiologyDiagnostics.DivisionSample latest = biologyDiagnostics.LatestDivision;
+        divisionParentFound = biologyDiagnostics.HasLatestDivision
+            && TryGetGeodesicGrowthSnapshotById(latest.before.organismId, out divisionParentVisual);
+        divisionDaughterFound = biologyDiagnostics.HasLatestDivision
+            && TryGetGeodesicGrowthSnapshotById(latest.childId, out divisionDaughterVisual);
+    }
+
     internal bool RunGeodesicBiologyStep(float stepDeltaTime)
     {
         if (geodesicBiology == null) return false;
+        geodesicBiology.SetVisualGrowthSettings(visualGrowthSettings);
         geodesicBiology.Step(stepDeltaTime, agents, populationState, basalEnergyCostPerSecond,
             hydrogenotrophyCO2PerTick, hydrogenotrophyH2PerTick, hydrogenotrophyEnergyPerTick, hydrogenotrophyStoreFraction,
             anaerobeO2InhibitionEnabled && anaerobeO2InhibitionAffectsHydrogenotrophy,
@@ -3548,8 +3577,29 @@ public class ReplicatorManager : MonoBehaviour
             populationState,
             replicatorMesh,
             replicatorMaterial,
-            geodesicBiology != null && movementDiagnostics.Enabled ? movementDiagnostics : null);
+            geodesicBiology != null && movementDiagnostics.Enabled ? movementDiagnostics : null,
+            geodesicBiology != null, visualGrowthSettings, divisionBiomassMultiple, planetGenerator != null ? planetGenerator.transform : null);
+        minimumVisualDiameter = renderSystem.MinimumVisualDiameter;
+        averageVisualDiameter = renderSystem.AverageVisualDiameter;
+        maximumVisualDiameter = renderSystem.MaximumVisualDiameter;
+        currentlyDividing = renderSystem.CurrentlyDividing;
+        invalidVisualStateCorrections = renderSystem.InvalidVisualStateCorrections + (geodesicBiology?.VisualStateCorrections ?? 0);
+        replacedDivisionTransitions = geodesicBiology?.ReplacedDivisionTransitions ?? 0;
+        constrainedDaughterSeparations = geodesicBiology?.ConstrainedDaughterSeparations ?? 0;
+        failedDaughterSeparations = geodesicBiology?.FailedDaughterSeparations ?? 0;
         movementDiagnostics.LogIfDue(this);
+    }
+
+    private void ResetVisualGrowthReadouts()
+    {
+        renderSystem.ResetVisualDiagnostics();
+        geodesicBiology?.ResetVisualDiagnostics();
+        minimumVisualDiameter = averageVisualDiameter = maximumVisualDiameter = 0f;
+        currentlyDividing = 0;
+        invalidVisualStateCorrections = 0;
+        replacedDivisionTransitions = constrainedDaughterSeparations = failedDaughterSeparations = 0;
+        divisionParentFound = divisionDaughterFound = false;
+        divisionParentVisual = divisionDaughterVisual = default;
     }
 
     private void OnDrawGizmos() => movementDiagnostics?.DrawSelectedTrail();

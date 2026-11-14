@@ -37,6 +37,8 @@ public sealed class ReplicatorMovementDiagnostics
         public float cellCenterAngularDisplacementRadians, packedPositionError;
         public int renderFrame;
         public Vector3 renderedWorldPosition;
+        public Vector3 presentationOffsetWorld;
+        public float renderedAuthoritativeAngularDisplacementRadians;
         public float renderPositionError, renderedAngularDisplacementRadians;
         public float renderedLocalDistance, expectedMaxRenderAngularRadians;
         public Anomaly anomalies;
@@ -58,6 +60,7 @@ public sealed class ReplicatorMovementDiagnostics
         public Sample sample;
         public bool hasRender;
         public Vector3 lastRenderedLocal;
+        public Vector3 lastRenderedAuthoritativeLocal;
         public double lastRenderKinematicsTime;
     }
 
@@ -203,31 +206,35 @@ public sealed class ReplicatorMovementDiagnostics
 
     // Called with the translation of the matrix actually submitted to DrawMeshInstanced.
     // This measures the CPU submission, not whether a GPU fragment survives depth/coverage.
-    public void ObserveRenderedPosition(Replicator agent, Vector3 renderedWorldPosition)
+    public void ObserveRenderedPosition(Replicator agent, Vector3 renderedWorldPosition, Vector3 presentationOffsetWorld = default)
     {
         if (!enabled || planetTransform == null || !observations.TryGetValue(agent.DiagnosticId, out Observation observation)) return;
         Sample sample = observation.sample;
         Vector3 local = planetTransform.InverseTransformPoint(renderedWorldPosition);
+        Vector3 authoritativeLocal = local - planetTransform.InverseTransformVector(presentationOffsetWorld);
         Vector3 previousRenderedLocal = observation.hasRender ? observation.lastRenderedLocal : local;
         sample.renderFrame = Time.frameCount;
         sample.renderedWorldPosition = renderedWorldPosition;
-        sample.renderPositionError = Vector3.Distance(renderedWorldPosition, sample.packedWorldPosition);
-        float localError = Vector3.Distance(local, planetTransform.InverseTransformPoint(sample.packedWorldPosition));
+        sample.presentationOffsetWorld = presentationOffsetWorld;
+        sample.renderPositionError = Vector3.Distance(renderedWorldPosition, sample.packedWorldPosition + presentationOffsetWorld);
+        float localError = Vector3.Distance(authoritativeLocal, planetTransform.InverseTransformPoint(sample.packedWorldPosition));
         if (!IsFinite(local) || local.sqrMagnitude < 1e-12f) sample.anomalies |= Anomaly.InvalidPosition;
         if (localError > localPositionTolerance) sample.anomalies |= Anomaly.RenderPositionMismatch;
         if (observation.hasRender)
         {
             sample.renderedAngularDisplacementRadians = AngularDistance(observation.lastRenderedLocal.normalized, local.normalized);
+            sample.renderedAuthoritativeAngularDisplacementRadians = AngularDistance(observation.lastRenderedAuthoritativeLocal.normalized, authoritativeLocal.normalized);
             sample.renderedLocalDistance = Vector3.Distance(observation.lastRenderedLocal, local);
             sample.expectedMaxRenderAngularRadians = GeodesicBiologyRuntime.PassiveAngularSpeedRadiansPerSecond
                 * (float)(kinematicsTime - observation.lastRenderKinematicsTime);
-            if (sample.renderedAngularDisplacementRadians > sample.expectedMaxRenderAngularRadians + angularToleranceRadians)
+            if (sample.renderedAuthoritativeAngularDisplacementRadians > sample.expectedMaxRenderAngularRadians + angularToleranceRadians)
                 sample.anomalies |= Anomaly.RenderDiscontinuity;
         }
         sample.score = CalculateScore(sample);
         observation.sample = sample;
         observation.hasRender = true;
         observation.lastRenderedLocal = local;
+        observation.lastRenderedAuthoritativeLocal = authoritativeLocal;
         observation.lastRenderKinematicsTime = kinematicsTime;
         observations[agent.DiagnosticId] = observation;
         Retain(sample, local, true, previousRenderedLocal);
@@ -236,7 +243,7 @@ public sealed class ReplicatorMovementDiagnostics
     private float CalculateScore(Sample sample)
     {
         float score = Mathf.Max(sample.angularDisplacementRadians / (sample.expectedMaxAngularRadians + angularToleranceRadians),
-            sample.renderedAngularDisplacementRadians / (sample.expectedMaxRenderAngularRadians + angularToleranceRadians));
+            sample.renderedAuthoritativeAngularDisplacementRadians / (sample.expectedMaxRenderAngularRadians + angularToleranceRadians));
         if (sample.anomalies != Anomaly.None) score += 1000f;
         return float.IsFinite(score) ? score : 1000000f;
     }
@@ -307,7 +314,7 @@ public sealed class ReplicatorMovementDiagnostics
             + $"angleRad={s.angularDisplacementRadians:G6}/{s.expectedMaxAngularRadians:G6} surfaceDistance={s.surfaceDistance:G6}/{s.expectedMaxSurfaceDistance:G6} "
             + $"totalLocalDistance={s.authoritativeLocalDistance:G6} cellAngleRad={s.cellCenterAngularDisplacementRadians:G6} packedError={s.packedPositionError:G6} "
             + $"renderFrame={s.renderFrame} renderedWorld={s.renderedWorldPosition.ToString("F7")} renderErrorWorld={s.renderPositionError:G6} "
-            + $"renderAngleRad={s.renderedAngularDisplacementRadians:G6}/{s.expectedMaxRenderAngularRadians:G6} renderDistanceLocal={s.renderedLocalDistance:G6} flags={s.anomalies}";
+            + $"renderAngleRad(raw/underlying/allowed)={s.renderedAngularDisplacementRadians:G6}/{s.renderedAuthoritativeAngularDisplacementRadians:G6}/{s.expectedMaxRenderAngularRadians:G6} presentationOffsetWorld={s.presentationOffsetWorld.magnitude:G6} renderDistanceLocal={s.renderedLocalDistance:G6} flags={s.anomalies}";
     }
 
     public void DrawSelectedTrail()

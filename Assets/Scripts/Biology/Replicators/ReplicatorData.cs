@@ -88,6 +88,7 @@ public class Replicator
     public Traits traits;
     public float energy;
     public float size;
+    public ReplicatorVisualState visualGrowth;
     public float organicCStore;
     public float biomassTarget;
     public float speedFactor;
@@ -245,6 +246,8 @@ public class Replicator
         agent.tumbleProbability = snapshot.tumbleProbability;
         agent.nextSenseTime = snapshot.nextSenseTime;
         agent.size = snapshot.size;
+        agent.visualGrowth = snapshot.visualGrowth;
+        agent.geodesicCellIndex = snapshot.hasGeodesicHabitat ? snapshot.geodesicCellIndex : -1;
         agent.currentOceanLayerIndex = snapshot.currentOceanLayerIndex;
         agent.preferredOceanLayerIndex = snapshot.preferredOceanLayerIndex;
         agent.biomassTarget = snapshot.biomassTarget;

@@ -17,6 +17,9 @@ public struct GeodesicGrowthSnapshot
     public float organicC, biomassTarget, requiredCarbon, carbonProgress;
     public float energy, requiredEnergy, temperatureKelvin, temperaturePerformance;
     public float probabilityPerStep, age, visualSize;
+    public float matureSize, visualDiameterMultiplier, growthCycleCarbonBaseline, visualGrowthProgress;
+    public float divisionStartDiameterMultiplier, divisionAnimationProgress;
+    public bool isVisuallyDividing;
     public Vector3 worldPosition;
     public bool carbonLimited, validHabitat, validState, pendingDeath;
     public bool carbonReady, energyReady, temperatureReady, belowPopulationCap, packedCanReplicate;
@@ -114,9 +117,11 @@ public sealed class GeodesicBiologyDiagnostics
         public float parentEnergy, childEnergy, parentCarbon, childCarbon, splitToChild;
         public float childInitialEnergy, childInitialCarbon;
         public float parentAge, childAge;
+        public float parentVisualDiameterMultiplier, childVisualDiameterMultiplier;
+        public float parentGrowthCycleBaseline, childGrowthCycleBaseline, maximumDaughterSeparation;
         public int childCell, childLayer;
         public Vector3 parentPosition, childPosition;
-        public double energyResidual, carbonResidual, placementError;
+        public double energyResidual, carbonResidual, placementError, daughterSeparationDistance;
         public DivisionViolation violations;
         // There are no carbon costs, environmental exchanges or other inventory grants at birth.
     }
@@ -167,6 +172,8 @@ public sealed class GeodesicBiologyDiagnostics
     public long SelectedOrganismId => selectedOrganismId;
     public bool SelectedOrganismFound => selectedOrganismFound;
     public GeodesicGrowthSnapshot SelectedGrowth => selectedGrowth;
+    public bool HasLatestDivision => hasLatestDivision;
+    public DivisionSample LatestDivision => latestDivision;
 
     internal void AdvanceObservedTime(float dt) => observedSeconds += Math.Max(0d, dt);
 
@@ -260,7 +267,7 @@ public sealed class GeodesicBiologyDiagnostics
 
     internal void RecordDivision(in GeodesicGrowthSnapshot before, int parentIndex, int childIndex,
         long childId, ReplicatorPopulationState state, GeodesicOceanLayerGrid grid, float split,
-        float childInitialEnergy, float childInitialCarbon)
+        float childInitialEnergy, float childInitialCarbon, Transform planet, float maximumDaughterSeparation)
     {
         var sample = new DivisionSample
         {
@@ -269,13 +276,19 @@ public sealed class GeodesicBiologyDiagnostics
             parentEnergy = state.Energy[parentIndex], childEnergy = state.Energy[childIndex],
             parentCarbon = state.OrganicCStore[parentIndex], childCarbon = state.OrganicCStore[childIndex],
             parentAge = state.Age[parentIndex], childAge = state.Age[childIndex],
+            parentVisualDiameterMultiplier = state.VisualGrowth[parentIndex].diameterMultiplier,
+            childVisualDiameterMultiplier = state.VisualGrowth[childIndex].diameterMultiplier,
+            parentGrowthCycleBaseline = state.VisualGrowth[parentIndex].carbonBaseline,
+            childGrowthCycleBaseline = state.VisualGrowth[childIndex].carbonBaseline,
+            maximumDaughterSeparation = maximumDaughterSeparation,
             childCell = state.GeodesicCellIndex[childIndex], childLayer = state.CurrentOceanLayerIndex[childIndex],
             parentPosition = state.Position[parentIndex], childPosition = state.Position[childIndex]
         };
         double expectedEnergy = Math.Max(0d, (double)before.energy - before.requiredEnergy);
         sample.energyResidual = (double)sample.parentEnergy + sample.childEnergy - expectedEnergy;
         sample.carbonResidual = (double)sample.parentCarbon + sample.childCarbon - before.organicC;
-        sample.placementError = Vector3.Distance(before.worldPosition, sample.childPosition);
+        sample.daughterSeparationDistance = Vector3.Distance(before.worldPosition, sample.childPosition);
+        sample.placementError = Math.Max(0d, sample.daughterSeparationDistance - maximumDaughterSeparation);
         double expectedChildCarbon = before.carbonLimited ? before.organicC * (double)Mathf.Clamp01(split) : 0d;
         if (!Finite(sample.energyResidual) || !Finite(sample.carbonResidual) || !Finite(sample.placementError)
             || sample.parentEnergy < 0f || sample.childEnergy < 0f || sample.parentCarbon < 0f || sample.childCarbon < 0f)
@@ -292,8 +305,16 @@ public sealed class GeodesicBiologyDiagnostics
         if (!grid.IsNodeActive(sample.childCell, sample.childLayer) || sample.childCell != before.cell || sample.childLayer != before.layer
             || state.GeodesicCellIndex[parentIndex] != before.cell || state.CurrentOceanLayerIndex[parentIndex] != before.layer)
             sample.violations |= DivisionViolation.Habitat;
+        Vector3 parentLocal = planet.InverseTransformPoint(sample.parentPosition);
+        Vector3 childLocal = planet.InverseTransformPoint(sample.childPosition);
+        // Daughter placement may now have a bounded tangential offset. Parent stays fixed,
+        // cell/layer identity stays identical, and both use the same spherical depth radius.
         if (!FinitePosition(sample.childPosition) || !FinitePosition(sample.parentPosition)
-            || sample.placementError > 1e-5d || Vector3.Distance(before.worldPosition, sample.parentPosition) > 1e-5f)
+            || sample.placementError > 1e-5d
+            || Vector3.Distance(before.worldPosition, sample.parentPosition) > 1e-5f
+            || Mathf.Abs(parentLocal.magnitude - childLocal.magnitude) > Mathf.Max(1f, parentLocal.magnitude) * 1e-5f
+            || (grid.IsNodeActive(sample.childCell, sample.childLayer)
+                && !GeodesicBiologyRuntime.DirectionInsideCell(sample.childCell, childLocal.normalized, grid.SourceTopology)))
             sample.violations |= DivisionViolation.Position;
         if (sample.childAge != 0f || sample.parentAge != before.age) sample.violations |= DivisionViolation.Age;
 
@@ -333,7 +354,7 @@ public sealed class GeodesicBiologyDiagnostics
         double stored = 0d;
         for (int i = 0; i < MetabolismCount; i++) stored += reactions[i].storedCarbon;
         lastMeasuredCarbonResidual = -measuredNet.Carbon - stored;
-        Debug.Log($"[GeodesicGrowth] population={population} divisionReady={divisionReady} progressBins(<25/25-50/50-75/75-100/100+percent)={progressBins[0]}/{progressBins[1]}/{progressBins[2]}/{progressBins[3]}/{progressBins[4]} invalidProgress={invalidProgress} principalBlocks(none/habitat/state/death/temperature/cap/energy/carbon)={principalBlockCounts[0]}/{principalBlockCounts[1]}/{principalBlockCounts[2]}/{principalBlockCounts[3]}/{principalBlockCounts[4]}/{principalBlockCounts[5]}/{principalBlockCounts[6]}/{principalBlockCounts[7]} selectedFound={selectedOrganismFound} selectedId={selectedGrowth.organismId} selectedC={selectedGrowth.organicC:G6} target={selectedGrowth.biomassTarget:G6} requiredC={selectedGrowth.requiredCarbon:G6} progress={selectedGrowth.carbonProgress:G6} E={selectedGrowth.energy:G6} requiredE(strictlyGreater)={selectedGrowth.requiredEnergy:G6} temperaturePerformance={selectedGrowth.temperaturePerformance:G6} permitted={selectedGrowth.divisionPermitted} block={selectedGrowth.principalBlock} probabilityPerStep={selectedGrowth.probabilityPerStep:G6} visualSize={selectedGrowth.visualSize:G6}");
+        Debug.Log($"[GeodesicGrowth] population={population} divisionReady={divisionReady} progressBins(<25/25-50/50-75/75-100/100+percent)={progressBins[0]}/{progressBins[1]}/{progressBins[2]}/{progressBins[3]}/{progressBins[4]} invalidProgress={invalidProgress} principalBlocks(none/habitat/state/death/temperature/cap/energy/carbon)={principalBlockCounts[0]}/{principalBlockCounts[1]}/{principalBlockCounts[2]}/{principalBlockCounts[3]}/{principalBlockCounts[4]}/{principalBlockCounts[5]}/{principalBlockCounts[6]}/{principalBlockCounts[7]} selectedFound={selectedOrganismFound} selectedId={selectedGrowth.organismId} selectedC={selectedGrowth.organicC:G6} target={selectedGrowth.biomassTarget:G6} requiredC={selectedGrowth.requiredCarbon:G6} progress={selectedGrowth.carbonProgress:G6} E={selectedGrowth.energy:G6} requiredE(strictlyGreater)={selectedGrowth.requiredEnergy:G6} temperaturePerformance={selectedGrowth.temperaturePerformance:G6} permitted={selectedGrowth.divisionPermitted} block={selectedGrowth.principalBlock} probabilityPerStep={selectedGrowth.probabilityPerStep:G6} visualSize={selectedGrowth.visualSize:G6} diameterMultiplier={selectedGrowth.visualDiameterMultiplier:G6} growthBaseline={selectedGrowth.growthCycleCarbonBaseline:G6} visualProgress={selectedGrowth.visualGrowthProgress:G6} dividing={selectedGrowth.isVisuallyDividing}");
         Debug.Log($"[GeodesicDivisionAccounting] observedSimulationSeconds={observedSeconds:G6} birthsInterval={divisionInterval.births} energyCost={divisionInterval.energyCost:G9} maxAbsResidual(E/C)={divisionInterval.maxAbsEnergyResidual:G9}/{divisionInterval.maxAbsCarbonResidual:G9} violations={divisionInterval.violations} violations(E/C/allocation/gate/habitat/position/age/invalid)={divisionInterval.energyViolations}/{divisionInterval.carbonViolations}/{divisionInterval.allocationViolations}/{divisionInterval.gateViolations}/{divisionInterval.habitatViolations}/{divisionInterval.positionViolations}/{divisionInterval.ageViolations}/{divisionInterval.invalid} maxPlacementError={divisionInterval.maxPlacementError:G9} explicitCarbonCost=0 birthEnvironmentalTransfer=0 tolerance=abs({AbsoluteTolerance:G4})+rel({RelativeTolerance:G4})*scale");
         Debug.Log($"[GeodesicResourceAccounting] requestedNet=({requestedNet}) measuredNet=({measuredNet}) measuredMinusRequested=({netTransferResidual}) transferViolations={transferViolations} mixedNodeResourcePairs={mixedPairs} measuredUnaccountedCarbon(+missing/-excess)={lastMeasuredCarbonResidual:G9} scope=reactionsOnly deathRecycling=separate grossAttribution=proportionalUnmixedOnly mixedGross=unobservableNetOnly");
         for (int i = 0; i < MetabolismCount; i++)
@@ -361,7 +382,7 @@ public sealed class GeodesicBiologyDiagnostics
         => Debug.Log($"[GeodesicDivisionExample] kind={kind} parentId={s.before.organismId} childId={s.childId} cell/layer={s.before.cell}/{s.before.layer} childCell/layer={s.childCell}/{s.childLayer}"
             + $" E(before/parent/child/cost)={s.before.energy:G9}/{s.parentEnergy:G9}/{s.childEnergy:G9}/{s.before.requiredEnergy:G9} C(before/parent/child)={s.before.organicC:G9}/{s.parentCarbon:G9}/{s.childCarbon:G9}"
             + $" childPreallocation(E/C)={s.childInitialEnergy:G9}/{s.childInitialCarbon:G9} split={s.splitToChild:G6} residual(E/C)={s.energyResidual:G9}/{s.carbonResidual:G9}"
-            + $" parentBeforeWorld={s.before.worldPosition.ToString("G9")} parentAfterWorld={s.parentPosition.ToString("G9")} childWorld={s.childPosition.ToString("G9")} placementError={s.placementError:G9}"
+            + $" parentBeforeWorld={s.before.worldPosition.ToString("G9")} parentAfterWorld={s.parentPosition.ToString("G9")} childWorld={s.childPosition.ToString("G9")} daughterSeparation={s.daughterSeparationDistance:G9}/{s.maximumDaughterSeparation:G9} placementExcess={s.placementError:G9}"
             + $" childAge={s.childAge:G6} thermalPerformance={s.before.temperaturePerformance:G6} gates={s.before.principalBlock} violations={s.violations}");
 
     private static void Attribute(ref ResourceAmounts attributed, ref ResourceAmounts netOnly,
