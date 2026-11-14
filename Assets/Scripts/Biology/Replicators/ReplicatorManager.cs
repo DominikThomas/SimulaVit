@@ -468,6 +468,8 @@ public class ReplicatorManager : MonoBehaviour
     [Range(0.00001f, 0.1f)] public float debugSessileMovementEpsilon = 0.001f;
     [Header("Geodesic Movement Diagnostics")]
     [SerializeField] private ReplicatorMovementDiagnostics movementDiagnostics = new ReplicatorMovementDiagnostics();
+    [Header("Geodesic Growth and Accounting Diagnostics")]
+    [SerializeField] private GeodesicBiologyDiagnostics biologyDiagnostics = new GeodesicBiologyDiagnostics();
 
     public int RuntimeSimulationStepsPerFrame => runtimeSimulationStepsPerFrame;
     public int ConfiguredSimulationStepsPerFrame => runtimeSimulationStepsPerFrame;
@@ -851,6 +853,7 @@ public class ReplicatorManager : MonoBehaviour
             enabled = true;
             ClearPopulation();
             geodesicBiology = new GeodesicBiologyRuntime();
+            geodesicBiology.SetAccountingDiagnostics(biologyDiagnostics);
             float spawnDelay = spawnInitialPopulation ? Mathf.Max(0f, geodesicBiologySpawnDelaySeconds) : 0f;
             int immediateFounderCount = spawnInitialPopulation && spawnDelay <= 0f ? initialSpawnCount : 0;
             if (!geodesicBiology.Initialize(planetGenerator, agents, populationState, immediateFounderCount,
@@ -904,6 +907,7 @@ public class ReplicatorManager : MonoBehaviour
         agents.Clear();
         populationState.Reset();
         movementDiagnostics.Reset();
+        biologyDiagnostics.Reset();
         preyAgentsBySpatialBin.Clear();
         spontaneousHydrogenSpawnCandidateCells.Clear();
         spontaneousSpawnCandidateCacheLastRefreshStep = -1;
@@ -946,6 +950,38 @@ public class ReplicatorManager : MonoBehaviour
         simulationTimeSeconds = currentSimulationTimeSeconds;
         simulationStepCount++;
     }
+
+    /// <summary>On-demand packed-state read. Indices can change on swap-back; use the ID overload to pin an organism.</summary>
+    public bool TryGetGeodesicGrowthSnapshot(int packedIndex, out GeodesicGrowthSnapshot snapshot)
+    {
+        snapshot = default;
+        return geodesicBiology != null && geodesicBiology.TryGetGrowthSnapshot(packedIndex, agents, populationState,
+            enableCarbonLimitedDivision, divisionEnergyCost, replicationEnergyCost, divisionBiomassMultiple,
+            maxPopulation, reproductionRate, currentStepDeltaTime, out snapshot);
+    }
+
+    /// <summary>Explicit inspection only; the ID lookup is not run per frame or by rendering.</summary>
+    public bool TryGetGeodesicGrowthSnapshotById(long organismId, out GeodesicGrowthSnapshot snapshot)
+    {
+        snapshot = default;
+        if (geodesicBiology == null) return false;
+        for (int i = 0; i < agents.Count; i++)
+            if (agents[i].DiagnosticId == organismId) return TryGetGeodesicGrowthSnapshot(i, out snapshot);
+        return false;
+    }
+
+    [ContextMenu("Biology Diagnostics/Refresh Selected Growth")]
+    private void RefreshSelectedGeodesicGrowth()
+    {
+        GeodesicGrowthSnapshot snapshot;
+        bool found = biologyDiagnostics.SelectedOrganismId == 0
+            ? TryGetGeodesicGrowthSnapshot(0, out snapshot)
+            : TryGetGeodesicGrowthSnapshotById(biologyDiagnostics.SelectedOrganismId, out snapshot);
+        biologyDiagnostics.SetSelectedGrowth(found, snapshot);
+    }
+
+    [ContextMenu("Biology Diagnostics/Reset Accounting Readouts")]
+    private void ResetGeodesicAccountingReadouts() => biologyDiagnostics.Reset();
 
     internal bool RunGeodesicBiologyStep(float stepDeltaTime)
     {

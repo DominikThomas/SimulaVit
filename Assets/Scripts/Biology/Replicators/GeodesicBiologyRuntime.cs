@@ -66,6 +66,7 @@ public sealed class GeodesicBiologyRuntime
     private System.Random temperatureMutationRandom;
     private GeodesicBiologyTemperatureSettings temperatureSettings = GeodesicBiologyTemperatureSettings.Default;
     private readonly GeodesicBiologyTemperatureTelemetry temperatureTelemetry = new GeodesicBiologyTemperatureTelemetry();
+    private GeodesicBiologyDiagnostics accountingDiagnostics;
     private readonly long[] requestedByMetabolism = new long[Enum.GetValues(typeof(MetabolismType)).Length];
     private readonly long[] achievedByMetabolism = new long[Enum.GetValues(typeof(MetabolismType)).Length];
     private readonly double[] extentByMetabolism = new double[Enum.GetValues(typeof(MetabolismType)).Length];
@@ -143,6 +144,61 @@ public sealed class GeodesicBiologyRuntime
         public float Temperature;
         public float TemperaturePerformance;
         public double AvailabilityFactor;
+        // Ephemeral observations from this reaction commit, consumed before lifecycle swap-back.
+        public float DiagnosticStoreBefore, DiagnosticStoreAfter;
+        public double DiagnosticEnergyDelta;
+    }
+
+    public void SetAccountingDiagnostics(GeodesicBiologyDiagnostics diagnostics) => accountingDiagnostics = diagnostics;
+
+    public bool TryGetGrowthSnapshot(int index, List<Replicator> agents, ReplicatorPopulationState state,
+        bool carbonDivision, float divisionCost, float replicationCost, float divisionMultiple,
+        int maxPopulation, float reproductionRate, float stepSeconds, out GeodesicGrowthSnapshot snapshot)
+    {
+        snapshot = default;
+        if (grid == null || state == null || agents == null || index < 0 || index >= state.Count || index >= agents.Count) return false;
+        // External inspection can happen after an environmental tick, before the next biology step.
+        RefreshTemperatureCache();
+        float temperature = GetHabitatTemperature(state.GeodesicCellIndex[index], state.CurrentOceanLayerIndex[index]);
+        float performance = CalculateTemperaturePerformance(temperature, state.OptimalTempMin[index],
+            state.OptimalTempMax[index], state.LethalTempMargin[index], temperatureSettings.DormancyFloor);
+        snapshot = CaptureGrowthSnapshot(index, agents[index].DiagnosticId, state, temperature, performance,
+            carbonDivision, divisionCost, replicationCost, divisionMultiple, maxPopulation, reproductionRate, stepSeconds);
+        return true;
+    }
+
+    private GeodesicGrowthSnapshot CaptureGrowthSnapshot(int index, long id, ReplicatorPopulationState state,
+        float temperature, float performance, bool carbonDivision, float divisionCost, float replicationCost,
+        float divisionMultiple, int maxPopulation, float reproductionRate, float stepSeconds)
+    {
+        float requiredCarbon = Mathf.Max(1f, divisionMultiple) * state.BiomassTarget[index];
+        float requiredEnergy = Mathf.Max(0f, carbonDivision ? divisionCost : replicationCost);
+        var snapshot = new GeodesicGrowthSnapshot
+        {
+            organismId = id, packedIndex = index, cell = state.GeodesicCellIndex[index], layer = state.CurrentOceanLayerIndex[index],
+            metabolism = state.Metabolism[index], organicC = state.OrganicCStore[index], biomassTarget = state.BiomassTarget[index],
+            requiredCarbon = requiredCarbon, carbonProgress = requiredCarbon > 0f ? state.OrganicCStore[index] / requiredCarbon : float.NaN,
+            energy = state.Energy[index], requiredEnergy = requiredEnergy, temperatureKelvin = temperature, temperaturePerformance = performance,
+            probabilityPerStep = Mathf.Clamp01(reproductionRate * stepSeconds * performance), age = state.Age[index],
+            visualSize = state.Size[index], worldPosition = state.Position[index], carbonLimited = carbonDivision,
+            validHabitat = grid.IsNodeActive(state.GeodesicCellIndex[index], state.CurrentOceanLayerIndex[index]),
+            validState = float.IsFinite(state.Energy[index]) && float.IsFinite(state.OrganicCStore[index]) && state.OrganicCStore[index] >= 0f
+                && float.IsFinite(requiredCarbon) && requiredCarbon > 0f && float.IsFinite(requiredEnergy)
+                && float.IsFinite(temperature) && float.IsFinite(state.Age[index]) && float.IsFinite(state.MaxLifespan[index])
+                && float.IsFinite(state.OptimalTempMin[index]) && float.IsFinite(state.OptimalTempMax[index])
+                && state.OptimalTempMax[index] >= state.OptimalTempMin[index] && float.IsFinite(state.LethalTempMargin[index])
+                && state.LethalTempMargin[index] > 0f && GeodesicBiologyDiagnostics.FinitePosition(state.Position[index]),
+            pendingDeath = ClassifyLifecycleDeath(state.Energy[index], state.Age[index], state.MaxLifespan[index]) != DeathCause.Unknown
+                || (temperatureSettings.DirectDamageEnabled
+                    && ((temperatureSettings.ColdExposureDeathSeconds > 0f && state.ColdTemperatureExposureSeconds[index] >= temperatureSettings.ColdExposureDeathSeconds)
+                        || (temperatureSettings.HeatExposureDeathSeconds > 0f && state.HeatTemperatureExposureSeconds[index] >= temperatureSettings.HeatExposureDeathSeconds))),
+            carbonReady = !carbonDivision || state.OrganicCStore[index] >= requiredCarbon,
+            energyReady = state.Energy[index] > requiredEnergy,
+            temperatureReady = GeodesicBiologyTemperaturePolicy.CanReproduce(performance, temperatureSettings),
+            belowPopulationCap = state.Count < maxPopulation, packedCanReplicate = state.CanReplicate[index]
+        };
+        snapshot.Classify();
+        return snapshot;
     }
 
     public readonly struct HydrogenotrophyTickResult
@@ -397,6 +453,8 @@ public sealed class GeodesicBiologyRuntime
         GeodesicBiologyTemperatureSettings? configuredTemperatureSettings = null)
     {
         temperatureSettings = configuredTemperatureSettings ?? GeodesicBiologyTemperatureSettings.Default;
+        bool observeAccounting = accountingDiagnostics != null && accountingDiagnostics.Enabled;
+        if (observeAccounting) accountingDiagnostics.AdvanceObservedTime(dt);
         RefreshTemperatureCache();
         if (!hydrogenotrophyConfigLogged)
         {
@@ -410,7 +468,7 @@ public sealed class GeodesicBiologyRuntime
         if (agents.Count == 0)
         {
             diagnosticElapsed += dt;
-            if (diagnosticElapsed >= 10d) { LogDiagnostics(state, agents, carbonDivision, divisionCost, replicationCost, divisionMultiple, maxPopulation); diagnosticElapsed = 0d; }
+            if (diagnosticElapsed >= 10d) { LogDiagnostics(state, agents, carbonDivision, divisionCost, replicationCost, divisionMultiple, maxPopulation, reproductionRate); diagnosticElapsed = 0d; }
             return;
         }
         state.EnsureMatchesAgentCount(agents);
@@ -430,15 +488,16 @@ public sealed class GeodesicBiologyRuntime
                 using (DemandAggregation.Auto()) AggregateDemands(state.Count);
                 using (AvailabilityResolution.Auto()) ResolveAvailabilityFactors();
                 using (Competition.Auto()) ResolveCompetition(state.Count);
-                CommitRequests(state.Count, state, maxStore);
+                if (observeAccounting) PrepareAccountingScratch();
+                CommitRequests(state.Count, state, maxStore, observeAccounting);
             }
         }
         using (Lifecycle.Auto())
-        using (MaintenanceAndLifecycle.Auto()) RunLifecycle(dt, agents, state, maintenance, reproductionRate, carbonDivision, divisionCost, replicationCost, divisionMultiple, childSplit, maxPopulation, registerDeathCause);
+        using (MaintenanceAndLifecycle.Auto()) RunLifecycle(dt, agents, state, maintenance, reproductionRate, carbonDivision, divisionCost, replicationCost, divisionMultiple, childSplit, maxPopulation, registerDeathCause, observeAccounting && reactionDt > 0f, observeAccounting);
         diagnosticElapsed += dt;
         if (diagnosticElapsed >= 10d)
         {
-            LogDiagnostics(state, agents, carbonDivision, divisionCost, replicationCost, divisionMultiple, maxPopulation);
+            LogDiagnostics(state, agents, carbonDivision, divisionCost, replicationCost, divisionMultiple, maxPopulation, reproductionRate);
             diagnosticElapsed = 0d;
         }
     }
@@ -551,12 +610,32 @@ public sealed class GeodesicBiologyRuntime
             if (r.Actual > 0) achievedByMetabolism[metabolism]++; else zeroAchieved++;
         }
     }
-    private void CommitRequests(int count, ReplicatorPopulationState state, float maxStore)
+    private void PrepareAccountingScratch()
+    {
+        // Competition has finished reading these buffers. Reuse only touched scratch pairs,
+        // not another ocean-sized allocation: gross input/product now, measured ratio after commit.
+        for (int t = 0; t < touchedCount; t++)
+        for (int k = 0; k < ResourceCount; k++)
+        {
+            int scratch = k * grid.NodeCapacity + touched[t];
+            demand[scratch] = availabilityFactor[scratch] = 0d;
+        }
+    }
+
+    private void CommitRequests(int count, ReplicatorPopulationState state, float maxStore, bool observeAccounting)
     {
         using (AgentEnergyAndStores.Auto())
         for (int i = 0; i < count; i++)
         {
             ref Request r = ref requests[i]; if (r.Actual <= 0) continue;
+            float energyBefore = state.Energy[i];
+            if (observeAccounting)
+            {
+                r.DiagnosticStoreBefore = state.OrganicCStore[i];
+                demand[(int)r.A * grid.NodeCapacity + r.Node] += r.NeedA * r.Actual;
+                if (r.NeedB > 0) demand[(int)r.B * grid.NodeCapacity + r.Node] += r.NeedB * r.Actual;
+                if (r.ProductCoefficient > 0) availabilityFactor[(int)r.Product * grid.NodeCapacity + r.Node] += r.ProductCoefficient * r.Actual;
+            }
             delta[(int)r.A*grid.NodeCapacity+r.Node] -= r.NeedA*r.Actual;
             if (r.NeedB > 0) delta[(int)r.B*grid.NodeCapacity+r.Node] -= r.NeedB*r.Actual;
             if (r.ProductCoefficient > 0) delta[(int)r.Product*grid.NodeCapacity+r.Node] += r.ProductCoefficient*r.Actual;
@@ -564,6 +643,11 @@ public sealed class GeodesicBiologyRuntime
             float gained = r.EnergyPerExtent*(float)r.Actual;
             state.Energy[i] += gained;
             state.OrganicCStore[i] = Mathf.Min(maxStore,state.OrganicCStore[i]+r.StorePerExtent*(float)r.Actual);
+            if (observeAccounting)
+            {
+                r.DiagnosticStoreAfter = state.OrganicCStore[i];
+                r.DiagnosticEnergyDelta = (double)state.Energy[i] - energyBefore;
+            }
             int metabolism=(int)state.Metabolism[i]; extentByMetabolism[metabolism]+=r.Actual; energyByMetabolism[metabolism]+=gained;
         }
         using (ReactionCommit.Auto())
@@ -573,16 +657,28 @@ public sealed class GeodesicBiologyRuntime
             for(int k=0;k<ResourceCount;k++)
             {
                 double d=delta[k*grid.NodeCapacity+node];
-                if(d!=0) resources.ApplyDirectExchangeInventory((GeodesicOceanResource)k,node,d);
+                double actual = d != 0 ? resources.ApplyDirectExchangeInventory((GeodesicOceanResource)k,node,d) : 0d;
+                if (observeAccounting)
+                {
+                    int scratch = k * grid.NodeCapacity + node;
+                    bool mixed = demand[scratch] > 0d && availabilityFactor[scratch] > 0d;
+                    if (d != 0d || mixed) accountingDiagnostics.RecordNodeExchange((GeodesicOceanResource)k, d, actual, mixed);
+                    // A mixed input/product pair exposes only a net exchange, even when it is zero.
+                    // Do not invent a measured gross consumption for its individual requests.
+                    availabilityFactor[scratch] = mixed ? double.NaN : d != 0d ? actual / d : 1d;
+                }
             }
         }
     }
     private void RunLifecycle(float dt, List<Replicator> agents, ReplicatorPopulationState state, float maintenance,
         float rate, bool carbon, float divisionCost, float replicationCost, float multiple, float split,
-        int maxPopulation, Action<MetabolismType, DeathCause> registerDeathCause)
+        int maxPopulation, Action<MetabolismType, DeathCause> registerDeathCause, bool recordReactions, bool observeAccounting)
     {
         for (int i = state.Count - 1; i >= 0; i--)
         {
+            // Original request indices still match here, before any reverse-loop swap-back or birth.
+            // Fold accounting into this existing pass rather than scanning the population again.
+            if (recordReactions) RecordReactionAccounting(i);
             state.Age[i] += dt;
             float temperature = GetHabitatTemperature(state.GeodesicCellIndex[i], state.CurrentOceanLayerIndex[i]);
             float performance = CalculateTemperaturePerformance(temperature, state.OptimalTempMin[i],
@@ -614,9 +710,15 @@ public sealed class GeodesicBiologyRuntime
             if (!eligible || !state.CanReplicate[i] || agents.Count >= maxPopulation
                 || reproductionRandom.NextDouble() >= Mathf.Clamp01(rate * dt * performance)) continue;
             Replicator parent = agents[i];
+            GeodesicGrowthSnapshot divisionBefore = observeAccounting
+                ? CaptureGrowthSnapshot(i, parent.DiagnosticId, state, temperature, performance,
+                    carbon, divisionCost, replicationCost, multiple, maxPopulation, rate, dt)
+                : default;
             float childMovementSeed = (float)reproductionRandom.NextDouble();
             var child = new Replicator(state.Position[i], state.Rotation[i], state.MaxLifespan[i], parent.color, parent.traits,
                 childMovementSeed, state.Metabolism[i], state.Locomotion[i], parent.locomotionSkill);
+            float childInitialEnergy = observeAccounting ? child.energy : 0f;
+            float childInitialCarbon = observeAccounting ? child.organicCStore : 0f;
             child.geodesicCellIndex = state.GeodesicCellIndex[i];
             child.currentOceanLayerIndex = state.CurrentOceanLayerIndex[i];
             child.preferredOceanLayerIndex = state.CurrentOceanLayerIndex[i];
@@ -633,9 +735,25 @@ public sealed class GeodesicBiologyRuntime
             if (carbon) { child.organicCStore = state.OrganicCStore[i] * Mathf.Clamp01(split); state.OrganicCStore[i] -= child.organicCStore; }
             agents.Add(child);
             state.AddAgentFromReplicatorData(child);
+            if (observeAccounting) accountingDiagnostics.RecordDivision(divisionBefore, i, state.Count - 1,
+                child.DiagnosticId, state, grid, split, childInitialEnergy, childInitialCarbon);
             births++;
             temperatureTelemetry.RecordBirth(performance, temperatureSettings);
         }
+    }
+
+    private void RecordReactionAccounting(int index)
+    {
+        ref Request r = ref requests[index];
+        if (!r.Supported) return;
+        double product = r.ProductCoefficient > 0d ? r.ProductCoefficient * r.Actual : 0d;
+        accountingDiagnostics.RecordReaction(r.Metabolism, r.A, r.B, r.Product,
+            r.NeedA * r.Desired, r.NeedB * r.Desired, r.NeedA * r.Actual, r.NeedB * r.Actual, product,
+            availabilityFactor[(int)r.A * grid.NodeCapacity + r.Node],
+            availabilityFactor[(int)r.B * grid.NodeCapacity + r.Node],
+            availabilityFactor[(int)r.Product * grid.NodeCapacity + r.Node],
+            r.StorePerExtent * (float)r.Actual, r.DiagnosticStoreBefore, r.DiagnosticStoreAfter,
+            r.EnergyPerExtent * (float)r.Actual, r.DiagnosticEnergyDelta, r.Actual > 0d);
     }
 
     private void RecycleDeathInventory(int index, Replicator companion, ReplicatorPopulationState state, DeathCause cause)
@@ -1140,15 +1258,20 @@ public sealed class GeodesicBiologyRuntime
         temperatureSamples++; if (performance <= 0f) zeroTemperaturePerformance++;
     }
     private void LogDiagnostics(ReplicatorPopulationState state, List<Replicator> agents, bool carbonDivision,
-        float divisionCost, float replicationCost, float divisionMultiple, int maxPopulation)
+        float divisionCost, float replicationCost, float divisionMultiple, int maxPopulation, float reproductionRate)
     {
         LogDeathRecycling();
         temperatureTelemetry.Log(state, oceanTemperature, temperatureSettings, carbonDivision,
             divisionCost, replicationCost, divisionMultiple, maxPopulation, GetHabitatTemperature);
         int hydrogen=0,sulfur=0,methanogenesis=0,photosynthesis=0,methanotrophy=0,passive=0,amoeboid=0,flagellum=0,anchored=0;
+        bool observeAccounting = accountingDiagnostics != null && accountingDiagnostics.Enabled;
+        if (observeAccounting) accountingDiagnostics.BeginPopulationReport();
         float organicMin=float.PositiveInfinity,organicMax=float.NegativeInfinity,thresholdMin=float.PositiveInfinity,thresholdMax=float.NegativeInfinity,maxDivisionCarbonFraction=0f;double organicSum=0d,thresholdSum=0d;int divisionEligible=0,occupiedNodeCount=0;
         for (int i = 0; i < state.Count; i++)
         {
+            if (observeAccounting && TryGetGrowthSnapshot(i, agents, state, carbonDivision, divisionCost,
+                replicationCost, divisionMultiple, maxPopulation, reproductionRate, lastBiologyStepSeconds, out GeodesicGrowthSnapshot growth))
+                accountingDiagnostics.ObserveGrowth(growth);
             switch (state.Metabolism[i])
             {
                 case MetabolismType.Hydrogenotrophy: hydrogen++; break;
@@ -1186,6 +1309,7 @@ public sealed class GeodesicBiologyRuntime
         double evaluationsPerHabitat=agentEvaluations/(double)Math.Max(1L,habitatSamples);
         double evaluationsPerTemperatureRead=agentEvaluations/(double)Math.Max(1L,oceanTemperatureReads);
         Debug.Log($"[GeodesicBiologyTelemetry] population={state.Count} biologySteps={biologySteps} lastStepSeconds={lastBiologyStepSeconds:G6} agentEvaluations={agentEvaluations} habitatSamples={habitatSamples} occupiedHabitatH2(min/avg/max)={occupiedH2Min:G6}/{occupiedH2Sum/Math.Max(1,occupiedSamples):G6}/{occupiedH2Max:G6} occupiedHabitatCO2(min/avg/max)={occupiedCo2Min:G6}/{occupiedCo2Sum/Math.Max(1,occupiedSamples):G6}/{occupiedCo2Max:G6} organicCStore(min/avg/max)={organicMin:G6}/{organicSum/Math.Max(1,state.Count):G6}/{organicMax:G6} divisionThreshold(min/avg/max)={thresholdMin:G6}/{thresholdSum/Math.Max(1,state.Count):G6}/{thresholdMax:G6} maxDivisionCarbonFraction={maxDivisionCarbonFraction:G6} divisionEligible={divisionEligible} oceanTemperatureReads={oceanTemperatureReads} photosyntheticLightReads={photosyntheticLightReads} resourceInventoryReads={resourceInventoryReads} competitionPairs={competitionPairs} evaluationsPerHabitat={evaluationsPerHabitat:G6} evaluationsPerTemperatureRead={evaluationsPerTemperatureRead:G6} metabolismOrder=h/s/m/p/mt populationByMetabolism={hydrogen}/{sulfur}/{methanogenesis}/{photosynthesis}/{methanotrophy} locomotionOrder=passive/amoeboid/flagellum/anchored populationByLocomotion={passive}/{amoeboid}/{flagellum}/{anchored} movementUpdates={movementUpdates} wanderStateRefreshes={wanderStateRefreshes} continuousKinematicUpdates={continuousKinematicUpdates} horizontalBoundaryCrossings={horizontalBoundaryCrossings} verticalTransitions={verticalTransitions} landBoundaryRejections={landBoundaryRejections} invalidLayerCorrections={invalidLayerCorrections} births={births} deaths={deaths} starvation={starvationDeaths} lifespan={lifespanDeaths} requests={requestedByMetabolism[h]}/{requestedByMetabolism[s]}/{requestedByMetabolism[m]}/{requestedByMetabolism[p]}/{requestedByMetabolism[mt]} achieved={achievedByMetabolism[h]}/{achievedByMetabolism[s]}/{achievedByMetabolism[m]}/{achievedByMetabolism[p]}/{achievedByMetabolism[mt]} zeroAchieved={zeroAchieved} resourceLimited={resourceLimited} extent={extentByMetabolism[h]:G6}/{extentByMetabolism[s]:G6}/{extentByMetabolism[m]:G6}/{extentByMetabolism[p]:G6}/{extentByMetabolism[mt]:G6} energy={energyByMetabolism[h]:G6}/{energyByMetabolism[s]:G6}/{energyByMetabolism[m]:G6}/{energyByMetabolism[p]:G6}/{energyByMetabolism[mt]:G6} maintenance={maintenancePaid:G6} biologyTemperatureAuthority=coarseOceanLayer temperatureK(min/avg/max)={temperatureMin:G6}/{temperatureSum/samples:G6}/{temperatureMax:G6} performance(min/avg/max)={performanceMin:G6}/{performanceSum/samples:G6}/{performanceMax:G6} zeroPerformance={zeroTemperaturePerformance} invalidHabitat={invalidHabitats} invalidState={invalidBiologicalStates}");
+        if (observeAccounting) accountingDiagnostics.LogAndResetInterval();
         biologySteps=agentEvaluations=habitatSamples=oceanTemperatureReads=photosyntheticLightReads=resourceInventoryReads=competitionPairs=movementUpdates=wanderStateRefreshes=continuousKinematicUpdates=horizontalBoundaryCrossings=verticalTransitions=landBoundaryRejections=invalidLayerCorrections=0;
     }
     public static float ResolvePhotosyntheticLight(float daylight, int layer) => Mathf.Clamp01(daylight) * (layer == 0 ? 1f : layer == 1 ? 0.55f : 0f);
@@ -1200,6 +1324,7 @@ public sealed class GeodesicBiologyRuntime
         temperatureSettings = GeodesicBiologyTemperatureSettings.Default;
         temperatureMutationRandom = null;
         temperatureTelemetry.Clear();
+        accountingDiagnostics?.Reset();
         Array.Clear(requestedByMetabolism, 0, requestedByMetabolism.Length);
         Array.Clear(achievedByMetabolism, 0, achievedByMetabolism.Length);
         Array.Clear(extentByMetabolism, 0, extentByMetabolism.Length);
