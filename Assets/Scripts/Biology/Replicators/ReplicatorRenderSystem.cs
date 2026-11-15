@@ -163,7 +163,7 @@ public class ReplicatorRenderSystem
         Material replicatorMaterial,
         ReplicatorMovementDiagnostics diagnostics)
     {
-        float baseScale = 0.1f * Mathf.Max(0.1f, size) * diameterMultiplier;
+        float baseScale = 0.05f * Mathf.Max(0.1f, size) * diameterMultiplier;
         // Passive bodies are isotropic. Avoid normal/tangent reconstruction for the dominant
         // founder population; their authoritative continuous position is already render-ready.
         if (locomotion == LocomotionType.PassiveDrift)

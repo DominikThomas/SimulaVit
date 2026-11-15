@@ -194,6 +194,7 @@ public sealed class GeodesicBiologyRuntime
             probabilityPerStep = Mathf.Clamp01(reproductionRate * stepSeconds * performance), age = state.Age[index],
             visualSize = state.Size[index] * visualDiameter, matureSize = state.Size[index],
             visualDiameterMultiplier = visualDiameter, growthCycleCarbonBaseline = visual.carbonBaseline,
+            cycleStartDiameterMultiplier = ReplicatorVisualGrowth.CycleStartDiameter(visual, visualGrowthSettings),
             visualGrowthProgress = visualProgress, isVisuallyDividing = passiveVisual && visual.IsDividing,
             divisionStartDiameterMultiplier = visual.divisionStartDiameterMultiplier,
             divisionAnimationProgress = ReplicatorVisualGrowth.DivisionBlend(visual),
@@ -776,10 +777,13 @@ public sealed class GeodesicBiologyRuntime
                 EnsurePassiveKinematicState(childIndex, state, planet.transform.worldToLocalMatrix);
                 InitializePassiveSchedulesAtSpawn(state, childIndex, passiveMovementTime);
                 Vector3 childLocal = planet.transform.InverseTransformPoint(state.Position[childIndex]);
+                // Presentation observes the configured carbon allocation; no inventory or split is changed.
+                // Energy-only reproduction has no carbon split to mirror, so retain equal visual volumes.
+                float childVisualFraction = carbon && float.IsFinite(split) ? Mathf.Clamp01(split) : 0.5f;
                 ReplicatorVisualGrowth.BeginDivision(ref state.VisualGrowth[i], state.OrganicCStore[i], divisionStartDiameter,
-                    commonVisualLocal - parentLocal, parentLocal.normalized, visualGrowthSettings);
+                    commonVisualLocal - parentLocal, parentLocal.normalized, visualGrowthSettings, 1f - childVisualFraction);
                 ReplicatorVisualGrowth.BeginDivision(ref state.VisualGrowth[childIndex], state.OrganicCStore[childIndex], divisionStartDiameter,
-                    commonVisualLocal - childLocal, childLocal.normalized, visualGrowthSettings);
+                    commonVisualLocal - childLocal, childLocal.normalized, visualGrowthSettings, childVisualFraction);
             }
             if (observeAccounting) accountingDiagnostics.RecordDivision(divisionBefore, i, state.Count - 1,
                 child.DiagnosticId, state, grid, split, childInitialEnergy, childInitialCarbon,

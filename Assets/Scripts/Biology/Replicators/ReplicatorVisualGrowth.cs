@@ -5,9 +5,10 @@ using UnityEngine;
 [Serializable]
 public struct ReplicatorVisualGrowthSettings
 {
-    [Range(0.01f, 1f)] public float minimumDiameterMultiplier;
+    [Range(0.01f, 1f), Tooltip("Founder / legacy-cycle starting diameter. Division cycles use cube-root volume shares of the parent diameter.")]
+    public float minimumDiameterMultiplier;
     [Range(0.01f, 1f)] public float maximumDiameterMultiplier;
-    [Range(0f, 1f), Tooltip("Blends linear carbon progress with smoothstep. No age/energy or time-based growth lag.")]
+    [Range(0f, 1f), Tooltip("Blends linear carbon progress with smoothstep before interpolating volume. No age/energy or time-based growth lag.")]
     public float growthCurveSmoothing;
     [Min(0f), Tooltip("Presentation seconds at normal speed. Acceleration shortens transitions; pause freezes them.")]
     public float divisionAnimationDuration;
@@ -16,14 +17,16 @@ public struct ReplicatorVisualGrowthSettings
 
     public static ReplicatorVisualGrowthSettings Default => new ReplicatorVisualGrowthSettings
     {
-        minimumDiameterMultiplier = 0.333f, maximumDiameterMultiplier = 1f,
+        minimumDiameterMultiplier = EqualDivisionDiameterMultiplier, maximumDiameterMultiplier = 1f,
         growthCurveSmoothing = 1f, divisionAnimationDuration = 0.65f, daughterSeparationDistance = 0.06f
     };
+
+    public const float EqualDivisionDiameterMultiplier = 0.7937005f; // cube root of 0.5
 
     public ReplicatorVisualGrowthSettings Sanitized()
     {
         var s = this;
-        s.minimumDiameterMultiplier = float.IsFinite(s.minimumDiameterMultiplier) ? Mathf.Clamp(s.minimumDiameterMultiplier, 0.01f, 1f) : 0.333f;
+        s.minimumDiameterMultiplier = float.IsFinite(s.minimumDiameterMultiplier) ? Mathf.Clamp(s.minimumDiameterMultiplier, 0.01f, 1f) : EqualDivisionDiameterMultiplier;
         s.maximumDiameterMultiplier = float.IsFinite(s.maximumDiameterMultiplier) ? Mathf.Clamp(s.maximumDiameterMultiplier, s.minimumDiameterMultiplier, 1f) : 1f;
         s.growthCurveSmoothing = float.IsFinite(s.growthCurveSmoothing) ? Mathf.Clamp01(s.growthCurveSmoothing) : 1f;
         s.divisionAnimationDuration = float.IsFinite(s.divisionAnimationDuration) ? Mathf.Clamp(s.divisionAnimationDuration, 0f, 5f) : 0.65f;
@@ -40,6 +43,9 @@ public struct ReplicatorVisualState
 {
     public bool initialized;
     public float carbonBaseline;
+    // Zero means a founder / older snapshot: use the configured minimum. Positive values
+    // retain an actual division volume share through growth, swap-back and snapshot restore.
+    public float cycleStartDiameterMultiplier;
     public float growthProgress;
     public float diameterMultiplier;
     public float divisionElapsedSeconds;
@@ -80,33 +86,52 @@ public static class ReplicatorVisualGrowth
         return progress;
     }
 
+    public static float CycleStartDiameter(in ReplicatorVisualState visual, ReplicatorVisualGrowthSettings settings)
+        => float.IsFinite(visual.cycleStartDiameterMultiplier) && visual.cycleStartDiameterMultiplier > 0f
+            ? Mathf.Clamp(visual.cycleStartDiameterMultiplier, 0.01f, settings.maximumDiameterMultiplier)
+            : settings.minimumDiameterMultiplier;
+
     public static float TargetDiameter(float progress, ReplicatorVisualGrowthSettings settings)
+        => TargetDiameter(progress, settings, settings.minimumDiameterMultiplier);
+
+    public static float TargetDiameter(float progress, ReplicatorVisualGrowthSettings settings, float cycleStartDiameter)
     {
+        progress = Mathf.Clamp01(progress);
         float curved = Mathf.Lerp(progress, progress * progress * (3f - 2f * progress), settings.growthCurveSmoothing);
-        return Mathf.Lerp(settings.minimumDiameterMultiplier, settings.maximumDiameterMultiplier, curved);
+        // For spheres, the common pi/6 factor cancels: volume is proportional to diameter cubed.
+        // Return exact endpoints so cube-root rounding cannot overshoot the mature maximum.
+        float maximum = settings.maximumDiameterMultiplier;
+        float minimum = Mathf.Clamp(cycleStartDiameter, 0.01f, maximum);
+        if (curved <= 0f) return minimum;
+        if (curved >= 1f) return maximum;
+        float volume = Mathf.Lerp(minimum * minimum * minimum, maximum * maximum * maximum, curved);
+        return Mathf.Clamp(Mathf.Pow(volume, 1f / 3f), minimum, maximum);
     }
 
     public static float DisplayDiameter(in ReplicatorVisualState visual, float progress, ReplicatorVisualGrowthSettings settings)
     {
-        float target = TargetDiameter(progress, settings);
+        float target = TargetDiameter(progress, settings, CycleStartDiameter(visual, settings));
         return visual.IsDividing
-            ? Mathf.Lerp(Mathf.Clamp(visual.divisionStartDiameterMultiplier, settings.minimumDiameterMultiplier, settings.maximumDiameterMultiplier),
+            ? Mathf.Lerp(Mathf.Clamp(visual.divisionStartDiameterMultiplier, 0.01f, settings.maximumDiameterMultiplier),
                 target, DivisionBlend(visual))
             : target;
     }
 
     public static void BeginDivision(ref ReplicatorVisualState visual, float retainedCarbon, float startDiameter,
-        Vector3 startOffsetLocal, Vector3 birthDirectionLocal, ReplicatorVisualGrowthSettings settings)
+        Vector3 startOffsetLocal, Vector3 birthDirectionLocal, ReplicatorVisualGrowthSettings settings, float volumeFraction = 0.5f)
     {
         InitializeCycle(ref visual, retainedCarbon, settings);
-        visual.divisionStartDiameterMultiplier = Mathf.Clamp(startDiameter, settings.minimumDiameterMultiplier, settings.maximumDiameterMultiplier);
+        visual.divisionStartDiameterMultiplier = Mathf.Clamp(startDiameter, 0.01f, settings.maximumDiameterMultiplier);
+        volumeFraction = float.IsFinite(volumeFraction) ? Mathf.Clamp01(volumeFraction) : 0.5f;
+        visual.cycleStartDiameterMultiplier = Mathf.Clamp(
+            visual.divisionStartDiameterMultiplier * Mathf.Pow(volumeFraction, 1f / 3f), 0.01f, settings.maximumDiameterMultiplier);
         visual.diameterMultiplier = visual.divisionStartDiameterMultiplier;
         visual.divisionDurationSeconds = settings.divisionAnimationDuration;
         visual.divisionStartOffsetLocal = startOffsetLocal;
         visual.divisionBirthDirectionLocal = birthDirectionLocal;
         if (!visual.IsDividing)
         {
-            visual.diameterMultiplier = settings.minimumDiameterMultiplier;
+            visual.diameterMultiplier = visual.cycleStartDiameterMultiplier;
             visual.divisionStartOffsetLocal = Vector3.zero;
         }
     }
@@ -157,7 +182,14 @@ public static class ReplicatorVisualGrowth
             visual.growthProgress = 0f;
             corrected = true;
         }
-        if (!float.IsFinite(visual.diameterMultiplier) || visual.diameterMultiplier < settings.minimumDiameterMultiplier
+        if (!float.IsFinite(visual.cycleStartDiameterMultiplier) || visual.cycleStartDiameterMultiplier < 0f
+            || visual.cycleStartDiameterMultiplier > 1f)
+        {
+            visual.cycleStartDiameterMultiplier = 0f;
+            corrected = true;
+        }
+        // A small/asymmetric parent's descendants can legitimately start below the founder minimum.
+        if (!float.IsFinite(visual.diameterMultiplier) || visual.diameterMultiplier < 0.01f
             || visual.diameterMultiplier > settings.maximumDiameterMultiplier) corrected = true;
         visual.growthProgress = Progress(visual, carbon, threshold);
         visual.diameterMultiplier = DisplayDiameter(visual, visual.growthProgress, settings);

@@ -18,6 +18,7 @@ public struct GeodesicGrowthSnapshot
     public float energy, requiredEnergy, temperatureKelvin, temperaturePerformance;
     public float probabilityPerStep, age, visualSize;
     public float matureSize, visualDiameterMultiplier, growthCycleCarbonBaseline, visualGrowthProgress;
+    public float cycleStartDiameterMultiplier;
     public float divisionStartDiameterMultiplier, divisionAnimationProgress;
     public bool isVisuallyDividing;
     public Vector3 worldPosition;
