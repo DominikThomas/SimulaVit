@@ -371,6 +371,7 @@ public sealed partial class GeodesicBiologyRuntime
         float probability = !active.hasSuitability ? steeringSettings.BaseTumbleProbability : better
             ? steeringSettings.MovementTumbleChanceWhenBetter : worse
             ? steeringSettings.MovementTumbleChanceWhenWorse : steeringSettings.MovementTumbleChanceNeutral;
+        if (!chemotacticSteeringEnabled && hadMemory) probability = steeringSettings.MovementTumbleChanceNeutral;
         if (hadMemory)
         {
             if (better) suitabilityImproving++; else if (worse) suitabilityWorsening++; else suitabilityNeutral++;
@@ -398,6 +399,8 @@ public sealed partial class GeodesicBiologyRuntime
             active.runSeconds = 0f;
         }
         if (hadMemory) RecordTaxisTumble(comparison.trend, tumble, tumbled);
+        RecordABChemotaxisComparison(observation, active.lastTaxisObservation, comparison,
+            state.Metabolism[i], hadMemory, tumble, tumbled, active.cellCrossingsSinceSense);
         RecordDetailedTaxisSense(trackedSlot, observation, previousSuitability, previousReadiness,
             comparison, probability, tumble, tumbled, !hadMemory, active.cellCrossingsSinceSense, active.lastSenseInterval);
         double blend = SafeMovementValue(steeringSettings.MovementSuitabilityMemoryBlend, 0.35f, 0f, 1f);
@@ -425,12 +428,17 @@ public sealed partial class GeodesicBiologyRuntime
             else if (vertical.trend == TaxisTrend.Improving)
             {
                 verticalBetter++;
-                if (NextActiveRandom(i, state) >= locomotionSettings.verticalContinueWhenBetter) active.verticalDirection *= -1;
+                if (chemotacticSteeringEnabled)
+                {
+                    if (NextActiveRandom(i, state) >= locomotionSettings.verticalContinueWhenBetter) active.verticalDirection *= -1;
+                }
+                else if (NextActiveRandom(i, state) < 0.5f) active.verticalDirection *= -1;
             }
             else if (vertical.trend == TaxisTrend.Worsening)
             {
                 verticalWorse++;
-                if (NextActiveRandom(i, state) < locomotionSettings.verticalReverseWhenWorse) active.verticalDirection *= -1;
+                if (NextActiveRandom(i, state) < (chemotacticSteeringEnabled
+                    ? locomotionSettings.verticalReverseWhenWorse : 0.5f)) active.verticalDirection *= -1;
             }
             else if (paired)
             {

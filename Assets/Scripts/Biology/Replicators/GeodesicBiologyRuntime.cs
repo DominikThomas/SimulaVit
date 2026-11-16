@@ -472,6 +472,7 @@ public sealed partial class GeodesicBiologyRuntime
         GeodesicBiologyTemperatureSettings? configuredTemperatureSettings = null)
     {
         temperatureSettings = configuredTemperatureSettings ?? GeodesicBiologyTemperatureSettings.Default;
+        AdvanceChemotaxisABStep(dt);
         bool observeAccounting = accountingDiagnostics != null && accountingDiagnostics.Enabled;
         if (observeAccounting) accountingDiagnostics.AdvanceObservedTime(dt);
         RefreshTemperatureCache();
@@ -662,6 +663,7 @@ public sealed partial class GeodesicBiologyRuntime
             if (r.ProductCoefficient > 0) delta[(int)r.Product*grid.NodeCapacity+r.Node] += r.ProductCoefficient*r.Actual;
             if (r.SulfurProduct) suspended.AddPrecipitate(r.Cell,r.Layer,r.NeedB*r.Actual,0);
             float gained = r.EnergyPerExtent*(float)r.Actual;
+            RecordABMetabolicEnergy(state.Locomotion[i], gained);
             state.Energy[i] += gained;
             state.OrganicCStore[i] = Mathf.Min(maxStore,state.OrganicCStore[i]+r.StorePerExtent*(float)r.Actual);
             if (observeAccounting)
@@ -697,6 +699,7 @@ public sealed partial class GeodesicBiologyRuntime
     {
         for (int i = state.Count - 1; i >= 0; i--)
         {
+            ObserveABOrganismTime(i, state, dt);
             // Original request indices still match here, before any reverse-loop swap-back or birth.
             // Fold accounting into this existing pass rather than scanning the population again.
             if (recordReactions) RecordReactionAccounting(i);
@@ -718,6 +721,7 @@ public sealed partial class GeodesicBiologyRuntime
             {
                 RecycleDeathInventory(i, agents[i], state, cause);
                 RecordLocomotionDeath(state.Metabolism[i], state.Locomotion[i]);
+                RecordABDeath(state.Locomotion[i], cause);
                 deaths++;
                 if (cause == DeathCause.EnergyDepletion) starvationDeaths++;
                 else if (cause == DeathCause.OldAge) lifespanDeaths++;
@@ -803,6 +807,7 @@ public sealed partial class GeodesicBiologyRuntime
                 child.DiagnosticId, state, grid, split, childInitialEnergy, childInitialCarbon,
                 planet.transform, visualGrowthSettings.daughterSeparationDistance);
             births++;
+            RecordABBirth(state.Locomotion[i]);
             RecordLocomotionBirth(state.Metabolism[i], state.Locomotion[i]);
             temperatureTelemetry.RecordBirth(performance, temperatureSettings);
         }
@@ -1377,7 +1382,8 @@ public sealed partial class GeodesicBiologyRuntime
         float divisionCost, float replicationCost, float divisionMultiple, int maxPopulation, float reproductionRate)
     {
         LogDeathRecycling();
-        LogLocomotionDiagnostics(state);
+        if (!chemotaxisABDiagnosticsEnabled) LogLocomotionDiagnostics(state);
+        bool reportAB = BeginABPopulationReport();
         temperatureTelemetry.Log(state, oceanTemperature, temperatureSettings, carbonDivision,
             divisionCost, replicationCost, divisionMultiple, maxPopulation, GetHabitatTemperature);
         int hydrogen=0,sulfur=0,methanogenesis=0,photosynthesis=0,methanotrophy=0,passive=0,amoeboid=0,flagellum=0,anchored=0;
@@ -1386,6 +1392,7 @@ public sealed partial class GeodesicBiologyRuntime
         float organicMin=float.PositiveInfinity,organicMax=float.NegativeInfinity,thresholdMin=float.PositiveInfinity,thresholdMax=float.NegativeInfinity,maxDivisionCarbonFraction=0f;double organicSum=0d,thresholdSum=0d;int divisionEligible=0,occupiedNodeCount=0;
         for (int i = 0; i < state.Count; i++)
         {
+            if (reportAB) ObserveABPopulation(i, state);
             if (observeAccounting && TryGetGrowthSnapshot(i, agents, state, carbonDivision, divisionCost,
                 replicationCost, divisionMultiple, maxPopulation, reproductionRate, lastBiologyStepSeconds, out GeodesicGrowthSnapshot growth))
                 accountingDiagnostics.ObserveGrowth(growth);
@@ -1426,12 +1433,14 @@ public sealed partial class GeodesicBiologyRuntime
         double evaluationsPerHabitat=agentEvaluations/(double)Math.Max(1L,habitatSamples);
         double evaluationsPerTemperatureRead=agentEvaluations/(double)Math.Max(1L,oceanTemperatureReads);
         Debug.Log($"[GeodesicBiologyTelemetry] population={state.Count} biologySteps={biologySteps} lastStepSeconds={lastBiologyStepSeconds:G6} agentEvaluations={agentEvaluations} habitatSamples={habitatSamples} occupiedHabitatH2(min/avg/max)={occupiedH2Min:G6}/{occupiedH2Sum/Math.Max(1,occupiedSamples):G6}/{occupiedH2Max:G6} occupiedHabitatCO2(min/avg/max)={occupiedCo2Min:G6}/{occupiedCo2Sum/Math.Max(1,occupiedSamples):G6}/{occupiedCo2Max:G6} organicCStore(min/avg/max)={organicMin:G6}/{organicSum/Math.Max(1,state.Count):G6}/{organicMax:G6} divisionThreshold(min/avg/max)={thresholdMin:G6}/{thresholdSum/Math.Max(1,state.Count):G6}/{thresholdMax:G6} maxDivisionCarbonFraction={maxDivisionCarbonFraction:G6} divisionEligible={divisionEligible} oceanTemperatureReads={oceanTemperatureReads} photosyntheticLightReads={photosyntheticLightReads} resourceInventoryReads={resourceInventoryReads} competitionPairs={competitionPairs} evaluationsPerHabitat={evaluationsPerHabitat:G6} evaluationsPerTemperatureRead={evaluationsPerTemperatureRead:G6} metabolismOrder=h/s/m/p/mt populationByMetabolism={hydrogen}/{sulfur}/{methanogenesis}/{photosynthesis}/{methanotrophy} locomotionOrder=passive/amoeboid/flagellum/anchored populationByLocomotion={passive}/{amoeboid}/{flagellum}/{anchored} movementUpdates={movementUpdates} wanderStateRefreshes={wanderStateRefreshes} continuousKinematicUpdates={continuousKinematicUpdates} horizontalBoundaryCrossings={horizontalBoundaryCrossings} verticalTransitions={verticalTransitions} landBoundaryRejections={landBoundaryRejections} invalidLayerCorrections={invalidLayerCorrections} births={births} deaths={deaths} starvation={starvationDeaths} lifespan={lifespanDeaths} requests={requestedByMetabolism[h]}/{requestedByMetabolism[s]}/{requestedByMetabolism[m]}/{requestedByMetabolism[p]}/{requestedByMetabolism[mt]} achieved={achievedByMetabolism[h]}/{achievedByMetabolism[s]}/{achievedByMetabolism[m]}/{achievedByMetabolism[p]}/{achievedByMetabolism[mt]} zeroAchieved={zeroAchieved} resourceLimited={resourceLimited} extent={extentByMetabolism[h]:G6}/{extentByMetabolism[s]:G6}/{extentByMetabolism[m]:G6}/{extentByMetabolism[p]:G6}/{extentByMetabolism[mt]:G6} energy={energyByMetabolism[h]:G6}/{energyByMetabolism[s]:G6}/{energyByMetabolism[m]:G6}/{energyByMetabolism[p]:G6}/{energyByMetabolism[mt]:G6} maintenance={maintenancePaid:G6} biologyTemperatureAuthority=coarseOceanLayer temperatureK(min/avg/max)={temperatureMin:G6}/{temperatureSum/samples:G6}/{temperatureMax:G6} performance(min/avg/max)={performanceMin:G6}/{performanceSum/samples:G6}/{performanceMax:G6} zeroPerformance={zeroTemperaturePerformance} invalidHabitat={invalidHabitats} invalidState={invalidBiologicalStates}");
+        if (reportAB) LogChemotaxisABReport(state.Count);
         if (observeAccounting) accountingDiagnostics.LogAndResetInterval();
         biologySteps=agentEvaluations=habitatSamples=oceanTemperatureReads=photosyntheticLightReads=resourceInventoryReads=competitionPairs=movementUpdates=wanderStateRefreshes=continuousKinematicUpdates=horizontalBoundaryCrossings=verticalTransitions=landBoundaryRejections=invalidLayerCorrections=0;
     }
     public static float ResolvePhotosyntheticLight(float daylight, int layer) => Mathf.Clamp01(daylight) * (layer == 0 ? 1f : layer == 1 ? 0.55f : 0f);
     public void Clear()
     {
+        ClearChemotaxisAB();
         ClearLocomotion();
         ResetVisualDiagnostics();
         planet = null; resources = null; suspended = null; oceanTemperature = null;

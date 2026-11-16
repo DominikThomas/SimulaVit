@@ -94,6 +94,12 @@ public sealed partial class GeodesicBiologyRuntime
             return $"count={count} rawScoreDelta(min/mean/max/meanAbs)={rawMin:G6}/{rawSum / divisor:G6}/{rawMax:G6}/{rawAbsoluteSum / divisor:G6} relativeReadinessDelta(min/mean/max/meanAbs)={normalizedMin:G6}/{normalizedSum / divisor:G6}/{normalizedMax:G6}/{normalizedAbsoluteSum / divisor:G6} absRelativeBins(0,<1e-4,<1e-3,<.01,<.05,<.25,>=.25)={bins[0]}/{bins[1]}/{bins[2]}/{bins[3]}/{bins[4]}/{bins[5]}/{bins[6]}";
         }
 
+        public string CompactSummary()
+        {
+            double divisor = Math.Max(1L, count);
+            return $"n={count},raw(min/mean/max/meanAbs)={rawMin:G4}/{rawSum / divisor:G4}/{rawMax:G4}/{rawAbsoluteSum / divisor:G4},rel(min/mean/max/meanAbs)={normalizedMin:G4}/{normalizedSum / divisor:G4}/{normalizedMax:G4}/{normalizedAbsoluteSum / divisor:G4}";
+        }
+
         public void Reset()
         {
             count = 0;

@@ -181,6 +181,10 @@ public sealed class GeodesicBiologyTemperatureTelemetry
         Debug.Log(text.ToString());
     }
 
+    /// <summary>Read-only access to the existing cell-based ring map. -1 means invalid geography.</summary>
+    public int GetVentRingBand(int cell) => grid != null && cell >= 0 && cell < ringByCell.Length
+        && grid.ActiveLayerCountByCell[cell] > 0 ? RingBand(cell) : -1;
+
     private int RingBand(int cell)
     {
         int ring = ringByCell[cell];

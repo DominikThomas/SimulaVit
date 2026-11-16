@@ -383,6 +383,10 @@ public class ReplicatorManager : MonoBehaviour
     [Range(0f, 1f)] public float movementTumbleChanceNeutral = 0.2f;
 
     [Header("Geodesic Active Locomotion")]
+    [Tooltip("A/B control: disable only environmental feedback on horizontal tumbles and vertical persistence. Active swimming, neutral exploration, costs and evolution remain enabled.")]
+    public bool enableGeodesicChemotacticSteering = true;
+    [Tooltip("Opt-in controlled-experiment summaries at the existing ten-simulated-second biology cadence. Replaces the verbose locomotion/taxis summary block while enabled.")]
+    public bool enableGeodesicChemotaxisABDiagnostics;
     public GeodesicLocomotionSettings geodesicLocomotion = GeodesicLocomotionSettings.Default;
 
     [Header("Scent-Based Predation")]
@@ -1026,6 +1030,8 @@ public class ReplicatorManager : MonoBehaviour
     internal bool RunGeodesicBiologyStep(float stepDeltaTime)
     {
         if (geodesicBiology == null) return false;
+        geodesicBiology.SetChemotaxisABContext(enableGeodesicChemotacticSteering,
+            enableGeodesicChemotaxisABDiagnostics, simulationTimeSeconds);
         geodesicBiology.SetVisualGrowthSettings(visualGrowthSettings);
         geodesicBiology.SetLocomotionSettings(geodesicLocomotion, CreateSteeringSettings(), moveSpeed,
             amoeboidMoveSpeedMultiplier, flagellumMoveSpeedMultiplier, amoeboidTurnRate, flagellumTurnRate,
