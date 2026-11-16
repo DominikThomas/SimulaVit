@@ -493,7 +493,7 @@ public sealed partial class GeodesicBiologyRuntime
         state.EnsureMatchesAgentCount(agents);
         SetHydrogenotrophMovementInputs(hydrogenCo2, hydrogenH2, hydrogenO2InhibitionEnabled,
             o2ComfortMax, o2StressMax, hydrogenMinimumO2Efficiency);
-        using (Movement.Auto()) RunGeodesicMovement(dt, state);
+        using (Movement.Auto()) RunGeodesicMovement(dt, agents, state);
         float reactionDt = ConsumeFixedInterval(ref reactionAccumulator, dt, ReactionIntervalSeconds);
         if (reactionDt > 0f)
         {
@@ -950,7 +950,7 @@ public sealed partial class GeodesicBiologyRuntime
     }
 
     public static void RemoveAgentAtSwapBack(int i,List<Replicator>a,ReplicatorPopulationState s){int last=a.Count-1;if(i<0||i>last)return;if(i!=last)a[i]=a[last];a.RemoveAt(last);s.RemoveAgentAtSwapBack(i);}
-    private void RunGeodesicMovement(float dt, ReplicatorPopulationState state)
+    private void RunGeodesicMovement(float dt, List<Replicator> agents, ReplicatorPopulationState state)
     {
         if (!(dt > 0f) || state.Count == 0) return;
         passiveMovementTime += dt;
@@ -1027,7 +1027,7 @@ public sealed partial class GeodesicBiologyRuntime
         }
 
         if (kinematicsDt > 0f)
-            using (ActiveMovementMarker.Auto()) RunActiveMovement(kinematicsDt, state, worldToLocal, localToWorld);
+            using (ActiveMovementMarker.Auto()) RunActiveMovement(kinematicsDt, agents, state, worldToLocal, localToWorld);
 
         using (MovementVertical.Auto())
         {

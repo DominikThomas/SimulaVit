@@ -22,6 +22,14 @@ public struct GeodesicLocomotionSettings
     [Range(0f, 1f), Tooltip("Diagnostic per-birth mutation rate. Normal operation uses locomotionMutationChance.")]
     public float diagnosticMutationChance;
     public bool logDiagnostics;
+    [Min(0.000000001f), Tooltip("Minimum detectable reaction readiness, in full-reference-tick equivalents. Relative taxis deltas below this floor fade to zero; this is not a raw concentration threshold.")]
+    public float taxisReadinessFloor;
+    public bool detailedTaxisDiagnostics;
+    [Range(1, 4)] public int maximumTrackedTaxisOrganisms;
+    [Tooltip("0 automatically follows a few stable IDs. A positive ID follows only that organism, even through packed swap-back.")]
+    public long trackedTaxisOrganismId;
+    [Min(1f), Tooltip("Real seconds between bounded detailed reports, including at accelerated simulation speeds.")]
+    public float detailedTaxisLogIntervalRealSeconds;
 
     public static GeodesicLocomotionSettings Default => new GeodesicLocomotionSettings
     {
@@ -29,7 +37,8 @@ public struct GeodesicLocomotionSettings
         flagellumTumbleMultiplier = 0.3f, tumbleReferenceSeconds = 0.5f,
         verticalSpeedMetersPerSecond = 10f, verticalExplorationIntervalSeconds = 20f,
         verticalContinueWhenBetter = 0.8f, verticalReverseWhenWorse = 0.8f,
-        diagnosticMutationChance = 1f, logDiagnostics = true
+        diagnosticMutationChance = 1f, logDiagnostics = true,
+        taxisReadinessFloor = 0.0001f, maximumTrackedTaxisOrganisms = 2, detailedTaxisLogIntervalRealSeconds = 2f
     };
 
     internal static float Safe(float value, float fallback, float min, float max) =>
@@ -48,6 +57,11 @@ public struct GeodesicLocomotionSettings
         s.verticalContinueWhenBetter = Safe(s.verticalContinueWhenBetter, 0.8f, 0f, 1f);
         s.verticalReverseWhenWorse = Safe(s.verticalReverseWhenWorse, 0.8f, 0f, 1f);
         s.diagnosticMutationChance = Safe(s.diagnosticMutationChance, 1f, 0f, 1f);
+        // New fields in older serialized settings are zero. Give them working defaults without editing scenes.
+        s.taxisReadinessFloor = Safe(s.taxisReadinessFloor > 0f ? s.taxisReadinessFloor : 0.0001f, 0.0001f, 1e-9f, 1f);
+        s.maximumTrackedTaxisOrganisms = Mathf.Clamp(s.maximumTrackedTaxisOrganisms > 0 ? s.maximumTrackedTaxisOrganisms : 2, 1, 4);
+        s.trackedTaxisOrganismId = Math.Max(0L, s.trackedTaxisOrganismId);
+        s.detailedTaxisLogIntervalRealSeconds = Safe(s.detailedTaxisLogIntervalRealSeconds > 0f ? s.detailedTaxisLogIntervalRealSeconds : 2f, 2f, 1f, 60f);
         return s;
     }
 }
@@ -63,6 +77,26 @@ public struct GeodesicActiveMovementState
     public int verticalDirection, verticalTargetLayer;
     public bool verticalMoving, verticalObservationPending;
     public float verticalCountdown, verticalBaseline;
+    // Whole-struct copying already carries these fields through capacity growth, swap-back and snapshots.
+    public int taxisModelVersion;
+    public bool memoryUsesMetabolism;
+    public double reactionReadinessMemory;
+    public GeodesicTaxisObservation lastTaxisObservation;
+    public int cellCrossingsSinceSense;
+    public bool verticalOriginRecorded;
+    public int verticalOriginCell, verticalOriginLayer, verticalArrivalCell, verticalArrivalLayer;
+    public double verticalReadinessBefore, verticalReadinessAfter;
+    public float verticalArrivalSuitability;
+}
+
+/// <summary>One actual local experience, independent of the smoothed steering memory.</summary>
+[Serializable]
+public struct GeodesicTaxisObservation
+{
+    public bool valid;
+    public int cell, layer;
+    public float h2, co2, o2, temperature, performance, oxygenEfficiency, suitability;
+    public double reactionReadiness;
 }
 
 /// <summary>Optional compatible population snapshot extension. Missing data initializes at the saved position.</summary>

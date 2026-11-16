@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Unity.Profiling;
 using UnityEngine;
 
@@ -16,7 +17,7 @@ public sealed partial class GeodesicBiologyRuntime
     private System.Random locomotionMutationRandom;
     private float movementHydrogenCo2, movementHydrogenH2, movementO2Comfort, movementO2Stress, movementO2Floor;
     private bool movementO2Inhibition;
-    private struct MovementHabitatSample { public float h2, co2, o2; }
+    private struct MovementHabitatSample { public float h2, co2, o2; public double resourceReferenceTicks; }
     private MovementHabitatSample[] movementSamples = Array.Empty<MovementHabitatSample>();
     private int[] movementSampleStamps = Array.Empty<int>();
     private float[] movementSafeAngles = Array.Empty<float>();
@@ -100,6 +101,16 @@ public sealed partial class GeodesicBiologyRuntime
                 co2 = SafeMovementValue(co2, 0f, 0f, float.MaxValue),
                 o2 = SafeMovementValue(o2, 0f, 0f, float.MaxValue)
             };
+            // Biology consumes inventories, not concentrations. The local concentration knee
+            // is the configured per-reference-tick need divided by this actual physical volume.
+            double volume = grid.PhysicalLayerVolumeKm3[node];
+            if (volume > 0d && double.IsFinite(volume) && movementHydrogenCo2 > 0f)
+            {
+                double co2Ticks = movementSamples[node].co2 * volume / movementHydrogenCo2;
+                double h2Ticks = movementHydrogenH2 > 0f
+                    ? movementSamples[node].h2 * volume / movementHydrogenH2 : double.PositiveInfinity;
+                movementSamples[node].resourceReferenceTicks = Math.Min(co2Ticks, h2Ticks);
+            }
             movementSampleStamps[node] = movementSampleGeneration;
         }
         return movementSamples[node];
@@ -107,26 +118,46 @@ public sealed partial class GeodesicBiologyRuntime
 
     private float CurrentMovementSuitability(int i, ReplicatorPopulationState state, out float h2, out float performance)
     {
-        h2 = performance = 0f;
+        GeodesicTaxisObservation observation = ObserveMovementHabitat(i, state);
+        h2 = observation.h2;
+        performance = observation.performance;
+        return observation.suitability;
+    }
+
+    private GeodesicTaxisObservation ObserveMovementHabitat(int i, ReplicatorPopulationState state)
+    {
         int cell = state.GeodesicCellIndex[i], layer = state.CurrentOceanLayerIndex[i];
-        if (!grid.IsNodeActive(cell, layer)) return 0f;
-        performance = CalculateTemperaturePerformance(GetHabitatTemperature(cell, layer), state.OptimalTempMin[i],
+        var observation = new GeodesicTaxisObservation { cell = cell, layer = layer };
+        if (!grid.IsNodeActive(cell, layer)) return observation;
+        observation.valid = true;
+        observation.temperature = GetHabitatTemperature(cell, layer);
+        observation.performance = CalculateTemperaturePerformance(observation.temperature, state.OptimalTempMin[i],
             state.OptimalTempMax[i], state.LethalTempMargin[i], temperatureSettings.DormancyFloor);
         MovementHabitatSample sample = SampleMovementHabitat(cell, layer);
-        h2 = sample.h2;
+        observation.h2 = sample.h2; observation.co2 = sample.co2; observation.o2 = sample.o2;
         // Each future pathway must supply substrates matching its actual geodesic reaction.
         // Do not invent suitability or activate mutations for nonfunctional metabolisms here.
         switch (state.Metabolism[i])
         {
             case MetabolismType.Hydrogenotrophy:
-                float food = Mathf.Min(
-                    movementHydrogenH2 > 0f ? Mathf.Clamp01(sample.h2 / SafeMovementValue(steeringSettings.SteerGoodH2, 0.4f, 1e-7f, float.MaxValue)) : 1f,
-                    movementHydrogenCo2 > 0f ? Mathf.Clamp01(sample.co2 / SafeMovementValue(steeringSettings.SteerGoodCO2, 0.02f, 1e-7f, float.MaxValue)) : 1f);
-                float oxygen = movementO2Inhibition
+                observation.oxygenEfficiency = movementO2Inhibition
                     ? CalculateAnaerobeO2Efficiency(sample.o2, movementO2Comfort, movementO2Stress, movementO2Floor) : 1f;
-                return SafeMovementValue(food * performance * oxygen, 0f, 0f, 1f);
-            default: return 0f;
+                observation.reactionReadiness = sample.resourceReferenceTicks * observation.performance * observation.oxygenEfficiency;
+                if (!double.IsFinite(observation.reactionReadiness) || observation.reactionReadiness < 0d)
+                    observation.reactionReadiness = 0d;
+                observation.suitability = BoundedReactionReadiness(observation.reactionReadiness);
+                break;
         }
+        return observation;
+    }
+
+    private static float BoundedReactionReadiness(double readiness)
+    {
+        if (!(readiness > 0d) || !double.IsFinite(readiness)) return 0f;
+        // log1p is approximated near zero to retain tiny but finite observations. No hard
+        // substrate saturation; 0 / 0.1 / 1 / 10 ticks map to 0 / .121 / .5 / .776.
+        double log = readiness < 1e-4d ? readiness - readiness * readiness * 0.5d : Math.Log(1d + readiness);
+        return (float)(log / (0.6931471805599453d + log)); // ln(2)
     }
 
     private void AccumulateActiveMovementTime(float dt, ReplicatorPopulationState state)
@@ -148,13 +179,15 @@ public sealed partial class GeodesicBiologyRuntime
         * locomotionSettings.activeSpeedMultiplier * (activeMoveSpeed / 4f)
         * (type == LocomotionType.Flagellum ? flagellarSpeed : amoeboidSpeed);
 
-    private void RunActiveMovement(float elapsed, ReplicatorPopulationState state, Matrix4x4 worldToLocal, Matrix4x4 localToWorld)
+    private void RunActiveMovement(float elapsed, List<Replicator> agents, ReplicatorPopulationState state, Matrix4x4 worldToLocal, Matrix4x4 localToWorld)
     {
         bool samplesReady = false;
+        BeginDetailedTaxisBatch();
         for (int i = 0; i < state.Count; i++)
         {
             LocomotionType type = state.Locomotion[i];
             if (!IsActive(type)) continue;
+            int trackedSlot = locomotionSettings.detailedTaxisDiagnostics ? TrackTaxisOrganism(agents[i].DiagnosticId, type) : -1;
             if (!samplesReady) { BeginMovementSamples(); samplesReady = true; }
             if (!EnsureActiveHabitat(i, state)) continue;
             int cell = state.GeodesicCellIndex[i];
@@ -175,6 +208,7 @@ public sealed partial class GeodesicBiologyRuntime
                 active.verticalCountdown = locomotionSettings.verticalExplorationIntervalSeconds * (0.5f + NextActiveRandom(i, state));
                 InitializeActiveDepth(i, state);
             }
+            EnsureTaxisMemoryModel(ref active);
             float speed = ActiveAngularSpeed(type);
             // Bounded catch-up; never enlarge a geometric step to absorb excess elapsed time.
             // Normal pipeline ticks are <= 1/30s and movement batches are 0.1s.
@@ -185,7 +219,7 @@ public sealed partial class GeodesicBiologyRuntime
                     movementSafeAngles[cell] = Mathf.Max(1e-7f, GetMinimumNeighborSpacingRadians(cell) * 0.2f);
                 float stepDt = Mathf.Min(remaining, PassiveKinematicsIntervalSeconds);
                 if (speed > 0f) stepDt = Mathf.Min(stepDt, movementSafeAngles[cell] / speed);
-                using (ActiveSensingMarker.Auto()) SenseActiveHabitat(i, state, stepDt);
+                using (ActiveSensingMarker.Auto()) SenseActiveHabitat(i, state, stepDt, trackedSlot);
                 using (ActiveVerticalMarker.Auto()) PrepareVerticalExploration(i, state, stepDt);
                 float rate = type == LocomotionType.Flagellum ? locomotionSettings.flagellumEnergyPerSecond : locomotionSettings.amoeboidEnergyPerSecond;
                 bool hasPropulsion = speed > 0f || (active.verticalMoving && locomotionSettings.verticalSpeedMetersPerSecond > 0f);
@@ -250,6 +284,7 @@ public sealed partial class GeodesicBiologyRuntime
             state.Rotation[i] = Quaternion.LookRotation(worldTangent, worldNormal);
             state.PreferredOceanLayerIndex[i] = state.CurrentOceanLayerIndex[i];
         }
+        EndDetailedTaxisBatch();
     }
 
     private static bool ValidActiveMemory(in GeodesicActiveMovementState active) =>
@@ -257,6 +292,8 @@ public sealed partial class GeodesicBiologyRuntime
         && float.IsFinite(active.senseCountdown) && float.IsFinite(active.lastSenseInterval) && active.lastSenseInterval >= 0f
         && float.IsFinite(active.suitabilityMemory) && active.suitabilityMemory >= 0f && active.suitabilityMemory <= 1f
         && float.IsFinite(active.runSeconds) && active.runSeconds >= 0f && float.IsFinite(active.verticalCountdown)
+        && double.IsFinite(active.reactionReadinessMemory) && active.reactionReadinessMemory >= 0d
+        && active.cellCrossingsSinceSense >= 0
         && float.IsFinite(active.verticalBaseline) && active.verticalBaseline >= 0f && active.verticalBaseline <= 1f
         && GeodesicBiologyDiagnostics.FinitePosition(active.desiredTangentLocal)
         && active.verticalDirection >= -1 && active.verticalDirection <= 1;
@@ -315,26 +352,30 @@ public sealed partial class GeodesicBiologyRuntime
     private float NextActiveRandom(int i, ReplicatorPopulationState state) =>
         ToUnitFloat(Hash(MovementSeedBits(state.MovementSeed[i]) ^ 0xAC714E5u, state.ActiveMovement[i].sequence++));
 
-    private void SenseActiveHabitat(int i, ReplicatorPopulationState state, float dt)
+    private void SenseActiveHabitat(int i, ReplicatorPopulationState state, float dt, int trackedSlot)
     {
         ref GeodesicActiveMovementState active = ref state.ActiveMovement[i];
         active.senseCountdown -= dt;
         active.lastSenseInterval += dt;
         if (active.senseCountdown > 0f) return;
         bool flagellar = state.Locomotion[i] == LocomotionType.Flagellum;
-        float suitability = CurrentMovementSuitability(i, state, out _, out float performance);
-        if (!steeringSettings.ActiveMovementMetabolismSuitabilityEnabled) suitability = performance;
-        float deltaSuitability = active.hasSuitability ? suitability - active.suitabilityMemory : 0f;
-        float improvement = SafeMovementValue(steeringSettings.MovementSuitabilityImprovementThreshold, 0.05f, 0f, 1f);
-        float worsening = SafeMovementValue(steeringSettings.MovementSuitabilityWorseningThreshold, 0.05f, 0f, 1f);
-        bool better = active.hasSuitability && deltaSuitability > 0f && deltaSuitability >= improvement;
-        bool worse = active.hasSuitability && deltaSuitability < 0f && deltaSuitability <= -worsening;
+        GeodesicTaxisObservation observation = ObserveSteeringHabitat(i, state);
+        bool hadMemory = active.hasSuitability;
+        float previousSuitability = active.suitabilityMemory;
+        double previousReadiness = active.reactionReadinessMemory;
+        TaxisComparison comparison = hadMemory
+            ? CompareTaxis(observation.reactionReadiness, previousReadiness, observation.suitability, previousSuitability)
+            : CompareTaxis(observation.reactionReadiness, observation.reactionReadiness, observation.suitability, observation.suitability);
+        bool better = hadMemory && comparison.trend == TaxisTrend.Improving;
+        bool worse = hadMemory && comparison.trend == TaxisTrend.Worsening;
         float probability = !active.hasSuitability ? steeringSettings.BaseTumbleProbability : better
             ? steeringSettings.MovementTumbleChanceWhenBetter : worse
             ? steeringSettings.MovementTumbleChanceWhenWorse : steeringSettings.MovementTumbleChanceNeutral;
-        if (active.hasSuitability)
+        if (hadMemory)
         {
             if (better) suitabilityImproving++; else if (worse) suitabilityWorsening++; else suitabilityNeutral++;
+            RecordHorizontalTaxis(observation, active.lastTaxisObservation, comparison,
+                active.cellCrossingsSinceSense, active.lastSenseInterval);
         }
         float min = SafeMovementValue(steeringSettings.MinTumbleProbability, 0.02f, 0f, 1f);
         float max = SafeMovementValue(steeringSettings.MaxTumbleProbability, 0.9f, min, 1f);
@@ -344,7 +385,8 @@ public sealed partial class GeodesicBiologyRuntime
             * (flagellar ? locomotionSettings.flagellumTumbleMultiplier : 1f);
         float tumble = 1f - Mathf.Pow(1f - probability, hazardTime);
         state.TumbleProbability[i] = tumble;
-        if (active.hasSuitability && NextActiveRandom(i, state) < tumble)
+        bool tumbled = hadMemory && NextActiveRandom(i, state) < tumble;
+        if (tumbled)
         {
             float maxAngle = flagellar ? steeringSettings.FlagellumTurnAngleMax : steeringSettings.AmoeboidTurnAngleMax;
             float angle = (NextActiveRandom(i, state) * 2f - 1f) * SafeMovementValue(maxAngle, flagellar ? 180f : 60f, 0f, 180f);
@@ -355,29 +397,50 @@ public sealed partial class GeodesicBiologyRuntime
             completedRuns++;
             active.runSeconds = 0f;
         }
-        active.suitabilityMemory = active.hasSuitability
-            ? Mathf.Lerp(active.suitabilityMemory, suitability, SafeMovementValue(steeringSettings.MovementSuitabilityMemoryBlend, 0.35f, 0f, 1f)) : suitability;
+        if (hadMemory) RecordTaxisTumble(comparison.trend, tumble, tumbled);
+        RecordDetailedTaxisSense(trackedSlot, observation, previousSuitability, previousReadiness,
+            comparison, probability, tumble, tumbled, !hadMemory, active.cellCrossingsSinceSense, active.lastSenseInterval);
+        double blend = SafeMovementValue(steeringSettings.MovementSuitabilityMemoryBlend, 0.35f, 0f, 1f);
+        active.reactionReadinessMemory = hadMemory
+            ? previousReadiness + (observation.reactionReadiness - previousReadiness) * blend : observation.reactionReadiness;
+        active.suitabilityMemory = SteeringScore(active.reactionReadinessMemory);
         active.hasSuitability = true;
+        active.lastTaxisObservation = observation;
+        active.cellCrossingsSinceSense = 0;
         state.LastHabitatValue[i] = active.suitabilityMemory;
         if (active.verticalObservationPending && !active.verticalMoving)
         {
-            float verticalDelta = suitability - active.verticalBaseline;
-            if (verticalDelta > 0f && verticalDelta >= improvement)
+            bool paired = active.verticalOriginRecorded
+                && grid.IsNodeActive(active.verticalOriginCell, active.verticalOriginLayer)
+                && grid.IsNodeActive(active.verticalArrivalCell, active.verticalArrivalLayer)
+                && Math.Abs(active.verticalArrivalLayer - active.verticalOriginLayer) == 1
+                && active.verticalArrivalLayer == active.verticalTargetLayer
+                && double.IsFinite(active.verticalReadinessBefore) && active.verticalReadinessBefore >= 0d
+                && double.IsFinite(active.verticalReadinessAfter) && active.verticalReadinessAfter >= 0d
+                && float.IsFinite(active.verticalArrivalSuitability);
+            TaxisComparison vertical = CompareTaxis(active.verticalReadinessAfter, active.verticalReadinessBefore,
+                active.verticalArrivalSuitability, active.verticalBaseline);
+            int trialDirection = active.verticalDirection;
+            if (!paired) verticalUnpaired++;
+            else if (vertical.trend == TaxisTrend.Improving)
             {
                 verticalBetter++;
                 if (NextActiveRandom(i, state) >= locomotionSettings.verticalContinueWhenBetter) active.verticalDirection *= -1;
             }
-            else if (verticalDelta < 0f && verticalDelta <= -worsening)
+            else if (vertical.trend == TaxisTrend.Worsening)
             {
                 verticalWorse++;
                 if (NextActiveRandom(i, state) < locomotionSettings.verticalReverseWhenWorse) active.verticalDirection *= -1;
             }
-            else
+            else if (paired)
             {
                 verticalNeutral++;
                 if (NextActiveRandom(i, state) < 0.5f) active.verticalDirection *= -1;
             }
+            if (paired) verticalDeltaStats.Observe(vertical);
+            RecordDetailedVerticalTaxis(trackedSlot, active, vertical, trialDirection, paired);
             active.verticalObservationPending = false;
+            active.verticalOriginRecorded = false;
         }
         float interval = flagellar ? steeringSettings.FlagellumSenseInterval : steeringSettings.AmoeboidSenseInterval;
         float jitter = flagellar ? steeringSettings.FlagellumSenseIntervalJitter : steeringSettings.AmoeboidSenseIntervalJitter;
@@ -404,8 +467,12 @@ public sealed partial class GeodesicBiologyRuntime
         }
         active.verticalCountdown = locomotionSettings.verticalExplorationIntervalSeconds * (0.5f + NextActiveRandom(i, state));
         if (target == layer || !grid.IsNodeActive(cell, target)) { verticalBlocked++; return; }
-        active.verticalBaseline = CurrentMovementSuitability(i, state, out _, out float performance);
-        if (!steeringSettings.ActiveMovementMetabolismSuitabilityEnabled) active.verticalBaseline = performance;
+        GeodesicTaxisObservation origin = ObserveSteeringHabitat(i, state);
+        active.verticalBaseline = origin.suitability;
+        active.verticalReadinessBefore = origin.reactionReadiness;
+        active.verticalOriginCell = cell;
+        active.verticalOriginLayer = layer;
+        active.verticalOriginRecorded = origin.valid;
         active.verticalTargetLayer = target;
         active.verticalMoving = true;
         verticalTrials++;
@@ -444,8 +511,15 @@ public sealed partial class GeodesicBiologyRuntime
         {
             active.verticalMoving = false;
             active.verticalObservationPending = true;
+            // Freeze the actual arrival experience now, before any later horizontal motion.
+            GeodesicTaxisObservation arrival = ObserveSteeringHabitat(i, state);
+            active.verticalArrivalSuitability = arrival.suitability;
+            active.verticalReadinessAfter = arrival.reactionReadiness;
+            active.verticalArrivalCell = arrival.cell;
+            active.verticalArrivalLayer = arrival.layer;
+            active.verticalOriginRecorded &= arrival.valid;
             active.verticalCountdown = locomotionSettings.verticalExplorationIntervalSeconds * (0.5f + NextActiveRandom(i, state));
-            // Arrival experience is sampled at the next normal sensing event, not from a destination lookup.
+            // The captured origin/arrival pair is classified at the next normal sensing event.
         }
         return distanceKm;
     }
@@ -491,7 +565,12 @@ public sealed partial class GeodesicBiologyRuntime
                 cell = candidate;
                 state.GeodesicCellIndex[i] = cell;
                 horizontalBoundaryCrossings++;
-                if (active) activeCellCrossings++;
+                if (active)
+                {
+                    activeCellCrossings++;
+                    if (state.ActiveMovement[i].cellCrossingsSinceSense < int.MaxValue)
+                        state.ActiveMovement[i].cellCrossingsSinceSense++;
+                }
             }
         }
     }
@@ -570,10 +649,12 @@ public sealed partial class GeodesicBiologyRuntime
         Debug.Log($"[GeodesicLocomotion] cumulativeCounters=true population(passive/amoeboid/flagellum/anchored)={passive}/{amoeba}/{flagellar}/{anchored} mutationAttempts={mutationAttempts} successful={successfulMutations} blockedOrNoChange={blockedMutations} inheritanceCorrections={inheritanceCorrections} movementCorrections={movementCorrections} activeDistanceKm={activeDistanceKm:G6} horizontalKm={activeHorizontalKm:G6} verticalKm={activeVerticalKm:G6} activeCellCrossings={activeCellCrossings} activeLayerTransitions={activeLayerTransitions} depthBoundaryRejections={depthBoundaryRejections} energySpent={locomotionEnergyPaid:G6} energyLimitedSteps={energyLimitedSteps} improving/worsening/neutral={suitabilityImproving}/{suitabilityWorsening}/{suitabilityNeutral} tumbles={activeTumbles} worseningTumbles={worseningTumbles} completedMeanRunSeconds={completedRunSeconds / Math.Max(1, completedRuns):G6} verticalTrials/better/worse/neutral/blocked={verticalTrials}/{verticalBetter}/{verticalWorse}/{verticalNeutral}/{verticalBlocked} mutationRate={(locomotionSettings.mutationRateOverrideEnabled ? locomotionSettings.diagnosticMutationChance : mutationChance):G6}");
         Debug.Log($"[GeodesicLocomotionEcology] hydrogenotrophSamples(passive/active)={passiveH}/{activeH} meanH2={passiveH2 / p:G6}/{activeH2 / a:G6} meanTemperaturePerformance={passivePerformance / p:G6}/{activePerformance / a:G6} meanSuitability={passiveSuitability / p:G6}/{activeSuitability / a:G6} meanEnergy={passiveEnergy / p:G6}/{activeEnergy / a:G6} cumulativeParentBirths={locomotionBirths[0]}/{locomotionBirths[1]} cumulativeDeaths={locomotionDeaths[0]}/{locomotionDeaths[1]}");
         Debug.Log($"[GeodesicLocomotionMutations] rows/columns=passive,amoeboid,flagellum,anchored transitions={locomotionTransitions[0]},{locomotionTransitions[1]},{locomotionTransitions[2]},{locomotionTransitions[3]};{locomotionTransitions[4]},{locomotionTransitions[5]},{locomotionTransitions[6]},{locomotionTransitions[7]};{locomotionTransitions[8]},{locomotionTransitions[9]},{locomotionTransitions[10]},{locomotionTransitions[11]};{locomotionTransitions[12]},{locomotionTransitions[13]},{locomotionTransitions[14]},{locomotionTransitions[15]}");
+        LogTaxisDistributions();
     }
 
     private void ClearLocomotion()
     {
+        ClearTaxisDiagnostics();
         locomotionMutationRandom = null;
         movementSamples = Array.Empty<MovementHabitatSample>(); movementSampleStamps = Array.Empty<int>(); movementSafeAngles = Array.Empty<float>();
         movementSampleGeneration = 1;

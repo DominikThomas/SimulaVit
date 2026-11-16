@@ -32,15 +32,15 @@ Swimmers retain their physical radius across horizontal boundaries. A coastline,
 
 ## Temporal suitability and runs
 
-Only the currently experienced cell/layer is sampled. For hydrogenotrophy:
+Only the currently experienced cell/layer is sampled. The habitat-seeking correction and its audit are documented in [GeodesicHabitatSeekingFix.md](GeodesicHabitatSeekingFix.md). For hydrogenotrophy, let `V` be the local physical layer volume, and `needH2` / `needCO2` the configured consumption per 0.5-second reference tick:
 
-`suitability = min(clamp01(H2 / steerGoodH2), clamp01(CO2 / steerGoodCO2)) * temperaturePerformance * oxygenEfficiency`
+`readiness = min(H2 * V / needH2, CO2 * V / needCO2) * temperaturePerformance * oxygenEfficiency`
 
-A substrate with zero configured reaction requirement is omitted from the limiting minimum. Invalid ocean habitats score zero. Temperature uses the same coarse ocean cell/layer authority, inherited optimum, lethal margin, and dormancy floor as biology. O2 inhibition uses the exact enabled flag, comfort/stress thresholds, and efficiency floor passed to the hydrogenotrophy reaction. This is a concentration-based local metabolic opportunity score; resource withdrawals still use the existing inventory/competition system.
+`suitability = ln(1 + readiness) / (ln(2) + ln(1 + readiness))`
 
-The product makes poor temperature or missing substrate limit metabolic opportunity. It deliberately does not use the legacy additive temperature/food weights, which could rate substrate-free water highly. `steerGoodH2` and `steerGoodCO2` retain their existing normalization role. Inspect observed concentrations and tune these scales/thresholds if a configured gradient falls entirely within the neutral band.
+Zero required substrates, zero temperature/O2 efficiency and invalid habitats score zero. A zero H2 requirement omits that substrate; a nonpositive CO2 requirement scores zero, matching the reaction's positive-primary-demand gate. Temperature and O2 use the same configured physiology as biology. The two substrate concentrations are not multiplied together. This is resource opportunity before competition, not a new metabolic reaction or energy award. Geodesic taxis no longer uses legacy `steerGoodH2` / `steerGoodCO2` normalization.
 
-Existing sense intervals/jitter, suitability memory blend, improvement/worsening thresholds, tumble probabilities/limits, turn angles/rates, speed multipliers and amoeboid noise settings are connected. Improved experience lowers tumble chance; worsening raises it; neutral experience uses the baseline. Disabling `activeMovementMetabolismSuitabilityEnabled` makes temporal steering use temperature performance alone. Zero thresholds still require a strictly positive/negative change.
+Memory is smoothed in readiness units. Steering compares `(currentReadiness - rememberedReadiness) / max(taxisReadinessFloor, currentReadiness, rememberedReadiness)`, so existing improvement/worsening settings of 0.05 now mean fractional changes of 5%, independently of display-score compression. The default readiness floor is 0.0001 reference-tick equivalents, preventing tiny numerical traces from producing strong responses. Old snapshot memories are reinitialized once without moving the organism. Existing sense intervals/jitter, memory blend, tumble probabilities/limits, turn angles/rates, speed multipliers and amoeboid noise settings remain connected. Improved experience lowers tumble chance; worsening raises it. Disabling `activeMovementMetabolismSuitabilityEnabled` uses temperature performance alone. Zero thresholds still require a strictly positive/negative change.
 
 Tumble probabilities are converted to time hazards:
 
@@ -56,7 +56,7 @@ After a jittered exploration interval, a swimmer tries an adjacent valid layer i
 
 Travel advances continuously toward that adjacent layer centre. Geometric radius travel is converted using the ocean grid's physical depth scale and the configured effective metres per simulated second. Authoritative layer identity changes at the physical interface; rendered radius follows the actual paid travel. One trial cannot skip layers. Horizontal and vertical propulsion each receive `1/sqrt(2)` of the effort while swimming diagonally, sharing one energy budget.
 
-The organism remembers the suitability where the trial began. After arrival, the next ordinary sensing event compares the experienced destination against that baseline. Better trials tend to retain the vertical direction; worse trials tend to reverse it; neutral trials allow either. Each subsequent trial waits another bounded interval. Horizontal resource changes during a vertical trial can affect this comparison; the model is short-term experience, not a controlled gradient measurement or optimal-depth calculation.
+The organism records origin readiness and cell/layer. Actual arrival readiness and cell/layer are captured on reaching the adjacent layer centre; the next ordinary sensing event compares that frozen pair with the same relative rule as horizontal taxis. Only valid adjacent-layer pairs contribute to vertical outcome statistics. Better trials tend to retain the direction, worse trials tend to reverse it, and neutral trials allow either. Each subsequent trial waits another bounded interval. Horizontal/environmental changes during a trial can affect this comparison; the model is short-term experience, not a controlled gradient measurement or optimal-depth calculation.
 
 ## Inheritance and energy
 
@@ -89,6 +89,8 @@ Every existing ten simulated-second biology report can emit three aggregate loco
 - `GeodesicLocomotionMutations`: a 4×4 source/destination transition matrix. Row/column order is passive, amoeboid, flagellum, anchored.
 
 Existing `GeodesicBiologyTelemetry` continues reporting total horizontal/vertical crossings, land rejections and invalid habitat/layer counts. New counters are cumulative since runtime initialization; the existing biology movement counters retain their interval semantics. Detailed passive movement trails remain optional and passive-specific. New profiler markers cover active movement, sensing and vertical work.
+
+The habitat-seeking correction adds `GeodesicTaxisDistribution` / `GeodesicTaxisResponse`: raw/relative delta distributions, unchanged versus changing input samples, exact-neutral versus deadband-neutral comparisons, crossings between senses, chosen tumble probabilities by trend, and actual vertical pair outcomes. Enable `detailedTaxisDiagnostics` in the geodesic settings to trace up to four stable IDs (two by default), optionally pinning `trackedTaxisOrganismId`. Latest senses, strongest changes and vertical outcomes are bounded by `detailedTaxisLogIntervalRealSeconds` (two real seconds by default). See the correction guide for field definitions and manual checks.
 
 Resource sensing caches three concentrations per occupied node within a movement batch, independently of reaction scratch buffers. Temperature shares the existing environmental-tick cache. Topological spacing is cached lazily per visited cell. There are no per-agent GameObjects, resource authorities, global resource scans, candidate habitat rankings, topology rebuilds or per-step managed allocations after capacity/cache initialization. Logging/formatting is bounded to report boundaries.
 

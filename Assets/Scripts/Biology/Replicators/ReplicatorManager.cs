@@ -374,7 +374,9 @@ public class ReplicatorManager : MonoBehaviour
     [Tooltip("Use metabolism/resource/temperature/O2-efficiency suitability for temporal run-and-tumble comparisons without scanning neighboring cells.")]
     public bool activeMovementMetabolismSuitabilityEnabled = true;
     [Range(0f, 1f)] public float movementSuitabilityMemoryBlend = 0.35f;
+    [Tooltip("Geodesic: fractional improvement in experienced reaction readiness (0.05 = 5%). Legacy: absolute suitability delta.")]
     public float movementSuitabilityImprovementThreshold = 0.05f;
+    [Tooltip("Geodesic: fractional deterioration in experienced reaction readiness (0.05 = 5%). Legacy: absolute suitability delta.")]
     public float movementSuitabilityWorseningThreshold = 0.05f;
     [Range(0f, 1f)] public float movementTumbleChanceWhenWorse = 0.65f;
     [Range(0f, 1f)] public float movementTumbleChanceWhenBetter = 0.05f;
