@@ -154,6 +154,11 @@ MonoBehaviour:
     gridType: 0
     cubeSphereResolution: 10
     geodesicSubdivisionLevel: 3
+    geodesicSeaLevelControlMode: 0
+    geodesicTargetOceanCoveragePercent: 45
+    geodesicSeaLevelOffset: 0
+    geodesicOceanWorldMinimumDepth: 0.06
+    enableGeodesicRivers: 1
     axisTiltDegrees: 23.5
     dayLengthSeconds: 480
     yearLengthInDays: 100
@@ -181,6 +186,7 @@ MonoBehaviour:
     ventH2SPerTick: 0.004
     ventCO2PerTick: 0.02
     ventFe2PerTick: 0.002
+    geodesicVentProductionMultiplier: 1
     geodesicVentH2PhysicalPerSecond: 10
     geodesicVentH2SPhysicalPerSecond: 0
     geodesicVentCO2PhysicalPerSecond: 0
@@ -191,8 +197,97 @@ MonoBehaviour:
     showRiverTerminationReasons: 0
     initialSpawnCount: 100
     startPaused: 0
+    biology:
+      maxPopulation: 50000
+      reproductionRate: 0.1
+      moveEnergyCostPerSecond: 0.05
+      replicationEnergyCost: 0.5
+      basalEnergyCostPerSecond: 0.01
+      enableCarbonLimitedDivision: 1
+      defaultBiomassTarget: 0.2
+      divisionBiomassMultiple: 2
+      divisionEnergyCost: 0.2
+      divisionCarbonSplitToChild: 0.5
+      biomassMutationChance: 0.02
+      biomassMutationScale: 0.1
+      metabolismMutationChance: 0.01
+      hydrogenToPhotosynthesisMutationChance: 0.003
+      hydrogenToSaprotrophyMutationChance: 0.003
+      hydrogenToSulfurMutationChance: 0.003
+      hydrogenToFermentationMutationChance: 0.002
+      fermentationToMethanogenesisMutationChance: 0.002
+      hydrogenToMethanotrophyMutationChance: 0.0015
+      saprotrophyMutationChance: 0.005
+      predatorMutationChance: 0.002
+      locomotionMutationChance: 0.01
+      locomotionUpgradeChance: 0.5
+      locomotionAnchoredMutationChance: 0.05
+      allowAnchoredToAmoeboidMutation: 0
+      anchoredToAmoeboidMutationChance: 0.001
+      hydrogenotrophyH2PerTick: 0.02
+      hydrogenotrophyCO2PerTick: 0.01
+      hydrogenotrophyEnergyPerTick: 8
+      hydrogenotrophyStoreFraction: 0.8
+      chemosynthesisCo2NeedPerTick: 0.02
+      chemosynthesisH2sNeedPerTick: 0.001
+      chemosynthesisEnergyPerTick: 0.3
+      chemosynthStoreFraction: 1
+      chemoRespirationCPerTick: 0.01
+      fermentationOrganicCPerTick: 0.02
+      fermentationEnergyPerTick: 0.04
+      fermentationAssimilationFraction: 0.15
+      methanogenesisH2PerTick: 0.02
+      methanogenesisCO2PerTick: 0.01
+      methanogenesisEnergyPerTick: 0.03
+      methanogenesisAssimilationFraction: 0.15
+      methanotrophyCH4PerTick: 0.01
+      methanotrophyO2PerTick: 0.01
+      methanotrophyEnergyPerTick: 0.04
+      methanotrophyAssimilationFraction: 0.15
+      photosynthesisCo2PerTickAtFullInsolation: 0.02
+      photosynthesisEnergyPerCo2: 2
+      photosynthStoreFraction: 1
+      maxOrganicCStore: 10
+      aerobicO2PerC: 0.02
+      aerobicEnergyPerC: 0.05
+      nightRespirationCPerTick: 0.01
+      saproCPerTick: 0.02
+      saproAssimilationFraction: 0.2
+      saproRespireStoreCPerTick: 0.01
+      predatorBiteOrganicC: 0.05
+      predatorBiteEnergy: 0.05
+      predatorAssimilationFraction: 0.6
+      hydrogenTempRange: {x: 293.15, y: 343.15}
+      sulfurChemoTempRange: {x: 333.15, y: 393.15}
+      photoTempRange: {x: 283.15, y: 313.15}
+      saproTempRange: {x: 278.15, y: 308.15}
+      predatorTempRange: {x: 283.15, y: 323.15}
+      fermentationTempRange: {x: 285.15, y: 330.15}
+      methanogenesisTempRange: {x: 305.15, y: 355.15}
+      methanotrophyTempRange: {x: 280.15, y: 320.15}
+      defaultLethalMargin: 20
+      temperatureDormancyFloor: 0.02
+      temperatureReplicationMinEfficiency: 0.15
+      tempMutationChance: 0.02
+      tempMutationScale: 2
+      temperatureDirectDamageEnabled: 1
+      extremeColdDeathTempKelvin: 233.15
+      extremeHeatDeathTempKelvin: 423.15
+      geodesicTemperatureStressMaintenanceMultiplier: 1
+      geodesicColdExposureDeathSeconds: 120
+      geodesicHeatExposureDeathSeconds: 60
+      geodesicTemperatureExposureRecoveryPerSecond: 1
+      enableGeodesicChemotacticSteering: 1
+      enableGeodesicChemotaxisABDiagnostics: 0
+      geodesicAmoeboidEnergyPerSecond: 0.02
+      geodesicFlagellumEnergyPerSecond: 0.04
     excludeSmallDisconnectedSeas: 0
     minimumOceanComponentAreaFraction: 0.001
+    infillExcludedInlandBasins: 0
+    basinInfillLimits:
+      totalArea: 0.08
+      liftFraction: 0.2
+      transitionGrade: 0.35
     inlandElevationMagnitude: 0
     enableTerminationValleyCarving: 0
     valleyCarvingPasses: 1
@@ -202,6 +297,7 @@ MonoBehaviour:
     showValleyCarvingDebug: 0
     riverFlowThreshold: 8
     majorRiverThreshold: 64
+    colourRiversByUltimateDestination: 0
     hydrologyTerrainMode: 0
     generateHydrologicalLakes: 0
     minimumLakeBasinAreaFraction: 0.0001
@@ -218,6 +314,11 @@ MonoBehaviour:
     gridType: 0
     cubeSphereResolution: 10
     geodesicSubdivisionLevel: 3
+    geodesicSeaLevelControlMode: 0
+    geodesicTargetOceanCoveragePercent: 45
+    geodesicSeaLevelOffset: 0
+    geodesicOceanWorldMinimumDepth: 0.06
+    enableGeodesicRivers: 1
     axisTiltDegrees: 23.5
     dayLengthSeconds: 480
     yearLengthInDays: 100
@@ -245,6 +346,7 @@ MonoBehaviour:
     ventH2SPerTick: 0.004
     ventCO2PerTick: 0.02
     ventFe2PerTick: 0.002
+    geodesicVentProductionMultiplier: 1
     geodesicVentH2PhysicalPerSecond: 10
     geodesicVentH2SPhysicalPerSecond: 0
     geodesicVentCO2PhysicalPerSecond: 0
@@ -255,8 +357,97 @@ MonoBehaviour:
     showRiverTerminationReasons: 0
     initialSpawnCount: 100
     startPaused: 0
+    biology:
+      maxPopulation: 50000
+      reproductionRate: 0.1
+      moveEnergyCostPerSecond: 0.05
+      replicationEnergyCost: 0.5
+      basalEnergyCostPerSecond: 0.01
+      enableCarbonLimitedDivision: 1
+      defaultBiomassTarget: 0.2
+      divisionBiomassMultiple: 2
+      divisionEnergyCost: 0.2
+      divisionCarbonSplitToChild: 0.5
+      biomassMutationChance: 0.02
+      biomassMutationScale: 0.1
+      metabolismMutationChance: 0.01
+      hydrogenToPhotosynthesisMutationChance: 0.003
+      hydrogenToSaprotrophyMutationChance: 0.003
+      hydrogenToSulfurMutationChance: 0.003
+      hydrogenToFermentationMutationChance: 0.002
+      fermentationToMethanogenesisMutationChance: 0.002
+      hydrogenToMethanotrophyMutationChance: 0.0015
+      saprotrophyMutationChance: 0.005
+      predatorMutationChance: 0.002
+      locomotionMutationChance: 0.01
+      locomotionUpgradeChance: 0.5
+      locomotionAnchoredMutationChance: 0.05
+      allowAnchoredToAmoeboidMutation: 0
+      anchoredToAmoeboidMutationChance: 0.001
+      hydrogenotrophyH2PerTick: 0.02
+      hydrogenotrophyCO2PerTick: 0.01
+      hydrogenotrophyEnergyPerTick: 8
+      hydrogenotrophyStoreFraction: 0.8
+      chemosynthesisCo2NeedPerTick: 0.02
+      chemosynthesisH2sNeedPerTick: 0.001
+      chemosynthesisEnergyPerTick: 0.3
+      chemosynthStoreFraction: 1
+      chemoRespirationCPerTick: 0.01
+      fermentationOrganicCPerTick: 0.02
+      fermentationEnergyPerTick: 0.04
+      fermentationAssimilationFraction: 0.15
+      methanogenesisH2PerTick: 0.02
+      methanogenesisCO2PerTick: 0.01
+      methanogenesisEnergyPerTick: 0.03
+      methanogenesisAssimilationFraction: 0.15
+      methanotrophyCH4PerTick: 0.01
+      methanotrophyO2PerTick: 0.01
+      methanotrophyEnergyPerTick: 0.04
+      methanotrophyAssimilationFraction: 0.15
+      photosynthesisCo2PerTickAtFullInsolation: 0.02
+      photosynthesisEnergyPerCo2: 2
+      photosynthStoreFraction: 1
+      maxOrganicCStore: 10
+      aerobicO2PerC: 0.02
+      aerobicEnergyPerC: 0.05
+      nightRespirationCPerTick: 0.01
+      saproCPerTick: 0.02
+      saproAssimilationFraction: 0.2
+      saproRespireStoreCPerTick: 0.01
+      predatorBiteOrganicC: 0.05
+      predatorBiteEnergy: 0.05
+      predatorAssimilationFraction: 0.6
+      hydrogenTempRange: {x: 293.15, y: 343.15}
+      sulfurChemoTempRange: {x: 333.15, y: 393.15}
+      photoTempRange: {x: 283.15, y: 313.15}
+      saproTempRange: {x: 278.15, y: 308.15}
+      predatorTempRange: {x: 283.15, y: 323.15}
+      fermentationTempRange: {x: 285.15, y: 330.15}
+      methanogenesisTempRange: {x: 305.15, y: 355.15}
+      methanotrophyTempRange: {x: 280.15, y: 320.15}
+      defaultLethalMargin: 20
+      temperatureDormancyFloor: 0.02
+      temperatureReplicationMinEfficiency: 0.15
+      tempMutationChance: 0.02
+      tempMutationScale: 2
+      temperatureDirectDamageEnabled: 1
+      extremeColdDeathTempKelvin: 233.15
+      extremeHeatDeathTempKelvin: 423.15
+      geodesicTemperatureStressMaintenanceMultiplier: 1
+      geodesicColdExposureDeathSeconds: 120
+      geodesicHeatExposureDeathSeconds: 60
+      geodesicTemperatureExposureRecoveryPerSecond: 1
+      enableGeodesicChemotacticSteering: 1
+      enableGeodesicChemotaxisABDiagnostics: 0
+      geodesicAmoeboidEnergyPerSecond: 0.02
+      geodesicFlagellumEnergyPerSecond: 0.04
     excludeSmallDisconnectedSeas: 0
     minimumOceanComponentAreaFraction: 0.001
+    infillExcludedInlandBasins: 0
+    basinInfillLimits:
+      totalArea: 0.08
+      liftFraction: 0.2
+      transitionGrade: 0.35
     inlandElevationMagnitude: 0
     enableTerminationValleyCarving: 0
     valleyCarvingPasses: 1
@@ -266,6 +457,7 @@ MonoBehaviour:
     showValleyCarvingDebug: 0
     riverFlowThreshold: 8
     majorRiverThreshold: 64
+    colourRiversByUltimateDestination: 0
     hydrologyTerrainMode: 0
     generateHydrologicalLakes: 0
     minimumLakeBasinAreaFraction: 0.0001
@@ -1008,6 +1200,7 @@ MonoBehaviour:
   geodesicRenderSubdivisionLevel: 7
   geodesicColliderSubdivisionLevel: 6
   geodesicDiagnosticTriangleWarningThreshold: 350000
+  bypassGeodesicCarvingCache: 0
   validateOptimizedGeodesicShoreDistances: 0
   showGeodesicCellOutlines: 0
   highlightGeodesicPentagons: 0
@@ -1180,6 +1373,7 @@ MonoBehaviour:
   bathymetryVisualStrength: 0.35
   enableAtmosphere: 1
   atmosphereRadiusMultiplier: 1.01
+  atmosphereTerrainClearance: 0.001
   geodesicAtmosphereRenderSubdivisionLevel: 4
   atmosphereMaterial: {fileID: 2100000, guid: 359c2383b6d970d4e90649d66110cde6, type: 2}
   randomizeOnStart: 0
@@ -1397,14 +1591,14 @@ MonoBehaviour:
   m_Name: GeodesicOceanTemperatureField
   m_EditorClassIdentifier: SimulaVit::GeodesicOceanTemperatureField
   enableGeodesicOceanTemperature: 1
-  abyssalBaselineTemperatureC: 1.5
+  abyssalBaselineTemperatureC: 4
   climateReferenceBaseKelvin: 273.15
   abyssalClimateCoupling: 0.25
   shallowResponseTimescaleSeconds: 80
   deepResponseTimescaleSeconds: 1200
   depthProfileExponent: 1.4
   submarineVentSourceTemperatureC: 350
-  ventThermalInfluence: 0.08
+  ventThermalInfluence: 0.15
   aboveBottomVentHeatingFactor: 0.35
   subsurfaceHeatCapacityPerVolume: 1
   verticalThermalDiffusivity: 0.00002
@@ -2184,6 +2378,26 @@ MonoBehaviour:
   movementTumbleChanceWhenWorse: 0.65
   movementTumbleChanceWhenBetter: 0.05
   movementTumbleChanceNeutral: 0.2
+  enableGeodesicChemotacticSteering: 0
+  enableGeodesicChemotaxisABDiagnostics: 1
+  geodesicLocomotion:
+    activeSpeedMultiplier: 2
+    amoeboidEnergyPerSecond: 0.02
+    flagellumEnergyPerSecond: 0.04
+    flagellumTumbleMultiplier: 0.3
+    tumbleReferenceSeconds: 0.5
+    verticalSpeedMetersPerSecond: 10
+    verticalExplorationIntervalSeconds: 20
+    verticalContinueWhenBetter: 0.8
+    verticalReverseWhenWorse: 0.8
+    mutationRateOverrideEnabled: 0
+    diagnosticMutationChance: 1
+    logDiagnostics: 1
+    taxisReadinessFloor: 0.0001
+    detailedTaxisDiagnostics: 0
+    maximumTrackedTaxisOrganisms: 2
+    trackedTaxisOrganismId: 0
+    detailedTaxisLogIntervalRealSeconds: 2
   useScentPredation: 1
   dissolvedOrganicLeakEmitPerSecond: 1
   toxicProteolyticWasteEmitPerSecond: 1.5
@@ -2218,14 +2432,1059 @@ MonoBehaviour:
   energyVisualMultiplier: 1
   showSimulationHud: 1
   runtimeSimulationStepsPerFrame: 1
-  allowRenderFrameSkippingAtHighSpeed: 0
-  renderEveryNFramesAtHighSpeed: 2
-  renderSkipMinStepsPerFrame: 20
   enableRunAndTumbleDebug: 0
   runAndTumbleDebugWindowSeconds: 2
   debugSessileMovement: 0
   debugSessileMovementWindowSeconds: 3
   debugSessileMovementEpsilon: 0.001
+  movementDiagnostics:
+    enabled: 0
+    maximumTrackedOrganisms: 4
+    selectedOrganismId: 0
+    drawSelectedTrail: 1
+    trailPointCount: 96
+    logTrackedOrganisms: 1
+    logIntervalRealSeconds: 2
+    angularToleranceRadians: 0.00001
+    localPositionTolerance: 0.0001
+    trackedOrganisms: []
+  biologyDiagnostics:
+    enabled: 1
+    logDetailedDivisionExamples: 0
+    selectedOrganismId: 0
+    selectedOrganismFound: 0
+    selectedGrowth:
+      organismId: 0
+      packedIndex: 0
+      cell: 0
+      layer: 0
+      metabolism: 0
+      organicC: 0
+      biomassTarget: 0
+      requiredCarbon: 0
+      carbonProgress: 0
+      energy: 0
+      requiredEnergy: 0
+      temperatureKelvin: 0
+      temperaturePerformance: 0
+      probabilityPerStep: 0
+      age: 0
+      visualSize: 0
+      matureSize: 0
+      visualDiameterMultiplier: 0
+      growthCycleCarbonBaseline: 0
+      visualGrowthProgress: 0
+      cycleStartDiameterMultiplier: 0
+      divisionStartDiameterMultiplier: 0
+      divisionAnimationProgress: 0
+      isVisuallyDividing: 0
+      worldPosition: {x: 0, y: 0, z: 0}
+      carbonLimited: 0
+      validHabitat: 0
+      validState: 0
+      pendingDeath: 0
+      carbonReady: 0
+      energyReady: 0
+      temperatureReady: 0
+      belowPopulationCap: 0
+      packedCanReplicate: 0
+      divisionPermitted: 0
+      principalBlock: 0
+    population: 0
+    divisionReady: 0
+    invalidProgress: 0
+    progressBins: 0000000000000000000000000000000000000000
+    principalBlockCounts: 0000000000000000000000000000000000000000000000000000000000000000
+    lastObservedSimulationSeconds: 0
+    lastDivisionInterval:
+      births: 0
+      violations: 0
+      energyViolations: 0
+      carbonViolations: 0
+      allocationViolations: 0
+      gateViolations: 0
+      habitatViolations: 0
+      positionViolations: 0
+      ageViolations: 0
+      invalid: 0
+      energyCost: 0
+      maxAbsEnergyResidual: 0
+      maxAbsCarbonResidual: 0
+      maxPlacementError: 0
+    hasLatestDivision: 0
+    latestDivision:
+      before:
+        organismId: 0
+        packedIndex: 0
+        cell: 0
+        layer: 0
+        metabolism: 0
+        organicC: 0
+        biomassTarget: 0
+        requiredCarbon: 0
+        carbonProgress: 0
+        energy: 0
+        requiredEnergy: 0
+        temperatureKelvin: 0
+        temperaturePerformance: 0
+        probabilityPerStep: 0
+        age: 0
+        visualSize: 0
+        matureSize: 0
+        visualDiameterMultiplier: 0
+        growthCycleCarbonBaseline: 0
+        visualGrowthProgress: 0
+        cycleStartDiameterMultiplier: 0
+        divisionStartDiameterMultiplier: 0
+        divisionAnimationProgress: 0
+        isVisuallyDividing: 0
+        worldPosition: {x: 0, y: 0, z: 0}
+        carbonLimited: 0
+        validHabitat: 0
+        validState: 0
+        pendingDeath: 0
+        carbonReady: 0
+        energyReady: 0
+        temperatureReady: 0
+        belowPopulationCap: 0
+        packedCanReplicate: 0
+        divisionPermitted: 0
+        principalBlock: 0
+      childId: 0
+      parentEnergy: 0
+      childEnergy: 0
+      parentCarbon: 0
+      childCarbon: 0
+      splitToChild: 0
+      childInitialEnergy: 0
+      childInitialCarbon: 0
+      parentAge: 0
+      childAge: 0
+      parentVisualDiameterMultiplier: 0
+      childVisualDiameterMultiplier: 0
+      parentGrowthCycleBaseline: 0
+      childGrowthCycleBaseline: 0
+      maximumDaughterSeparation: 0
+      childCell: 0
+      childLayer: 0
+      parentPosition: {x: 0, y: 0, z: 0}
+      childPosition: {x: 0, y: 0, z: 0}
+      energyResidual: 0
+      carbonResidual: 0
+      placementError: 0
+      daughterSeparationDistance: 0
+      violations: 0
+    unusualExampleCount: 0
+    unusualExamples:
+    - before:
+        organismId: 0
+        packedIndex: 0
+        cell: 0
+        layer: 0
+        metabolism: 0
+        organicC: 0
+        biomassTarget: 0
+        requiredCarbon: 0
+        carbonProgress: 0
+        energy: 0
+        requiredEnergy: 0
+        temperatureKelvin: 0
+        temperaturePerformance: 0
+        probabilityPerStep: 0
+        age: 0
+        visualSize: 0
+        matureSize: 0
+        visualDiameterMultiplier: 0
+        growthCycleCarbonBaseline: 0
+        visualGrowthProgress: 0
+        cycleStartDiameterMultiplier: 0
+        divisionStartDiameterMultiplier: 0
+        divisionAnimationProgress: 0
+        isVisuallyDividing: 0
+        worldPosition: {x: 0, y: 0, z: 0}
+        carbonLimited: 0
+        validHabitat: 0
+        validState: 0
+        pendingDeath: 0
+        carbonReady: 0
+        energyReady: 0
+        temperatureReady: 0
+        belowPopulationCap: 0
+        packedCanReplicate: 0
+        divisionPermitted: 0
+        principalBlock: 0
+      childId: 0
+      parentEnergy: 0
+      childEnergy: 0
+      parentCarbon: 0
+      childCarbon: 0
+      splitToChild: 0
+      childInitialEnergy: 0
+      childInitialCarbon: 0
+      parentAge: 0
+      childAge: 0
+      parentVisualDiameterMultiplier: 0
+      childVisualDiameterMultiplier: 0
+      parentGrowthCycleBaseline: 0
+      childGrowthCycleBaseline: 0
+      maximumDaughterSeparation: 0
+      childCell: 0
+      childLayer: 0
+      parentPosition: {x: 0, y: 0, z: 0}
+      childPosition: {x: 0, y: 0, z: 0}
+      energyResidual: 0
+      carbonResidual: 0
+      placementError: 0
+      daughterSeparationDistance: 0
+      violations: 0
+    - before:
+        organismId: 0
+        packedIndex: 0
+        cell: 0
+        layer: 0
+        metabolism: 0
+        organicC: 0
+        biomassTarget: 0
+        requiredCarbon: 0
+        carbonProgress: 0
+        energy: 0
+        requiredEnergy: 0
+        temperatureKelvin: 0
+        temperaturePerformance: 0
+        probabilityPerStep: 0
+        age: 0
+        visualSize: 0
+        matureSize: 0
+        visualDiameterMultiplier: 0
+        growthCycleCarbonBaseline: 0
+        visualGrowthProgress: 0
+        cycleStartDiameterMultiplier: 0
+        divisionStartDiameterMultiplier: 0
+        divisionAnimationProgress: 0
+        isVisuallyDividing: 0
+        worldPosition: {x: 0, y: 0, z: 0}
+        carbonLimited: 0
+        validHabitat: 0
+        validState: 0
+        pendingDeath: 0
+        carbonReady: 0
+        energyReady: 0
+        temperatureReady: 0
+        belowPopulationCap: 0
+        packedCanReplicate: 0
+        divisionPermitted: 0
+        principalBlock: 0
+      childId: 0
+      parentEnergy: 0
+      childEnergy: 0
+      parentCarbon: 0
+      childCarbon: 0
+      splitToChild: 0
+      childInitialEnergy: 0
+      childInitialCarbon: 0
+      parentAge: 0
+      childAge: 0
+      parentVisualDiameterMultiplier: 0
+      childVisualDiameterMultiplier: 0
+      parentGrowthCycleBaseline: 0
+      childGrowthCycleBaseline: 0
+      maximumDaughterSeparation: 0
+      childCell: 0
+      childLayer: 0
+      parentPosition: {x: 0, y: 0, z: 0}
+      childPosition: {x: 0, y: 0, z: 0}
+      energyResidual: 0
+      carbonResidual: 0
+      placementError: 0
+      daughterSeparationDistance: 0
+      violations: 0
+    - before:
+        organismId: 0
+        packedIndex: 0
+        cell: 0
+        layer: 0
+        metabolism: 0
+        organicC: 0
+        biomassTarget: 0
+        requiredCarbon: 0
+        carbonProgress: 0
+        energy: 0
+        requiredEnergy: 0
+        temperatureKelvin: 0
+        temperaturePerformance: 0
+        probabilityPerStep: 0
+        age: 0
+        visualSize: 0
+        matureSize: 0
+        visualDiameterMultiplier: 0
+        growthCycleCarbonBaseline: 0
+        visualGrowthProgress: 0
+        cycleStartDiameterMultiplier: 0
+        divisionStartDiameterMultiplier: 0
+        divisionAnimationProgress: 0
+        isVisuallyDividing: 0
+        worldPosition: {x: 0, y: 0, z: 0}
+        carbonLimited: 0
+        validHabitat: 0
+        validState: 0
+        pendingDeath: 0
+        carbonReady: 0
+        energyReady: 0
+        temperatureReady: 0
+        belowPopulationCap: 0
+        packedCanReplicate: 0
+        divisionPermitted: 0
+        principalBlock: 0
+      childId: 0
+      parentEnergy: 0
+      childEnergy: 0
+      parentCarbon: 0
+      childCarbon: 0
+      splitToChild: 0
+      childInitialEnergy: 0
+      childInitialCarbon: 0
+      parentAge: 0
+      childAge: 0
+      parentVisualDiameterMultiplier: 0
+      childVisualDiameterMultiplier: 0
+      parentGrowthCycleBaseline: 0
+      childGrowthCycleBaseline: 0
+      maximumDaughterSeparation: 0
+      childCell: 0
+      childLayer: 0
+      parentPosition: {x: 0, y: 0, z: 0}
+      childPosition: {x: 0, y: 0, z: 0}
+      energyResidual: 0
+      carbonResidual: 0
+      placementError: 0
+      daughterSeparationDistance: 0
+      violations: 0
+    lastReactions:
+    - requests: 0
+      achieved: 0
+      unattributedCarbonReactions: 0
+      modelViolations: 0
+      measuredViolations: 0
+      invalid: 0
+      inputTransferViolations: 0
+      zeroMeasuredInputWithEnergy: 0
+      requestedInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      plannedInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      attributedInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      netOnlyInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      definedProducts:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      attributedProducts:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      netOnlyProducts:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      requestedStore: 0
+      storedCarbon: 0
+      capLoss: 0
+      storeFloatResidual: 0
+      modelCarbonResidual: 0
+      plannedCarbonResidual: 0
+      measuredCarbonResidual: 0
+      missingCarbon: 0
+      excessCarbon: 0
+      maxAbsMeasuredCarbonResidual: 0
+      energyAwarded: 0
+      energyDelta: 0
+    - requests: 0
+      achieved: 0
+      unattributedCarbonReactions: 0
+      modelViolations: 0
+      measuredViolations: 0
+      invalid: 0
+      inputTransferViolations: 0
+      zeroMeasuredInputWithEnergy: 0
+      requestedInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      plannedInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      attributedInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      netOnlyInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      definedProducts:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      attributedProducts:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      netOnlyProducts:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      requestedStore: 0
+      storedCarbon: 0
+      capLoss: 0
+      storeFloatResidual: 0
+      modelCarbonResidual: 0
+      plannedCarbonResidual: 0
+      measuredCarbonResidual: 0
+      missingCarbon: 0
+      excessCarbon: 0
+      maxAbsMeasuredCarbonResidual: 0
+      energyAwarded: 0
+      energyDelta: 0
+    - requests: 0
+      achieved: 0
+      unattributedCarbonReactions: 0
+      modelViolations: 0
+      measuredViolations: 0
+      invalid: 0
+      inputTransferViolations: 0
+      zeroMeasuredInputWithEnergy: 0
+      requestedInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      plannedInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      attributedInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      netOnlyInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      definedProducts:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      attributedProducts:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      netOnlyProducts:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      requestedStore: 0
+      storedCarbon: 0
+      capLoss: 0
+      storeFloatResidual: 0
+      modelCarbonResidual: 0
+      plannedCarbonResidual: 0
+      measuredCarbonResidual: 0
+      missingCarbon: 0
+      excessCarbon: 0
+      maxAbsMeasuredCarbonResidual: 0
+      energyAwarded: 0
+      energyDelta: 0
+    - requests: 0
+      achieved: 0
+      unattributedCarbonReactions: 0
+      modelViolations: 0
+      measuredViolations: 0
+      invalid: 0
+      inputTransferViolations: 0
+      zeroMeasuredInputWithEnergy: 0
+      requestedInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      plannedInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      attributedInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      netOnlyInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      definedProducts:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      attributedProducts:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      netOnlyProducts:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      requestedStore: 0
+      storedCarbon: 0
+      capLoss: 0
+      storeFloatResidual: 0
+      modelCarbonResidual: 0
+      plannedCarbonResidual: 0
+      measuredCarbonResidual: 0
+      missingCarbon: 0
+      excessCarbon: 0
+      maxAbsMeasuredCarbonResidual: 0
+      energyAwarded: 0
+      energyDelta: 0
+    - requests: 0
+      achieved: 0
+      unattributedCarbonReactions: 0
+      modelViolations: 0
+      measuredViolations: 0
+      invalid: 0
+      inputTransferViolations: 0
+      zeroMeasuredInputWithEnergy: 0
+      requestedInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      plannedInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      attributedInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      netOnlyInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      definedProducts:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      attributedProducts:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      netOnlyProducts:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      requestedStore: 0
+      storedCarbon: 0
+      capLoss: 0
+      storeFloatResidual: 0
+      modelCarbonResidual: 0
+      plannedCarbonResidual: 0
+      measuredCarbonResidual: 0
+      missingCarbon: 0
+      excessCarbon: 0
+      maxAbsMeasuredCarbonResidual: 0
+      energyAwarded: 0
+      energyDelta: 0
+    - requests: 0
+      achieved: 0
+      unattributedCarbonReactions: 0
+      modelViolations: 0
+      measuredViolations: 0
+      invalid: 0
+      inputTransferViolations: 0
+      zeroMeasuredInputWithEnergy: 0
+      requestedInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      plannedInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      attributedInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      netOnlyInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      definedProducts:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      attributedProducts:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      netOnlyProducts:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      requestedStore: 0
+      storedCarbon: 0
+      capLoss: 0
+      storeFloatResidual: 0
+      modelCarbonResidual: 0
+      plannedCarbonResidual: 0
+      measuredCarbonResidual: 0
+      missingCarbon: 0
+      excessCarbon: 0
+      maxAbsMeasuredCarbonResidual: 0
+      energyAwarded: 0
+      energyDelta: 0
+    - requests: 0
+      achieved: 0
+      unattributedCarbonReactions: 0
+      modelViolations: 0
+      measuredViolations: 0
+      invalid: 0
+      inputTransferViolations: 0
+      zeroMeasuredInputWithEnergy: 0
+      requestedInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      plannedInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      attributedInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      netOnlyInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      definedProducts:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      attributedProducts:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      netOnlyProducts:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      requestedStore: 0
+      storedCarbon: 0
+      capLoss: 0
+      storeFloatResidual: 0
+      modelCarbonResidual: 0
+      plannedCarbonResidual: 0
+      measuredCarbonResidual: 0
+      missingCarbon: 0
+      excessCarbon: 0
+      maxAbsMeasuredCarbonResidual: 0
+      energyAwarded: 0
+      energyDelta: 0
+    - requests: 0
+      achieved: 0
+      unattributedCarbonReactions: 0
+      modelViolations: 0
+      measuredViolations: 0
+      invalid: 0
+      inputTransferViolations: 0
+      zeroMeasuredInputWithEnergy: 0
+      requestedInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      plannedInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      attributedInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      netOnlyInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      definedProducts:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      attributedProducts:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      netOnlyProducts:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      requestedStore: 0
+      storedCarbon: 0
+      capLoss: 0
+      storeFloatResidual: 0
+      modelCarbonResidual: 0
+      plannedCarbonResidual: 0
+      measuredCarbonResidual: 0
+      missingCarbon: 0
+      excessCarbon: 0
+      maxAbsMeasuredCarbonResidual: 0
+      energyAwarded: 0
+      energyDelta: 0
+    lastRequestedNet:
+      co2: 0
+      o2: 0
+      ch4: 0
+      h2: 0
+      h2s: 0
+      fe2: 0
+      organicC: 0
+    lastMeasuredNet:
+      co2: 0
+      o2: 0
+      ch4: 0
+      h2: 0
+      h2s: 0
+      fe2: 0
+      organicC: 0
+    lastNetTransferResidual:
+      co2: 0
+      o2: 0
+      ch4: 0
+      h2: 0
+      h2s: 0
+      fe2: 0
+      organicC: 0
+    lastMixedPairs: 0
+    lastTransferViolations: 0
+    lastMeasuredCarbonResidual: 0
+  visualGrowthSettings:
+    minimumDiameterMultiplier: 0.333
+    maximumDiameterMultiplier: 1
+    growthCurveSmoothing: 1
+    divisionAnimationDuration: 0.65
+    daughterSeparationDistance: 0.06
+  minimumVisualDiameter: 0
+  averageVisualDiameter: 0
+  maximumVisualDiameter: 0
+  currentlyDividing: 0
+  invalidVisualStateCorrections: 0
+  replacedDivisionTransitions: 0
+  constrainedDaughterSeparations: 0
+  failedDaughterSeparations: 0
+  divisionParentFound: 0
+  divisionDaughterFound: 0
+  divisionParentVisual:
+    organismId: 0
+    packedIndex: 0
+    cell: 0
+    layer: 0
+    metabolism: 0
+    organicC: 0
+    biomassTarget: 0
+    requiredCarbon: 0
+    carbonProgress: 0
+    energy: 0
+    requiredEnergy: 0
+    temperatureKelvin: 0
+    temperaturePerformance: 0
+    probabilityPerStep: 0
+    age: 0
+    visualSize: 0
+    matureSize: 0
+    visualDiameterMultiplier: 0
+    growthCycleCarbonBaseline: 0
+    visualGrowthProgress: 0
+    cycleStartDiameterMultiplier: 0
+    divisionStartDiameterMultiplier: 0
+    divisionAnimationProgress: 0
+    isVisuallyDividing: 0
+    worldPosition: {x: 0, y: 0, z: 0}
+    carbonLimited: 0
+    validHabitat: 0
+    validState: 0
+    pendingDeath: 0
+    carbonReady: 0
+    energyReady: 0
+    temperatureReady: 0
+    belowPopulationCap: 0
+    packedCanReplicate: 0
+    divisionPermitted: 0
+    principalBlock: 0
+  divisionDaughterVisual:
+    organismId: 0
+    packedIndex: 0
+    cell: 0
+    layer: 0
+    metabolism: 0
+    organicC: 0
+    biomassTarget: 0
+    requiredCarbon: 0
+    carbonProgress: 0
+    energy: 0
+    requiredEnergy: 0
+    temperatureKelvin: 0
+    temperaturePerformance: 0
+    probabilityPerStep: 0
+    age: 0
+    visualSize: 0
+    matureSize: 0
+    visualDiameterMultiplier: 0
+    growthCycleCarbonBaseline: 0
+    visualGrowthProgress: 0
+    cycleStartDiameterMultiplier: 0
+    divisionStartDiameterMultiplier: 0
+    divisionAnimationProgress: 0
+    isVisuallyDividing: 0
+    worldPosition: {x: 0, y: 0, z: 0}
+    carbonLimited: 0
+    validHabitat: 0
+    validState: 0
+    pendingDeath: 0
+    carbonReady: 0
+    energyReady: 0
+    temperatureReady: 0
+    belowPopulationCap: 0
+    packedCanReplicate: 0
+    divisionPermitted: 0
+    principalBlock: 0
   chemosynthAgentCount: 0
   hydrogenotrophAgentCount: 0
   photosynthAgentCount: 0

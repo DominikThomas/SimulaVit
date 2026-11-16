@@ -9,7 +9,7 @@ using UnityEditor;
 #endif
 
 [DefaultExecutionOrder(-2000)]
-public class SimulationStartupController : MonoBehaviour
+public partial class SimulationStartupController : MonoBehaviour
 {
     private const float AxisTiltMinDegrees = 0f;
     private const float AxisTiltMaxDegrees = 90f;
@@ -34,7 +34,7 @@ public class SimulationStartupController : MonoBehaviour
     public const float GeodesicVentPhysicalMaxPerSecond = 1000f;
     private const int InitialSpawnMin = 0;
     private const int InitialSpawnMax = 10000;
-    private const int SavedStartupConfigVersion = 22;
+    private const int SavedStartupConfigVersion = 23;
     public const float NormalAtmospherePressureMaxBar = 5f;
     public const float DenseAtmospherePressureMaxBar = 600f;
     public const float DefaultApproximateThermalIntervalSeconds = 2f;
@@ -82,13 +82,12 @@ public class SimulationStartupController : MonoBehaviour
 
     [Header("Built-in Start Screen UI")]
     [SerializeField] private bool useBuiltInSetupGui = true;
-    [SerializeField] private float setupGuiWidth = 520f;
+    [SerializeField] private float setupGuiWidth = 960f;
     [SerializeField] private float setupGuiTopPadding = 70f;
 
     private enum StartupUiState { MainMenu, ConfigScreen, SavePicker }
 
-    private Vector2 setupGuiScrollPosition;
-    private readonly Dictionary<string, (float value, string text)> numericFieldEdits = new();
+    private readonly Dictionary<string, SetupNumericEdit> numericFieldEdits = new();
     private Vector2 savePickerScrollPosition;
     private StartupUiState startupUiState;
     private IReadOnlyList<SimulationSaveLoadService.SaveFileInfo> cachedSaveFiles = Array.Empty<SimulationSaveLoadService.SaveFileInfo>();
@@ -111,8 +110,6 @@ public class SimulationStartupController : MonoBehaviour
     private bool warnedAboutMissingOverlay;
     private bool returningToMainMenu;
     private bool deferredStartupPrepared;
-    private bool advancedSettingsExpanded;
-    private bool debugSettingsExpanded;
 
     public static bool IsSetupActive { get; private set; }
     public static bool IsStartupBlockingHud => IsSetupActive;
@@ -202,13 +199,18 @@ public class SimulationStartupController : MonoBehaviour
             defaults.ventH2PerTick = planetResourceMap.ventH2PerTick;
             defaults.ventH2SPerTick = planetResourceMap.ventH2SPerTick;
             defaults.ventCO2PerTick = planetResourceMap.ventCO2PerTick;
+            defaults.ventFe2PerTick = planetResourceMap.ventDissolvedFe2PlusPerTick;
         }
 
         if (replicatorManager != null)
         {
             defaults.initialSpawnCount = replicatorManager.initialSpawnCount;
+            defaults.geodesicBiologySpawnDelaySeconds = replicatorManager.geodesicBiologySpawnDelaySeconds;
+            defaults.biology ??= new SimulationStartupBiologyConfig();
+            defaults.biology.Capture(replicatorManager);
             resumeStepsPerFrame = Mathf.Max(1, replicatorManager.ConfiguredSimulationStepsPerFrame);
         }
+        CaptureAdditionalSceneDefaults();
     }
 
     private void LoadSavedStartupConfigIfEnabled()
@@ -258,7 +260,6 @@ public class SimulationStartupController : MonoBehaviour
 
     public void ShowConfigScreenFromMainMenu()
     {
-        advancedSettingsExpanded = false;
         startupUiState = StartupUiState.ConfigScreen;
         startScreenStatusMessage = null;
         ShowSetupScreen(true);
@@ -349,6 +350,7 @@ public class SimulationStartupController : MonoBehaviour
 
     public void BackToStartMenu()
     {
+        SaveSetupDraft();
         ShowMainMenu();
     }
 
@@ -403,6 +405,8 @@ public class SimulationStartupController : MonoBehaviour
         if (currentConfig == null) currentConfig = new SimulationStartupConfig();
         CopyNormalSettings(defaults ?? new SimulationStartupConfig(), currentConfig);
         NormalizeAtmosphereComposition(currentConfig);
+        numericFieldEdits.Clear();
+        integerFieldEdits.Clear();
         RefreshStartupPanels();
     }
 
@@ -410,6 +414,8 @@ public class SimulationStartupController : MonoBehaviour
     {
         if (currentConfig == null) currentConfig = new SimulationStartupConfig();
         CopyAdvancedSettings(defaults ?? new SimulationStartupConfig(), currentConfig);
+        numericFieldEdits.Clear();
+        integerFieldEdits.Clear();
         RefreshStartupPanels();
     }
 
@@ -457,12 +463,24 @@ public class SimulationStartupController : MonoBehaviour
         destination.geodesicVentCO2PhysicalPerSecond = source.geodesicVentCO2PhysicalPerSecond;
         destination.geodesicVentFe2PhysicalPerSecond = source.geodesicVentFe2PhysicalPerSecond;
         destination.initialSpawnCount = source.initialSpawnCount;
+        destination.geodesicTargetOceanCoveragePercent = source.geodesicTargetOceanCoveragePercent;
+        destination.enableGeodesicRivers = source.enableGeodesicRivers;
+        var previousBiology = destination.biology;
+        destination.biology = (source.biology ?? new SimulationStartupBiologyConfig()).Clone();
+        if (previousBiology != null)
+        {
+            destination.biology.enableGeodesicChemotacticSteering = previousBiology.enableGeodesicChemotacticSteering;
+            destination.biology.enableGeodesicChemotaxisABDiagnostics = previousBiology.enableGeodesicChemotaxisABDiagnostics;
+        }
     }
 
     public static void CopyAdvancedSettings(SimulationStartupConfig source, SimulationStartupConfig destination)
     {
         if (source == null || destination == null) return;
         destination.geodesicSubdivisionLevel = source.geodesicSubdivisionLevel;
+        destination.geodesicSeaLevelControlMode = source.geodesicSeaLevelControlMode;
+        destination.geodesicSeaLevelOffset = source.geodesicSeaLevelOffset;
+        destination.geodesicOceanWorldMinimumDepth = source.geodesicOceanWorldMinimumDepth;
         destination.excludeSmallDisconnectedSeas = source.excludeSmallDisconnectedSeas;
         destination.minimumOceanComponentAreaFraction = source.minimumOceanComponentAreaFraction;
         destination.hydrologyTerrainMode = source.hydrologyTerrainMode;
@@ -688,6 +706,11 @@ public class SimulationStartupController : MonoBehaviour
         {
             planetGenerator.ApplyStartupSeed(seed, requestedRandomSeed);
             planetGenerator.ApplyStartupGrid(config.gridType, config.cubeSphereResolution, config.geodesicSubdivisionLevel);
+            planetGenerator.geodesicSeaLevelControlMode = config.geodesicSeaLevelControlMode;
+            planetGenerator.geodesicTargetOceanCoveragePercent = config.geodesicTargetOceanCoveragePercent;
+            planetGenerator.geodesicSeaLevelOffset = config.geodesicSeaLevelOffset;
+            planetGenerator.geodesicOceanWorldMinimumDepth = config.geodesicOceanWorldMinimumDepth;
+            planetGenerator.enableGeodesicRivers = config.enableGeodesicRivers;
             if (config.gridType == PlanetGridType.GeodesicIcosphere)
             {
                 planetGenerator.GetComponent<GeodesicSurfaceTemperatureField>()?.SetStartupTemperatureParameters(config.baseTempKelvin, config.insolationTempGain);
@@ -755,6 +778,7 @@ public class SimulationStartupController : MonoBehaviour
             planetResourceMap.ventH2PerTick = Mathf.Max(0f, config.ventH2PerTick);
             planetResourceMap.ventH2SPerTick = Mathf.Max(0f, config.ventH2SPerTick);
             planetResourceMap.ventCO2PerTick = Mathf.Max(0f, config.ventCO2PerTick);
+            planetResourceMap.ventDissolvedFe2PlusPerTick = Mathf.Max(0f, config.ventFe2PerTick);
             planetResourceMap.ReinitializeResources();
             planetGenerator?.RefreshLegacyIceVisuals("resources initialized after legacy startup config");
         }
@@ -772,6 +796,7 @@ public class SimulationStartupController : MonoBehaviour
 
         if (replicatorManager != null)
         {
+            config.biology?.Apply(replicatorManager);
             replicatorManager.initialSpawnCount = Mathf.Max(0, config.initialSpawnCount);
             replicatorManager.geodesicBiologySpawnDelaySeconds = Mathf.Max(0f, config.geodesicBiologySpawnDelaySeconds);
         }
@@ -898,6 +923,7 @@ public class SimulationStartupController : MonoBehaviour
             return;
         }
 
+        NormalizeAdditionalSettings(config, defaults);
         config.axisTiltDegrees = Mathf.Clamp(config.axisTiltDegrees, AxisTiltMinDegrees, AxisTiltMaxDegrees);
         config.dayLengthSeconds = Mathf.Clamp(config.dayLengthSeconds, DayLengthMinSeconds, DayLengthMaxSeconds);
         config.yearLengthInDays = Mathf.Clamp(config.yearLengthInDays, YearLengthMinDays, YearLengthMaxDays);
@@ -1060,6 +1086,9 @@ public class SimulationStartupController : MonoBehaviour
         builder.AppendLine($"Inland elevation magnitude: {config.inlandElevationMagnitude:G9}");
         builder.AppendLine($"Termination valley carving: {config.enableTerminationValleyCarving}; passes: {config.valleyCarvingPasses}; maximum cut per pass: {config.maximumValleyCarveDepth:G6}; minimum runoff: {config.minimumValleyCarveRunoff:G6}; width: {config.valleyCarveWidth:G6}; Scene debug: {config.showValleyCarvingDebug}");
         builder.AppendLine($"Hydrological lakes: {config.generateHydrologicalLakes}; minimum basin area: {config.minimumLakeBasinAreaFraction * 100f:0.####}% of planet; minimum depth: {config.minimumLakeDepth:0.####} planet units");
+        builder.AppendLine($"Sea-level mode: {config.geodesicSeaLevelControlMode}; target ocean coverage: {config.geodesicTargetOceanCoveragePercent:G9}%; manual offset: {config.geodesicSeaLevelOffset:G9}; Ocean World minimum depth: {config.geodesicOceanWorldMinimumDepth:G9}");
+        builder.AppendLine($"Generate geodesic rivers: {config.enableGeodesicRivers}");
+        builder.AppendLine($"Biology startup parameters (mode={config.gridType}; legacy-only values remain inactive in geodesic): {JsonUtility.ToJson(config.biology)}");
         builder.AppendLine($"Initial Spawn Count: {config.initialSpawnCount}");
         builder.AppendLine($"Start Paused: {startPaused}");
         builder.AppendLine($"Saved Config Path: {SavedStartupConfigPath}");
@@ -1086,11 +1115,13 @@ public class SimulationStartupController : MonoBehaviour
         saved.minimumValleyCarveRunoff = GeodesicValleyCarving.DefaultRunoff;
         saved.valleyCarveWidth = GeodesicValleyCarving.DefaultWidth;
         if (!string.IsNullOrWhiteSpace(json)) JsonUtility.FromJsonOverwrite(json, saved);
-        return saved.ToConfig(authoritativeFallback);
+        var config = saved.ToConfig(authoritativeFallback);
+        NormalizeAdditionalSettings(config, authoritativeFallback);
+        return config;
     }
 
     [Serializable]
-    private class SavedStartupConfig
+    private partial class SavedStartupConfig
     {
         public int version = SavedStartupConfigVersion;
         public int planetSeed;
@@ -1155,7 +1186,7 @@ public class SimulationStartupController : MonoBehaviour
         public static SavedStartupConfig FromConfig(SimulationStartupConfig config)
         {
             config ??= new SimulationStartupConfig();
-            return new SavedStartupConfig
+            var saved = new SavedStartupConfig
             {
                 version = SavedStartupConfigVersion,
                 planetSeed = config.planetSeed,
@@ -1219,6 +1250,8 @@ public class SimulationStartupController : MonoBehaviour
                 geodesicResourceTransportIntervalSeconds = config.geodesicResourceTransportIntervalSeconds,
                 chemistryTelemetryIntervalSimSeconds = config.chemistryTelemetryIntervalSimSeconds
             };
+            saved.CaptureV23(config);
+            return saved;
         }
 
         public SimulationStartupConfig ToConfig(SimulationStartupConfig fallback)
@@ -1283,7 +1316,7 @@ public class SimulationStartupController : MonoBehaviour
             config.ventH2PerTick = ventH2PerTick;
             config.ventH2SPerTick = ventH2SPerTick;
             config.ventCO2PerTick = ventCO2PerTick;
-            config.ventFe2PerTick = ventFe2PerTick > 0f ? ventFe2PerTick : config.ventFe2PerTick;
+            config.ventFe2PerTick = version >= 23 || ventFe2PerTick > 0f ? ventFe2PerTick : config.ventFe2PerTick;
             config.geodesicVentProductionMultiplier = SimulationStartupConfig.NormalizeVentProductionMultiplier(geodesicVentProductionMultiplier);
             // Schema v7 and older have no Geodesic physical-rate fields. Keep the cloned new
             // defaults rather than reinterpreting their legacy/pre-physical vent values.
@@ -1300,6 +1333,7 @@ public class SimulationStartupController : MonoBehaviour
             config.approximateThermalIntervalSeconds = approximateThermalIntervalSeconds;
             config.geodesicResourceTransportIntervalSeconds = geodesicResourceTransportIntervalSeconds;
             config.chemistryTelemetryIntervalSimSeconds = version >= 5 ? chemistryTelemetryIntervalSimSeconds : config.chemistryTelemetryIntervalSimSeconds;
+            RestoreV23(config);
             return config;
         }
     }
@@ -1529,252 +1563,6 @@ public class SimulationStartupController : MonoBehaviour
         GUILayout.EndArea();
     }
 
-    private void DrawBuiltInConfigScreen()
-    {
-        float width = Mathf.Max(1f, Mathf.Min(setupGuiWidth, Screen.width - 40f));
-        float x = (Screen.width - width) * 0.5f;
-        float line = 28f;
-        float gap = 8f;
-        float visibleTopPadding = Mathf.Clamp(setupGuiTopPadding, 0f, Mathf.Max(0f, Screen.height - 100f));
-        float scrollHeight = Mathf.Max(100f, Screen.height - visibleTopPadding - 20f);
-        Rect setupRect = new Rect(x, visibleTopPadding, width, scrollHeight);
-
-        GUILayout.BeginArea(setupRect);
-        setupGuiScrollPosition = GUILayout.BeginScrollView(setupGuiScrollPosition, GUILayout.Width(width), GUILayout.Height(scrollHeight));
-
-        float contentWidth = Mathf.Max(1f, width - 20f);
-        float infillHeight = currentConfig.gridType == PlanetGridType.GeodesicIcosphere
-            ? 98f + (currentConfig.infillExcludedInlandBasins ? (line + gap) * 6f : 0f) : 0f;
-        float advancedHeight = advancedSettingsExpanded ? 1920f + infillHeight + (currentConfig.gridType == PlanetGridType.GeodesicIcosphere ? line + gap + 78f : 0f) : 0f;
-        int normalRows = currentConfig.gridType == PlanetGridType.GeodesicIcosphere ? 26 : 25;
-        float contentHeight = 44f + ((line + gap) * normalRows) + advancedHeight + (debugSettingsExpanded ? 370f : 40f) + (gap * 2f) + 42f + 30f + 82f;
-        Rect contentRect = GUILayoutUtility.GetRect(contentWidth, contentHeight, GUILayout.Width(contentWidth), GUILayout.Height(contentHeight));
-        float controlX = contentRect.x;
-        float y = contentRect.y;
-
-        GUI.Label(new Rect(controlX, y, contentWidth, 34f), "Planet Simulation Setup", titleStyle);
-        y += 44f;
-
-        DrawBool(new Rect(controlX, y, contentWidth, line), "Use Random Seed", ref currentConfig.useRandomSeed);
-        y += line + gap;
-        DrawInt(new Rect(controlX, y, contentWidth, line), "Planet Seed", ref currentConfig.planetSeed, !currentConfig.useRandomSeed);
-        y += line + gap;
-        DrawPlanetGridPopup(new Rect(controlX, y, contentWidth, line));
-        y += line + gap;
-        if (currentConfig.gridType == PlanetGridType.LegacyCubeSphere)
-        {
-            DrawInt(new Rect(controlX, y, contentWidth, line), "Cube Sphere Resolution", ref currentConfig.cubeSphereResolution, true, 3, 240);
-        }
-        y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Axis Tilt (deg)", ref currentConfig.axisTiltDegrees, AxisTiltMinDegrees, AxisTiltMaxDegrees);
-        y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Day Length (sec)", ref currentConfig.dayLengthSeconds, DayLengthMinSeconds, DayLengthMaxSeconds);
-        y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Year Length (days)", ref currentConfig.yearLengthInDays, YearLengthMinDays, YearLengthMaxDays);
-        y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Insolation Gain", ref currentConfig.insolationTempGain, InsolationGainMin, InsolationGainMax);
-        y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Initial Ocean CO2", ref currentConfig.initialCO2, InitialAtmosphereMin, InitialCO2Max);
-        y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Initial Ocean O2", ref currentConfig.initialO2, InitialAtmosphereMin, InitialO2Max);
-        y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Initial Ocean CH4", ref currentConfig.initialCH4, InitialAtmosphereMin, InitialCH4Max);
-        y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Initial Ocean Fe2+", ref currentConfig.initialDissolvedFe2Plus, InitialFe2Min, InitialFe2Max);
-        y += line + gap;
-        float atmospherePressureMax = currentConfig.allowDenseAtmosphere ? DenseAtmospherePressureMaxBar : NormalAtmospherePressureMaxBar;
-        string atmospherePressureLabel = currentConfig.allowDenseAtmosphere
-            ? "Initial Atmosphere Pressure (bar; Advanced Dense 0-600)"
-            : "Initial Atmosphere Pressure (bar; Normal 0-5)";
-        DrawFloat(new Rect(controlX, y, contentWidth, line), atmospherePressureLabel, ref currentConfig.initialAtmospherePressureBar, 0f, atmospherePressureMax); y += line + gap;
-        NormalizeAtmosphereComposition(currentConfig);
-        DrawFloat(new Rect(controlX, y, contentWidth, line), $"CO2 fraction ({currentConfig.atmosphericCO2Bar:0.###} bar)", ref currentConfig.atmosphericCO2Fraction, 0f, 1f); y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), $"O2 fraction ({currentConfig.atmosphericO2Bar:0.###} bar)", ref currentConfig.atmosphericO2Fraction, 0f, 1f); y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), $"CH4 fraction ({currentConfig.atmosphericCH4Bar:0.###} bar)", ref currentConfig.atmosphericCH4Fraction, 0f, 1f); y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), $"H2 fraction ({currentConfig.atmosphericH2Bar:0.###} bar)", ref currentConfig.atmosphericH2Fraction, 0f, 1f); y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), $"H2S fraction ({currentConfig.atmosphericH2SBar:0.###} bar)", ref currentConfig.atmosphericH2SFraction, 0f, 1f); y += line + gap;
-        NormalizeAtmosphereComposition(currentConfig);
-        GUI.Label(new Rect(controlX, y, contentWidth, line), $"N2 remainder: {(currentConfig.initialAtmospherePressureBar > 0f ? currentConfig.atmosphericN2Bar / currentConfig.initialAtmospherePressureBar : 1f):P2} ({currentConfig.atmosphericN2Bar:0.###} bar)", labelStyle); y += line + gap;
-        DrawFloat(new Rect(controlX, y, contentWidth, line), "Vent Clustering", ref currentConfig.ventClustering, 0f, 1f);
-        y += line + gap;
-        if (currentConfig.gridType == PlanetGridType.GeodesicIcosphere)
-        {
-            DrawNonnegativeFloatInput(new Rect(controlX, y, contentWidth, line), "Global Vent Production Multiplier",
-                ref currentConfig.geodesicVentProductionMultiplier, SimulationStartupConfig.DefaultVentProductionMultiplier,
-                SimulationStartupConfig.MaximumVentProductionMultiplier);
-            y += line + gap;
-            GUI.Label(new Rect(controlX, y, contentWidth, line), "Physical inventory rates (concentration·km³/s)", labelStyle); y += line + gap;
-            DrawFloat(new Rect(controlX, y, contentWidth, line), "Global Vent H2 / sim s", ref currentConfig.geodesicVentH2PhysicalPerSecond, 0f, GeodesicVentPhysicalMaxPerSecond); y += line + gap;
-            DrawFloat(new Rect(controlX, y, contentWidth, line), "Global Vent H2S / sim s", ref currentConfig.geodesicVentH2SPhysicalPerSecond, 0f, GeodesicVentPhysicalMaxPerSecond); y += line + gap;
-            DrawFloat(new Rect(controlX, y, contentWidth, line), "Global Vent CO2 / sim s", ref currentConfig.geodesicVentCO2PhysicalPerSecond, 0f, GeodesicVentPhysicalMaxPerSecond); y += line + gap;
-            DrawFloat(new Rect(controlX, y, contentWidth, line), "Global Vent Fe2 / sim s", ref currentConfig.geodesicVentFe2PhysicalPerSecond, 0f, GeodesicVentPhysicalMaxPerSecond); y += line + gap;
-        }
-        else
-        {
-            DrawFloat(new Rect(controlX, y, contentWidth, line), "Global Vent H2 / sim s", ref currentConfig.ventH2PerTick, VentPerTickMin, VentH2MaxPerTick); y += line + gap;
-            DrawFloat(new Rect(controlX, y, contentWidth, line), "Global Vent H2S / sim s", ref currentConfig.ventH2SPerTick, VentPerTickMin, VentH2SMaxPerTick); y += line + gap;
-            DrawFloat(new Rect(controlX, y, contentWidth, line), "Global Vent CO2 / sim s", ref currentConfig.ventCO2PerTick, VentPerTickMin, VentCO2MaxPerTick); y += line + gap;
-            DrawFloat(new Rect(controlX, y, contentWidth, line), "Global Vent Fe2 / sim s", ref currentConfig.ventFe2PerTick, VentPerTickMin, VentCO2MaxPerTick); y += line + gap;
-        }
-        DrawInt(new Rect(controlX, y, contentWidth, line), "Initial Spawn Count", ref currentConfig.initialSpawnCount, true, InitialSpawnMin, InitialSpawnMax);
-        y += line + (gap * 2f);
-
-        if (GUI.Button(new Rect(controlX, y, contentWidth, 32f), advancedSettingsExpanded ? "Advanced ▲" : "Advanced ▼", buttonStyle))
-        {
-            advancedSettingsExpanded = !advancedSettingsExpanded;
-        }
-        y += 40f;
-        if (advancedSettingsExpanded)
-        {
-            if (currentConfig.gridType == PlanetGridType.GeodesicIcosphere)
-            {
-                DrawInt(new Rect(controlX, y, contentWidth, line), "Geodesic Subdivision Level", ref currentConfig.geodesicSubdivisionLevel, true, 0, GeodesicGridTopology.MaxSupportedSubdivision);
-                y += line + gap;
-                DrawInlandElevationMagnitude(new Rect(controlX, y, contentWidth, line));
-                y += line + gap;
-                GUI.Label(new Rect(controlX, y, contentWidth, 100f), GeodesicInlandUplift.Help, new GUIStyle(labelStyle) { wordWrap = true });
-                y += 106f;
-                GUI.Label(new Rect(controlX, y, contentWidth, line), "Terrain / Hydrology", labelStyle);
-                y += line + gap;
-                DrawRiverThreshold(new Rect(controlX, y, contentWidth, line), "River flow threshold", ref currentConfig.riverFlowThreshold, GeodesicRiverSystem.DefaultRiverFlowThreshold);
-                y += line + gap;
-                GUI.Label(new Rect(controlX, y, contentWidth, 88f), "Minimum accumulated runoff required for a visible river.\nLower values create more small streams; higher values retain only larger drainage networks.\nExpressed in mean-cell-area equivalents at unit runoff.", new GUIStyle(labelStyle) { wordWrap = true });
-                y += 94f;
-                DrawRiverThreshold(new Rect(controlX, y, contentWidth, line), "Major river threshold", ref currentConfig.majorRiverThreshold, GeodesicRiverSystem.DefaultMajorRiverThreshold);
-                y += line + gap;
-                GUI.Label(new Rect(controlX, y, contentWidth, 44f), "Accumulated runoff threshold used to classify/scale major rivers.", new GUIStyle(labelStyle) { wordWrap = true });
-                y += 50f;
-                DrawBool(new Rect(controlX, y, contentWidth, line), "Colour rivers by ultimate destination (debug)", ref currentConfig.colourRiversByUltimateDestination);
-                y += line + gap;
-                GUI.Label(new Rect(controlX, y, contentWidth, 72f),
-                    "Shows where each river ultimately drains.\nBlue = ocean • Red = closed inland basin\nPurple = terminal lake • Orange = unresolved",
-                    new GUIStyle(labelStyle) { wordWrap = true });
-                y += 78f;
-                GUI.Label(new Rect(controlX, y, contentWidth, line), "Hydrology terrain input", labelStyle);
-                y += line + gap;
-                currentConfig.hydrologyTerrainMode = (HydrologyTerrainMode)GUI.SelectionGrid(
-                    new Rect(controlX, y, contentWidth, line * 3f), (int)currentConfig.hydrologyTerrainMode,
-                    new[] { "Visible terrain", "Fine detail removed (full ridges)", "Reduced ridge + fine detail (failed reference)" }, 1);
-                y += line * 3f + gap;
-                currentConfig.enableTerminationValleyCarving = GUI.Toggle(new Rect(controlX, y, contentWidth, line), currentConfig.enableTerminationValleyCarving, "Enable termination valley carving");
-                y += line + gap;
-                DrawInt(new Rect(controlX, y, contentWidth, line), "Valley carving passes", ref currentConfig.valleyCarvingPasses, true, 1, 5);
-                y += line + gap;
-                DrawNonnegativeFloatInput(new Rect(controlX, y, contentWidth, line), "Maximum carve depth (planet units)", ref currentConfig.maximumValleyCarveDepth, GeodesicValleyCarving.DefaultDepth, 1f);
-                y += line + gap;
-                DrawNonnegativeFloatInput(new Rect(controlX, y, contentWidth, line), "Minimum river runoff for carving", ref currentConfig.minimumValleyCarveRunoff, GeodesicValleyCarving.DefaultRunoff, 1000000f);
-                y += line + gap;
-                DrawNonnegativeFloatInput(new Rect(controlX, y, contentWidth, line), "Carve width (planet units)", ref currentConfig.valleyCarveWidth, GeodesicValleyCarving.DefaultWidth, 1f);
-                y += line + gap;
-                currentConfig.showValleyCarvingDebug = GUI.Toggle(new Rect(controlX, y, contentWidth, line), currentConfig.showValleyCarvingDebug, "Show valley carving debug (Scene gizmos)");
-                y += line + gap;
-                GUI.Label(new Rect(controlX, y, contentWidth, 150f), GeodesicValleyCarving.Help, new GUIStyle(labelStyle) { wordWrap = true });
-                y += 156f;
-                DrawBool(new Rect(controlX, y, contentWidth, line), "Exclude small inland seas", ref currentConfig.excludeSmallDisconnectedSeas);
-                y += line + gap;
-                bool oceanControlEnabled = GUI.enabled;
-                GUI.enabled = oceanControlEnabled && currentConfig.excludeSmallDisconnectedSeas;
-                float basinPercent = currentConfig.minimumOceanComponentAreaFraction * 100f;
-                DrawFloat(new Rect(controlX, y, contentWidth, line), "Minimum ocean basin area (% of planet)", ref basinPercent, 0f, GeodesicOceanConnectivity.MaximumAreaFraction * 100f, labelAbove: true);
-                currentConfig.minimumOceanComponentAreaFraction = GeodesicOceanConnectivity.NormalizeThreshold(basinPercent / 100f);
-                GUI.enabled = oceanControlEnabled;
-                y += line * 2f + gap;
-                GUI.Label(new Rect(controlX, y, contentWidth, 52f), "Small enclosed depressions stay outside the ocean.\nHydrological lakes can fill valid basins.", labelStyle);
-                y += 58f;
-                GUI.enabled = oceanControlEnabled && currentConfig.excludeSmallDisconnectedSeas;
-                DrawBool(new Rect(controlX, y, contentWidth, line), "Infill excluded inland basins (experimental)", ref currentConfig.infillExcludedInlandBasins);
-                y += line + gap;
-                GUI.Label(new Rect(controlX, y, contentWidth, 64f),
-                    "Builds sedimentary plains from the surrounding land. Requires the render subdivision to match or exceed the simulation subdivision.",
-                    new GUIStyle(labelStyle) { wordWrap = true });
-                y += 70f;
-                if (currentConfig.infillExcludedInlandBasins)
-                    DrawBasinInfillLimits(controlX, contentWidth, line, gap, ref y);
-                GUI.enabled = oceanControlEnabled;
-                DrawBool(new Rect(controlX, y, contentWidth, line), "Generate hydrological lakes", ref currentConfig.generateHydrologicalLakes);
-                y += line + gap;
-                GUI.enabled = oceanControlEnabled && currentConfig.generateHydrologicalLakes;
-                float lakePercent = currentConfig.minimumLakeBasinAreaFraction * 100f;
-                DrawFloat(new Rect(controlX, y, contentWidth, line), "Minimum lake basin area (% of planet)", ref lakePercent, 0f, 5f, labelAbove: true);
-                currentConfig.minimumLakeBasinAreaFraction = GeodesicLakeBasins.NormalizeArea(lakePercent / 100f);
-                y += line * 2f + gap;
-                DrawFloat(new Rect(controlX, y, contentWidth, line), "Minimum lake depth (planet units)", ref currentConfig.minimumLakeDepth, 0f, 1f, labelAbove: true);
-                y += line * 2f + gap;
-                GUI.enabled = oceanControlEnabled;
-                GUI.Label(new Rect(controlX, y, contentWidth, 52f), "Fills significant depressions to their spill elevation.\nSmall depressions remain resolved without visible water.", labelStyle);
-                y += 58f;
-            }
-            DrawFloat(new Rect(controlX, y, contentWidth, line), "Base Temperature (K)", ref currentConfig.baseTempKelvin, BaseTempMinKelvin, BaseTempMaxKelvin);
-            y += line + gap;
-            DrawFloat(new Rect(controlX, y, contentWidth, line), "Terrestrial Vent Fraction", ref currentConfig.terrestrialVentFraction, 0f, 1f);
-            y += line + gap;
-            DrawBool(new Rect(controlX, y, contentWidth, line), "Allow Dense Atmosphere (up to 600 bar)", ref currentConfig.allowDenseAtmosphere);
-            y += line + gap;
-            DrawFloat(new Rect(controlX, y, contentWidth, line), "Atmosphere Inventory / bar (authoring)", ref currentConfig.atmosphereInventoryPerBar, 0.000001f, 1000000f); y += line + gap;
-            DrawFloat(new Rect(controlX, y, contentWidth, line), "Air-Sea L0 Relaxation Half-Life (sim s; 0 off)", ref currentConfig.airSeaExchangeHalfLifeSeconds, 0f, 1000000f); y += line + gap;
-            DrawFloat(new Rect(controlX, y, contentWidth, line), "Prebiotic Biology Delay (sim s)", ref currentConfig.geodesicBiologySpawnDelaySeconds, 0f, 5000f); y += line + gap;
-            GUI.Label(new Rect(controlX, y, contentWidth, 38f), "Relaxation of surface-ocean L0 concentration toward atmosphere-controlled equilibrium; not finite-atmosphere depletion half-life.", labelStyle);
-            y += 42f;
-            GUI.Label(new Rect(controlX, y, contentWidth, 24f), "Environment Timing", labelStyle);
-            y += 26f;
-            DrawPreset(new Rect(controlX, y, contentWidth, line), "Temperature update interval", ref currentConfig.approximateThermalIntervalSeconds, ApproximateThermalIntervalPresets);
-            y += line;
-            GUI.Label(new Rect(controlX, y, contentWidth, 22f), "Simulated time. Lower updates more often but costs more CPU. Recommended: 2 s.", labelStyle);
-            y += 28f;
-            DrawPreset(new Rect(controlX, y, contentWidth, line), "Resource transport interval", ref currentConfig.geodesicResourceTransportIntervalSeconds, ResourceTransportIntervalPresets);
-            y += line;
-            GUI.Label(new Rect(controlX, y, contentWidth, 22f), "Simulated time. Lower gives finer transport but costs more CPU. Recommended: 5 s.", labelStyle);
-            y += 30f;
-            DrawFloat(new Rect(controlX, y, contentWidth, line), "Chemistry telemetry interval", ref currentConfig.chemistryTelemetryIntervalSimSeconds, -1f, 3600f);
-            y += line;
-            GUI.Label(new Rect(controlX, y, contentWidth, 22f), "Authoritative simulated time. Recommended: 60 s; <= 0 disables.", labelStyle);
-            y += 30f;
-            if (GUI.Button(new Rect(controlX, y, contentWidth, 30f), "Reset Advanced to Defaults", buttonStyle)) ResetAdvancedToDefaults();
-            y += 38f;
-        }
-
-        if (GUI.Button(new Rect(controlX, y, contentWidth, 32f), debugSettingsExpanded ? "Debug Settings ▲" : "Debug Settings ▼", buttonStyle))
-            debugSettingsExpanded = !debugSettingsExpanded;
-        y += 40f;
-        if (debugSettingsExpanded)
-        {
-            GUI.Label(new Rect(controlX, y, contentWidth, line), "River Debug", labelStyle); y += line + gap;
-            DrawBool(new Rect(controlX, y, contentWidth, line), "Show rejected uphill river segments", ref currentConfig.showRejectedUphillRiverSegments); y += line + gap;
-            GUI.Label(new Rect(controlX, y, contentWidth, 64f), "Displays reaches omitted because they rise uphill.\nDiagnostic only; these do not become valid drainage routes.\nYellow → orange → red: increasing uphill slope (Geodesic only).", labelStyle); y += 72f;
-            DrawBool(new Rect(controlX, y, contentWidth, line), "Colour rendered rivers by visible terrain grade", ref currentConfig.colourRenderedRiversByVisibleTerrainGrade); y += line + gap;
-            GUI.Label(new Rect(controlX, y, contentWidth, 64f), "Audits every rendered segment against completed visible terrain.\nDownhill retains normal colour; uphill is yellow, orange or red.\nThis does not alter routing.", labelStyle); y += 72f;
-            DrawBool(new Rect(controlX, y, contentWidth, line), "Show river termination reasons", ref currentConfig.showRiverTerminationReasons); y += line + gap;
-            GUI.Label(new Rect(controlX, y, contentWidth, 28f), "Purple: closed basin. White: unexpected routing failure. No lakes created.", labelStyle); y += 36f;
-        }
-
-        float buttonWidth = (contentWidth - gap) * 0.5f;
-        if (GUI.Button(new Rect(controlX, y, buttonWidth, 34f), "Start Simulation", buttonStyle))
-        {
-            StartSimulation();
-        }
-        if (GUI.Button(new Rect(controlX + buttonWidth + gap, y, buttonWidth, 34f), "Start Paused", buttonStyle))
-        {
-            StartSimulationPaused();
-        }
-        y += 42f;
-        if (GUI.Button(new Rect(controlX, y, buttonWidth, 30f), "Randomize Seed", buttonStyle))
-        {
-            RandomizeSeed();
-        }
-        if (GUI.Button(new Rect(controlX + buttonWidth + gap, y, buttonWidth, 30f), "Reset Defaults", buttonStyle))
-        {
-            ResetDefaults();
-        }
-        y += 38f;
-        if (GUI.Button(new Rect(controlX, y, contentWidth, 30f), "Back", buttonStyle))
-        {
-            BackToStartMenu();
-        }
-
-        GUILayout.EndScrollView();
-        GUILayout.EndArea();
-    }
-
     private void DrawBuiltInSavePicker()
     {
         float width = Mathf.Max(1f, Mathf.Min(720f, Screen.width - 40f));
@@ -1805,167 +1593,6 @@ public class SimulationStartupController : MonoBehaviour
         if (bytes >= 1024L * 1024L) return $"{bytes / (1024d * 1024d):0.##} MB";
         if (bytes >= 1024L) return $"{bytes / 1024d:0.##} KB";
         return $"{bytes} B";
-    }
-
-    private void DrawBool(Rect rect, string label, ref bool value)
-    {
-        GUI.Label(new Rect(rect.x, rect.y, rect.width * 0.45f, rect.height), label, labelStyle);
-        value = GUI.Toggle(new Rect(rect.x + rect.width * 0.48f, rect.y, rect.width * 0.52f, rect.height), value, value ? "Yes" : "No");
-    }
-
-    private void DrawPlanetGridPopup(Rect rect)
-    {
-        GUI.Label(new Rect(rect.x, rect.y, rect.width * 0.42f, rect.height), "Planet Grid", labelStyle);
-        string[] labels = { "Cube Sphere (Legacy)", "Geodesic Icosphere" };
-        int selected = currentConfig.gridType == PlanetGridType.GeodesicIcosphere ? 1 : 0;
-        selected = GUI.SelectionGrid(new Rect(rect.x + rect.width * 0.44f, rect.y, rect.width * 0.56f, rect.height), selected, labels, 2);
-        currentConfig.gridType = selected == 1 ? PlanetGridType.GeodesicIcosphere : PlanetGridType.LegacyCubeSphere;
-    }
-
-    private void DrawNonnegativeFloatInput(Rect rect, string label, ref float value, float fallback, float maximum)
-    {
-        value = float.IsFinite(value) ? Mathf.Clamp(value, 0f, maximum) : fallback;
-        string text = numericFieldEdits.TryGetValue(label, out var edit) && edit.value == value
-            && GUI.GetNameOfFocusedControl() == label ? edit.text : value.ToString("G9");
-        GUI.Label(new Rect(rect.x, rect.y, rect.width * .78f, rect.height), label, labelStyle);
-        GUI.SetNextControlName(label);
-        string next = GUI.TextField(new Rect(rect.x + rect.width * .8f, rect.y, rect.width * .2f, rect.height), text);
-        if (float.TryParse(next, out float parsed) && float.IsFinite(parsed))
-            value = Mathf.Clamp(parsed, 0f, maximum);
-        numericFieldEdits[label] = (value, next);
-    }
-
-    private void DrawRiverThreshold(Rect rect, string label, ref float value, float fallback)
-    {
-        value = NormalizeRiverThreshold(value, fallback);
-        GUI.Label(new Rect(rect.x, rect.y, rect.width * 0.75f, rect.height), label, labelStyle);
-        // Preserve partial decimal input while typing; only finite positive values enter the config.
-        string text = numericFieldEdits.TryGetValue(label, out var edit) && edit.value == value
-            && GUI.GetNameOfFocusedControl() == label ? edit.text : value.ToString("G9");
-        GUI.SetNextControlName(label);
-        string next = GUI.TextField(new Rect(rect.x + rect.width * 0.80f, rect.y, rect.width * 0.20f, rect.height), text);
-        if (float.TryParse(next, out float parsed) && parsed > 0f && !float.IsInfinity(parsed))
-            value = NormalizeRiverThreshold(parsed, fallback);
-        numericFieldEdits[label] = (value, next);
-    }
-
-    private void DrawInlandElevationMagnitude(Rect rect)
-    {
-        const string label = "Inland elevation magnitude";
-        float value = GeodesicInlandUplift.NormalizeMagnitude(currentConfig.inlandElevationMagnitude);
-        if (!numericFieldEdits.TryGetValue(label, out var edit) || edit.value != value)
-            edit = (value, value.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture));
-        GUI.Label(new Rect(rect.x, rect.y, rect.width * .8f, rect.height), label + " [0-0.05]", labelStyle);
-        string next = GUI.TextField(new Rect(rect.x + rect.width * .8f, rect.y, rect.width * .2f, rect.height), edit.text);
-        if (float.TryParse(next, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float parsed))
-            value = GeodesicInlandUplift.NormalizeMagnitude(parsed);
-        numericFieldEdits[label] = (value, next);
-        currentConfig.inlandElevationMagnitude = value;
-    }
-
-    private void DrawBasinInfillLimits(float x, float width, float line, float gap, ref float y)
-    {
-        var limits = currentConfig.basinInfillLimits;
-        DrawPercent("Infill maximum affected area (% of planet)", ref limits.totalArea, GeodesicBasinInfillLimits.MaximumTotalArea, y);
-        y += 2f * line + gap;
-        DrawPercent("Infill maximum local lift (% of planet radius)", ref limits.liftFraction, GeodesicBasinInfillLimits.MaximumLiftFraction, y);
-        y += 2f * line + gap;
-        DrawPercent("Infill maximum new slope (%)", ref limits.transitionGrade, GeodesicBasinInfillLimits.MaximumGrade, y);
-        y += 2f * line + gap;
-        currentConfig.basinInfillLimits = limits.Normalized();
-
-        void DrawPercent(string label, ref float fraction, float maximum, float position)
-        {
-            float percent = fraction * 100f;
-            DrawFloat(new Rect(x, position, width, line), label, ref percent, 0f, maximum * 100f, labelAbove: true);
-            fraction = percent / 100f;
-        }
-    }
-    private void DrawFloat(Rect rect, string label, ref float value, float min, float max, bool labelAbove = false)
-    {
-        float clampedValue = Mathf.Clamp(value, min, max);
-        if (!Mathf.Approximately(value, clampedValue))
-        {
-            value = clampedValue;
-        }
-
-        GUI.Label(new Rect(rect.x, rect.y, rect.width * (labelAbove ? 1f : 0.42f), rect.height), $"{label}: {value:0.###} [{min:0.###}-{max:0.###}]", labelStyle);
-        if (labelAbove) rect.y += rect.height;
-
-        Rect sliderRect = new Rect(rect.x + rect.width * (labelAbove ? 0f : 0.44f), rect.y + 8f, rect.width * (labelAbove ? 0.76f : 0.34f), rect.height);
-        float sliderValue = GUI.HorizontalSlider(sliderRect, value, min, max);
-        if (!Mathf.Approximately(value, sliderValue))
-        {
-            value = sliderValue;
-        }
-
-        Rect fieldRect = new Rect(rect.x + rect.width * 0.80f, rect.y, rect.width * 0.20f, rect.height);
-        string next = GUI.TextField(fieldRect, value.ToString("0.####"));
-        if (float.TryParse(next, out float parsed))
-        {
-            value = Mathf.Clamp(parsed, min, max);
-        }
-    }
-
-    private void DrawPreset(Rect rect, string label, ref float value, float[] presets)
-    {
-        value = NormalizeToPreset(value, presets, presets[0]);
-        GUI.Label(new Rect(rect.x, rect.y, rect.width * 0.42f, rect.height), $"{label}: {value:0.#} s simulated", labelStyle);
-        string[] choices = new string[presets.Length];
-        int selected = 0;
-        for (int i = 0; i < presets.Length; i++)
-        {
-            choices[i] = $"{presets[i]:0.#} s";
-            if (Mathf.Approximately(value, presets[i])) selected = i;
-        }
-        selected = GUI.SelectionGrid(new Rect(rect.x + rect.width * 0.44f, rect.y, rect.width * 0.56f, rect.height), selected, choices, presets.Length);
-        value = presets[selected];
-    }
-
-    private void DrawInt(Rect rect, string label, ref int value, bool enabled, int min = int.MinValue, int max = int.MaxValue)
-    {
-        bool oldEnabled = GUI.enabled;
-        GUI.enabled = enabled;
-        GUI.Label(new Rect(rect.x, rect.y, rect.width * 0.42f, rect.height), FormatIntLabel(label, value, min, max), labelStyle);
-
-        Rect controlRect = new Rect(rect.x + rect.width * 0.44f, rect.y, rect.width * 0.56f, rect.height);
-        if (min != int.MinValue || max != int.MaxValue)
-        {
-            int clampedValue = Mathf.Clamp(value, min, max);
-            if (value != clampedValue)
-            {
-                value = clampedValue;
-            }
-
-            Rect sliderRect = new Rect(controlRect.x, rect.y + 8f, rect.width * 0.34f, rect.height);
-            value = Mathf.RoundToInt(GUI.HorizontalSlider(sliderRect, value, min, max));
-
-            Rect fieldRect = new Rect(rect.x + rect.width * 0.80f, rect.y, rect.width * 0.20f, rect.height);
-            string next = GUI.TextField(fieldRect, value.ToString());
-            if (int.TryParse(next, out int parsed))
-            {
-                value = Mathf.Clamp(parsed, min, max);
-            }
-        }
-        else
-        {
-            string next = GUI.TextField(controlRect, value.ToString());
-            if (int.TryParse(next, out int parsed))
-            {
-                value = parsed;
-            }
-        }
-        GUI.enabled = oldEnabled;
-    }
-
-    private static string FormatIntLabel(string label, int value, int min, int max)
-    {
-        if (min != int.MinValue || max != int.MaxValue)
-        {
-            return $"{label}: {value} [{min}-{max}]";
-        }
-
-        return $"{label}: {value}";
     }
 
     private void EnsureStyles()

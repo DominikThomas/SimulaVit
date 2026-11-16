@@ -201,6 +201,25 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
         transportIntervalSeconds = Mathf.Max(0.01f, intervalSeconds);
     }
 
+    // Read-only startup snapshot; called before world initialization, never from OnGUI.
+    public void CaptureStartupDefaults(SimulationStartupConfig config, bool includeSharedOceanValues)
+    {
+        config.geodesicResourceTransportIntervalSeconds = transportIntervalSeconds;
+        config.ventClustering = ventClustering;
+        config.terrestrialVentFraction = terrestrialVentFraction;
+        config.geodesicVentProductionMultiplier = ventProductionMultiplier;
+        // Before startup, these serialized fields are the unscaled scene source rates.
+        config.geodesicVentH2PhysicalPerSecond = (float)physicalVentH2InventoryRatePerSecond;
+        config.geodesicVentH2SPhysicalPerSecond = (float)physicalVentH2SInventoryRatePerSecond;
+        config.geodesicVentCO2PhysicalPerSecond = (float)physicalVentCO2InventoryRatePerSecond;
+        config.geodesicVentFe2PhysicalPerSecond = (float)physicalVentFe2InventoryRatePerSecond;
+        if (!includeSharedOceanValues) return;
+        config.initialCO2 = initialCO2Concentration;
+        config.initialO2 = initialO2Concentration;
+        config.initialCH4 = initialCH4Concentration;
+        config.initialDissolvedFe2Plus = initialFe2Concentration;
+    }
+
     public void SetStartupChemistryTelemetryInterval(float intervalSeconds)
     {
         ResolveChemistryComponents();

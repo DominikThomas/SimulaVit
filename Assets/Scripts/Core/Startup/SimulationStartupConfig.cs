@@ -13,6 +13,11 @@ public class SimulationStartupConfig
     public PlanetGridType gridType = PlanetGridType.LegacyCubeSphere;
     [Range(3, 240)] public int cubeSphereResolution = 10;
     [Range(0, GeodesicGridTopology.MaxSupportedSubdivision)] public int geodesicSubdivisionLevel = 3;
+    public GeodesicSeaLevelControlMode geodesicSeaLevelControlMode = GeodesicSeaLevelControlMode.ManualOffset;
+    [Range(0f, 100f)] public float geodesicTargetOceanCoveragePercent = 45f;
+    public float geodesicSeaLevelOffset;
+    public float geodesicOceanWorldMinimumDepth = 0.06f;
+    public bool enableGeodesicRivers = true;
 
     [Header("Sun / Seasons")]
     [Range(0f, 90f)] public float axisTiltDegrees = 23.5f;
@@ -82,6 +87,7 @@ public class SimulationStartupConfig
     [Header("Population")]
     [Min(0)] public int initialSpawnCount = 100;
     public bool startPaused;
+    public SimulationStartupBiologyConfig biology = new SimulationStartupBiologyConfig();
 
     [Header("Advanced Geodesic Ocean")]
     [Tooltip("Prevents small enclosed terrain depressions below global sea level from automatically becoming ocean. These basins can later support proper lakes.")]
@@ -140,6 +146,8 @@ public class SimulationStartupConfig
 
     public SimulationStartupConfig Clone()
     {
-        return (SimulationStartupConfig)MemberwiseClone();
+        var clone = (SimulationStartupConfig)MemberwiseClone();
+        clone.biology = (biology ?? new SimulationStartupBiologyConfig()).Clone();
+        return clone;
     }
 }

@@ -174,7 +174,9 @@ public class SimulationStartupPanel : MonoBehaviour
         OnAxisTiltChanged(config.axisTiltDegrees);
     }
 
-    public void PushToConfig()
+    public void PushToConfig() => PushToConfigForGrid(null);
+
+    private void PushToConfigForGrid(PlanetGridType? displayedGrid)
     {
         if (controller == null || controller.CurrentConfig == null)
         {
@@ -208,7 +210,7 @@ public class SimulationStartupPanel : MonoBehaviour
         config.initialO2 = Mathf.Max(0f, ReadFloat(initialO2Input, config.initialO2));
         config.initialCH4 = Mathf.Max(0f, ReadFloat(initialCH4Input, config.initialCH4));
         config.initialDissolvedFe2Plus = Mathf.Max(0f, ReadFloat(initialFe2Input, config.initialDissolvedFe2Plus));
-        if (config.gridType == PlanetGridType.GeodesicIcosphere)
+        if ((displayedGrid ?? config.gridType) == PlanetGridType.GeodesicIcosphere)
         {
             config.geodesicVentH2PhysicalPerSecond = Mathf.Clamp(ReadFloat(ventH2Input, config.geodesicVentH2PhysicalPerSecond), 0f, SimulationStartupController.GeodesicVentPhysicalMaxPerSecond);
             config.geodesicVentH2SPhysicalPerSecond = Mathf.Clamp(ReadFloat(ventH2SInput, config.geodesicVentH2SPhysicalPerSecond), 0f, SimulationStartupController.GeodesicVentPhysicalMaxPerSecond);
@@ -261,6 +263,7 @@ public class SimulationStartupPanel : MonoBehaviour
 
     private void BackToMainMenu()
     {
+        PushToConfig();
         controller?.BackToStartMenu();
     }
 
@@ -293,6 +296,8 @@ public class SimulationStartupPanel : MonoBehaviour
     {
         if (controller?.CurrentConfig != null)
         {
+            // Commit the outgoing fields using their displayed units before switching grids.
+            PushToConfigForGrid(controller.CurrentConfig.gridType);
             controller.CurrentConfig.gridType = value == 1 ? PlanetGridType.GeodesicIcosphere : PlanetGridType.LegacyCubeSphere;
             ApplyGridSpecificVisibility(controller.CurrentConfig.gridType);
             RefreshFromConfig();
@@ -378,7 +383,7 @@ public class SimulationStartupPanel : MonoBehaviour
 
     private static float ReadFloat(TMP_InputField input, float fallback)
     {
-        return input != null && float.TryParse(input.text, out float parsed) ? parsed : fallback;
+        return input != null && SimulationStartupController.TryParseSetupFloat(input.text, out float parsed) ? parsed : fallback;
     }
 
     private static int ReadInt(TMP_InputField input, int fallback)
