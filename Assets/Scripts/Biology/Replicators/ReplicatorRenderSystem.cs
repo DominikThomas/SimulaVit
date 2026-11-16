@@ -65,7 +65,7 @@ public class ReplicatorRenderSystem
                 float movementSeed = populationState.MovementSeed[i];
                 float diameter = 1f;
                 Vector3 presentationOffset = Vector3.zero;
-                if (geodesicVisualGrowth && locomotion == LocomotionType.PassiveDrift)
+                if (geodesicVisualGrowth && locomotion != LocomotionType.Anchored)
                 {
                     if (!float.IsFinite(size) || size <= 0f)
                     {
@@ -104,6 +104,7 @@ public class ReplicatorRenderSystem
                     movementSeed,
                     diameter,
                     presentationOffset,
+                    geodesicVisualGrowth,
                     ref batchCount,
                     replicatorMesh,
                     replicatorMaterial,
@@ -129,6 +130,7 @@ public class ReplicatorRenderSystem
                     a.movementSeed,
                     1f,
                     Vector3.zero,
+                    false,
                     ref batchCount,
                     replicatorMesh,
                     replicatorMaterial,
@@ -158,6 +160,7 @@ public class ReplicatorRenderSystem
         float movementSeed,
         float diameterMultiplier,
         Vector3 presentationOffset,
+        bool usePackedHeading,
         ref int batchCount,
         Mesh replicatorMesh,
         Material replicatorMaterial,
@@ -188,7 +191,9 @@ public class ReplicatorRenderSystem
         {
             case LocomotionType.Flagellum:
                 {
-                    Vector3 visualForward = GetSmoothedVisualForward(agentIndex, tangentForward, up);
+                    // Geodesic steering already turns continuously. An index-keyed smoothing cache
+                    // would briefly borrow another organism's heading after swap-back removal.
+                    Vector3 visualForward = usePackedHeading ? tangentForward : GetSmoothedVisualForward(agentIndex, tangentForward, up);
                     Quaternion rodRotation = Quaternion.LookRotation(visualForward, up);
 
                     // Rod / bacterium-like body: elongated along local Z

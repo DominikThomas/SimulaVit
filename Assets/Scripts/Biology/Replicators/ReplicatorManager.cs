@@ -380,6 +380,9 @@ public class ReplicatorManager : MonoBehaviour
     [Range(0f, 1f)] public float movementTumbleChanceWhenBetter = 0.05f;
     [Range(0f, 1f)] public float movementTumbleChanceNeutral = 0.2f;
 
+    [Header("Geodesic Active Locomotion")]
+    public GeodesicLocomotionSettings geodesicLocomotion = GeodesicLocomotionSettings.Default;
+
     [Header("Scent-Based Predation")]
     public bool useScentPredation = true;
     public float dissolvedOrganicLeakEmitPerSecond = 1.0f;
@@ -566,6 +569,13 @@ public class ReplicatorManager : MonoBehaviour
                 movementSeed = populationState.MovementSeed[i],
                 size = populationState.Size[i],
                 visualGrowth = populationState.VisualGrowth[i],
+                geodesicMovement = new GeodesicMovementSnapshot
+                {
+                    directionLocal = populationState.PassiveDriftDirection[i],
+                    tangentLocal = populationState.PassiveDriftTangent[i],
+                    radius = populationState.PassiveVisualRadius[i],
+                    active = populationState.ActiveMovement[i]
+                },
                 hasGeodesicHabitat = populationState.GeodesicCellIndex[i] >= 0,
                 geodesicCellIndex = populationState.GeodesicCellIndex[i],
                 color = new SerializableColor(populationState.Color[i]),
@@ -1015,6 +1025,10 @@ public class ReplicatorManager : MonoBehaviour
     {
         if (geodesicBiology == null) return false;
         geodesicBiology.SetVisualGrowthSettings(visualGrowthSettings);
+        geodesicBiology.SetLocomotionSettings(geodesicLocomotion, CreateSteeringSettings(), moveSpeed,
+            amoeboidMoveSpeedMultiplier, flagellumMoveSpeedMultiplier, amoeboidTurnRate, flagellumTurnRate,
+            locomotionMutationChance, locomotionUpgradeChance, locomotionAnchoredMutationChance,
+            allowAnchoredToAmoeboidMutation, anchoredToAmoeboidMutationChance);
         geodesicBiology.Step(stepDeltaTime, agents, populationState, basalEnergyCostPerSecond,
             hydrogenotrophyCO2PerTick, hydrogenotrophyH2PerTick, hydrogenotrophyEnergyPerTick, hydrogenotrophyStoreFraction,
             anaerobeO2InhibitionEnabled && anaerobeO2InhibitionAffectsHydrogenotrophy,
@@ -1048,6 +1062,30 @@ public class ReplicatorManager : MonoBehaviour
             geodesicBiology.LastMovementKinematicsSeconds);
         if (!enableRendering) movementDiagnostics.LogIfDue(this);
         return true;
+    }
+
+    [ContextMenu("Diagnostics/Geodesic Locomotion/Selected to Amoeboid")]
+    private void DiagnosticSelectedToAmoeboid() => SetDiagnosticSelectedLocomotion(LocomotionType.Amoeboid);
+
+    [ContextMenu("Diagnostics/Geodesic Locomotion/Selected to Flagellum")]
+    private void DiagnosticSelectedToFlagellum() => SetDiagnosticSelectedLocomotion(LocomotionType.Flagellum);
+
+    [ContextMenu("Diagnostics/Geodesic Locomotion/Selected to Passive Drift")]
+    private void DiagnosticSelectedToPassive() => SetDiagnosticSelectedLocomotion(LocomotionType.PassiveDrift);
+
+    private void SetDiagnosticSelectedLocomotion(LocomotionType type)
+    {
+        if (geodesicBiology == null || populationState.Count == 0) return;
+        long selected = biologyDiagnostics.SelectedOrganismId;
+        int index = 0;
+        if (selected != 0)
+        {
+            index = agents.FindIndex(agent => agent.DiagnosticId == selected);
+            if (index < 0) { Debug.LogWarning($"[GeodesicLocomotion] Diagnostic organism {selected} is no longer alive.", this); return; }
+        }
+        geodesicBiology.SetDiagnosticLocomotion(index, type, populationState);
+        agents[index].locomotion = type;
+        Debug.Log($"[GeodesicLocomotion] DIAGNOSTIC override organism={agents[index].DiagnosticId} locomotion={type}; normal founders remain passive.", this);
     }
 
     internal bool ShouldProcessPredatorScent()

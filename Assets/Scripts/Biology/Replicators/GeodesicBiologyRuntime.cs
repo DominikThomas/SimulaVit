@@ -3,8 +3,8 @@ using System.Collections.Generic;
 using Unity.Profiling;
 using UnityEngine;
 
-/// <summary>Mode boundary for the first ocean-only Geodesic biology foundation.</summary>
-public sealed class GeodesicBiologyRuntime
+/// <summary>Ocean-only geodesic biology, lifecycle, and continuous locomotion.</summary>
+public sealed partial class GeodesicBiologyRuntime
 {
     private static readonly ProfilerMarker Evaluation = new ProfilerMarker("GeodesicBiology.ReactionEvaluation");
     private static readonly ProfilerMarker HabitatSampling = new ProfilerMarker("GeodesicBiology.ReactionEvaluation.HabitatSampling");
@@ -16,7 +16,7 @@ public sealed class GeodesicBiologyRuntime
     private static readonly ProfilerMarker MaintenanceAndLifecycle = new ProfilerMarker("GeodesicBiology.ReactionEvaluation.MaintenanceAndLifecycle");
     private static readonly ProfilerMarker Competition = new ProfilerMarker("GeodesicBiology.CompetitionResolution");
     private static readonly ProfilerMarker Lifecycle = new ProfilerMarker("GeodesicBiology.LifecycleReproduction");
-    private static readonly ProfilerMarker Movement = new ProfilerMarker("GeodesicBiology.PassiveMovement");
+    private static readonly ProfilerMarker Movement = new ProfilerMarker("GeodesicBiology.Movement");
     private static readonly ProfilerMarker MovementKinematics = new ProfilerMarker("GeodesicBiology.PassiveMovement.KinematicsAndBoundary");
     private static readonly ProfilerMarker MovementWanderIntegration = new ProfilerMarker("GeodesicBiology.PassiveMovement.KinematicsAndBoundary.WanderIntegration");
     private static readonly ProfilerMarker MovementDirectionUpdate = new ProfilerMarker("GeodesicBiology.PassiveMovement.KinematicsAndBoundary.ContinuousDirectionUpdate");
@@ -183,7 +183,7 @@ public sealed class GeodesicBiologyRuntime
         float requiredEnergy = Mathf.Max(0f, carbonDivision ? divisionCost : replicationCost);
         ReplicatorVisualState visual = state.VisualGrowth[index];
         float visualProgress = ReplicatorVisualGrowth.Progress(visual, state.OrganicCStore[index], requiredCarbon);
-        bool passiveVisual = state.Locomotion[index] == LocomotionType.PassiveDrift;
+        bool passiveVisual = state.Locomotion[index] != LocomotionType.Anchored;
         float visualDiameter = passiveVisual ? ReplicatorVisualGrowth.DisplayDiameter(visual, visualProgress, visualGrowthSettings) : 1f;
         var snapshot = new GeodesicGrowthSnapshot
         {
@@ -276,6 +276,7 @@ public sealed class GeodesicBiologyRuntime
         var visualRandom = new System.Random(biologySeed ^ 0x3419A7D);
         reproductionRandom = new System.Random(biologySeed ^ 0x5EED123);
         temperatureMutationRandom = new System.Random(biologySeed ^ 0x54454D50);
+        locomotionMutationRandom = new System.Random(biologySeed ^ 0x4C4F434F);
         temperatureTelemetry.Initialize(grid, resources, biologySeed);
         int spawned = SpawnFounders(requestedFounders, random, visualRandom, agents, state, minLife, maxLife, color, biomassTarget,
             hydrogenTemperatureRange, lethalTemperatureMargin, false);
@@ -490,7 +491,9 @@ public sealed class GeodesicBiologyRuntime
             return;
         }
         state.EnsureMatchesAgentCount(agents);
-        using (Movement.Auto()) RunPassiveMovement(dt, agents, state);
+        SetHydrogenotrophMovementInputs(hydrogenCo2, hydrogenH2, hydrogenO2InhibitionEnabled,
+            o2ComfortMax, o2StressMax, hydrogenMinimumO2Efficiency);
+        using (Movement.Auto()) RunGeodesicMovement(dt, state);
         float reactionDt = ConsumeFixedInterval(ref reactionAccumulator, dt, ReactionIntervalSeconds);
         if (reactionDt > 0f)
         {
@@ -714,6 +717,7 @@ public sealed class GeodesicBiologyRuntime
             if (cause != DeathCause.Unknown)
             {
                 RecycleDeathInventory(i, agents[i], state, cause);
+                RecordLocomotionDeath(state.Metabolism[i], state.Locomotion[i]);
                 deaths++;
                 if (cause == DeathCause.EnergyDepletion) starvationDeaths++;
                 else if (cause == DeathCause.OldAge) lifespanDeaths++;
@@ -730,10 +734,10 @@ public sealed class GeodesicBiologyRuntime
                 || reproductionRandom.NextDouble() >= Mathf.Clamp01(rate * dt * performance)) continue;
             Replicator parent = agents[i];
             // Capture presentation before the instantaneous biological transfer. No gate or RNG depends on this state.
-            bool passiveDivision = state.Locomotion[i] == LocomotionType.PassiveDrift;
+            bool animatedDivision = state.Locomotion[i] != LocomotionType.Anchored;
             float divisionStartDiameter = 1f;
             Vector3 parentLocal = Vector3.zero, commonVisualLocal = Vector3.zero;
-            if (passiveDivision)
+            if (animatedDivision)
             {
                 ref ReplicatorVisualState parentVisual = ref state.VisualGrowth[i];
                 if (ReplicatorVisualGrowth.Update(ref parentVisual, state.OrganicCStore[i],
@@ -750,13 +754,15 @@ public sealed class GeodesicBiologyRuntime
             float childMovementSeed = (float)reproductionRandom.NextDouble();
             var child = new Replicator(state.Position[i], state.Rotation[i], state.MaxLifespan[i], parent.color, parent.traits,
                 childMovementSeed, state.Metabolism[i], state.Locomotion[i], parent.locomotionSkill);
+            child.locomotion = ResolveGeodesicInheritedLocomotion(state.Locomotion[i], state.GeodesicCellIndex[i],
+                state.CurrentOceanLayerIndex[i]);
             float childInitialEnergy = observeAccounting ? child.energy : 0f;
             float childInitialCarbon = observeAccounting ? child.organicCStore : 0f;
             child.geodesicCellIndex = state.GeodesicCellIndex[i];
             child.currentOceanLayerIndex = state.CurrentOceanLayerIndex[i];
             child.preferredOceanLayerIndex = state.CurrentOceanLayerIndex[i];
             child.biomassTarget = state.BiomassTarget[i];
-            if (passiveDivision) child.size = state.Size[i];
+            if (animatedDivision) child.size = state.Size[i];
             child.optimalTempMin = state.OptimalTempMin[i];
             child.optimalTempMax = state.OptimalTempMax[i];
             child.lethalTempMargin = state.LethalTempMargin[i];
@@ -767,15 +773,23 @@ public sealed class GeodesicBiologyRuntime
             state.Energy[i] = parentEnergy;
             child.energy = childEnergy;
             if (carbon) { child.organicCStore = state.OrganicCStore[i] * Mathf.Clamp01(split); state.OrganicCStore[i] -= child.organicCStore; }
-            PlacePassiveDaughter(i, child, state);
+            PlaceDaughter(i, child, state);
+            if (child.locomotion != LocomotionType.PassiveDrift)
+            {
+                Vector3 birthNormal = planet.transform.InverseTransformPoint(child.position).normalized;
+                Vector3 birthTangent = CreateInitialPassiveTangent(birthNormal, MovementSeedBits(child.movementSeed));
+                child.currentDirection = planet.transform.TransformDirection(birthNormal).normalized;
+                child.moveDirection = child.desiredMoveDir = planet.transform.TransformDirection(birthTangent).normalized;
+                child.rotation = Quaternion.LookRotation(child.moveDirection, child.currentDirection);
+            }
             agents.Add(child);
             state.AddAgentFromReplicatorData(child);
             int childIndex = state.Count - 1;
-            if (passiveDivision)
+            // Initialize all newborn transport from the separated world position. Steering memory is not inherited.
+            EnsurePassiveKinematicState(childIndex, state, planet.transform.worldToLocalMatrix);
+            InitializePassiveSchedulesAtSpawn(state, childIndex, passiveMovementTime);
+            if (animatedDivision)
             {
-                // Supply a valid direction/radius/tangent and schedules even if render precedes the next kinematic tick.
-                EnsurePassiveKinematicState(childIndex, state, planet.transform.worldToLocalMatrix);
-                InitializePassiveSchedulesAtSpawn(state, childIndex, passiveMovementTime);
                 Vector3 childLocal = planet.transform.InverseTransformPoint(state.Position[childIndex]);
                 // Presentation observes the configured carbon allocation; no inventory or split is changed.
                 // Energy-only reproduction has no carbon split to mirror, so retain equal visual volumes.
@@ -789,13 +803,14 @@ public sealed class GeodesicBiologyRuntime
                 child.DiagnosticId, state, grid, split, childInitialEnergy, childInitialCarbon,
                 planet.transform, visualGrowthSettings.daughterSeparationDistance);
             births++;
+            RecordLocomotionBirth(state.Metabolism[i], state.Locomotion[i]);
             temperatureTelemetry.RecordBirth(performance, temperatureSettings);
         }
     }
 
-    private void PlacePassiveDaughter(int parentIndex, Replicator child, ReplicatorPopulationState state)
+    private void PlaceDaughter(int parentIndex, Replicator child, ReplicatorPopulationState state)
     {
-        if (child.locomotion != LocomotionType.PassiveDrift || visualGrowthSettings.daughterSeparationDistance <= 0f) return;
+        if (visualGrowthSettings.daughterSeparationDistance <= 0f) return;
         int cell = state.GeodesicCellIndex[parentIndex], layer = state.CurrentOceanLayerIndex[parentIndex];
         Vector3 local = planet.transform.InverseTransformPoint(state.Position[parentIndex]);
         float radius = local.magnitude;
@@ -935,16 +950,15 @@ public sealed class GeodesicBiologyRuntime
     }
 
     public static void RemoveAgentAtSwapBack(int i,List<Replicator>a,ReplicatorPopulationState s){int last=a.Count-1;if(i<0||i>last)return;if(i!=last)a[i]=a[last];a.RemoveAt(last);s.RemoveAgentAtSwapBack(i);}
-    private void RunPassiveMovement(float dt, List<Replicator> agents, ReplicatorPopulationState state)
+    private void RunGeodesicMovement(float dt, ReplicatorPopulationState state)
     {
         if (!(dt > 0f) || state.Count == 0) return;
         passiveMovementTime += dt;
         float kinematicsDt = ConsumeFixedInterval(ref passiveKinematicsAccumulator, dt, PassiveKinematicsIntervalSeconds);
         LastMovementKinematicsSeconds = kinematicsDt;
-        GeodesicGridTopology topology = grid.SourceTopology;
-        Vector3[] cellDirections = topology.CellDirections;
         Matrix4x4 worldToLocal = planet.transform.worldToLocalMatrix;
         Matrix4x4 localToWorld = planet.transform.localToWorldMatrix;
+        AccumulateActiveMovementTime(dt, state);
 
         using (MovementWanderRefresh.Auto())
         {
@@ -999,30 +1013,7 @@ public sealed class GeodesicBiologyRuntime
                 using (MovementDirectionUpdate.Auto()) AdvancePassiveKinematics(ref direction, ref tangent, wanderRate, integrationDt);
                 proposedDirection = direction;
 
-                int cell = state.GeodesicCellIndex[i];
-                for (int crossing = 0; crossing < MaximumBoundaryCrossingsPerStep; crossing++)
-                {
-                    int candidate;
-                    using (MovementBoundaryCandidates.Auto()) candidate = FindCloserRealNeighbor(cell, proposedDirection, cellDirections,
-                        topology.Neighbors6, topology.NeighborCounts);
-                    if (candidate < 0) break;
-                    int activeLayers = grid.ActiveLayerCountByCell[candidate];
-                    if (activeLayers <= 0)
-                    {
-                        landBoundaryRejections++;
-                        using (MovementLandHandling.Auto()) ReflectFromLandBoundary(ref proposedDirection, ref tangent, cellDirections[cell], cellDirections[candidate]);
-                        break;
-                    }
-                    using (MovementBoundaryResolution.Auto())
-                    {
-                    int mappedLayer = ResolveHorizontalTargetLayer(state.CurrentOceanLayerIndex[i], activeLayers);
-                    if (mappedLayer != state.CurrentOceanLayerIndex[i]) invalidLayerCorrections++;
-                    state.CurrentOceanLayerIndex[i] = mappedLayer;
-                    cell = candidate;
-                    state.GeodesicCellIndex[i] = cell;
-                    horizontalBoundaryCrossings++;
-                    }
-                }
+                TraverseMovementBoundaries(i, state, ref proposedDirection, ref tangent, false);
                 direction = proposedDirection;
                 }
 
@@ -1034,6 +1025,9 @@ public sealed class GeodesicBiologyRuntime
                 continuousKinematicUpdates++;
             }
         }
+
+        if (kinematicsDt > 0f)
+            using (ActiveMovementMarker.Auto()) RunActiveMovement(kinematicsDt, state, worldToLocal, localToWorld);
 
         using (MovementVertical.Auto())
         {
@@ -1102,21 +1096,31 @@ public sealed class GeodesicBiologyRuntime
         // Spawn may already have supplied direction/radius without a travel tangent.
         // Validate each part independently so partial state cannot disable horizontal drift.
         Vector3 direction = state.PassiveDriftDirection[index];
-        if (!(direction.sqrMagnitude > 0.9f))
+        if (!GeodesicBiologyDiagnostics.FinitePosition(direction) || !(direction.sqrMagnitude > 0.9f))
         {
             direction = worldToLocal.MultiplyPoint3x4(state.Position[index]).normalized;
-            if (direction.sqrMagnitude < 0.9f) direction = planet.GeodesicTopology.CellDirections[0];
+            if (!GeodesicBiologyDiagnostics.FinitePosition(direction) || direction.sqrMagnitude < 0.9f)
+            {
+                direction = grid.SourceTopology.CellDirections[state.GeodesicCellIndex[index]];
+                movementCorrections++;
+            }
             state.PassiveDriftDirection[index] = direction;
         }
+        if (Mathf.Abs(direction.sqrMagnitude - 1f) > 1e-4f)
+        {
+            direction.Normalize();
+            state.PassiveDriftDirection[index] = direction;
+            movementCorrections++;
+        }
         Vector3 tangent = state.PassiveDriftTangent[index];
-        if (!(tangent.sqrMagnitude > 0.9f) || Mathf.Abs(Vector3.Dot(direction, tangent)) > 1e-4f)
+        if (!GeodesicBiologyDiagnostics.FinitePosition(tangent) || !(tangent.sqrMagnitude > 0.9f) || Mathf.Abs(Vector3.Dot(direction, tangent)) > 1e-4f)
         {
             tangent = Vector3.ProjectOnPlane(tangent, direction);
             state.PassiveDriftTangent[index] = tangent.sqrMagnitude > 1e-10f
                 ? tangent.normalized
                 : CreateInitialPassiveTangent(direction, MovementSeedBits(state.MovementSeed[index]));
         }
-        if (!(state.PassiveVisualRadius[index] > 0f))
+        if (!float.IsFinite(state.PassiveVisualRadius[index]) || !(state.PassiveVisualRadius[index] > 0f))
             state.PassiveVisualRadius[index] = worldToLocal.MultiplyPoint3x4(state.Position[index]).magnitude;
     }
 
@@ -1373,6 +1377,7 @@ public sealed class GeodesicBiologyRuntime
         float divisionCost, float replicationCost, float divisionMultiple, int maxPopulation, float reproductionRate)
     {
         LogDeathRecycling();
+        LogLocomotionDiagnostics(state);
         temperatureTelemetry.Log(state, oceanTemperature, temperatureSettings, carbonDivision,
             divisionCost, replicationCost, divisionMultiple, maxPopulation, GetHabitatTemperature);
         int hydrogen=0,sulfur=0,methanogenesis=0,photosynthesis=0,methanotrophy=0,passive=0,amoeboid=0,flagellum=0,anchored=0;
@@ -1427,6 +1432,7 @@ public sealed class GeodesicBiologyRuntime
     public static float ResolvePhotosyntheticLight(float daylight, int layer) => Mathf.Clamp01(daylight) * (layer == 0 ? 1f : layer == 1 ? 0.55f : 0f);
     public void Clear()
     {
+        ClearLocomotion();
         ResetVisualDiagnostics();
         planet = null; resources = null; suspended = null; oceanTemperature = null;
         experiencedTemperature = null; surfaceTemperature = null; grid = null;

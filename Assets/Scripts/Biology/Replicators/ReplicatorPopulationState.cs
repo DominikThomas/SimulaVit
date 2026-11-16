@@ -71,6 +71,8 @@ public class ReplicatorPopulationState
     public uint[] PassiveWanderSequence = new uint[0];
     public float[] NextPassiveVerticalDriftTime = new float[0];
     public float[] PassiveVisualRadius = new float[0];
+    // Transport direction/tangent/radius above are shared by passive and active geodesic movement.
+    public GeodesicActiveMovementState[] ActiveMovement = new GeodesicActiveMovementState[0];
     public float[] Size = new float[0];
     // Presentation state follows the same copy/clear/capacity lifecycle as biological state.
     public ReplicatorVisualState[] VisualGrowth = new ReplicatorVisualState[0];
@@ -258,6 +260,11 @@ public class ReplicatorPopulationState
         agent.color = Color[index];
         agent.size = Size[index];
         agent.visualGrowth = VisualGrowth[index];
+        agent.geodesicMovement = new GeodesicMovementSnapshot
+        {
+            directionLocal = PassiveDriftDirection[index], tangentLocal = PassiveDriftTangent[index],
+            radius = PassiveVisualRadius[index], active = ActiveMovement[index]
+        };
     }
 
     // Compatibility-only broad mirror. Do not use in hot simulation systems.
@@ -321,6 +328,10 @@ public class ReplicatorPopulationState
         TumbleProbability[index] = agent.tumbleProbability;
         NextSenseTime[index] = agent.nextSenseTime;
         MovementSeed[index] = agent.movementSeed;
+        ActiveMovement[index] = agent.geodesicMovement.active;
+        PassiveDriftDirection[index] = agent.geodesicMovement.directionLocal;
+        PassiveDriftTangent[index] = agent.geodesicMovement.tangentLocal;
+        PassiveVisualRadius[index] = agent.geodesicMovement.radius;
         Size[index] = agent.size;
         VisualGrowth[index] = agent.visualGrowth;
         if (!VisualGrowth[index].initialized)
@@ -380,6 +391,7 @@ public class ReplicatorPopulationState
         PassiveWanderSequence[dstIndex] = PassiveWanderSequence[srcIndex];
         NextPassiveVerticalDriftTime[dstIndex] = NextPassiveVerticalDriftTime[srcIndex];
         PassiveVisualRadius[dstIndex] = PassiveVisualRadius[srcIndex];
+        ActiveMovement[dstIndex] = ActiveMovement[srcIndex];
         Size[dstIndex] = Size[srcIndex];
         VisualGrowth[dstIndex] = VisualGrowth[srcIndex];
         Color[dstIndex] = Color[srcIndex];
@@ -424,6 +436,7 @@ public class ReplicatorPopulationState
         PassiveWanderSequence[index] = 0;
         NextPassiveVerticalDriftTime[index] = 0f;
         PassiveVisualRadius[index] = 0f;
+        ActiveMovement[index] = default;
     }
 
     void EnsureCapacity(int required)
@@ -484,6 +497,7 @@ public class ReplicatorPopulationState
         Array.Resize(ref PassiveWanderSequence, newCapacity);
         Array.Resize(ref NextPassiveVerticalDriftTime, newCapacity);
         Array.Resize(ref PassiveVisualRadius, newCapacity);
+        Array.Resize(ref ActiveMovement, newCapacity);
         Array.Resize(ref Size, newCapacity);
         Array.Resize(ref VisualGrowth, newCapacity);
         Array.Resize(ref Color, newCapacity);

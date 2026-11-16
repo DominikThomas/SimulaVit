@@ -230,6 +230,7 @@ public class ReplicatorSnapshot
     public float movementSeed;
     public float size;
     public ReplicatorVisualState visualGrowth;
+    public GeodesicMovementSnapshot geodesicMovement;
     public bool hasGeodesicHabitat;
     public int geodesicCellIndex;
     public SerializableColor color;
