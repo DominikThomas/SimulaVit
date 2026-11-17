@@ -1,0 +1,862 @@
+[
+  {
+    "configuration": "previous",
+    "habitat": "active-bottom",
+    "parent": "PassiveDrift",
+    "seed": 383,
+    "attempts": 1000000,
+    "mutation": 0.06,
+    "upgrade": 0.05,
+    "anchor": 0.015,
+    "release": 0.01,
+    "allowRelease": true,
+    "mutationOverride": false,
+    "observed": [
+      996193,
+      2903,
+      0,
+      904
+    ],
+    "probability": [
+      0.9961450000612437,
+      0.002954999978989362,
+      0.0,
+      0.0008999999597668652
+    ],
+    "expected": [
+      996145.0000612438,
+      2954.9999789893623,
+      0.0,
+      899.9999597668652
+    ],
+    "standardDeviation": [
+      61.96885438854307,
+      54.279535315932236,
+      0.0,
+      29.986496291485686
+    ],
+    "zScore": [
+      0.7745816705803394,
+      -0.9580033927464211,
+      0.0,
+      0.1333947185510477
+    ]
+  },
+  {
+    "configuration": "previous",
+    "habitat": "active-bottom",
+    "parent": "Amoeboid",
+    "seed": 384,
+    "attempts": 1000000,
+    "mutation": 0.06,
+    "upgrade": 0.05,
+    "anchor": 0.015,
+    "release": 0.01,
+    "allowRelease": true,
+    "mutationOverride": false,
+    "observed": [
+      0,
+      996248,
+      2889,
+      863
+    ],
+    "probability": [
+      0.0,
+      0.9961450000612437,
+      0.002954999978989362,
+      0.0008999999597668652
+    ],
+    "expected": [
+      0.0,
+      996145.0000612438,
+      2954.9999789893623,
+      899.9999597668652
+    ],
+    "standardDeviation": [
+      0.0,
+      61.96885438854307,
+      54.279535315932236,
+      29.986496291485686
+    ],
+    "zScore": [
+      0.0,
+      1.6621243005465394,
+      -1.2159274873156443,
+      -1.233887394085815
+    ]
+  },
+  {
+    "configuration": "previous",
+    "habitat": "active-bottom",
+    "parent": "Flagellum",
+    "seed": 385,
+    "attempts": 1000000,
+    "mutation": 0.06,
+    "upgrade": 0.05,
+    "anchor": 0.015,
+    "release": 0.01,
+    "allowRelease": true,
+    "mutationOverride": false,
+    "observed": [
+      0,
+      0,
+      999154,
+      846
+    ],
+    "probability": [
+      0.0,
+      0.0,
+      0.9991000000402331,
+      0.0008999999597668652
+    ],
+    "expected": [
+      0.0,
+      0.0,
+      999100.0000402331,
+      899.9999597668652
+    ],
+    "standardDeviation": [
+      0.0,
+      0.0,
+      29.98649629148563,
+      29.986496291485686
+    ],
+    "zScore": [
+      0.0,
+      0.0,
+      1.8008092456669416,
+      -1.8008092456669533
+    ]
+  },
+  {
+    "configuration": "previous",
+    "habitat": "active-bottom",
+    "parent": "Anchored",
+    "seed": 386,
+    "attempts": 1000000,
+    "mutation": 0.06,
+    "upgrade": 0.05,
+    "anchor": 0.015,
+    "release": 0.01,
+    "allowRelease": true,
+    "mutationOverride": false,
+    "observed": [
+      0,
+      13,
+      0,
+      999987
+    ],
+    "probability": [
+      0.0,
+      8.999999396502984E-06,
+      0.0,
+      0.9999910000006035
+    ],
+    "expected": [
+      0.0,
+      8.999999396502984,
+      0.0,
+      999991.0000006035
+    ],
+    "standardDeviation": [
+      0.0,
+      2.999986399388145,
+      0.0,
+      2.999986399390901
+    ],
+    "zScore": [
+      0.0,
+      1.3333395792437013,
+      0.0,
+      -1.3333395792424807
+    ]
+  },
+  {
+    "configuration": "previous",
+    "habitat": "not-bottom",
+    "parent": "PassiveDrift",
+    "seed": 283,
+    "attempts": 1000000,
+    "mutation": 0.06,
+    "upgrade": 0.05,
+    "anchor": 0.015,
+    "release": 0.01,
+    "allowRelease": true,
+    "mutationOverride": false,
+    "observed": [
+      996962,
+      3038,
+      0,
+      0
+    ],
+    "probability": [
+      0.9970000000223518,
+      0.002999999977648257,
+      0.0,
+      0.0
+    ],
+    "expected": [
+      997000.0000223517,
+      2999.9999776482573,
+      0.0,
+      0.0
+    ],
+    "standardDeviation": [
+      54.69003545237767,
+      54.69003545237805,
+      0.0,
+      0.0
+    ],
+    "zScore": [
+      -0.6948253376948529,
+      0.6948253376948648,
+      0.0,
+      0.0
+    ]
+  },
+  {
+    "configuration": "previous",
+    "habitat": "not-bottom",
+    "parent": "Amoeboid",
+    "seed": 284,
+    "attempts": 1000000,
+    "mutation": 0.06,
+    "upgrade": 0.05,
+    "anchor": 0.015,
+    "release": 0.01,
+    "allowRelease": true,
+    "mutationOverride": false,
+    "observed": [
+      0,
+      996941,
+      3059,
+      0
+    ],
+    "probability": [
+      0.0,
+      0.9970000000223518,
+      0.002999999977648257,
+      0.0
+    ],
+    "expected": [
+      0.0,
+      997000.0000223517,
+      2999.9999776482573,
+      0.0
+    ],
+    "standardDeviation": [
+      0.0,
+      54.69003545237767,
+      54.69003545237805,
+      0.0
+    ],
+    "zScore": [
+      0.0,
+      -1.0788075352980364,
+      1.0788075352980457,
+      0.0
+    ]
+  },
+  {
+    "configuration": "previous",
+    "habitat": "not-bottom",
+    "parent": "Flagellum",
+    "seed": 285,
+    "attempts": 1000000,
+    "mutation": 0.06,
+    "upgrade": 0.05,
+    "anchor": 0.015,
+    "release": 0.01,
+    "allowRelease": true,
+    "mutationOverride": false,
+    "observed": [
+      0,
+      0,
+      1000000,
+      0
+    ],
+    "probability": [
+      0.0,
+      0.0,
+      1.0,
+      0.0
+    ],
+    "expected": [
+      0.0,
+      0.0,
+      1000000.0,
+      0.0
+    ],
+    "standardDeviation": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "zScore": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ]
+  },
+  {
+    "configuration": "previous",
+    "habitat": "not-bottom",
+    "parent": "Anchored",
+    "seed": 286,
+    "attempts": 1000000,
+    "mutation": 0.06,
+    "upgrade": 0.05,
+    "anchor": 0.015,
+    "release": 0.01,
+    "allowRelease": true,
+    "mutationOverride": false,
+    "observed": [
+      0,
+      16,
+      0,
+      999984
+    ],
+    "probability": [
+      0.0,
+      8.999999396502984E-06,
+      0.0,
+      0.9999910000006035
+    ],
+    "expected": [
+      0.0,
+      8.999999396502984,
+      0.0,
+      999991.0000006035
+    ],
+    "standardDeviation": [
+      0.0,
+      2.999986399388145,
+      0.0,
+      2.999986399390901
+    ],
+    "zScore": [
+      0.0,
+      2.3333441128015395,
+      0.0,
+      -2.3333441127994
+    ]
+  },
+  {
+    "configuration": "latest",
+    "habitat": "active-bottom",
+    "parent": "PassiveDrift",
+    "seed": 383,
+    "attempts": 1000000,
+    "mutation": 0.2,
+    "upgrade": 0.05,
+    "anchor": 0.001,
+    "release": 0.01,
+    "allowRelease": true,
+    "mutationOverride": false,
+    "observed": [
+      989827,
+      9968,
+      0,
+      205
+    ],
+    "probability": [
+      0.98980999969027,
+      0.009990000297250229,
+      0.0,
+      0.00020000001247972264
+    ],
+    "expected": [
+      989809.9996902699,
+      9990.000297250228,
+      0.0,
+      200.00001247972264
+    ],
+    "standardDeviation": [
+      100.42989696010721,
+      99.44948562617691,
+      0.0,
+      14.140721780543267
+    ],
+    "zScore": [
+      0.16927538755534044,
+      -0.2212208249414724,
+      0.0,
+      0.35358785766912004
+    ]
+  },
+  {
+    "configuration": "latest",
+    "habitat": "active-bottom",
+    "parent": "Amoeboid",
+    "seed": 384,
+    "attempts": 1000000,
+    "mutation": 0.2,
+    "upgrade": 0.05,
+    "anchor": 0.001,
+    "release": 0.01,
+    "allowRelease": true,
+    "mutationOverride": false,
+    "observed": [
+      0,
+      989893,
+      9909,
+      198
+    ],
+    "probability": [
+      0.0,
+      0.98980999969027,
+      0.009990000297250229,
+      0.00020000001247972264
+    ],
+    "expected": [
+      0.0,
+      989809.9996902699,
+      9990.000297250228,
+      200.00001247972264
+    ],
+    "standardDeviation": [
+      0.0,
+      100.42989696010721,
+      99.44948562617691,
+      14.140721780543267
+    ],
+    "zScore": [
+      0.0,
+      0.8264502129583431,
+      -0.8144868396273255,
+      -0.141436378620682
+    ]
+  },
+  {
+    "configuration": "latest",
+    "habitat": "active-bottom",
+    "parent": "Flagellum",
+    "seed": 385,
+    "attempts": 1000000,
+    "mutation": 0.2,
+    "upgrade": 0.05,
+    "anchor": 0.001,
+    "release": 0.01,
+    "allowRelease": true,
+    "mutationOverride": false,
+    "observed": [
+      0,
+      0,
+      999792,
+      208
+    ],
+    "probability": [
+      0.0,
+      0.0,
+      0.9997999999875202,
+      0.00020000001247972264
+    ],
+    "expected": [
+      0.0,
+      0.0,
+      999799.9999875203,
+      200.00001247972264
+    ],
+    "standardDeviation": [
+      0.0,
+      0.0,
+      14.140721780545046,
+      14.140721780543267
+    ],
+    "zScore": [
+      0.0,
+      0.0,
+      -0.5657411017932598,
+      0.5657411017933209
+    ]
+  },
+  {
+    "configuration": "latest",
+    "habitat": "active-bottom",
+    "parent": "Anchored",
+    "seed": 386,
+    "attempts": 1000000,
+    "mutation": 0.2,
+    "upgrade": 0.05,
+    "anchor": 0.001,
+    "release": 0.01,
+    "allowRelease": true,
+    "mutationOverride": false,
+    "observed": [
+      0,
+      3,
+      0,
+      999997
+    ],
+    "probability": [
+      0.0,
+      2.00000008009374E-06,
+      0.0,
+      0.9999979999999199
+    ],
+    "expected": [
+      0.0,
+      2.00000008009374,
+      0.0,
+      999997.9999999199
+    ],
+    "standardDeviation": [
+      0.0,
+      1.4142121764761537,
+      0.0,
+      1.4142121764799902
+    ],
+    "zScore": [
+      0.0,
+      0.7071074175008151,
+      0.0,
+      -0.7071074174988958
+    ]
+  },
+  {
+    "configuration": "latest",
+    "habitat": "not-bottom",
+    "parent": "PassiveDrift",
+    "seed": 283,
+    "attempts": 1000000,
+    "mutation": 0.2,
+    "upgrade": 0.05,
+    "anchor": 0.001,
+    "release": 0.01,
+    "allowRelease": true,
+    "mutationOverride": false,
+    "observed": [
+      989885,
+      10115,
+      0,
+      0
+    ],
+    "probability": [
+      0.9899999997019768,
+      0.010000000298023226,
+      0.0,
+      0.0
+    ],
+    "expected": [
+      989999.9997019768,
+      10000.000298023226,
+      0.0,
+      0.0
+    ],
+    "standardDeviation": [
+      99.49874517833231,
+      99.49874517833258,
+      0.0,
+      0.0
+    ],
+    "zScore": [
+      -1.1557904752533446,
+      1.155790475253323,
+      0.0,
+      0.0
+    ]
+  },
+  {
+    "configuration": "latest",
+    "habitat": "not-bottom",
+    "parent": "Amoeboid",
+    "seed": 284,
+    "attempts": 1000000,
+    "mutation": 0.2,
+    "upgrade": 0.05,
+    "anchor": 0.001,
+    "release": 0.01,
+    "allowRelease": true,
+    "mutationOverride": false,
+    "observed": [
+      0,
+      990032,
+      9968,
+      0
+    ],
+    "probability": [
+      0.0,
+      0.9899999997019768,
+      0.010000000298023226,
+      0.0
+    ],
+    "expected": [
+      0.0,
+      989999.9997019768,
+      10000.000298023226,
+      0.0
+    ],
+    "standardDeviation": [
+      0.0,
+      99.49874517833231,
+      99.49874517833258,
+      0.0
+    ],
+    "zScore": [
+      0.0,
+      0.3216150913850171,
+      -0.3216150913850345,
+      0.0
+    ]
+  },
+  {
+    "configuration": "latest",
+    "habitat": "not-bottom",
+    "parent": "Flagellum",
+    "seed": 285,
+    "attempts": 1000000,
+    "mutation": 0.2,
+    "upgrade": 0.05,
+    "anchor": 0.001,
+    "release": 0.01,
+    "allowRelease": true,
+    "mutationOverride": false,
+    "observed": [
+      0,
+      0,
+      1000000,
+      0
+    ],
+    "probability": [
+      0.0,
+      0.0,
+      1.0,
+      0.0
+    ],
+    "expected": [
+      0.0,
+      0.0,
+      1000000.0,
+      0.0
+    ],
+    "standardDeviation": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "zScore": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ]
+  },
+  {
+    "configuration": "latest",
+    "habitat": "not-bottom",
+    "parent": "Anchored",
+    "seed": 286,
+    "attempts": 1000000,
+    "mutation": 0.2,
+    "upgrade": 0.05,
+    "anchor": 0.001,
+    "release": 0.01,
+    "allowRelease": true,
+    "mutationOverride": false,
+    "observed": [
+      0,
+      2,
+      0,
+      999998
+    ],
+    "probability": [
+      0.0,
+      2.00000008009374E-06,
+      0.0,
+      0.9999979999999199
+    ],
+    "expected": [
+      0.0,
+      2.00000008009374,
+      0.0,
+      999997.9999999199
+    ],
+    "standardDeviation": [
+      0.0,
+      1.4142121764761537,
+      0.0,
+      1.4142121764799902
+    ],
+    "zScore": [
+      0.0,
+      -5.663488224534747E-08,
+      0.0,
+      5.663488318725023E-08
+    ]
+  },
+  {
+    "configuration": "anchor-only-comparison",
+    "habitat": "active-bottom",
+    "parent": "PassiveDrift",
+    "seed": 383,
+    "attempts": 1000000,
+    "mutation": 0.2,
+    "upgrade": 0.05,
+    "anchor": 0.015,
+    "release": 0.01,
+    "allowRelease": true,
+    "mutationOverride": false,
+    "observed": [
+      987261,
+      9828,
+      0,
+      2911
+    ],
+    "probability": [
+      0.9871499997254461,
+      0.009850000296905638,
+      0.0,
+      0.002999999977648257
+    ],
+    "expected": [
+      987149.9997254461,
+      9850.000296905639,
+      0.0,
+      2999.9999776482573
+    ],
+    "standardDeviation": [
+      112.62716265403216,
+      98.75716577067507,
+      0.0,
+      54.69003545237805
+    ],
+    "zScore": [
+      0.9855551000149525,
+      -0.22277165139313232,
+      0.0,
+      -1.6273527144767534
+    ]
+  },
+  {
+    "configuration": "anchor-only-comparison",
+    "habitat": "active-bottom",
+    "parent": "Amoeboid",
+    "seed": 384,
+    "attempts": 1000000,
+    "mutation": 0.2,
+    "upgrade": 0.05,
+    "anchor": 0.015,
+    "release": 0.01,
+    "allowRelease": true,
+    "mutationOverride": false,
+    "observed": [
+      0,
+      987292,
+      9767,
+      2941
+    ],
+    "probability": [
+      0.0,
+      0.9871499997254461,
+      0.009850000296905638,
+      0.002999999977648257
+    ],
+    "expected": [
+      0.0,
+      987149.9997254461,
+      9850.000296905639,
+      2999.9999776482573
+    ],
+    "standardDeviation": [
+      0.0,
+      112.62716265403216,
+      98.75716577067507,
+      54.69003545237805
+    ],
+    "zScore": [
+      0.0,
+      1.26079953723145,
+      -0.8404483488152582,
+      -1.0788067179007808
+    ]
+  },
+  {
+    "configuration": "anchor-only-comparison",
+    "habitat": "active-bottom",
+    "parent": "Flagellum",
+    "seed": 385,
+    "attempts": 1000000,
+    "mutation": 0.2,
+    "upgrade": 0.05,
+    "anchor": 0.015,
+    "release": 0.01,
+    "allowRelease": true,
+    "mutationOverride": false,
+    "observed": [
+      0,
+      0,
+      997020,
+      2980
+    ],
+    "probability": [
+      0.0,
+      0.0,
+      0.9970000000223518,
+      0.002999999977648257
+    ],
+    "expected": [
+      0.0,
+      0.0,
+      997000.0000223517,
+      2999.9999776482573
+    ],
+    "standardDeviation": [
+      0.0,
+      0.0,
+      54.69003545237767,
+      54.69003545237805
+    ],
+    "zScore": [
+      0.0,
+      0.0,
+      0.3656969223520352,
+      -0.36569692235201606
+    ]
+  },
+  {
+    "configuration": "anchor-only-comparison",
+    "habitat": "active-bottom",
+    "parent": "Anchored",
+    "seed": 386,
+    "attempts": 1000000,
+    "mutation": 0.2,
+    "upgrade": 0.05,
+    "anchor": 0.015,
+    "release": 0.01,
+    "allowRelease": true,
+    "mutationOverride": false,
+    "observed": [
+      0,
+      39,
+      0,
+      999961
+    ],
+    "probability": [
+      0.0,
+      2.9999999105930325E-05,
+      0.0,
+      0.9999700000008941
+    ],
+    "expected": [
+      0.0,
+      29.999999105930325,
+      0.0,
+      999970.0000008941
+    ],
+    "standardDeviation": [
+      0.0,
+      5.477143334438489,
+      0.0,
+      5.477143334436806
+    ],
+    "zScore": [
+      0.0,
+      1.6431925083064027,
+      0.0,
+      -1.643192508306907
+    ]
+  }
+]

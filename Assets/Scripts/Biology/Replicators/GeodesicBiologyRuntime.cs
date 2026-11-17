@@ -739,7 +739,7 @@ public sealed partial class GeodesicBiologyRuntime
     {
         for (int i = state.Count - 1; i >= 0; i--)
         {
-            ObserveABOrganismTime(i, state, dt);
+            ObserveABOrganismTime(i, agents[i].DiagnosticId, state, dt);
             // Original request indices still match here, before any reverse-loop swap-back or birth.
             // Fold accounting into this existing pass rather than scanning the population again.
             if (recordReactions) RecordReactionAccounting(i);
@@ -762,11 +762,13 @@ public sealed partial class GeodesicBiologyRuntime
                 RecycleDeathInventory(i, agents[i], state, cause);
                 RecordLocomotionDeath(state.Metabolism[i], state.Locomotion[i]);
                 RecordABDeath(state.Locomotion[i], cause);
+                evolutionDiagnostics.Death(i, agents[i].DiagnosticId, state.Locomotion[i], abSimulationTime);
                 deaths++;
                 if (cause == DeathCause.EnergyDepletion) starvationDeaths++;
                 else if (cause == DeathCause.OldAge) lifespanDeaths++;
                 temperatureTelemetry.RecordDeath(cause);
                 registerDeathCause?.Invoke(state.Metabolism[i], cause);
+                evolutionDiagnostics.SwapBackRemoval(i, state.Count - 1);
                 RemoveAgentAtSwapBack(i, agents, state);
                 continue;
             }
@@ -799,7 +801,7 @@ public sealed partial class GeodesicBiologyRuntime
             var child = new Replicator(state.Position[i], state.Rotation[i], state.MaxLifespan[i], parent.color, parent.traits,
                 childMovementSeed, state.Metabolism[i], state.Locomotion[i], parent.locomotionSkill);
             child.locomotion = ResolveGeodesicInheritedLocomotion(state.Locomotion[i], state.GeodesicCellIndex[i],
-                state.CurrentOceanLayerIndex[i]);
+                state.CurrentOceanLayerIndex[i], out var locomotionMutation);
             float childInitialEnergy = observeAccounting ? child.energy : 0f;
             float childInitialCarbon = observeAccounting ? child.organicCStore : 0f;
             child.geodesicCellIndex = state.GeodesicCellIndex[i];
@@ -829,6 +831,18 @@ public sealed partial class GeodesicBiologyRuntime
             agents.Add(child);
             state.AddAgentFromReplicatorData(child);
             int childIndex = state.Count - 1;
+            evolutionDiagnostics.Birth(i, parent.DiagnosticId, state.Locomotion[i], childIndex,
+                child.DiagnosticId, child.locomotion, abSimulationTime, locomotionMutation);
+            if (evolutionDiagnostics.Enabled && grid.IsNodeActive(child.geodesicCellIndex, child.currentOceanLayerIndex))
+            {
+                int birthNode = grid.GetNodeIndex(child.geodesicCellIndex, child.currentOceanLayerIndex);
+                float radius = planet.transform.InverseTransformPoint(child.position).magnitude;
+                // Observe the existing passive visual-layer interpolation asymmetry without
+                // relocating a child or changing its inherited logical habitat.
+                double outside = Math.Max(0d, Math.Max(grid.LayerInnerRadius[birthNode] - radius,
+                    radius - grid.LayerOuterRadius[birthNode]));
+                evolutionDiagnostics.ObserveBirthDepth(child.locomotion, grid.ToPhysicalDepthKm(outside));
+            }
             // Initialize all newborn transport from the separated world position. Steering memory is not inherited.
             EnsurePassiveKinematicState(childIndex, state, planet.transform.worldToLocalMatrix);
             InitializePassiveSchedulesAtSpawn(state, childIndex, passiveMovementTime);
@@ -1477,6 +1491,11 @@ public sealed partial class GeodesicBiologyRuntime
         double evaluationsPerHabitat=agentEvaluations/(double)Math.Max(1L,habitatSamples);
         double evaluationsPerTemperatureRead=agentEvaluations/(double)Math.Max(1L,oceanTemperatureReads);
         Debug.Log($"[GeodesicBiologyTelemetry] population={state.Count} biologySteps={biologySteps} lastStepSeconds={lastBiologyStepSeconds:G6} agentEvaluations={agentEvaluations} habitatSamples={habitatSamples} occupiedHabitatH2(min/avg/max)={occupiedH2Min:G6}/{occupiedH2Sum/Math.Max(1,occupiedSamples):G6}/{occupiedH2Max:G6} occupiedHabitatCO2(min/avg/max)={occupiedCo2Min:G6}/{occupiedCo2Sum/Math.Max(1,occupiedSamples):G6}/{occupiedCo2Max:G6} organicCStore(min/avg/max)={organicMin:G6}/{organicSum/Math.Max(1,state.Count):G6}/{organicMax:G6} divisionThreshold(min/avg/max)={thresholdMin:G6}/{thresholdSum/Math.Max(1,state.Count):G6}/{thresholdMax:G6} maxDivisionCarbonFraction={maxDivisionCarbonFraction:G6} divisionEligible={divisionEligible} oceanTemperatureReads={oceanTemperatureReads} photosyntheticLightReads={photosyntheticLightReads} resourceInventoryReads={resourceInventoryReads} competitionPairs={competitionPairs} evaluationsPerHabitat={evaluationsPerHabitat:G6} evaluationsPerTemperatureRead={evaluationsPerTemperatureRead:G6} metabolismOrder=h/s/m/p/mt populationByMetabolism={hydrogen}/{sulfur}/{methanogenesis}/{photosynthesis}/{methanotrophy} locomotionOrder=passive/amoeboid/flagellum/anchored populationByLocomotion={passive}/{amoeboid}/{flagellum}/{anchored} movementUpdates={movementUpdates} wanderStateRefreshes={wanderStateRefreshes} continuousKinematicUpdates={continuousKinematicUpdates} horizontalBoundaryCrossings={horizontalBoundaryCrossings} verticalTransitions={verticalTransitions} landBoundaryRejections={landBoundaryRejections} invalidLayerCorrections={invalidLayerCorrections} births={births} deaths={deaths} starvation={starvationDeaths} lifespan={lifespanDeaths} requests={requestedByMetabolism[h]}/{requestedByMetabolism[s]}/{requestedByMetabolism[m]}/{requestedByMetabolism[p]}/{requestedByMetabolism[mt]} achieved={achievedByMetabolism[h]}/{achievedByMetabolism[s]}/{achievedByMetabolism[m]}/{achievedByMetabolism[p]}/{achievedByMetabolism[mt]} zeroAchieved={zeroAchieved} hydrogenPrecisionRejected={hydrogenPrecisionRejected} resourceLimited={resourceLimited} extent={extentByMetabolism[h]:G6}/{extentByMetabolism[s]:G6}/{extentByMetabolism[m]:G6}/{extentByMetabolism[p]:G6}/{extentByMetabolism[mt]:G6} energy={energyByMetabolism[h]:G6}/{energyByMetabolism[s]:G6}/{energyByMetabolism[m]:G6}/{energyByMetabolism[p]:G6}/{energyByMetabolism[mt]:G6} maintenance={maintenancePaid:G6} biologyTemperatureAuthority=coarseOceanLayer temperatureK(min/avg/max)={temperatureMin:G6}/{temperatureSum/samples:G6}/{temperatureMax:G6} performance(min/avg/max)={performanceMin:G6}/{performanceSum/samples:G6}/{performanceMax:G6} zeroPerformance={zeroTemperaturePerformance} invalidHabitat={invalidHabitats} invalidState={invalidBiologicalStates}");
+        if (evolutionDiagnostics.Enabled)
+        {
+            Debug.Log(evolutionDiagnostics.Summary(abSimulationTime));
+            Debug.Log(evolutionDiagnostics.CohortSummary());
+        }
         if (reportAB) LogChemotaxisABReport(state.Count);
         if (observeAccounting) accountingDiagnostics.LogAndResetInterval();
         biologySteps=agentEvaluations=habitatSamples=oceanTemperatureReads=photosyntheticLightReads=resourceInventoryReads=competitionPairs=movementUpdates=wanderStateRefreshes=continuousKinematicUpdates=horizontalBoundaryCrossings=verticalTransitions=landBoundaryRejections=invalidLayerCorrections=0;
@@ -1497,6 +1516,7 @@ public sealed partial class GeodesicBiologyRuntime
         temperatureMutationRandom = null;
         temperatureTelemetry.Clear();
         accountingDiagnostics?.Reset();
+        evolutionDiagnostics.Clear();
         Array.Clear(requestedByMetabolism, 0, requestedByMetabolism.Length);
         Array.Clear(achievedByMetabolism, 0, achievedByMetabolism.Length);
         Array.Clear(extentByMetabolism, 0, extentByMetabolism.Length);

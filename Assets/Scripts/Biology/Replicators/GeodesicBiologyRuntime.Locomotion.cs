@@ -14,6 +14,7 @@ public sealed partial class GeodesicBiologyRuntime
     private float amoeboidTurn = 0.5f, flagellarTurn = 1.5f;
     private float mutationChance, upgradeChance, anchoredChance, anchoredReleaseChance;
     private bool allowAnchoredRelease;
+    private readonly GeodesicLocomotionEvolutionDiagnostics evolutionDiagnostics = new GeodesicLocomotionEvolutionDiagnostics();
     private System.Random locomotionMutationRandom;
     private float movementHydrogenCo2, movementHydrogenH2, movementO2Comfort, movementO2Stress, movementO2Floor;
     private bool movementO2Inhibition;
@@ -48,7 +49,11 @@ public sealed partial class GeodesicBiologyRuntime
         anchoredChance = SafeMovementValue(anchor, 0.05f, 0f, 1f);
         allowAnchoredRelease = releaseAnchor;
         anchoredReleaseChance = SafeMovementValue(releaseChance, 0.001f, 0f, 1f);
+        evolutionDiagnostics.SetEnabled(locomotionSettings.logDiagnostics || chemotaxisABDiagnosticsEnabled, abSimulationTime);
     }
+
+    public string DescribeResolvedLocomotionControls() => FormattableString.Invariant(
+        $"[GeodesicResolvedLocomotion] simTime={abSimulationTime:G9} authority=ReplicatorManager_after_startup_or_load_overrides steeringFlag={chemotacticSteeringEnabled} mode={(chemotacticSteeringEnabled ? "A" : "B")} ABObserverEnabled={chemotaxisABDiagnosticsEnabled} ABOverridesSteering=false metabolismAwareSensing={steeringSettings.ActiveMovementMetabolismSuitabilityEnabled} feedback={(chemotacticSteeringEnabled ? steeringSettings.ActiveMovementMetabolismSuitabilityEnabled ? "localTemporalMetabolicReadiness" : "localTemporalTemperature" : "neutralTumble_randomVerticalPersistence")} mutationOverride={locomotionSettings.mutationRateOverrideEnabled} effectiveMutation={(locomotionSettings.mutationRateOverrideEnabled ? locomotionSettings.diagnosticMutationChance : mutationChance):G9} upgrade={upgradeChance:G9} anchor={anchoredChance:G9} allowAnchoredRelease={allowAnchoredRelease} nestedRelease={anchoredReleaseChance:G9} angularSpeed(A/F)={ActiveAngularSpeed(LocomotionType.Amoeboid):G9}/{ActiveAngularSpeed(LocomotionType.Flagellum):G9} movementEnergyPerSecond(A/F)={locomotionSettings.amoeboidEnergyPerSecond:G9}/{locomotionSettings.flagellumEnergyPerSecond:G9} sensingSeconds(A/F)={steeringSettings.AmoeboidSenseInterval:G9}/{steeringSettings.FlagellumSenseInterval:G9}");
 
     private static float SafeMovementValue(float value, float fallback, float min, float max) =>
         GeodesicLocomotionSettings.Safe(value, fallback, min, max);
@@ -368,10 +373,10 @@ public sealed partial class GeodesicBiologyRuntime
             : CompareTaxis(observation.reactionReadiness, observation.reactionReadiness, observation.suitability, observation.suitability);
         bool better = hadMemory && comparison.trend == TaxisTrend.Improving;
         bool worse = hadMemory && comparison.trend == TaxisTrend.Worsening;
-        float probability = !active.hasSuitability ? steeringSettings.BaseTumbleProbability : better
-            ? steeringSettings.MovementTumbleChanceWhenBetter : worse
-            ? steeringSettings.MovementTumbleChanceWhenWorse : steeringSettings.MovementTumbleChanceNeutral;
-        if (!chemotacticSteeringEnabled && hadMemory) probability = steeringSettings.MovementTumbleChanceNeutral;
+        float probability = GeodesicTaxisPolicy.ReferenceTumbleProbability(chemotacticSteeringEnabled,
+            hadMemory, (GeodesicTaxisPolicy.Trend)comparison.trend, steeringSettings.BaseTumbleProbability,
+            steeringSettings.MovementTumbleChanceWhenBetter, steeringSettings.MovementTumbleChanceWhenWorse,
+            steeringSettings.MovementTumbleChanceNeutral);
         if (hadMemory)
         {
             if (better) suitabilityImproving++; else if (worse) suitabilityWorsening++; else suitabilityNeutral++;
@@ -583,33 +588,27 @@ public sealed partial class GeodesicBiologyRuntime
         }
     }
 
-    private LocomotionType ResolveGeodesicInheritedLocomotion(LocomotionType source, int cell, int layer)
+    private LocomotionType ResolveGeodesicInheritedLocomotion(LocomotionType source, int cell, int layer,
+        out GeodesicLocomotionMutationPolicy.Result outcome)
     {
-        if ((uint)source > (uint)LocomotionType.Anchored)
+        var settings = new GeodesicLocomotionMutationPolicy.Settings
         {
-            inheritanceCorrections++;
-            source = LocomotionType.PassiveDrift;
-        }
-        float chance = locomotionSettings.mutationRateOverrideEnabled ? locomotionSettings.diagnosticMutationChance : mutationChance;
-        if (chance <= 0f || locomotionMutationRandom.NextDouble() >= chance) return source;
-        mutationAttempts++;
-        LocomotionType target = source;
-        // Match the legacy branch order and bottom-layer anchoring gate. No new downgrade or metabolic mutations.
-        if (locomotionMutationRandom.NextDouble() < anchoredChance)
+            mutation = mutationChance, upgrade = upgradeChance, anchor = anchoredChance,
+            release = anchoredReleaseChance, allowRelease = allowAnchoredRelease,
+            overrideMutation = locomotionSettings.mutationRateOverrideEnabled,
+            diagnosticMutation = locomotionSettings.diagnosticMutationChance
+        };
+        bool bottom = grid != null && grid.IsNodeActive(cell, layer)
+            && layer == grid.ActiveLayerCountByCell[cell] - 1;
+        outcome = GeodesicLocomotionMutationPolicy.Sample(source, bottom, settings, locomotionMutationRandom);
+        if (outcome.correctedInheritance) inheritanceCorrections++;
+        if (outcome.attempted)
         {
-            if (source != LocomotionType.Anchored && grid.IsNodeActive(cell, layer)
-                && layer == grid.ActiveLayerCountByCell[cell] - 1) target = LocomotionType.Anchored;
-            else if (source == LocomotionType.Anchored && allowAnchoredRelease
-                && locomotionMutationRandom.NextDouble() < anchoredReleaseChance) target = LocomotionType.Amoeboid;
+            mutationAttempts++;
+            if (!outcome.Changed) blockedMutations++;
+            else { successfulMutations++; locomotionTransitions[(int)outcome.source * 4 + (int)outcome.target]++; }
         }
-        if (target == source && locomotionMutationRandom.NextDouble() < upgradeChance)
-        {
-            if (source == LocomotionType.PassiveDrift) target = LocomotionType.Amoeboid;
-            else if (source == LocomotionType.Amoeboid) target = LocomotionType.Flagellum;
-        }
-        if (target == source) blockedMutations++;
-        else { successfulMutations++; locomotionTransitions[(int)source * 4 + (int)target]++; }
-        return target;
+        return outcome.target;
     }
 
     private void RecordLocomotionBirth(MetabolismType metabolism, LocomotionType parent)

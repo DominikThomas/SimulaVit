@@ -1,6 +1,10 @@
 # Manual geodesic chemotaxis A/B experiment
 
-This adds one steering control and read-only experiment telemetry. It is not a simulation runner. Unity, Play mode, simulations, automated tests, builds, benchmarks and parameter sweeps have not been run by Codex; runtime results remain for manual evaluation.
+The steering control has read-only A/B experiment telemetry. The later
+[seed-283 evolution audit](GeodesicLocomotionEvolutionAudit.md) records actual
+run evidence, saved-setting overrides, mutation tests and bounded lineage counters.
+Native controlled ecological fixtures were compiled but could not execute because
+Unity exited during bootstrap; ecological effectiveness remains unverified.
 
 ## Inspector controls
 
@@ -9,7 +13,13 @@ On `ReplicatorManager`, under **Geodesic Active Locomotion**:
 - **Enable Geodesic Chemotactic Steering** (`enableGeodesicChemotacticSteering`): defaults to **true**. True selects A; false selects B.
 - **Enable Geodesic Chemotaxis AB Diagnostics** (`enableGeodesicChemotaxisABDiagnostics`): defaults to **false**. Enable in both experimental runs before starting the simulation.
 
-No suitable Advanced startup switch already existed. The older `activeMovementMetabolismSuitabilityEnabled` switch selects metabolism-aware versus temperature-only sensing; it does **not** disable environmental feedback. Keep it enabled in both runs for this metabolism-aware comparison. The new toggle is Inspector-only, not a duplicated startup configuration field or inherited/evolvable trait.
+The tabbed startup screen now exposes both switches under **Debug**, and saves
+them in `startup_config.json`. Those saved selections override the scene Inspector
+before initialization. Check `[GeodesicResolvedLocomotion]` for the effective mode.
+The older `activeMovementMetabolismSuitabilityEnabled` switch selects
+metabolism-aware versus temperature-only sensing; it does **not** enable or disable
+environmental feedback. Keep it enabled in both runs for this comparison. Steering
+selection is not an inherited/evolvable trait.
 
 ## Exactly what differs
 
@@ -100,10 +110,10 @@ These are associations, not a decomposition of causality. Same-node samples can 
 ## Manual A/B procedure
 
 1. Choose a concrete planet seed and turn **Use Random Seed off** in startup settings. Record the complete accepted configuration: grid, physical environment, vent production, ocean/atmosphere initialization, founder count and delay, hydrogenotrophy/temperature parameters, population cap, reproduction, locomotion/mutation settings, and speed profile.
-2. Before run A, enable chemotactic steering and A/B diagnostics on the manager. Keep metabolism-aware suitability enabled and detailed individual tracing off. Do not apply diagnostic organism locomotion overrides. Start a fresh world through the normal startup flow.
+2. Before run A, enable chemotactic steering and A/B diagnostics in the startup **Debug** tab. Saved startup values override the manager's scene Inspector. Keep metabolism-aware suitability enabled and detailed individual tracing off. Do not apply diagnostic organism locomotion overrides. Start a fresh world through the normal startup flow and check that `[GeodesicResolvedLocomotion]` reports effective mode A.
 3. Choose a fixed simulated duration, for example 1,800 simulated seconds, and save the Unity log. Compare full report windows with their actual times; if the final endpoint is between reports, use the last equivalent completed windows in both runs. Verify A labels, matching concrete/biology seeds and no mode switches.
-4. Stop/reset the run and start an independent fresh world with the same concrete seed and identical settings. For run B, change **only Enable Geodesic Chemotactic Steering to false**. Keep A/B diagnostics enabled. Do not run A and B populations together, continue A as B, or reuse A's depleted environment/population.
-5. Run B for the same simulated duration and save its log. Verify B labels, identical startup configuration, coverage from the beginning and no mode switches. A live mode change is allowed for inspection, but reports flag `mixedWindow` and the run retains a nonzero `runModeSwitches`; such a run is not an independent A/B trial. Enabling diagnostics late reports `coverageStart` rather than pretending earlier organism-time was observed.
+4. Stop/reset the run and start an independent fresh world with the same concrete seed and identical settings. For run B, change **only Enable Geodesic Chemotactic Steering to false** in startup's Debug tab, and verify the resolved log says B. Keep A/B diagnostics enabled. Do not run A and B populations together, continue A as B, or reuse A's depleted environment/population.
+5. Run B for the same simulated duration and save its log. Verify B labels, all other startup configuration identical, coverage from the beginning and no mode switches. A live mode change is allowed for inspection, but reports flag `mixedWindow` and the run retains a nonzero `runModeSwitches`; such a run is not an independent A/B trial. Enabling diagnostics late reports `coverageStart` rather than pretending earlier organism-time was observed.
 6. Compare each locomotion group's valid habitat means, energy/C, gross energy production per organism-second, parent births/deaths per organism-second, and time-weighted ring residence. Examine composition/absolute counts alongside normalized measures. Check actual tumble rates, movement energy/time and displacement/time before interpreting different exploration as a habitat benefit. Use sample versus memory changes in the four categories to inspect how much steering responds to within-node temporal changes.
 7. If manually repeating at different accelerations, keep matched A/B settings and equal simulated durations within each pair. Watch valid sampling counts, crossings between senses, partial windows and throughput. For confidence beyond one stochastic outcome, manually repeat independent matched pairs with additional recorded concrete seeds; no automated runner or sweep is provided.
 

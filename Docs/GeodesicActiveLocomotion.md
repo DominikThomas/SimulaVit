@@ -1,6 +1,14 @@
 # Geodesic active locomotion and evolution
 
-Implemented on `codex/geodesic-biology-parity`. Verification is source inspection, a C# 9 Roslyn syntax parse, and `git diff --check` only. Unity, automated tests, builds, generation, simulations, benchmarks, and parameter sweeps were not run. Ecological advantage and performance remain for manual validation.
+For the seed-283 probability, lineage-selection and effective-steering investigation,
+see [GeodesicLocomotionEvolutionAudit.md](GeodesicLocomotionEvolutionAudit.md).
+It records the later managed validation and the native ecological verification limit.
+
+The original milestone was implemented on `codex/geodesic-biology-parity` and
+verified by source inspection, a C# 9 Roslyn syntax parse and `git diff --check`.
+The later audit above adds managed tests and native ecological fixtures; the
+ecological fixtures still require successful Unity execution. No ecological
+advantage or performance claim follows from the source inspection alone.
 
 ## Integration and files
 

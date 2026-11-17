@@ -895,6 +895,8 @@ public class ReplicatorManager : MonoBehaviour
                 isInitialized = false;
                 return false;
             }
+            ApplyGeodesicRuntimeControls();
+            Debug.Log(geodesicBiology.DescribeResolvedLocomotionControls(), this);
             geodesicFounderSpawnSchedule.Configure(0d, spawnDelay,
                 spawnInitialPopulation ? initialSpawnCount : 0);
             if (geodesicFounderSpawnSchedule.IsPending)
@@ -1028,9 +1030,8 @@ public class ReplicatorManager : MonoBehaviour
             && TryGetGeodesicGrowthSnapshotById(latest.childId, out divisionDaughterVisual);
     }
 
-    internal bool RunGeodesicBiologyStep(float stepDeltaTime)
+    private void ApplyGeodesicRuntimeControls()
     {
-        if (geodesicBiology == null) return false;
         geodesicBiology.SetChemotaxisABContext(enableGeodesicChemotacticSteering,
             enableGeodesicChemotaxisABDiagnostics, simulationTimeSeconds);
         geodesicBiology.SetVisualGrowthSettings(visualGrowthSettings);
@@ -1038,6 +1039,12 @@ public class ReplicatorManager : MonoBehaviour
             amoeboidMoveSpeedMultiplier, flagellumMoveSpeedMultiplier, amoeboidTurnRate, flagellumTurnRate,
             locomotionMutationChance, locomotionUpgradeChance, locomotionAnchoredMutationChance,
             allowAnchoredToAmoeboidMutation, anchoredToAmoeboidMutationChance);
+    }
+
+    internal bool RunGeodesicBiologyStep(float stepDeltaTime)
+    {
+        if (geodesicBiology == null) return false;
+        ApplyGeodesicRuntimeControls();
         geodesicBiology.Step(stepDeltaTime, agents, populationState, basalEnergyCostPerSecond,
             hydrogenotrophyCO2PerTick, hydrogenotrophyH2PerTick, hydrogenotrophyEnergyPerTick, hydrogenotrophyStoreFraction,
             anaerobeO2InhibitionEnabled && anaerobeO2InhibitionAffectsHydrogenotrophy,

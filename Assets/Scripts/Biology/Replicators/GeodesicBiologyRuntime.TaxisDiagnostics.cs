@@ -57,14 +57,10 @@ public sealed partial class GeodesicBiologyRuntime
             improvementThreshold = SafeMovementValue(steeringSettings.MovementSuitabilityImprovementThreshold, 0.05f, 0f, 1f),
             worseningThreshold = SafeMovementValue(steeringSettings.MovementSuitabilityWorseningThreshold, 0.05f, 0f, 1f)
         };
-        // Compare fractional changes in the underlying readiness, before display-score compression.
-        // The floor prevents arbitrarily small numerical resource traces from becoming strong taxis.
-        double denominator = Math.Max(locomotionSettings.taxisReadinessFloor, Math.Max(current, remembered));
-        comparison.normalizedDelta = (float)Math.Max(-1d, Math.Min(1d, comparison.rawReadinessDelta / denominator));
-        if (comparison.normalizedDelta > 0f && comparison.normalizedDelta >= comparison.improvementThreshold)
-            comparison.trend = TaxisTrend.Improving;
-        else if (comparison.normalizedDelta < 0f && comparison.normalizedDelta <= -comparison.worseningThreshold)
-            comparison.trend = TaxisTrend.Worsening;
+        var decision = GeodesicTaxisPolicy.Compare(current, remembered, locomotionSettings.taxisReadinessFloor,
+            comparison.improvementThreshold, comparison.worseningThreshold);
+        comparison.normalizedDelta = decision.normalizedDelta;
+        comparison.trend = (TaxisTrend)decision.trend;
         return comparison;
     }
 

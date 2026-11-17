@@ -110,8 +110,9 @@ public sealed partial class GeodesicBiologyRuntime
         return band >= 0 ? band : ABRingCount - 1;
     }
 
-    private void ObserveABOrganismTime(int i, ReplicatorPopulationState state, float dt)
+    private void ObserveABOrganismTime(int i, long organismId, ReplicatorPopulationState state, float dt)
     {
+        evolutionDiagnostics.Observe(i, organismId, state.Locomotion[i], dt, abSimulationTime);
         if (!chemotaxisABDiagnosticsEnabled) return;
         int group = ABLocomotionIndex(state.Locomotion[i]);
         if (group < 0) { abInvalidStates++; return; }

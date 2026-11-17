@@ -475,6 +475,7 @@ public partial class SimulationStartupController
         SetupSection("Geodesic chemotaxis A/B");
         SetupBool("Enable geodesic chemotactic steering", ref currentConfig.biology.enableGeodesicChemotacticSteering);
         SetupBool("Enable geodesic chemotaxis A/B diagnostics", ref currentConfig.biology.enableGeodesicChemotaxisABDiagnostics);
+        SetupHelp("These saved startup values are applied to the manager before initialization, overriding its scene Inspector defaults. A/B diagnostics observe the selected steering mode: steering on is A; steering off is B.");
         SetupHelp("Uses the existing manager switches and diagnostic implementation. No steering, sensing or diagnostic algorithms are changed by setup.");
     }
 
