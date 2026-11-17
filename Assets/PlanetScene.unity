@@ -1855,8 +1855,8 @@ MonoBehaviour:
   m_TargetGraphic: {fileID: 1049548737}
   m_HandleRect: {fileID: 1049548736}
   m_Direction: 2
-  m_Value: 1
-  m_Size: 1
+  m_Value: 0
+  m_Size: 0.473684
   m_NumberOfSteps: 0
   m_OnValueChanged:
     m_PersistentCalls:
@@ -2378,7 +2378,7 @@ MonoBehaviour:
   movementTumbleChanceWhenWorse: 0.65
   movementTumbleChanceWhenBetter: 0.05
   movementTumbleChanceNeutral: 0.2
-  enableGeodesicChemotacticSteering: 0
+  enableGeodesicChemotacticSteering: 1
   enableGeodesicChemotaxisABDiagnostics: 1
   geodesicLocomotion:
     activeSpeedMultiplier: 2
@@ -2776,75 +2776,7 @@ MonoBehaviour:
         h2s: 0
         fe2: 0
         organicC: 0
-      plannedInputs:
-        co2: 0
-        o2: 0
-        ch4: 0
-        h2: 0
-        h2s: 0
-        fe2: 0
-        organicC: 0
-      attributedInputs:
-        co2: 0
-        o2: 0
-        ch4: 0
-        h2: 0
-        h2s: 0
-        fe2: 0
-        organicC: 0
-      netOnlyInputs:
-        co2: 0
-        o2: 0
-        ch4: 0
-        h2: 0
-        h2s: 0
-        fe2: 0
-        organicC: 0
-      definedProducts:
-        co2: 0
-        o2: 0
-        ch4: 0
-        h2: 0
-        h2s: 0
-        fe2: 0
-        organicC: 0
-      attributedProducts:
-        co2: 0
-        o2: 0
-        ch4: 0
-        h2: 0
-        h2s: 0
-        fe2: 0
-        organicC: 0
-      netOnlyProducts:
-        co2: 0
-        o2: 0
-        ch4: 0
-        h2: 0
-        h2s: 0
-        fe2: 0
-        organicC: 0
-      requestedStore: 0
-      storedCarbon: 0
-      capLoss: 0
-      storeFloatResidual: 0
-      modelCarbonResidual: 0
-      plannedCarbonResidual: 0
-      measuredCarbonResidual: 0
-      missingCarbon: 0
-      excessCarbon: 0
-      maxAbsMeasuredCarbonResidual: 0
-      energyAwarded: 0
-      energyDelta: 0
-    - requests: 0
-      achieved: 0
-      unattributedCarbonReactions: 0
-      modelViolations: 0
-      measuredViolations: 0
-      invalid: 0
-      inputTransferViolations: 0
-      zeroMeasuredInputWithEnergy: 0
-      requestedInputs:
+      competedInputs:
         co2: 0
         o2: 0
         ch4: 0
@@ -2928,75 +2860,7 @@ MonoBehaviour:
         h2s: 0
         fe2: 0
         organicC: 0
-      plannedInputs:
-        co2: 0
-        o2: 0
-        ch4: 0
-        h2: 0
-        h2s: 0
-        fe2: 0
-        organicC: 0
-      attributedInputs:
-        co2: 0
-        o2: 0
-        ch4: 0
-        h2: 0
-        h2s: 0
-        fe2: 0
-        organicC: 0
-      netOnlyInputs:
-        co2: 0
-        o2: 0
-        ch4: 0
-        h2: 0
-        h2s: 0
-        fe2: 0
-        organicC: 0
-      definedProducts:
-        co2: 0
-        o2: 0
-        ch4: 0
-        h2: 0
-        h2s: 0
-        fe2: 0
-        organicC: 0
-      attributedProducts:
-        co2: 0
-        o2: 0
-        ch4: 0
-        h2: 0
-        h2s: 0
-        fe2: 0
-        organicC: 0
-      netOnlyProducts:
-        co2: 0
-        o2: 0
-        ch4: 0
-        h2: 0
-        h2s: 0
-        fe2: 0
-        organicC: 0
-      requestedStore: 0
-      storedCarbon: 0
-      capLoss: 0
-      storeFloatResidual: 0
-      modelCarbonResidual: 0
-      plannedCarbonResidual: 0
-      measuredCarbonResidual: 0
-      missingCarbon: 0
-      excessCarbon: 0
-      maxAbsMeasuredCarbonResidual: 0
-      energyAwarded: 0
-      energyDelta: 0
-    - requests: 0
-      achieved: 0
-      unattributedCarbonReactions: 0
-      modelViolations: 0
-      measuredViolations: 0
-      invalid: 0
-      inputTransferViolations: 0
-      zeroMeasuredInputWithEnergy: 0
-      requestedInputs:
+      competedInputs:
         co2: 0
         o2: 0
         ch4: 0
@@ -3080,75 +2944,7 @@ MonoBehaviour:
         h2s: 0
         fe2: 0
         organicC: 0
-      plannedInputs:
-        co2: 0
-        o2: 0
-        ch4: 0
-        h2: 0
-        h2s: 0
-        fe2: 0
-        organicC: 0
-      attributedInputs:
-        co2: 0
-        o2: 0
-        ch4: 0
-        h2: 0
-        h2s: 0
-        fe2: 0
-        organicC: 0
-      netOnlyInputs:
-        co2: 0
-        o2: 0
-        ch4: 0
-        h2: 0
-        h2s: 0
-        fe2: 0
-        organicC: 0
-      definedProducts:
-        co2: 0
-        o2: 0
-        ch4: 0
-        h2: 0
-        h2s: 0
-        fe2: 0
-        organicC: 0
-      attributedProducts:
-        co2: 0
-        o2: 0
-        ch4: 0
-        h2: 0
-        h2s: 0
-        fe2: 0
-        organicC: 0
-      netOnlyProducts:
-        co2: 0
-        o2: 0
-        ch4: 0
-        h2: 0
-        h2s: 0
-        fe2: 0
-        organicC: 0
-      requestedStore: 0
-      storedCarbon: 0
-      capLoss: 0
-      storeFloatResidual: 0
-      modelCarbonResidual: 0
-      plannedCarbonResidual: 0
-      measuredCarbonResidual: 0
-      missingCarbon: 0
-      excessCarbon: 0
-      maxAbsMeasuredCarbonResidual: 0
-      energyAwarded: 0
-      energyDelta: 0
-    - requests: 0
-      achieved: 0
-      unattributedCarbonReactions: 0
-      modelViolations: 0
-      measuredViolations: 0
-      invalid: 0
-      inputTransferViolations: 0
-      zeroMeasuredInputWithEnergy: 0
-      requestedInputs:
+      competedInputs:
         co2: 0
         o2: 0
         ch4: 0
@@ -3232,6 +3028,14 @@ MonoBehaviour:
         h2s: 0
         fe2: 0
         organicC: 0
+      competedInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
       plannedInputs:
         co2: 0
         o2: 0
@@ -3301,6 +3105,266 @@ MonoBehaviour:
       inputTransferViolations: 0
       zeroMeasuredInputWithEnergy: 0
       requestedInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      competedInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      plannedInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      attributedInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      netOnlyInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      definedProducts:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      attributedProducts:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      netOnlyProducts:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      requestedStore: 0
+      storedCarbon: 0
+      capLoss: 0
+      storeFloatResidual: 0
+      modelCarbonResidual: 0
+      plannedCarbonResidual: 0
+      measuredCarbonResidual: 0
+      missingCarbon: 0
+      excessCarbon: 0
+      maxAbsMeasuredCarbonResidual: 0
+      energyAwarded: 0
+      energyDelta: 0
+    - requests: 0
+      achieved: 0
+      unattributedCarbonReactions: 0
+      modelViolations: 0
+      measuredViolations: 0
+      invalid: 0
+      inputTransferViolations: 0
+      zeroMeasuredInputWithEnergy: 0
+      requestedInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      competedInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      plannedInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      attributedInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      netOnlyInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      definedProducts:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      attributedProducts:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      netOnlyProducts:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      requestedStore: 0
+      storedCarbon: 0
+      capLoss: 0
+      storeFloatResidual: 0
+      modelCarbonResidual: 0
+      plannedCarbonResidual: 0
+      measuredCarbonResidual: 0
+      missingCarbon: 0
+      excessCarbon: 0
+      maxAbsMeasuredCarbonResidual: 0
+      energyAwarded: 0
+      energyDelta: 0
+    - requests: 0
+      achieved: 0
+      unattributedCarbonReactions: 0
+      modelViolations: 0
+      measuredViolations: 0
+      invalid: 0
+      inputTransferViolations: 0
+      zeroMeasuredInputWithEnergy: 0
+      requestedInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      competedInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      plannedInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      attributedInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      netOnlyInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      definedProducts:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      attributedProducts:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      netOnlyProducts:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      requestedStore: 0
+      storedCarbon: 0
+      capLoss: 0
+      storeFloatResidual: 0
+      modelCarbonResidual: 0
+      plannedCarbonResidual: 0
+      measuredCarbonResidual: 0
+      missingCarbon: 0
+      excessCarbon: 0
+      maxAbsMeasuredCarbonResidual: 0
+      energyAwarded: 0
+      energyDelta: 0
+    - requests: 0
+      achieved: 0
+      unattributedCarbonReactions: 0
+      modelViolations: 0
+      measuredViolations: 0
+      invalid: 0
+      inputTransferViolations: 0
+      zeroMeasuredInputWithEnergy: 0
+      requestedInputs:
+        co2: 0
+        o2: 0
+        ch4: 0
+        h2: 0
+        h2s: 0
+        fe2: 0
+        organicC: 0
+      competedInputs:
         co2: 0
         o2: 0
         ch4: 0

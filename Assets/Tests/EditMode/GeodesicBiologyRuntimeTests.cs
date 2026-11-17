@@ -133,23 +133,23 @@ public sealed class GeodesicBiologyRuntimeTests
     }
 
     [Test]
-    public void HydrogenotrophyFullReferenceTickPreservesLegacyBalance()
+    public void HydrogenotrophyActivityFractionScalesTheEntireReferenceTick()
     {
         var result = GeodesicBiologyRuntime.CalculateHydrogenotrophyTick(0.5f, 0.01f, 0.02f, 8f,
             0.8f, 1f, 1f, 1f);
-        Assert.That(result.AchievedExtent, Is.EqualTo(1d).Within(1e-6));
-        Assert.That(result.Co2Withdrawal, Is.EqualTo(0.01d).Within(1e-6));
-        Assert.That(result.H2Withdrawal, Is.EqualTo(0.02d).Within(1e-6));
-        Assert.That(result.EnergyGain, Is.EqualTo(8f).Within(1e-6f));
+        Assert.That(result.AchievedExtent, Is.EqualTo(.8d).Within(1e-6));
+        Assert.That(result.Co2Withdrawal, Is.EqualTo(0.008d).Within(1e-6));
+        Assert.That(result.H2Withdrawal, Is.EqualTo(0.016d).Within(1e-6));
+        Assert.That(result.EnergyGain, Is.EqualTo(6.4f).Within(1e-6f));
         Assert.That(result.OrganicCIncrease, Is.EqualTo(0.008f).Within(1e-6f));
         Assert.That(result.EnergyGain, Is.Not.EqualTo(0.05f).Within(1e-6f));
     }
 
-    [TestCase(0.5f, 1f, 1f, 4f, 0.005f, 0.01f, TestName = "HalfSubstrateScalesEverything")]
-    [TestCase(1f, 0.5f, 1f, 4f, 0.005f, 0.01f, TestName = "HalfTemperatureScalesEverything")]
-    [TestCase(0.5f, 0.5f, 1f, 2f, 0.0025f, 0.005f, TestName = "SubstrateAndTemperatureMultiply")]
-    [TestCase(1f, 1f, 0.5f, 4f, 0.005f, 0.01f, TestName = "O2InhibitionScalesWithoutO2Consumption")]
-    public void HydrogenotrophyModifiersScaleLegacyExtent(float substrate, float temperature, float oxygen,
+    [TestCase(0.5f, 1f, 1f, 3.2f, 0.004f, 0.008f, TestName = "HalfSubstrateScalesEverything")]
+    [TestCase(1f, 0.5f, 1f, 3.2f, 0.004f, 0.008f, TestName = "HalfTemperatureScalesEverything")]
+    [TestCase(0.5f, 0.5f, 1f, 1.6f, 0.002f, 0.004f, TestName = "SubstrateAndTemperatureMultiply")]
+    [TestCase(1f, 1f, 0.5f, 3.2f, 0.004f, 0.008f, TestName = "O2InhibitionScalesWithoutO2Consumption")]
+    public void HydrogenotrophyModifiersScaleTheWholeReaction(float substrate, float temperature, float oxygen,
         float expectedEnergy, float expectedCo2, float expectedH2)
     {
         var result = GeodesicBiologyRuntime.CalculateHydrogenotrophyTick(0.5f, 0.01f, 0.02f, 8f,
@@ -158,7 +158,7 @@ public sealed class GeodesicBiologyRuntimeTests
         Assert.That(result.Co2Withdrawal, Is.EqualTo(expectedCo2).Within(1e-6));
         Assert.That(result.H2Withdrawal, Is.EqualTo(expectedH2).Within(1e-6));
         // Hydrogenotrophy has no O2 stoichiometric input; oxygen only changes achieved extent.
-        Assert.That(result.OrganicCIncrease, Is.EqualTo(expectedCo2 * 0.8f).Within(1e-6f));
+        Assert.That(result.OrganicCIncrease, Is.EqualTo(expectedCo2).Within(1e-6f));
     }
 
     [Test]

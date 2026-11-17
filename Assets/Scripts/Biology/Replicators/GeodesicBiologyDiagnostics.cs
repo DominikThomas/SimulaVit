@@ -50,8 +50,8 @@ public sealed class GeodesicBiologyDiagnostics
     private static readonly int MetabolismCount = Enum.GetValues(typeof(MetabolismType)).Length;
     private const int ExampleLimit = 3;
     // Float-backed state is checked with an absolute + relative tolerance in model inventory units.
-    public const double AbsoluteTolerance = 1e-7;
-    public const double RelativeTolerance = 2e-6;
+    public const double AbsoluteTolerance = GeodesicHydrogenotrophyBalance.AbsoluteTolerance;
+    public const double RelativeTolerance = GeodesicHydrogenotrophyBalance.RelativeTolerance;
 
     [Flags]
     public enum DivisionViolation
@@ -102,7 +102,7 @@ public sealed class GeodesicBiologyDiagnostics
     {
         public long requests, achieved, unattributedCarbonReactions, modelViolations, measuredViolations, invalid;
         public long inputTransferViolations, zeroMeasuredInputWithEnergy;
-        public ResourceAmounts requestedInputs, plannedInputs, attributedInputs, netOnlyInputs;
+        public ResourceAmounts requestedInputs, competedInputs, plannedInputs, attributedInputs, netOnlyInputs;
         public ResourceAmounts definedProducts, attributedProducts, netOnlyProducts;
         public double requestedStore, storedCarbon, capLoss, storeFloatResidual;
         public double modelCarbonResidual, plannedCarbonResidual, measuredCarbonResidual;
@@ -217,12 +217,15 @@ public sealed class GeodesicBiologyDiagnostics
     internal void RecordReaction(MetabolismType metabolism, GeodesicOceanResource a, GeodesicOceanResource b,
         GeodesicOceanResource product, double requestedA, double requestedB, double inputA, double inputB,
         double output, double ratioA, double ratioB, double ratioProduct, float desiredStore,
-        float storeBefore, float storeAfter, float awardedEnergy, double energyDelta, bool achieved)
+        float storeBefore, float storeAfter, float awardedEnergy, double energyDelta, bool achieved,
+        double competedInputA = -1d, double competedInputB = -1d)
     {
         ref ReactionAccounting totals = ref reactions[(int)metabolism];
         totals.requests++;
         if (achieved) totals.achieved++;
         totals.requestedInputs.Add(a, requestedA); totals.requestedInputs.Add(b, requestedB);
+        totals.competedInputs.Add(a, competedInputA >= 0d ? competedInputA : inputA);
+        totals.competedInputs.Add(b, competedInputB >= 0d ? competedInputB : inputB);
         totals.plannedInputs.Add(a, inputA); totals.plannedInputs.Add(b, inputB);
         totals.definedProducts.Add(product, output);
         Attribute(ref totals.attributedInputs, ref totals.netOnlyInputs, a, inputA, ratioA);
@@ -357,13 +360,13 @@ public sealed class GeodesicBiologyDiagnostics
         lastMeasuredCarbonResidual = -measuredNet.Carbon - stored;
         Debug.Log($"[GeodesicGrowth] population={population} divisionReady={divisionReady} progressBins(<25/25-50/50-75/75-100/100+percent)={progressBins[0]}/{progressBins[1]}/{progressBins[2]}/{progressBins[3]}/{progressBins[4]} invalidProgress={invalidProgress} principalBlocks(none/habitat/state/death/temperature/cap/energy/carbon)={principalBlockCounts[0]}/{principalBlockCounts[1]}/{principalBlockCounts[2]}/{principalBlockCounts[3]}/{principalBlockCounts[4]}/{principalBlockCounts[5]}/{principalBlockCounts[6]}/{principalBlockCounts[7]} selectedFound={selectedOrganismFound} selectedId={selectedGrowth.organismId} selectedC={selectedGrowth.organicC:G6} target={selectedGrowth.biomassTarget:G6} requiredC={selectedGrowth.requiredCarbon:G6} progress={selectedGrowth.carbonProgress:G6} E={selectedGrowth.energy:G6} requiredE(strictlyGreater)={selectedGrowth.requiredEnergy:G6} temperaturePerformance={selectedGrowth.temperaturePerformance:G6} permitted={selectedGrowth.divisionPermitted} block={selectedGrowth.principalBlock} probabilityPerStep={selectedGrowth.probabilityPerStep:G6} visualSize={selectedGrowth.visualSize:G6} diameterMultiplier={selectedGrowth.visualDiameterMultiplier:G6} growthBaseline={selectedGrowth.growthCycleCarbonBaseline:G6} visualProgress={selectedGrowth.visualGrowthProgress:G6} dividing={selectedGrowth.isVisuallyDividing}");
         Debug.Log($"[GeodesicDivisionAccounting] observedSimulationSeconds={observedSeconds:G6} birthsInterval={divisionInterval.births} energyCost={divisionInterval.energyCost:G9} maxAbsResidual(E/C)={divisionInterval.maxAbsEnergyResidual:G9}/{divisionInterval.maxAbsCarbonResidual:G9} violations={divisionInterval.violations} violations(E/C/allocation/gate/habitat/position/age/invalid)={divisionInterval.energyViolations}/{divisionInterval.carbonViolations}/{divisionInterval.allocationViolations}/{divisionInterval.gateViolations}/{divisionInterval.habitatViolations}/{divisionInterval.positionViolations}/{divisionInterval.ageViolations}/{divisionInterval.invalid} maxPlacementError={divisionInterval.maxPlacementError:G9} explicitCarbonCost=0 birthEnvironmentalTransfer=0 tolerance=abs({AbsoluteTolerance:G4})+rel({RelativeTolerance:G4})*scale");
-        Debug.Log($"[GeodesicResourceAccounting] requestedNet=({requestedNet}) measuredNet=({measuredNet}) measuredMinusRequested=({netTransferResidual}) transferViolations={transferViolations} mixedNodeResourcePairs={mixedPairs} measuredUnaccountedCarbon(+missing/-excess)={lastMeasuredCarbonResidual:G9} scope=reactionsOnly deathRecycling=separate grossAttribution=proportionalUnmixedOnly mixedGross=unobservableNetOnly");
+        Debug.Log($"[GeodesicResourceAccounting] requestedNet=({requestedNet}) measuredNet=({measuredNet}) measuredMinusRequested=({netTransferResidual}) transferViolations={transferViolations} mixedNodeResourcePairs={mixedPairs} measuredUnaccountedCarbon(+missing/-excess)={lastMeasuredCarbonResidual:G9} scope=reactionsOnly deathRecycling=separate grossAttribution=hydrogenDirect_otherProportionalUnmixedOnly mixedGross=unobservableNetOnly");
         for (int i = 0; i < MetabolismCount; i++)
         {
             ref ReactionAccounting r = ref reactions[i];
             if (r.requests == 0) continue;
             Debug.Log($"[GeodesicReactionAccounting] metabolism={(MetabolismType)i} requests/achieved={r.requests}/{r.achieved}"
-                + $" requestedInputs=({r.requestedInputs}) afterCompetitionInputs=({r.plannedInputs}) actualAttributedInputs=({r.attributedInputs}) netOnlyInputs=({r.netOnlyInputs})"
+                + $" requestedInputs=({r.requestedInputs}) afterCompetitionInputs=({r.competedInputs}) committedInputs=({r.plannedInputs}) actualAttributedInputs=({r.attributedInputs}) netOnlyInputs=({r.netOnlyInputs})"
                 + $" definedProducts=({r.definedProducts}) actualAttributedProducts=({r.attributedProducts}) netOnlyProducts=({r.netOnlyProducts})"
                 + $" desiredStore={r.requestedStore:G9} actualStoreDelta={r.storedCarbon:G9} capLoss={r.capLoss:G9} storeFloatResidual={r.storeFloatResidual:G9}"
                 + $" modelCResidual={r.modelCarbonResidual:G9} plannedCResidual={r.plannedCarbonResidual:G9} plannedMissing/excess={r.missingCarbon:G9}/{r.excessCarbon:G9}"

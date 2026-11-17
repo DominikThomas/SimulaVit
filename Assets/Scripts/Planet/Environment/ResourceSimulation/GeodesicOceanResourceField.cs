@@ -19,8 +19,8 @@ public struct GeodesicOceanResourceDiagnostics
 /// <summary>
 /// Scene-owned authoritative dissolved-resource state for active geodesic ocean-layer nodes.
 /// Values are concentrations per layer volume; inventory is concentration * GeodesicOceanLayerGrid.PhysicalLayerVolumeKm3[node].
-/// Storage is one channel-major float buffer indexed as resource * nodeCapacity + fixed node index from GeodesicOceanLayerGrid.
-/// At subdivision 5 with 10,242 cells, five layers and seven channels this buffer is about 1.37 MiB plus active-node traversal and volume caches.
+/// Storage is one channel-major double buffer indexed as resource * nodeCapacity + fixed node index from GeodesicOceanLayerGrid.
+/// At subdivision 5 with 10,242 cells, five layers and seven channels this buffer is about 2.74 MiB plus active-node traversal and volume caches.
 /// </summary>
 [DisallowMultipleComponent]
 public sealed class GeodesicOceanResourceField : MonoBehaviour
@@ -108,7 +108,9 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     private GeodesicOceanLayerDomain domain;
     private PlanetGenerator planetGenerator;
     private GeodesicOceanLayerGrid sourceGrid;
-    private float[] concentrationsByResourceThenNode;
+    // Authoritative concentrations need sub-float resolution for organism-scale
+    // inventory transfers in physical ocean volumes. Public float views are readouts.
+    private double[] concentrationsByResourceThenNode;
     private int[] activeNodeIndices;
     private double[] activeNodeVolumes;
     private int[] chemistryCandidateNodes;
@@ -298,7 +300,7 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
             {
             sourceGrid = grid; cellCount = grid.CellCount; nodeCapacity = grid.NodeCapacity; activeNodeCount = grid.ActiveNodeCount;
             ResolveChemistryComponents(); ResolveAtmosphereComponents(); sedimentField.Initialize(cellCount); suspendedField.Initialize(grid); abioticChemistry.ResetCounters();
-            concentrationsByResourceThenNode = new float[ResourceCount * nodeCapacity];
+            concentrationsByResourceThenNode = new double[ResourceCount * nodeCapacity];
             activeNodeIndices = new int[activeNodeCount]; activeNodeVolumes = new double[activeNodeCount];
             chemistryCandidateNodes = new int[activeNodeCount]; chemistryCandidateCount = 0;
             configuredInitialConcentrations[(int)GeodesicOceanResource.CO2] = initialCO2Concentration;
@@ -315,7 +317,7 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
                 for (int r = 0; r < ResourceCount; r++) concentrationsByResourceThenNode[r * nodeCapacity + node] = configuredInitialConcentrations[r];
                 cursor++;
             }
-            activeOceanVolume = volume; approximateRuntimeMemoryBytes = (long)concentrationsByResourceThenNode.Length * sizeof(float) + (long)activeNodeIndices.Length * sizeof(int) + (long)activeNodeVolumes.Length * sizeof(double) + (long)chemistryCandidateNodes.Length * sizeof(int) + ResourceCount * 32L;
+            activeOceanVolume = volume; approximateRuntimeMemoryBytes = (long)concentrationsByResourceThenNode.Length * sizeof(double) + (long)activeNodeIndices.Length * sizeof(int) + (long)activeNodeVolumes.Length * sizeof(double) + (long)chemistryCandidateNodes.Length * sizeof(int) + ResourceCount * 32L;
             BuildTransportCaches(grid, planetGenerator);
             simulationClock = FindFirstObjectByType<ReplicatorManager>();
             double simulationTime = simulationClock != null ? Math.Max(0d, simulationClock.SimulationTimeSeconds) : 0d;
@@ -672,7 +674,7 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     private void AccumulateHorizontalAllResources()
     {
         int[] nodeA = sourceGrid.HorizontalNodeA, nodeB = sourceGrid.HorizontalNodeB;
-        float[] state = concentrationsByResourceThenNode; double[] delta = stagedInventoryDelta; int capacity = nodeCapacity;
+        double[] state = concentrationsByResourceThenNode; double[] delta = stagedInventoryDelta; int capacity = nodeCapacity;
         float dt = preparedTickDeltaTime;
         int activeMask = CalculateHorizontalActiveMask(resourceMayHaveSpatialVariation, horizontalTickCoefficients);
         horizontalActiveResourceChannelsLastTick = CountResourceBits(activeMask);
@@ -715,7 +717,7 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     private void AccumulateVerticalAllResources()
     {
         int[] nodeA = sourceGrid.VerticalUpperNode, nodeB = sourceGrid.VerticalLowerNode;
-        float[] state = concentrationsByResourceThenNode; double[] delta = stagedInventoryDelta; int capacity = nodeCapacity;
+        double[] state = concentrationsByResourceThenNode; double[] delta = stagedInventoryDelta; int capacity = nodeCapacity;
         float dt = preparedTickDeltaTime;
         float k0 = verticalTickCoefficients[0], k1 = verticalTickCoefficients[1], k2 = verticalTickCoefficients[2], k3 = verticalTickCoefficients[3], k4 = verticalTickCoefficients[4], k5 = verticalTickCoefficients[5], k6 = verticalTickCoefficients[6];
         using (VerticalMarker.Auto()) for (int i = 0; i < verticalLinkCount; i++)
@@ -732,7 +734,7 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void AccumulatePair(float[] state, double[] delta, int a, int b, float coefficient)
+    private static void AccumulatePair(double[] state, double[] delta, int a, int b, float coefficient)
     {
         double transfer = coefficient * (state[a] - state[b]);
         if (transfer == 0d) return;
@@ -741,7 +743,7 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
 
     private void ApplyStagedAllResources()
     {
-        float[] state = concentrationsByResourceThenNode; double[] delta = stagedInventoryDelta; int capacity = nodeCapacity;
+        double[] state = concentrationsByResourceThenNode; double[] delta = stagedInventoryDelta; int capacity = nodeCapacity;
         int h2Offset = (int)GeodesicOceanResource.H2 * capacity;
         int h2sOffset = (int)GeodesicOceanResource.H2S * capacity;
         int fe2Offset = (int)GeodesicOceanResource.Fe2 * capacity;
@@ -762,7 +764,7 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
         }
     }
 
-    public static int AppendChemistryCandidate(int node, float o2, float h2, float h2s, float fe2, int[] candidates, int count)
+    public static int AppendChemistryCandidate(int node, double o2, double h2, double h2s, double fe2, int[] candidates, int count)
     {
         if (!GeodesicAbioticChemistry.CanReact(o2, h2, h2s, fe2)) return count;
         candidates[count] = node;
@@ -770,8 +772,8 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void ApplyStagedNode(float[] state, double[] delta, int index, double volume)
-    { state[index] = (float)Math.Max(0d, (state[index] * volume + delta[index]) / volume); }
+    private static void ApplyStagedNode(double[] state, double[] delta, int index, double volume)
+    { state[index] = Math.Max(0d, (state[index] * volume + delta[index]) / volume); }
 
     private void InjectVentSources(float tickScale)
     {
@@ -795,10 +797,10 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
             int node = outlet.SourceNode;
             double scale = submarineGasProductionFraction * outlet.SystemBudgetWeight * outlet.WithinSystemWeight;
             double volume = sourceGrid.PhysicalLayerVolumeKm3[node];
-            concentrationsByResourceThenNode[(int)GeodesicOceanResource.H2 * nodeCapacity + node] += (float)GeodesicPhysicalScale.VentConcentrationDelta(physicalVentH2InventoryRatePerSecond * scale, tickScale, volume);
-            concentrationsByResourceThenNode[(int)GeodesicOceanResource.H2S * nodeCapacity + node] += (float)GeodesicPhysicalScale.VentConcentrationDelta(physicalVentH2SInventoryRatePerSecond * scale, tickScale, volume);
-            concentrationsByResourceThenNode[(int)GeodesicOceanResource.CO2 * nodeCapacity + node] += (float)GeodesicPhysicalScale.VentConcentrationDelta(physicalVentCO2InventoryRatePerSecond * scale, tickScale, volume);
-            concentrationsByResourceThenNode[(int)GeodesicOceanResource.Fe2 * nodeCapacity + node] += (float)GeodesicPhysicalScale.VentConcentrationDelta(physicalVentFe2InventoryRatePerSecond * outlet.SystemBudgetWeight * outlet.WithinSystemWeight, tickScale, volume);
+            concentrationsByResourceThenNode[(int)GeodesicOceanResource.H2 * nodeCapacity + node] += GeodesicPhysicalScale.VentConcentrationDelta(physicalVentH2InventoryRatePerSecond * scale, tickScale, volume);
+            concentrationsByResourceThenNode[(int)GeodesicOceanResource.H2S * nodeCapacity + node] += GeodesicPhysicalScale.VentConcentrationDelta(physicalVentH2SInventoryRatePerSecond * scale, tickScale, volume);
+            concentrationsByResourceThenNode[(int)GeodesicOceanResource.CO2 * nodeCapacity + node] += GeodesicPhysicalScale.VentConcentrationDelta(physicalVentCO2InventoryRatePerSecond * scale, tickScale, volume);
+            concentrationsByResourceThenNode[(int)GeodesicOceanResource.Fe2 * nodeCapacity + node] += GeodesicPhysicalScale.VentConcentrationDelta(physicalVentFe2InventoryRatePerSecond * outlet.SystemBudgetWeight * outlet.WithinSystemWeight, tickScale, volume);
         }
         double terrestrialScale = terrestrialGasProductionFraction * terrestrialOutletWeight * tickScale;
         atmosphereField.AddGeologicalSource(GeodesicAtmosphericGas.CO2, physicalVentCO2InventoryRatePerSecond * terrestrialScale);
@@ -870,29 +872,47 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
 
     public bool TryGetConcentration(int cellIndex, int layerIndex, GeodesicOceanResource resource, out float concentration)
     {
-        concentration = 0f; if (!TryResolveNode(cellIndex, layerIndex, resource, out int offset)) return false; concentration = concentrationsByResourceThenNode[offset]; return true;
+        concentration = 0f; if (!TryResolveNode(cellIndex, layerIndex, resource, out int offset)) return false; concentration = (float)concentrationsByResourceThenNode[offset]; return true;
     }
     internal double GetInventoryForChemistry(int node, GeodesicOceanResource resource, double volume)
     { return concentrationsByResourceThenNode[(int)resource * nodeCapacity + node] * volume; }
     internal void MarkSpatialVariation(GeodesicOceanResource resource)
     { resourceMayHaveSpatialVariation[(int)resource] = true; }
     internal void SetInventoryForChemistry(int node, GeodesicOceanResource resource, double inventory, double volume)
-    { MarkSpatialVariation(resource); concentrationsByResourceThenNode[(int)resource * nodeCapacity + node] = (float)(Math.Max(0d, inventory) / volume); }
+    { MarkSpatialVariation(resource); concentrationsByResourceThenNode[(int)resource * nodeCapacity + node] = Math.Max(0d, inventory) / volume; }
     internal float GetConcentrationForTelemetry(int node, GeodesicOceanResource resource)
-    { return concentrationsByResourceThenNode[(int)resource * nodeCapacity + node]; }
-    internal float[] ConcentrationsForChemistry => concentrationsByResourceThenNode;
+    { return (float)concentrationsByResourceThenNode[(int)resource * nodeCapacity + node]; }
+    internal double[] ConcentrationsForChemistry => concentrationsByResourceThenNode;
     internal int NodeCapacityForChemistry => nodeCapacity;
     internal double GetRawConcentration(GeodesicOceanResource resource, int node) => concentrationsByResourceThenNode[(int)resource * nodeCapacity + node];
     internal double ApplyDirectExchangeInventory(GeodesicOceanResource resource, int node, double inventoryDelta)
     {
         int offset = (int)resource * nodeCapacity + node; double volume = sourceGrid.PhysicalLayerVolumeKm3[node];
-        float before = concentrationsByResourceThenNode[offset];
+        double before = concentrationsByResourceThenNode[offset];
         double desired = Math.Max(0d, before * volume + inventoryDelta);
-        float after = (float)Math.Min(float.MaxValue, desired / volume);
+        double after = Math.Min(float.MaxValue, desired / volume);
         concentrationsByResourceThenNode[offset] = after;
-        double actual = (after - (double)before) * volume;
+        double actual = (after - before) * volume;
         if (actual != 0d) resourceMayHaveSpatialVariation[(int)resource] = true;
         return actual;
+    }
+
+    internal GeodesicHydrogenotrophyBalance.Transfer CommitHydrogenotrophy(int node,
+        double competedExtent, double co2PerTick, double h2PerTick, float energyPerTick,
+        float storeBefore, float maximumStore)
+    {
+        int co2 = (int)GeodesicOceanResource.CO2 * nodeCapacity + node;
+        int h2 = (int)GeodesicOceanResource.H2 * nodeCapacity + node;
+        var transfer = GeodesicHydrogenotrophyBalance.PlanCommit(
+            concentrationsByResourceThenNode[co2], concentrationsByResourceThenNode[h2],
+            sourceGrid.PhysicalLayerVolumeKm3[node], competedExtent, co2PerTick, h2PerTick,
+            energyPerTick, storeBefore, maximumStore);
+        if (transfer.status != GeodesicHydrogenotrophyBalance.CommitStatus.Committed) return transfer;
+        concentrationsByResourceThenNode[co2] = transfer.co2After;
+        concentrationsByResourceThenNode[h2] = transfer.h2After;
+        resourceMayHaveSpatialVariation[(int)GeodesicOceanResource.CO2] = true;
+        resourceMayHaveSpatialVariation[(int)GeodesicOceanResource.H2] = true;
+        return transfer;
     }
     internal double VentH2Rate => physicalVentH2InventoryRatePerSecond;
     internal double VentH2SRate => physicalVentH2SInventoryRatePerSecond;
@@ -923,17 +943,17 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     }
     public bool TryAddConcentration(int cellIndex, int layerIndex, GeodesicOceanResource resource, float deltaConcentration)
     {
-        if (!Finite(deltaConcentration)) { rejectedNonfiniteWriteCount++; return false; } if (!TryResolveNode(cellIndex, layerIndex, resource, out int offset)) return false; float next = concentrationsByResourceThenNode[offset] + deltaConcentration; if (!Finite(next)) { rejectedNonfiniteWriteCount++; return false; } if (next < 0f) { rejectedNegativeWriteCount++; return false; } resourceMayHaveSpatialVariation[(int)resource] = true; concentrationsByResourceThenNode[offset] = next; RecomputeDiagnosticsFor(resource); return true;
+        if (!Finite(deltaConcentration)) { rejectedNonfiniteWriteCount++; return false; } if (!TryResolveNode(cellIndex, layerIndex, resource, out int offset)) return false; double next = concentrationsByResourceThenNode[offset] + deltaConcentration; if (!Finite(next)) { rejectedNonfiniteWriteCount++; return false; } if (next < 0f) { rejectedNegativeWriteCount++; return false; } resourceMayHaveSpatialVariation[(int)resource] = true; concentrationsByResourceThenNode[offset] = next; RecomputeDiagnosticsFor(resource); return true;
     }
     public bool TryAddInventory(int cellIndex, int layerIndex, GeodesicOceanResource resource, double inventoryDelta)
     {
-        if (!Finite(inventoryDelta)) { rejectedNonfiniteWriteCount++; return false; } if (inventoryDelta < 0d) { rejectedNegativeWriteCount++; return false; } if (!TryResolveNode(cellIndex, layerIndex, resource, out int offset)) return false; int node = sourceGrid.GetNodeIndex(cellIndex, layerIndex); double delta = inventoryDelta / sourceGrid.PhysicalLayerVolumeKm3[node]; if (!Finite(delta) || delta > float.MaxValue) { rejectedNonfiniteWriteCount++; return false; } float next = concentrationsByResourceThenNode[offset] + (float)delta; if (!Finite(next)) { rejectedNonfiniteWriteCount++; return false; } if (next < 0f) { rejectedNegativeWriteCount++; return false; } resourceMayHaveSpatialVariation[(int)resource] = true; concentrationsByResourceThenNode[offset] = next; RecomputeDiagnosticsFor(resource); return true;
+        if (!Finite(inventoryDelta)) { rejectedNonfiniteWriteCount++; return false; } if (inventoryDelta < 0d) { rejectedNegativeWriteCount++; return false; } if (!TryResolveNode(cellIndex, layerIndex, resource, out int offset)) return false; int node = sourceGrid.GetNodeIndex(cellIndex, layerIndex); double delta = inventoryDelta / sourceGrid.PhysicalLayerVolumeKm3[node]; if (!Finite(delta) || delta > float.MaxValue) { rejectedNonfiniteWriteCount++; return false; } double next = concentrationsByResourceThenNode[offset] + delta; if (!Finite(next)) { rejectedNonfiniteWriteCount++; return false; } if (next < 0f) { rejectedNegativeWriteCount++; return false; } resourceMayHaveSpatialVariation[(int)resource] = true; concentrationsByResourceThenNode[offset] = next; RecomputeDiagnosticsFor(resource); return true;
     }
     public bool TryWithdrawInventoryBounded(int cellIndex, int layerIndex, GeodesicOceanResource resource, double requestedInventory, out double withdrawnInventory)
     {
-        withdrawnInventory = 0d; if (!Finite(requestedInventory) || requestedInventory < 0d) { if (!Finite(requestedInventory)) rejectedNonfiniteWriteCount++; else rejectedNegativeWriteCount++; return false; } if (!TryResolveNode(cellIndex, layerIndex, resource, out int offset)) return false; int node = sourceGrid.GetNodeIndex(cellIndex, layerIndex); double available = concentrationsByResourceThenNode[offset] * (double)sourceGrid.PhysicalLayerVolumeKm3[node]; withdrawnInventory = Math.Min(requestedInventory, available); double next = (available - withdrawnInventory) / sourceGrid.PhysicalLayerVolumeKm3[node]; if (!Finite(next) || next > float.MaxValue) { rejectedNonfiniteWriteCount++; return false; } resourceMayHaveSpatialVariation[(int)resource] = true; concentrationsByResourceThenNode[offset] = (float)next; RecomputeDiagnosticsFor(resource); return true;
+        withdrawnInventory = 0d; if (!Finite(requestedInventory) || requestedInventory < 0d) { if (!Finite(requestedInventory)) rejectedNonfiniteWriteCount++; else rejectedNegativeWriteCount++; return false; } if (!TryResolveNode(cellIndex, layerIndex, resource, out int offset)) return false; int node = sourceGrid.GetNodeIndex(cellIndex, layerIndex); double available = concentrationsByResourceThenNode[offset] * (double)sourceGrid.PhysicalLayerVolumeKm3[node]; withdrawnInventory = Math.Min(requestedInventory, available); double next = (available - withdrawnInventory) / sourceGrid.PhysicalLayerVolumeKm3[node]; if (!Finite(next) || next > float.MaxValue) { rejectedNonfiniteWriteCount++; return false; } resourceMayHaveSpatialVariation[(int)resource] = true; concentrationsByResourceThenNode[offset] = next; RecomputeDiagnosticsFor(resource); return true;
     }
-    public double GetNodeInventory(int cellIndex, int layerIndex, GeodesicOceanResource resource) => TryGetConcentration(cellIndex, layerIndex, resource, out float c) ? c * sourceGrid.PhysicalLayerVolumeKm3[sourceGrid.GetNodeIndex(cellIndex, layerIndex)] : 0d;
+    public double GetNodeInventory(int cellIndex, int layerIndex, GeodesicOceanResource resource) => TryResolveNode(cellIndex, layerIndex, resource, out int offset) ? concentrationsByResourceThenNode[offset] * sourceGrid.PhysicalLayerVolumeKm3[sourceGrid.GetNodeIndex(cellIndex, layerIndex)] : 0d;
     public double GetGlobalInventory(GeodesicOceanResource resource) => IsResourceValid(resource) && resourceDiagnostics != null ? resourceDiagnostics[(int)resource].globalInventory : 0d;
     public double GetVolumeWeightedMeanConcentration(GeodesicOceanResource resource) => IsResourceValid(resource) && resourceDiagnostics != null ? resourceDiagnostics[(int)resource].volumeWeightedMeanConcentration : 0d;
 
@@ -950,7 +970,7 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     private void RecomputeDiagnosticsFor(GeodesicOceanResource resource)
     {
         if (resourceDiagnostics == null || resourceDiagnostics.Length != ResourceCount) resourceDiagnostics = CreateDiagnosticsArray(); int r = (int)resource; double inventory = 0d; float min = float.PositiveInfinity, max = 0f;
-        for (int i = 0; i < activeNodeCount; i++) { float c = concentrationsByResourceThenNode[r * nodeCapacity + activeNodeIndices[i]]; if (c < min) min = c; if (c > max) max = c; inventory += c * (double)activeNodeVolumes[i]; }
+        for (int i = 0; i < activeNodeCount; i++) { double c = concentrationsByResourceThenNode[r * nodeCapacity + activeNodeIndices[i]]; if (c < min) min = (float)c; if (c > max) max = (float)c; inventory += c * (double)activeNodeVolumes[i]; }
         resourceDiagnostics[r].resource = resource; resourceDiagnostics[r].minimumActiveConcentration = activeNodeCount > 0 ? min : 0f; resourceDiagnostics[r].maximumActiveConcentration = activeNodeCount > 0 ? max : 0f; resourceDiagnostics[r].globalInventory = inventory; resourceDiagnostics[r].volumeWeightedMeanConcentration = activeOceanVolume > 0d ? inventory / activeOceanVolume : 0d;
     }
     private void ResetDiagnostics() { if (resourceDiagnostics == null || resourceDiagnostics.Length != ResourceCount) resourceDiagnostics = CreateDiagnosticsArray(); for (int i = 0; i < ResourceCount; i++) resourceDiagnostics[i] = new GeodesicOceanResourceDiagnostics { resource = (GeodesicOceanResource)i }; }
@@ -974,7 +994,7 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
             for (int layer = 0; layer < sourceGrid.MaximumLayerCount; layer++)
             {
                 int node = sourceGrid.GetNodeIndex(cell, layer); bool isActive = sourceGrid.IsNodeActive(cell, layer); if (isActive) { active++; volume += sourceGrid.PhysicalLayerVolumeKm3[node]; }
-                for (int r = 0; r < ResourceCount; r++) { float c = concentrationsByResourceThenNode[r * nodeCapacity + node]; if (isActive) { if (!Finite(c) || c < 0f) Fail("active concentration is non-finite or negative"); } else if (c != 0f) Fail("inactive concentration slot is non-zero"); }
+                for (int r = 0; r < ResourceCount; r++) { double c = concentrationsByResourceThenNode[r * nodeCapacity + node]; if (isActive) { if (!Finite(c) || c < 0f) Fail("active concentration is non-finite or negative"); } else if (c != 0f) Fail("inactive concentration slot is non-zero"); }
             }
         }
         if (active != sourceGrid.ActiveNodeCount || active != activeNodeCount) Fail("active-node count mismatch");
@@ -987,7 +1007,7 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
             if (!TryWithdrawInventoryBounded(sentinelCell, sentinelLayer, GeodesicOceanResource.O2, before * 2d + 1d, out double withdrawn) || withdrawn < -1e-9 || GetNodeInventory(sentinelCell, sentinelLayer, GeodesicOceanResource.O2) < -1e-9f) Fail("bounded withdrawal failed");
             if (!TryAddInventory(sentinelCell, sentinelLayer, GeodesicOceanResource.O2, withdrawn)) Fail("bounded withdrawal restore failed");
         }
-        float[] saved = concentrationsByResourceThenNode; int[] savedActive = activeNodeIndices; double[] savedVolumes = activeNodeVolumes; GeodesicOceanLayerGrid savedGrid = sourceGrid; int savedNodeCapacity = nodeCapacity;
+        double[] saved = concentrationsByResourceThenNode; int[] savedActive = activeNodeIndices; double[] savedVolumes = activeNodeVolumes; GeodesicOceanLayerGrid savedGrid = sourceGrid; int savedNodeCapacity = nodeCapacity;
         ClearField(false); if (concentrationsByResourceThenNode != null || activeNodeIndices != null || activeNodeVolumes != null || initialized) Fail("cleanup retained arrays");
         InitializeForCurrentDomain(); if (!initialized || concentrationsByResourceThenNode == null || ReferenceEquals(concentrationsByResourceThenNode, saved) || nodeCapacity != savedNodeCapacity || !ReferenceEquals(sourceGrid, savedGrid)) Fail("reinitialization duplicated or changed source state");
         if (saved != null && concentrationsByResourceThenNode != null && saved.Length == concentrationsByResourceThenNode.Length) Array.Copy(saved, concentrationsByResourceThenNode, saved.Length);
@@ -1024,7 +1044,7 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
         const int nodes = 4; int[] a = { 0, 1, 2, 0, 1 }, b = { 1, 2, 3, 2, 3 };
         float[] conductance = { 0.17f, 0.11f, 0.23f, 0.07f, 0.13f };
         float[] coefficient = { 0.02f, 0.0005f, 0.018f, 0.015f, 0.012f, 0.01f, 0.008f };
-        float[] state = new float[ResourceCount * nodes]; double[] reference = new double[state.Length], optimized = new double[state.Length];
+        double[] state = new double[ResourceCount * nodes]; double[] reference = new double[state.Length], optimized = new double[state.Length];
         for (int resource = 0; resource < ResourceCount; resource++) for (int node = 0; node < nodes; node++) state[resource * nodes + node] = 0.125f + resource * 0.7f + node * node * 0.31f;
         for (int resource = 0; resource < ResourceCount; resource++) for (int link = 0; link < a.Length; link++) AccumulatePair(state, reference, resource * nodes + a[link], resource * nodes + b[link], conductance[link] * coefficient[resource]);
         for (int link = 0; link < a.Length; link++) for (int resource = 0; resource < ResourceCount; resource++) AccumulatePair(state, optimized, resource * nodes + a[link], resource * nodes + b[link], conductance[link] * coefficient[resource]);

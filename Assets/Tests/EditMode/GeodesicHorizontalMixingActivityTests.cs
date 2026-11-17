@@ -46,7 +46,7 @@ public sealed class GeodesicHorizontalMixingActivityTests
     public void PairTransfer_IsEqualAndOppositeAndZeroTransferDoesNotWrite()
     {
         MethodInfo accumulate = typeof(GeodesicOceanResourceField).GetMethod("AccumulatePair", BindingFlags.NonPublic | BindingFlags.Static);
-        float[] state = { 3f, 1f, 2f, 2f }; double[] delta = new double[4];
+        double[] state = { 3d, 1d, 2d, 2d }; double[] delta = new double[4];
         accumulate.Invoke(null, new object[] { state, delta, 0, 1, 0.25f });
         Assert.That(delta[0] + delta[1], Is.EqualTo(0d));
         accumulate.Invoke(null, new object[] { state, delta, 2, 3, 0.25f });

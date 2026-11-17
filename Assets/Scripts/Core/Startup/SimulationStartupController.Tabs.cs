@@ -335,7 +335,8 @@ public partial class SimulationStartupController
                 SetupFloat("H2 consumed / reaction tick", ref b.hydrogenotrophyH2PerTick);
                 SetupFloat("CO2 consumed / reaction tick", ref b.hydrogenotrophyCO2PerTick);
                 SetupFloat("Energy / completed reaction tick", ref b.hydrogenotrophyEnergyPerTick);
-                SetupFloat("Consumed CO2 stored as organic carbon (fraction)", ref b.hydrogenotrophyStoreFraction, 0f, 1f);
+                SetupFloat(IsGeodesicSetup ? "Whole-reaction activity fraction" : "Consumed CO2 stored as organic carbon (fraction)", ref b.hydrogenotrophyStoreFraction, 0f, 1f);
+                if (IsGeodesicSetup) SetupHelp("Scales CO2/H2 uptake, energy and carbon fixation together. All withdrawn CO2 becomes stored carbon; available store capacity limits the reaction.");
                 break;
             case 1:
                 SetupFloat("CO2 consumed / reaction tick", ref b.chemosynthesisCo2NeedPerTick);

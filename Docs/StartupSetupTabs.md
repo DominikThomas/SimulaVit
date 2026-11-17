@@ -57,7 +57,7 @@ The existing initial-count and geodesic spawn-delay fields remain top-level. The
 | Temperature adaptation, lethal margin, dormancy/reproduction thresholds, direct-damage/extreme thresholds | Used | Used |
 | Exposure times/recovery and stress maintenance multiplier | Used | Not used; hidden |
 | Temperature templates | Hydrogen range seeds normal founders; other seven displayed as inactive legacy templates | All eight seed the existing metabolism-specific traits |
-| Hydrogen substrate/energy/store parameters | Used | Used |
+| Hydrogen substrate/energy parameters | Used; `hydrogenotrophyStoreFraction` scales the whole reaction, with all withdrawn CO2 stored | Used; the fraction retains legacy store-yield behavior |
 | Sulfur substrate/energy parameters | Used | Used |
 | Sulfur store fraction/fallback respiration | Existing fixed carbon conversion; these controls hidden | Used |
 | Methanogenesis substrate/energy parameters | Used with existing 0.85 energy factor and fixed 0.15 assimilation | Used with editable assimilation |
@@ -119,3 +119,5 @@ Manual checks for Unity:
 4. In geodesic mode, compare target coverage, manual offset and Ocean World selections; inspect the generator values before generation and retained coverage afterward. Toggle rivers, lakes and inland-sea filtering, including their dependent controls. Check unsupported controls are explained in legacy mode.
 5. Start Paused and inspect manager values: reproduction/costs, hydrogen temperature template/yield, temperature mutation, locomotion energy and A/B switches. Check geodesic-only fields and legacy-only reaction/evolution controls match the support table. In legacy mode inspect shared aerobic yields and Fe2+ vent startup application.
 6. Check Reset Defaults and Reset Advanced independently, Start versus Start Paused, and the existing Back, main menu, save picker and loaded-game paths. If an optional prefab root is configured, verify its existing controls still work and switching grids does not mix vent-rate units.
+
+The geodesic hydrogen activity/yield semantics and measured-transfer correction are detailed in [GeodesicHydrogenotrophyConservation.md](GeodesicHydrogenotrophyConservation.md).

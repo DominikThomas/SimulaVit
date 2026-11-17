@@ -193,6 +193,7 @@ public class ReplicatorManager : MonoBehaviour
     public float hydrogenotrophyH2PerTick = 0.02f;
     public float hydrogenotrophyCO2PerTick = 0.01f;
     public float hydrogenotrophyEnergyPerTick = 8f;
+    [Tooltip("Geodesic: scales the whole reaction (uptake, energy and carbon fixation); all withdrawn CO2 is stored. Legacy: fraction of consumed CO2 stored as organic carbon.")]
     [Range(0f, 1f)] public float hydrogenotrophyStoreFraction = 0.8f;
     public float fermentationOrganicCPerTick = 0.02f;
     public float fermentationEnergyPerTick = 0.04f;

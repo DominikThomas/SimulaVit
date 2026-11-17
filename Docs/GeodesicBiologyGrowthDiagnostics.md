@@ -1,5 +1,8 @@
 # Biology Milestone 1: growth, division and resource diagnostics
 
+> Update 2026-11-16: this document records the original observational milestone. Its hydrogen 20% loss, hydrogen cap-loss and float-transfer findings are historical; the subsequent correction and current verification limits are documented in [GeodesicHydrogenotrophyConservation.md](GeodesicHydrogenotrophyConservation.md). Other metabolism findings remain outside that correction.
+
+
 Implemented on `codex/geodesic-biology-parity`, starting at `037420e`. That commit contains the earlier parity audit; its file has been preserved byte-for-byte. No simulation rules, settings, reaction formulas, movement, thermal policy, renderers, ocean transport, caches or mutation logic were changed. No commit or merge was made.
 
 **What changed**
