@@ -1,5 +1,10 @@
 # Geodesic locomotion evolution audit — 17 November 2026
 
+Follow-up: [GeodesicFoodTaxisAudit.md](GeodesicFoodTaxisAudit.md) resolves the native
+execution blocker and records completed food-gradient tests, 48 controlled cohort
+outcomes and a fixed-step seed-283 OFF/ON world pair. The bootstrap limitation
+below describes the earlier audit stage; it is no longer the validation status.
+
 Mutation production is consistent with the implemented probabilities. The supplied
 population imbalance is strongly supported as reproductive selection after rare
 anchored origins, rather than excessive generation of anchored mutants. Both

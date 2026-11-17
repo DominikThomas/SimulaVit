@@ -12,6 +12,13 @@ public sealed partial class GeodesicBiologyRuntime
         public float rawScoreDelta, normalizedDelta, improvementThreshold, worseningThreshold;
     }
 
+#if UNITY_EDITOR
+    // Development fixtures can compare local signal hypotheses on isolated runtime
+    // instances. No normal manager sets this, it is not serialized, and it does not
+    // exist in a player. It adds no per-organism state or environmental scan.
+    internal Func<int, ReplicatorPopulationState, GeodesicTaxisObservation, GeodesicTaxisObservation> DiagnosticSteeringObservationOverride;
+#endif
+
     private GeodesicTaxisObservation ObserveSteeringHabitat(int i, ReplicatorPopulationState state)
     {
         GeodesicTaxisObservation observation = ObserveMovementHabitat(i, state);
@@ -20,6 +27,10 @@ public sealed partial class GeodesicBiologyRuntime
             observation.reactionReadiness = observation.performance;
             observation.suitability = observation.performance;
         }
+#if UNITY_EDITOR
+        if (DiagnosticSteeringObservationOverride != null)
+            observation = DiagnosticSteeringObservationOverride(i, state, observation);
+#endif
         return observation;
     }
 

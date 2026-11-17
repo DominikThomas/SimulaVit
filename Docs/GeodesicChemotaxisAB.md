@@ -3,8 +3,10 @@
 The steering control has read-only A/B experiment telemetry. The later
 [seed-283 evolution audit](GeodesicLocomotionEvolutionAudit.md) records actual
 run evidence, saved-setting overrides, mutation tests and bounded lineage counters.
-Native controlled ecological fixtures were compiled but could not execute because
-Unity exited during bootstrap; ecological effectiveness remains unverified.
+The follow-up [food-sensing audit](GeodesicFoodTaxisAudit.md) records successful
+native ecological execution, controlled steering alternatives and a matched
+fixed-step seed-283 OFF/ON pair. Neither world trial demonstrated a self-sustaining
+motile lineage; the current response did not improve amoeboid-parent births.
 
 ## Inspector controls
 

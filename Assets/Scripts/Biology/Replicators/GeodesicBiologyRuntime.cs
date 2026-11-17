@@ -1503,6 +1503,9 @@ public sealed partial class GeodesicBiologyRuntime
     public static float ResolvePhotosyntheticLight(float daylight, int layer) => Mathf.Clamp01(daylight) * (layer == 0 ? 1f : layer == 1 ? 0.55f : 0f);
     public void Clear()
     {
+#if UNITY_EDITOR
+        DiagnosticSteeringObservationOverride = null;
+#endif
         ClearChemotaxisAB();
         ClearLocomotion();
         ResetVisualDiagnostics();

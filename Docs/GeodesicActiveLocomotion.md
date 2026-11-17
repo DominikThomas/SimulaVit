@@ -2,13 +2,13 @@
 
 For the seed-283 probability, lineage-selection and effective-steering investigation,
 see [GeodesicLocomotionEvolutionAudit.md](GeodesicLocomotionEvolutionAudit.md).
-It records the later managed validation and the native ecological verification limit.
+The follow-up [food-sensing audit](GeodesicFoodTaxisAudit.md) records successful
+native food-gradient/ecology tests and a matched fixed-step seed-283 world pair.
 
 The original milestone was implemented on `codex/geodesic-biology-parity` and
 verified by source inspection, a C# 9 Roslyn syntax parse and `git diff --check`.
-The later audit above adds managed tests and native ecological fixtures; the
-ecological fixtures still require successful Unity execution. No ecological
-advantage or performance claim follows from the source inspection alone.
+The later audits add managed tests and completed native ecological measurements.
+No ecological advantage or performance claim follows from source inspection alone.
 
 ## Integration and files
 
