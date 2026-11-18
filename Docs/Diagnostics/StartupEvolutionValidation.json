@@ -1,0 +1,92 @@
+{
+  "source_baseline": "e9b4b66",
+  "production_and_EditMode_assemblies_compiled": true,
+  "managed_selected": {
+    "passed": 55,
+    "failed": 0
+  },
+  "managed_food": {
+    "passed": 20,
+    "failed": 0
+  },
+  "native_startup_evolution": {
+    "passed": 10,
+    "failed": 0,
+    "skipped": 0
+  },
+  "native_regressions": {
+    "total": "659",
+    "passed": "642",
+    "failed": "17",
+    "skipped": "0",
+    "start-time": "2026-11-18 08:35:01Z",
+    "end-time": "2026-11-18 08:35:12Z"
+  },
+  "baseline_failure_names_identical": true,
+  "baseline_failure_names": [
+    "GeodesicBiologyRuntimeTests.FixedPassiveTickPreservesDisplacementWithinDocumentedTolerance",
+    "GeodesicBiologyRuntimeTests.VerticalScheduleIsDeterministicAndFinite",
+    "GeodesicDrainageDeliveryIntegrationTests.DiagnosticsRunOnceAfterFinalPassAndDoNotChangeHydrologyOrMeshes",
+    "GeodesicHydrologyTerrainIntegrationTests.RiverOnlyTogglePreservesMeshOceanSeaLevelAndPausedLakesAndRestoresOff(FineDetailRemoved)",
+    "GeodesicHydrologyTerrainIntegrationTests.RiverOnlyTogglePreservesMeshOceanSeaLevelAndPausedLakesAndRestoresOff(ReducedRidgeAndFineDetail)",
+    "GeodesicInlandUpliftIntegrationTests.StartupDefaultMissingFieldsRoundTripAndResets",
+    "GeodesicInlandUpliftTests.NoCoastProducesNoUpliftAndInvalidMagnitudeIsSafe",
+    "GeodesicLakeIntegrationTests.TinRenderDrainageUsesActiveTopologyWithoutChangingTerrain",
+    "GeodesicOceanIntegrationTests.SameSeedFilterTogglePreservesTerrainAndRemovesMarineHabitat",
+    "GeodesicRiverGradeTests.DownhillTerracesAndTwoMicroUnitRisesAreAlreadyAccepted",
+    "GeodesicRiverThresholdStartupTests.StartupThresholdsReachFirstBuildAndOnlyChangeRiverQualification",
+    "GeodesicRiverUphillDebugIntegrationTests.OffOnOffPreservesAcceptedMeshColoursRunoffTopologyMouthsLakesAndTerrain(False)",
+    "GeodesicRiverUphillDebugIntegrationTests.OffOnOffPreservesAcceptedMeshColoursRunoffTopologyMouthsLakesAndTerrain(True)",
+    "GeodesicTinSurfaceTests.SphereCoastUsesExactCompletedFacetAndProjectedPathRemainsDownhill",
+    "PlanetResourceMapMathTests.AddAndGet_IgnoreInvalidCellIndices",
+    "PlanetResourceMapMathTests.Add_ClampsAtZero_WhenApplyingNegativeDelta",
+    "ReplicatorManagerLifecycleTests.WorldClock_RemainsRunnableAcrossRepeatedBiologyDeinitialization"
+  ],
+  "native_ui_cases": [
+    {
+      "name": "SimulationStartupEvolutionTests.EditedProbabilitiesSurviveActualFileSaveAndFreshControllerLoad(0.2f,0.4f)",
+      "result": "Passed"
+    },
+    {
+      "name": "SimulationStartupEvolutionTests.EditedProbabilitiesSurviveActualFileSaveAndFreshControllerLoad(0.0f,0.4f)",
+      "result": "Passed"
+    },
+    {
+      "name": "SimulationStartupEvolutionTests.EditedProbabilitiesSurviveActualFileSaveAndFreshControllerLoad(0.2f,0.0f)",
+      "result": "Passed"
+    },
+    {
+      "name": "SimulationStartupEvolutionTests.GeodesicFieldsAcceptInputAndActualSaveLoadRestoresThem",
+      "result": "Passed"
+    },
+    {
+      "name": "SimulationStartupEvolutionTests.LegacyEvolutionKeepsEveryExistingTransitionAndBiomassControlEditable",
+      "result": "Passed"
+    },
+    {
+      "name": "SimulationStartupEvolutionTests.ResetUsesConfiguredDefaultsAndExistingNormalizationHandlesInvalidInputs",
+      "result": "Passed"
+    },
+    {
+      "name": "SimulationStartupEvolutionTests.StartupSelectionReachesEffectiveManagerControlsBeforeActualGeodesicBirths(0.2f,0.4f,True)",
+      "result": "Passed"
+    },
+    {
+      "name": "SimulationStartupEvolutionTests.StartupSelectionReachesEffectiveManagerControlsBeforeActualGeodesicBirths(0.0f,1.0f,False)",
+      "result": "Passed"
+    },
+    {
+      "name": "SimulationStartupEvolutionTests.StartupSelectionReachesEffectiveManagerControlsBeforeActualGeodesicBirths(1.0f,0.0f,False)",
+      "result": "Passed"
+    },
+    {
+      "name": "SimulationStartupEvolutionTests.UnsupportedGeodesicControlsIgnoreInputAndPreserveExistingValues",
+      "result": "Passed"
+    }
+  ],
+  "user_startup_file_byte_identical": true,
+  "user_startup_SHA256": "EBD39B23AAD0181D4D7AE356AC5A14E61D3658306CC72A0E52BA4ED40CFF5D0C",
+  "saved_schema_version": 23,
+  "writer_scope": "Only disposable Temp/StartupEvolutionAudit test paths may be written; normal startup path is blocked.",
+  "raw_xml": "Temp/SulfurAudit/regressions-results.xml"
+}

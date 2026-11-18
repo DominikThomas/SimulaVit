@@ -257,8 +257,8 @@ public partial class SimulationStartupController
             : "Energy costs and biomass thresholds retain the existing division gates. Legacy population limits apply to initial/spontaneous spawning and reproduction.");
 
         SetupSection("Evolution");
-        if (!IsGeodesicSetup) DrawLegacyEvolution(b);
-        else SetupHelp("Geodesic offspring currently inherit their parent's single metabolism. General metabolism mutation, transition probabilities and biomass mutation operate only in Legacy Cube Sphere.");
+        DrawMetabolicEvolution(b);
+        SetupSection("Locomotion evolution");
         SetupFloat("Locomotion mutation chance / birth", ref b.locomotionMutationChance, 0f, 1f);
         SetupFloat("Locomotion upgrade probability", ref b.locomotionUpgradeChance, 0f, 1f);
         SetupFloat("Anchoring mutation probability", ref b.locomotionAnchoredMutationChance, 0f, 1f);
@@ -267,9 +267,10 @@ public partial class SimulationStartupController
         GUI.enabled = enabled && b.allowAnchoredToAmoeboidMutation;
         SetupFloat("Anchored → amoeboid probability", ref b.anchoredToAmoeboidMutationChance, 0f, 1f);
         GUI.enabled = enabled;
+        if (IsGeodesicSetup) SetupHelp("Existing locomotion diagnostic mutation overrides, if enabled in the Inspector, still take precedence over the normal mutation chance.");
+        SetupSection("Temperature adaptation");
         SetupFloat("Temperature adaptation mutation chance", ref b.tempMutationChance, 0f, 1f);
         SetupFloat("Temperature mutation scale (K)", ref b.tempMutationScale);
-        if (IsGeodesicSetup) SetupHelp("Existing locomotion diagnostic mutation overrides, if enabled in the Inspector, still take precedence over the normal mutation chance.");
 
         SetupSection("Initial / inherited temperature preferences");
         SetupHelp("Editable in °C; stored in Kelvin. These ranges seed temperature traits, not absolute species-wide survival limits. Offspring retain the current inheritance and adaptation behavior. Reversed endpoints are ordered when editing finishes.");
@@ -301,20 +302,35 @@ public partial class SimulationStartupController
         // section methods here. No placeholder controls or changes to oxygen mechanics.
     }
 
-    private void DrawLegacyEvolution(SimulationStartupBiologyConfig b)
+    private void DrawMetabolicEvolution(SimulationStartupBiologyConfig b)
     {
+        SetupSection("Metabolic evolution");
         SetupFloat("General metabolism mutation chance", ref b.metabolismMutationChance, 0f, 1f);
+        SetupFloat("Hydrogen → sulfur chemosynthesis probability", ref b.hydrogenToSulfurMutationChance, 0f, 1f);
+        SetupHelp(IsGeodesicSetup
+            ? "General metabolism mutation chance is checked first. Hydrogen → Sulfur is a subsequent conditional roll; local H2S and CO2 requirements must also be satisfied in the child's habitat. Only this metabolic transition is implemented for geodesic offspring."
+            : "For Hydrogen → Sulfur, general metabolism mutation chance is checked first, followed by the conditional sulfur roll. Earlier transition checks, unlocks and local resource requirements still apply; other legacy transitions retain their existing ordering and gates.");
+
+        SetupSection("Other metabolic transitions");
+        if (IsGeodesicSetup) SetupHelp("Not yet implemented in geodesic evolution. These settings are inactive here and retained for Legacy Cube Sphere.");
+        bool enabled = GUI.enabled;
+        GUI.enabled = enabled && !IsGeodesicSetup;
         SetupFloat("Hydrogen → photosynthesis probability", ref b.hydrogenToPhotosynthesisMutationChance, 0f, 1f);
         SetupFloat("Hydrogen → saprotrophy probability", ref b.hydrogenToSaprotrophyMutationChance, 0f, 1f);
-        SetupFloat("Hydrogen → sulfur probability", ref b.hydrogenToSulfurMutationChance, 0f, 1f);
         SetupFloat("Hydrogen → fermentation probability", ref b.hydrogenToFermentationMutationChance, 0f, 1f);
         SetupFloat("Fermentation → methanogenesis probability", ref b.fermentationToMethanogenesisMutationChance, 0f, 1f);
         SetupFloat("Hydrogen → methanotrophy probability", ref b.hydrogenToMethanotrophyMutationChance, 0f, 1f);
         SetupFloat("Saprotrophy mutation chance", ref b.saprotrophyMutationChance, 0f, 1f);
         SetupFloat("Predator mutation chance", ref b.predatorMutationChance, 0f, 1f);
+        GUI.enabled = enabled;
+
+        SetupSection("Biomass mutation");
+        if (IsGeodesicSetup) SetupHelp("Not yet implemented in geodesic biology. Offspring inherit their parent's biomass target; these mutation settings apply only to Legacy Cube Sphere.");
+        GUI.enabled = enabled && !IsGeodesicSetup;
         SetupFloat("Biomass mutation chance", ref b.biomassMutationChance, 0f, 1f);
         SetupFloat("Biomass mutation scale", ref b.biomassMutationScale);
-        SetupHelp("Existing resource gates, predator enablement and transition ordering still apply. Legacy metabolism-changing births use the destination template; same-metabolism births inherit the parent's thermal traits, then mutate them.");
+        GUI.enabled = enabled;
+        if (!IsGeodesicSetup) SetupHelp("Legacy metabolism-changing births use the destination template; same-metabolism births inherit the parent's thermal traits, then mutate them.");
     }
 
     private void DrawMetabolismParameters(SimulationStartupBiologyConfig b)

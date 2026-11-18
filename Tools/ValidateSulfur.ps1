@@ -4,6 +4,9 @@ param(
     [string]$NativeProject,
     [switch]$World,
     [switch]$Regressions,
+    [string]$TestFilter,
+    [switch]$AllowStartupTestFiles,
+    [switch]$Graphics,
     [string]$UnityEditor = 'C:\Program Files\Unity\Hub\Editor\6000.3.19f1\Editor\Unity.exe'
 )
 $ErrorActionPreference = 'Stop'
@@ -33,10 +36,13 @@ $startupSource = Join-Path $resolved 'Assets/Scripts/Core/Startup/SimulationStar
 $startupText = [IO.File]::ReadAllText($startupSource)
 $writerPattern = 'private void SaveStartupConfig\(SimulationStartupConfig config\)\s*\{'
 if ([regex]::Matches($startupText, $writerPattern).Count -ne 1) { throw 'Could not isolate the validation startup writer.' }
-$startupText = [regex]::Replace($startupText, $writerPattern, '$0' + [Environment]::NewLine + '        if (Application.isBatchMode) return; // Disposable validation copy only.')
+$writeGuard = if ($AllowStartupTestFiles -or $Regressions) {
+    '        if (Application.isBatchMode && !Path.GetFullPath(SavedStartupConfigPath).StartsWith(Path.GetFullPath(Path.Combine(Application.dataPath, "../Temp/StartupEvolutionAudit")) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) return; // Disposable validation copy: only isolated startup test files may be written.'
+} else { '        if (Application.isBatchMode) return; // Disposable validation copy only.' }
+$startupText = [regex]::Replace($startupText, $writerPattern, '$0' + [Environment]::NewLine + $writeGuard)
 [IO.File]::WriteAllText($startupSource, $startupText)
-$label = if ($World) { 'world' } elseif ($Regressions) { 'regressions' } else { 'sulfur' }
-$filter = if ($World) { '^GeodesicSulfur' }
+$label = if ($TestFilter) { 'filtered' } elseif ($World) { 'world' } elseif ($Regressions) { 'regressions' } else { 'sulfur' }
+$filter = if ($TestFilter) { $TestFilter } elseif ($World) { '^GeodesicSulfur' }
     elseif ($Regressions) {
         $fixtures = Get-ChildItem (Join-Path $repo 'Assets/Tests/EditMode') -Filter '*.cs' |
             Where-Object { $_.BaseName -notmatch 'WorldExperiments|FoodAlternatives' } |
@@ -46,9 +52,10 @@ $filter = if ($World) { '^GeodesicSulfur' }
     else { '^GeodesicSulfur(Runtime|Ecology)Tests' }
 $result = Join-Path $output "$label-results.xml"
 $log = Join-Path $output "$label.log"
-$arguments = @('-batchmode','-nographics','-projectPath',('"'+$resolved+'"'),
+$arguments = @('-batchmode','-projectPath',('"'+$resolved+'"'),
     '-runTests','-testPlatform','EditMode','-assemblyNames','SimulaVit.EditModeTests',
     '-testFilter',('"'+$filter+'"'),'-testResults',('"'+$result+'"'),'-logFile',('"'+$log+'"'))
+if (!$Graphics) { $arguments += '-nographics' }
 $process = Start-Process -FilePath $UnityEditor -ArgumentList $arguments -WindowStyle Hidden -PassThru
 $process.Id | Set-Content -LiteralPath (Join-Path $output "$label-process-id.txt")
 Write-Output "Started native $label run, process $($process.Id). Results: $result. This is not yet a completed test result."
