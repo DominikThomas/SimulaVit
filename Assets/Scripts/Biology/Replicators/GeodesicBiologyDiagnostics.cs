@@ -218,7 +218,8 @@ public sealed class GeodesicBiologyDiagnostics
         GeodesicOceanResource product, double requestedA, double requestedB, double inputA, double inputB,
         double output, double ratioA, double ratioB, double ratioProduct, float desiredStore,
         float storeBefore, float storeAfter, float awardedEnergy, double energyDelta, bool achieved,
-        double competedInputA = -1d, double competedInputB = -1d)
+        double competedInputA = -1d, double competedInputB = -1d,
+        GeodesicOceanResource secondaryProduct = default, double secondaryOutput = 0d, double ratioSecondary = 1d)
     {
         ref ReactionAccounting totals = ref reactions[(int)metabolism];
         totals.requests++;
@@ -228,14 +229,16 @@ public sealed class GeodesicBiologyDiagnostics
         totals.competedInputs.Add(b, competedInputB >= 0d ? competedInputB : inputB);
         totals.plannedInputs.Add(a, inputA); totals.plannedInputs.Add(b, inputB);
         totals.definedProducts.Add(product, output);
+        totals.definedProducts.Add(secondaryProduct,secondaryOutput);
         Attribute(ref totals.attributedInputs, ref totals.netOnlyInputs, a, inputA, ratioA);
         Attribute(ref totals.attributedInputs, ref totals.netOnlyInputs, b, inputB, ratioB);
         Attribute(ref totals.attributedProducts, ref totals.netOnlyProducts, product, output, ratioProduct);
+        Attribute(ref totals.attributedProducts,ref totals.netOnlyProducts,secondaryProduct,secondaryOutput,ratioSecondary);
 
         double stored = (double)storeAfter - storeBefore;
         // Reproduce only the existing float addition for observation; never write the result back.
         double unclampedDelta = (double)(storeBefore + desiredStore) - storeBefore;
-        double modelInput = Carbon(a, inputA) + Carbon(b, inputB), modelOutput = Carbon(product, output);
+        double modelInput = Carbon(a, inputA) + Carbon(b, inputB), modelOutput = Carbon(product, output) + Carbon(secondaryProduct,secondaryOutput);
         double modelResidual = modelInput - modelOutput - desiredStore;
         double plannedResidual = modelInput - modelOutput - stored;
         totals.requestedStore += desiredStore; totals.storedCarbon += stored;
@@ -252,12 +255,12 @@ public sealed class GeodesicBiologyDiagnostics
             totals.zeroMeasuredInputWithEnergy++;
 
         bool carbonKnown = KnownCarbon(a, inputA, ratioA) && KnownCarbon(b, inputB, ratioB)
-            && KnownCarbon(product, output, ratioProduct);
+            && KnownCarbon(product, output, ratioProduct) && KnownCarbon(secondaryProduct,secondaryOutput,ratioSecondary);
         if (!carbonKnown) totals.unattributedCarbonReactions++;
         else
         {
             double actualInput = AttributedCarbon(a, inputA, ratioA) + AttributedCarbon(b, inputB, ratioB);
-            double actualOutput = AttributedCarbon(product, output, ratioProduct);
+            double actualOutput = AttributedCarbon(product, output, ratioProduct) + AttributedCarbon(secondaryProduct,secondaryOutput,ratioSecondary);
             double residual = actualInput - actualOutput - stored;
             totals.measuredCarbonResidual += residual;
             if (Finite(residual)) totals.maxAbsMeasuredCarbonResidual = Math.Max(totals.maxAbsMeasuredCarbonResidual, Math.Abs(residual));

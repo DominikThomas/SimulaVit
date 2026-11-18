@@ -1,5 +1,7 @@
 # Startup Biology: metabolic evolution controls
 
+Later milestone: [Fermentation restoration](GeodesicFermentationParity.md) activates Hydrogen → Fermentation, its reaction parameters and its thermal template in geodesic mode. The earlier unsupported-fermentation entries below describe the prior UI.
+
 The Biology tab now exposes the existing general metabolism mutation chance and Hydrogen → Sulfur conditional probability in both grid modes. Values are read from and edited directly in `currentConfig.biology`; they remain probabilities in the existing 0–1 representation.
 
 The Evolution area has separate Metabolic evolution, Other metabolic transitions, Biomass mutation, Locomotion evolution and Temperature adaptation groups. Inactive geodesic settings remain visible and disabled with a “Not yet implemented” explanation. Their saved values are retained for legacy mode. No new configuration field, version change, default change or runtime algorithm is introduced.

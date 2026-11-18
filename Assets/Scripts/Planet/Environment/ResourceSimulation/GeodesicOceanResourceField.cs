@@ -922,6 +922,24 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
         return transfer;
     }
     internal double VentH2Rate => physicalVentH2InventoryRatePerSecond;
+    internal GeodesicFermentationBalance.Transfer CommitFermentation(int node, double extent, double need,
+        float energy, float assimilation, float store, float maximumStore)
+    {
+        int organic = (int)GeodesicOceanResource.OrganicC * nodeCapacity + node;
+        int co2 = (int)GeodesicOceanResource.CO2 * nodeCapacity + node;
+        int h2 = (int)GeodesicOceanResource.H2 * nodeCapacity + node;
+        var t = GeodesicFermentationBalance.PlanCommit(concentrationsByResourceThenNode[organic],
+            concentrationsByResourceThenNode[co2], concentrationsByResourceThenNode[h2],
+            sourceGrid.PhysicalLayerVolumeKm3[node], extent, need, energy, assimilation, store, maximumStore);
+        if (t.status != GeodesicHydrogenotrophyBalance.CommitStatus.Committed) return t;
+        concentrationsByResourceThenNode[organic] = t.organicAfter;
+        concentrationsByResourceThenNode[co2] = t.co2After;
+        concentrationsByResourceThenNode[h2] = t.h2After;
+        resourceMayHaveSpatialVariation[(int)GeodesicOceanResource.OrganicC] = true;
+        resourceMayHaveSpatialVariation[(int)GeodesicOceanResource.CO2] = true;
+        resourceMayHaveSpatialVariation[(int)GeodesicOceanResource.H2] = true;
+        return t;
+    }
     internal double VentH2SRate => physicalVentH2SInventoryRatePerSecond;
     internal double VentCO2Rate => physicalVentCO2InventoryRatePerSecond;
     internal double VentFe2Rate => physicalVentFe2InventoryRatePerSecond;

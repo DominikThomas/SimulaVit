@@ -158,7 +158,7 @@ public sealed partial class GeodesicBiologyRuntime
         if (!hadMemory) { abInitialSenses++; return; }
         if (!ValidABSignal(current) || !ValidABSignal(previous)) { abInvalidComparisons++; return; }
         if (steeringSettings.ActiveMovementMetabolismSuitabilityEnabled && metabolism != MetabolismType.Hydrogenotrophy
-            && metabolism != MetabolismType.SulfurChemosynthesis)
+            && metabolism != MetabolismType.SulfurChemosynthesis && metabolism != MetabolismType.Fermentation)
         { abUnsupportedComparisons++; return; }
         bool changedCell = current.cell != previous.cell, changedLayer = current.layer != previous.layer;
         int category = (changedCell ? 1 : 0) + (changedLayer ? 2 : 0);

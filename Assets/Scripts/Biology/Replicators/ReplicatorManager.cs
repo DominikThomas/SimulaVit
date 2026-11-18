@@ -1042,6 +1042,9 @@ public class ReplicatorManager : MonoBehaviour
             anaerobeO2InhibitionEnabled && anaerobeO2InhibitionAffectsSulfurChemosynthesis,
             anaerobeO2MinEfficiencySulfurChemosynthesis, metabolismMutationChance, hydrogenToSulfurMutationChance,
             mutationGateMinH2S, mutationGateMinCO2, sulfurChemoTempRange, defaultLethalMargin);
+        geodesicBiology.SetFermentationControls(fermentationOrganicCPerTick,fermentationEnergyPerTick,fermentationAssimilationFraction,
+            anaerobeO2InhibitionEnabled && anaerobeO2InhibitionAffectsFermentation,anaerobeO2MinEfficiencyFermentation,
+            hydrogenToFermentationMutationChance,mutationGateMinOrganicC,fermentationTempRange,defaultLethalMargin);
         geodesicBiology.SetLocomotionSettings(geodesicLocomotion, CreateSteeringSettings(), moveSpeed,
             amoeboidMoveSpeedMultiplier, flagellumMoveSpeedMultiplier, amoeboidTurnRate, flagellumTurnRate,
             locomotionMutationChance, locomotionUpgradeChance, locomotionAnchoredMutationChance,

@@ -35,13 +35,23 @@ public sealed partial class GeodesicBiologyRuntime
     public string DescribeResolvedSulfurControls(float co2, float h2s, float energy, float comfort, float stress) => FormattableString.Invariant(
         $"[GeodesicSulfurConfig] CO2PerTick={co2:G9} H2SPerTick={h2s:G9} energyPerTick={energy:G9} referenceTickSeconds={ReferenceTickSeconds:G9} configuredStoreFraction={sulfurActivity:G9} policy=wholeReactionActivity allWithdrawnCO2Stored=true capacityLimited=true atomicMeasuredInputs=true S0=suspendedMeasuredH2S oxygenInhibition={sulfurO2Inhibition} O2Comfort/Stress/Floor={comfort:G9}/{stress:G9}/{sulfurO2Floor:G9} mutationOuter/Inner={metabolicMutationChance:G9}/{hydrogenSulfurChance:G9} perEligibleBirth={metabolicMutationChance * hydrogenSulfurChance:G9} gateH2S/CO2={sulfurGateH2S:G9}/{sulfurGateCO2:G9} gateUnits=localConcentration temperatureRangeK={sulfurTemperatureRange.x:G9}/{sulfurTemperatureRange.y:G9} lethalMarginK={sulfurLethalMargin:G9} childHabitat=inherited noDirectO2Damage=true");
 
-    private void MutateChildMetabolism(Replicator child, MetabolismType parentMetabolism)
+    private void MutateChildMetabolism(Replicator child, MetabolismType parentMetabolism, float inheritedCarbon)
     {
-        if (parentMetabolism != MetabolismType.Hydrogenotrophy || metabolicMutationChance <= 0f || hydrogenSulfurChance <= 0f) return;
-        // Dedicated stream: enabling this edge does not draw from movement, birth, or thermal RNG.
-        if (metabolismMutationRandom == null) metabolismMutationRandom = new System.Random(unchecked(biologySeed ^ 0x53554C46));
-        if (metabolismMutationRandom.NextDouble() >= metabolicMutationChance
-            || metabolismMutationRandom.NextDouble() >= hydrogenSulfurChance) return;
+        if (parentMetabolism != MetabolismType.Hydrogenotrophy || metabolicMutationChance <= 0f) return;
+        if (hydrogenSulfurChance > 0f)
+        {
+            // Exactly the previous sulfur stream and short-circuit draw order.
+            if (metabolismMutationRandom == null) metabolismMutationRandom = new System.Random(unchecked(biologySeed ^ 0x53554C46));
+            if (metabolismMutationRandom.NextDouble() >= metabolicMutationChance) return;
+            if (metabolismMutationRandom.NextDouble() >= hydrogenSulfurChance)
+            { TryMutateFermentationChild(child,inheritedCarbon); return; }
+            // A selected sulfur candidate suppresses fermentation even if its habitat gate fails.
+        }
+        else
+        {
+            if (hydrogenFermentationChance <= 0f || FermentationRandom.NextDouble() >= metabolicMutationChance) return;
+            TryMutateFermentationChild(child,inheritedCarbon); return;
+        }
         sulfurMutationAttempts++;
         int cell = child.geodesicCellIndex, layer = child.currentOceanLayerIndex;
         int block = -1;

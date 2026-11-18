@@ -17,11 +17,11 @@ public sealed class SimulationStartupEvolutionTests
     internal const string General = "General metabolism mutation chance";
     internal const string Sulfur = "Hydrogen → sulfur chemosynthesis probability";
     private static readonly string[] InactiveLabels = {
-        "Hydrogen → photosynthesis probability", "Hydrogen → saprotrophy probability", "Hydrogen → fermentation probability",
+        "Hydrogen → photosynthesis probability", "Hydrogen → saprotrophy probability",
         "Fermentation → methanogenesis probability", "Hydrogen → methanotrophy probability", "Saprotrophy mutation chance", "Predator mutation chance",
         "Biomass mutation chance", "Biomass mutation scale" };
     private static readonly string[] InactiveFields = {
-        "hydrogenToPhotosynthesisMutationChance", "hydrogenToSaprotrophyMutationChance", "hydrogenToFermentationMutationChance",
+        "hydrogenToPhotosynthesisMutationChance", "hydrogenToSaprotrophyMutationChance",
         "fermentationToMethanogenesisMutationChance", "hydrogenToMethanotrophyMutationChance", "saprotrophyMutationChance", "predatorMutationChance",
         "biomassMutationChance", "biomassMutationScale" };
 
@@ -58,6 +58,8 @@ public sealed class SimulationStartupEvolutionTests
                 Assert.That(f.Controller.CurrentConfig.biology.hydrogenToSulfurMutationChance,Is.EqualTo(.003f));
                 float photosynthesisBefore=f.Controller.CurrentConfig.biology.hydrogenToPhotosynthesisMutationChance;
                 yield return Edit(window,General,"0.2"); yield return Edit(window,Sulfur,"0.4");
+                yield return Edit(window,"Hydrogen → fermentation probability","0.27");
+                Assert.That(f.Controller.CurrentConfig.biology.hydrogenToFermentationMutationChance,Is.EqualTo(.27f));
                 Assert.That(f.Controller.CurrentConfig.biology.metabolismMutationChance,Is.EqualTo(.2f));
                 Assert.That(f.Controller.CurrentConfig.biology.hydrogenToSulfurMutationChance,Is.EqualTo(.4f));
                 Assert.That(f.Controller.CurrentConfig.biology.hydrogenToPhotosynthesisMutationChance,Is.EqualTo(photosynthesisBefore));
@@ -68,6 +70,7 @@ public sealed class SimulationStartupEvolutionTests
                     Assert.That((bool)Call(restarted.Controller,"LoadSavedStartupConfig"),Is.True);
                     Assert.That(restarted.Controller.CurrentConfig.biology.metabolismMutationChance,Is.EqualTo(.2f));
                     Assert.That(restarted.Controller.CurrentConfig.biology.hydrogenToSulfurMutationChance,Is.EqualTo(.4f));
+                    Assert.That(restarted.Controller.CurrentConfig.biology.hydrogenToFermentationMutationChance,Is.EqualTo(.27f));
                 }
                 Assert.That(File.ReadAllText(f.Path),Does.Contain("\"version\": 23"));
             } finally { window.Close(); }
@@ -109,18 +112,38 @@ public sealed class SimulationStartupEvolutionTests
         }
     }
 
+    [UnityTest]
+    [Timeout(15000)]
+    public IEnumerator GeodesicFermentationParametersAreEditableAndPersistThroughTheExistingWriter()
+    {
+        RequireGraphics();
+        using(var f=new Fixture()) {
+            var window=ScriptableObject.CreateInstance<StartupEvolutionTestWindow>();
+            try {
+                window.Controller=f.Controller; window.DrawMethod="DrawMetabolismParameters"; Set(f.Controller,"selectedMetabolism",2);
+                window.position=new Rect(0,0,900,900); window.ShowUtility(); yield return Ready(window,false);
+                yield return Edit(window,"Organic carbon consumed / tick","0.031"); yield return Edit(window,"Energy parameter / reaction tick","0.63"); yield return Edit(window,"Carbon assimilation fraction","0.27");
+                var b=f.Controller.CurrentConfig.biology;
+                Assert.That(b.fermentationOrganicCPerTick,Is.EqualTo(.031f)); Assert.That(b.fermentationEnergyPerTick,Is.EqualTo(.63f)); Assert.That(b.fermentationAssimilationFraction,Is.EqualTo(.27f));
+                f.Controller.SaveCurrentStartupConfig();
+                using(var loaded=new Fixture()) { Set(loaded.Controller,"savedConfigFileName",f.Path); Assert.That((bool)Call(loaded.Controller,"LoadSavedStartupConfig"),Is.True);
+                    Assert.That(loaded.Controller.CurrentConfig.biology.fermentationOrganicCPerTick,Is.EqualTo(.031f)); Assert.That(loaded.Controller.CurrentConfig.biology.fermentationEnergyPerTick,Is.EqualTo(.63f)); Assert.That(loaded.Controller.CurrentConfig.biology.fermentationAssimilationFraction,Is.EqualTo(.27f)); }
+            } finally { window.Close(); }
+        }
+    }
+
     private static void RequireGraphics()
     {
         if(SystemInfo.graphicsDeviceType==UnityEngine.Rendering.GraphicsDeviceType.Null)
             Assert.Ignore("Native IMGUI input requires a graphics device; run ValidateSulfur.ps1 with -Graphics -AllowStartupTestFiles.");
     }
-    private static IEnumerator Ready(StartupEvolutionTestWindow window)
+    private static IEnumerator Ready(StartupEvolutionTestWindow window,bool checkMutationLabels=true)
     {
         double deadline=EditorApplication.timeSinceStartup+4d;
         while(window.Draws<2 && EditorApplication.timeSinceStartup<deadline) { window.Repaint(); yield return null; }
         Assert.That(window.Error,Is.Null); Assert.That(window.Draws,Is.GreaterThanOrEqualTo(2),"Native IMGUI must actually execute, not merely compile.");
         var labels=(Dictionary<string,GUIContent>)Get(window.Controller,"setupLabelContents");
-        Assert.That(labels.ContainsKey(General),Is.True); Assert.That(labels.ContainsKey(Sulfur),Is.True);
+        if(checkMutationLabels) { Assert.That(labels.ContainsKey(General),Is.True); Assert.That(labels.ContainsKey(Sulfur),Is.True); }
     }
     private static IEnumerator Edit(StartupEvolutionTestWindow window,string label,string text)
     {
@@ -163,7 +186,7 @@ public sealed class SimulationStartupEvolutionTests
             var planet=(PlanetGenerator)Get(f.runtime,"planet"); var manager=planet.gameObject.AddComponent<ReplicatorManager>();
             manager.planetGenerator=planet; Set(manager,"geodesicBiology",f.runtime); Set(manager,"agents",f.agents); Set(manager,"populationState",f.State);
             var b=new SimulationStartupBiologyConfig { metabolismMutationChance=general,hydrogenToSulfurMutationChance=sulfur,
-                hydrogenToPhotosynthesisMutationChance=1f,hydrogenToSaprotrophyMutationChance=1f,hydrogenToFermentationMutationChance=1f,
+                hydrogenToPhotosynthesisMutationChance=1f,hydrogenToSaprotrophyMutationChance=1f,hydrogenToFermentationMutationChance=0f,
                 hydrogenToMethanotrophyMutationChance=1f,saprotrophyMutationChance=1f,predatorMutationChance=1f,fermentationToMethanogenesisMutationChance=1f,
                 locomotionMutationChance=0f,tempMutationChance=0f,reproductionRate=2f,basalEnergyCostPerSecond=0f };
             // Inspector-like starting values must lose to the selected startup configuration.
@@ -182,6 +205,7 @@ public sealed class SimulationStartupEvolutionTests
 public sealed class StartupEvolutionTestWindow : EditorWindow
 {
     public SimulationStartupController Controller;
+    public string DrawMethod="DrawMetabolicEvolution";
     public string FocusLabel;
     public int Draws;
     public Exception Error;
@@ -191,7 +215,7 @@ public sealed class StartupEvolutionTestWindow : EditorWindow
         try {
             GUI.enabled=true;
             SimulationStartupEvolutionTests.Call(Controller,"EnsureStyles"); SimulationStartupEvolutionTests.Call(Controller,"EnsureSetupStyles");
-            GUILayout.BeginArea(new Rect(0,0,900,2000)); SimulationStartupEvolutionTests.Call(Controller,"DrawMetabolicEvolution",Controller.CurrentConfig.biology); GUILayout.EndArea();
+            GUILayout.BeginArea(new Rect(0,0,900,2000)); SimulationStartupEvolutionTests.Call(Controller,DrawMethod,Controller.CurrentConfig.biology); GUILayout.EndArea();
             if(FocusLabel!=null) GUI.FocusControl(FocusLabel);
             Draws++;
         } catch(Exception e) { Error=e.InnerException??e; }

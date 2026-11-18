@@ -21,4 +21,8 @@ public static class GeodesicFoodSignal
 
     public static double SulfurChemosynthesisTicks(double co2, double h2s, double volume, double needCo2, double needH2s)
         => HydrogenotrophyTicks(co2, h2s, volume, needCo2, needH2s);
+
+    public static double FermentationTicks(double organicC, double volume, double need)
+        => double.IsFinite(organicC) && organicC > 0d && double.IsFinite(volume) && volume > 0d
+            && double.IsFinite(need) && need > 0d ? organicC * volume / need : 0d;
 }

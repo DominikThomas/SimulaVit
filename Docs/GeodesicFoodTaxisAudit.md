@@ -1,5 +1,7 @@
 # Geodesic food sensing and steering audit — 17 November 2026
 
+Later milestone: [Fermentation restoration](GeodesicFermentationParity.md) adds one-resource local OrganicC readiness with individual thermal and O2 scaling. Hydrogen/sulfur signals and movement controls remain unchanged.
+
 Later milestone: [Sulfur restoration](GeodesicSulfurParity.md) extends production sensing to local CO2/H2S, individual temperature and configured O2 efficiency. Hydrogen sensing arithmetic and the hard-zero thermal limitation are unchanged. Earlier hydrogen-only scope statements below describe the audited baseline.
 
 ## Findings established before changing response or speed

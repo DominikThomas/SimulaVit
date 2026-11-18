@@ -1,0 +1,84 @@
+{
+  "source_baseline": "5296bbf",
+  "compiled_production_and_EditMode_tests": true,
+  "managed_selected": {
+    "passed": 55,
+    "failed": 0
+  },
+  "managed_food": {
+    "passed": 20,
+    "failed": 0
+  },
+  "native_final_regressions": {
+    "total": "694",
+    "passed": "677",
+    "failed": "17",
+    "skipped": "0",
+    "start-time": "2026-11-18 10:36:36Z",
+    "end-time": "2026-11-18 10:36:47Z"
+  },
+  "native_selected_fixtures": {
+    "GeodesicFermentationEcologyTests": {
+      "total": "7",
+      "passed": "7",
+      "failed": "0",
+      "skipped": "0"
+    },
+    "GeodesicFermentationRuntimeTests": {
+      "total": "28",
+      "passed": "28",
+      "failed": "0",
+      "skipped": "0"
+    },
+    "SimulationStartupEvolutionTests": {
+      "total": "11",
+      "passed": "11",
+      "failed": "0",
+      "skipped": "0"
+    }
+  },
+  "native_paired_world": {
+    "total": "1",
+    "passed": "1",
+    "failed": "0",
+    "start-time": "2026-11-18 10:09:11Z",
+    "end-time": "2026-11-18 10:21:18Z"
+  },
+  "baseline_failure_names_identical": true,
+  "baseline_failures": [
+    "GeodesicBiologyRuntimeTests.FixedPassiveTickPreservesDisplacementWithinDocumentedTolerance",
+    "GeodesicBiologyRuntimeTests.VerticalScheduleIsDeterministicAndFinite",
+    "GeodesicDrainageDeliveryIntegrationTests.DiagnosticsRunOnceAfterFinalPassAndDoNotChangeHydrologyOrMeshes",
+    "GeodesicHydrologyTerrainIntegrationTests.RiverOnlyTogglePreservesMeshOceanSeaLevelAndPausedLakesAndRestoresOff(FineDetailRemoved)",
+    "GeodesicHydrologyTerrainIntegrationTests.RiverOnlyTogglePreservesMeshOceanSeaLevelAndPausedLakesAndRestoresOff(ReducedRidgeAndFineDetail)",
+    "GeodesicInlandUpliftIntegrationTests.StartupDefaultMissingFieldsRoundTripAndResets",
+    "GeodesicInlandUpliftTests.NoCoastProducesNoUpliftAndInvalidMagnitudeIsSafe",
+    "GeodesicLakeIntegrationTests.TinRenderDrainageUsesActiveTopologyWithoutChangingTerrain",
+    "GeodesicOceanIntegrationTests.SameSeedFilterTogglePreservesTerrainAndRemovesMarineHabitat",
+    "GeodesicRiverGradeTests.DownhillTerracesAndTwoMicroUnitRisesAreAlreadyAccepted",
+    "GeodesicRiverThresholdStartupTests.StartupThresholdsReachFirstBuildAndOnlyChangeRiverQualification",
+    "GeodesicRiverUphillDebugIntegrationTests.OffOnOffPreservesAcceptedMeshColoursRunoffTopologyMouthsLakesAndTerrain(False)",
+    "GeodesicRiverUphillDebugIntegrationTests.OffOnOffPreservesAcceptedMeshColoursRunoffTopologyMouthsLakesAndTerrain(True)",
+    "GeodesicTinSurfaceTests.SphereCoastUsesExactCompletedFacetAndProjectedPathRemainsDownhill",
+    "PlanetResourceMapMathTests.AddAndGet_IgnoreInvalidCellIndices",
+    "PlanetResourceMapMathTests.Add_ClampsAtZero_WhenApplyingNegativeDelta",
+    "ReplicatorManagerLifecycleTests.WorldClock_RemainsRunnableAcrossRepeatedBiologyDeinitialization"
+  ],
+  "world_transaction_violation_maxima": {
+    "transferViolations": 0,
+    "inputTransferViolations": 0,
+    "zeroMeasuredInputWithEnergy": 0
+  },
+  "paired_config_differences": [
+    "biology.hydrogenToFermentationMutationChance"
+  ],
+  "resolved_fermentation_probability": 0.020000001415610313,
+  "user_confirmed_probability_change": {
+    "from": 0.3,
+    "to": 0.02,
+    "action": "kept newer value; no restore performed"
+  },
+  "final_user_settings_equal_native_pretrial_bytes": true,
+  "final_user_settings_SHA256": "1FB367D83097FFCBE4B764D788E38545316E7F6E2F503F55F87B87BD30E21532",
+  "raw_results": "Temp/FermentationAudit/native-world-results.xml; Temp/SulfurAudit/regressions-results.xml"
+}

@@ -60,7 +60,6 @@ public sealed class GeodesicFoodGradientTests
     [TestCase(MetabolismType.Methanotrophy, true)]
     [TestCase(MetabolismType.Photosynthesis, true)]
     [TestCase(MetabolismType.Saprotrophy, false)]
-    [TestCase(MetabolismType.Fermentation, false)]
     [TestCase(MetabolismType.Predation, false)]
     public void AuditOtherMetabolismsWithoutPretendingHydrogenSensingSupportsThem(MetabolismType metabolism, bool reactionDefined)
     {

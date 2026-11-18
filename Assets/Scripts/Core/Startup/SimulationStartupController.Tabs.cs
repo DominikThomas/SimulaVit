@@ -274,13 +274,13 @@ public partial class SimulationStartupController
 
         SetupSection("Initial / inherited temperature preferences");
         SetupHelp("Editable in °C; stored in Kelvin. These ranges seed temperature traits, not absolute species-wide survival limits. Offspring retain the current inheritance and adaptation behavior. Reversed endpoints are ordered when editing finishes.");
-        if (IsGeodesicSetup) SetupHelp("Normal geodesic founders use the hydrogenotrophy range. Other metabolism templates are shown for reference and remain editable in legacy mode; geodesic offspring inherit their own temperature traits.");
+        if (IsGeodesicSetup) SetupHelp("Hydrogenotrophy seeds geodesic founders. New sulfur and fermentation mutants use their metabolism template before individual thermal mutation; descendants inherit and adapt their own traits. Other templates apply to legacy evolution.");
         SetupTemperatureRange("Hydrogenotrophy", ref b.hydrogenTempRange, true);
-        SetupTemperatureRange("Sulfur chemosynthesis", ref b.sulfurChemoTempRange, !IsGeodesicSetup);
+        SetupTemperatureRange("Sulfur chemosynthesis", ref b.sulfurChemoTempRange, true);
         SetupTemperatureRange("Photosynthesis", ref b.photoTempRange, !IsGeodesicSetup);
         SetupTemperatureRange("Saprotrophy", ref b.saproTempRange, !IsGeodesicSetup);
         SetupTemperatureRange("Predation", ref b.predatorTempRange, !IsGeodesicSetup);
-        SetupTemperatureRange("Fermentation", ref b.fermentationTempRange, !IsGeodesicSetup);
+        SetupTemperatureRange("Fermentation", ref b.fermentationTempRange, true);
         SetupTemperatureRange("Methanogenesis", ref b.methanogenesisTempRange, !IsGeodesicSetup);
         SetupTemperatureRange("Methanotrophy", ref b.methanotrophyTempRange, !IsGeodesicSetup);
         SetupFloat("Initial lethal temperature margin (K)", ref b.defaultLethalMargin, 1f);
@@ -307,9 +307,10 @@ public partial class SimulationStartupController
         SetupSection("Metabolic evolution");
         SetupFloat("General metabolism mutation chance", ref b.metabolismMutationChance, 0f, 1f);
         SetupFloat("Hydrogen → sulfur chemosynthesis probability", ref b.hydrogenToSulfurMutationChance, 0f, 1f);
+        SetupFloat("Hydrogen → fermentation probability", ref b.hydrogenToFermentationMutationChance, 0f, 1f);
         SetupHelp(IsGeodesicSetup
-            ? "General metabolism mutation chance is checked first. Hydrogen → Sulfur is a subsequent conditional roll; local H2S and CO2 requirements must also be satisfied in the child's habitat. Only this metabolic transition is implemented for geodesic offspring."
-            : "For Hydrogen → Sulfur, general metabolism mutation chance is checked first, followed by the conditional sulfur roll. Earlier transition checks, unlocks and local resource requirements still apply; other legacy transitions retain their existing ordering and gates.");
+            ? "General metabolism mutation chance is checked first. Sulfur is selected before fermentation; a selected sulfur attempt suppresses fermentation even if its habitat gate fails. Each transition has a subsequent conditional roll and local resource requirements. Inherited carbon can satisfy fermentation eligibility but is not fermentation food."
+            : "For Hydrogen → Sulfur or Fermentation, general metabolism mutation chance is checked first, followed by the ordered conditional rolls. Earlier transition checks, unlocks and local resource requirements still apply; other legacy transitions retain their existing ordering and gates.");
 
         SetupSection("Other metabolic transitions");
         if (IsGeodesicSetup) SetupHelp("Not yet implemented in geodesic evolution. These settings are inactive here and retained for Legacy Cube Sphere.");
@@ -317,7 +318,6 @@ public partial class SimulationStartupController
         GUI.enabled = enabled && !IsGeodesicSetup;
         SetupFloat("Hydrogen → photosynthesis probability", ref b.hydrogenToPhotosynthesisMutationChance, 0f, 1f);
         SetupFloat("Hydrogen → saprotrophy probability", ref b.hydrogenToSaprotrophyMutationChance, 0f, 1f);
-        SetupFloat("Hydrogen → fermentation probability", ref b.hydrogenToFermentationMutationChance, 0f, 1f);
         SetupFloat("Fermentation → methanogenesis probability", ref b.fermentationToMethanogenesisMutationChance, 0f, 1f);
         SetupFloat("Hydrogen → methanotrophy probability", ref b.hydrogenToMethanotrophyMutationChance, 0f, 1f);
         SetupFloat("Saprotrophy mutation chance", ref b.saprotrophyMutationChance, 0f, 1f);
@@ -336,7 +336,7 @@ public partial class SimulationStartupController
     private void DrawMetabolismParameters(SimulationStartupBiologyConfig b)
     {
         selectedMetabolism = GUILayout.SelectionGrid(selectedMetabolism, MetabolismNames, 2, buttonStyle, GUILayout.MinHeight(112f));
-        bool supported = selectedMetabolism != 2 && selectedMetabolism != 6 && selectedMetabolism != 7;
+        bool supported = selectedMetabolism != 6 && selectedMetabolism != 7;
         if (IsGeodesicSetup && !supported)
         {
             SetupHelp("This reaction is not implemented by geodesic biology. Its parameters remain available in Legacy Cube Sphere. No new reaction or mutation path is added by setup.");
@@ -363,12 +363,13 @@ public partial class SimulationStartupController
                     SetupFloat("Consumed CO2 stored as carbon (fraction)", ref b.chemosynthStoreFraction, 0f, 1f);
                     SetupFloat("Fallback store respiration carbon / tick", ref b.chemoRespirationCPerTick);
                 }
-                else SetupHelp("Geodesic sulfur carbon storage follows its existing fixed conversion; the legacy store fraction is not consumed.");
+                else SetupHelp("Geodesic sulfur uses its configured whole-reaction activity fraction, with all withdrawn CO2 stored within available capacity.");
                 break;
             case 2:
                 SetupFloat("Organic carbon consumed / tick", ref b.fermentationOrganicCPerTick);
                 SetupFloat("Energy parameter / reaction tick", ref b.fermentationEnergyPerTick);
                 SetupFloat("Carbon assimilation fraction", ref b.fermentationAssimilationFraction, 0f, 1f);
+                if (IsGeodesicSetup) SetupHelp("Dissolved OrganicC feeds fermentation. Unstored carbon returns as equal CO2 and H2 inventory; energy scales with the fermented portion. Inherited stored carbon permits mutation eligibility but is not consumed as food.");
                 break;
             case 3:
                 SetupFloat("H2 consumed / reaction tick", ref b.methanogenesisH2PerTick);

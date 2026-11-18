@@ -1,5 +1,7 @@
 # Geodesic biology parity audit
 
+Later milestone: [Fermentation restoration](GeodesicFermentationParity.md) adds reachable fermentation, conservative OrganicC consumption and CO2/H2 products, eligibility fallback, food sensing and executed ecology. Its fermentation status supersedes the older table below.
+
 Later milestone: [Sulfur chemosynthesis restoration](GeodesicSulfurParity.md) completes reachable sulfur evolution, conservative feeding, local O2 physiology, food taxis, yellow rendering and bounded telemetry. Its source audit and executed results supersede sulfur-related missing/partial entries below.
 
 Source audit of `345ec6535fa14651840a552e1beaaa07f5ebb256`. No runtime behavior was changed or validated by execution.
