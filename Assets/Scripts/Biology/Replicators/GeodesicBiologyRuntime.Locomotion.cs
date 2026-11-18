@@ -18,7 +18,7 @@ public sealed partial class GeodesicBiologyRuntime
     private System.Random locomotionMutationRandom;
     private float movementHydrogenCo2, movementHydrogenH2, movementO2Comfort, movementO2Stress, movementO2Floor;
     private bool movementO2Inhibition;
-    private struct MovementHabitatSample { public float h2, co2, o2; public double resourceReferenceTicks; }
+    private struct MovementHabitatSample { public float h2, h2s, co2, o2; public double resourceReferenceTicks, sulfurReferenceTicks; }
     private MovementHabitatSample[] movementSamples = Array.Empty<MovementHabitatSample>();
     private int[] movementSampleStamps = Array.Empty<int>();
     private float[] movementSafeAngles = Array.Empty<float>();
@@ -53,7 +53,7 @@ public sealed partial class GeodesicBiologyRuntime
     }
 
     public string DescribeResolvedLocomotionControls() => FormattableString.Invariant(
-        $"[GeodesicResolvedLocomotion] simTime={abSimulationTime:G9} authority=ReplicatorManager_after_startup_or_load_overrides steeringFlag={chemotacticSteeringEnabled} mode={(chemotacticSteeringEnabled ? "A" : "B")} ABObserverEnabled={chemotaxisABDiagnosticsEnabled} ABOverridesSteering=false foodSignalScope=Hydrogenotrophy_only metabolismAwareSensing={steeringSettings.ActiveMovementMetabolismSuitabilityEnabled} feedback={(chemotacticSteeringEnabled ? steeringSettings.ActiveMovementMetabolismSuitabilityEnabled ? "localTemporalMetabolicReadiness" : "localTemporalTemperature" : "neutralTumble_randomVerticalPersistence")} mutationOverride={locomotionSettings.mutationRateOverrideEnabled} effectiveMutation={(locomotionSettings.mutationRateOverrideEnabled ? locomotionSettings.diagnosticMutationChance : mutationChance):G9} upgrade={upgradeChance:G9} anchor={anchoredChance:G9} allowAnchoredRelease={allowAnchoredRelease} nestedRelease={anchoredReleaseChance:G9} angularSpeed(A/F)={ActiveAngularSpeed(LocomotionType.Amoeboid):G9}/{ActiveAngularSpeed(LocomotionType.Flagellum):G9} movementEnergyPerSecond(A/F)={locomotionSettings.amoeboidEnergyPerSecond:G9}/{locomotionSettings.flagellumEnergyPerSecond:G9} sensingSeconds(A/F)={steeringSettings.AmoeboidSenseInterval:G9}/{steeringSettings.FlagellumSenseInterval:G9}");
+        $"[GeodesicResolvedLocomotion] simTime={abSimulationTime:G9} authority=ReplicatorManager_after_startup_or_load_overrides steeringFlag={chemotacticSteeringEnabled} mode={(chemotacticSteeringEnabled ? "A" : "B")} ABObserverEnabled={chemotaxisABDiagnosticsEnabled} ABOverridesSteering=false foodSignalScope=Hydrogenotrophy_and_SulfurChemosynthesis metabolismAwareSensing={steeringSettings.ActiveMovementMetabolismSuitabilityEnabled} feedback={(chemotacticSteeringEnabled ? steeringSettings.ActiveMovementMetabolismSuitabilityEnabled ? "localTemporalMetabolicReadiness" : "localTemporalTemperature" : "neutralTumble_randomVerticalPersistence")} mutationOverride={locomotionSettings.mutationRateOverrideEnabled} effectiveMutation={(locomotionSettings.mutationRateOverrideEnabled ? locomotionSettings.diagnosticMutationChance : mutationChance):G9} upgrade={upgradeChance:G9} anchor={anchoredChance:G9} allowAnchoredRelease={allowAnchoredRelease} nestedRelease={anchoredReleaseChance:G9} angularSpeed(A/F)={ActiveAngularSpeed(LocomotionType.Amoeboid):G9}/{ActiveAngularSpeed(LocomotionType.Flagellum):G9} movementEnergyPerSecond(A/F)={locomotionSettings.amoeboidEnergyPerSecond:G9}/{locomotionSettings.flagellumEnergyPerSecond:G9} sensingSeconds(A/F)={steeringSettings.AmoeboidSenseInterval:G9}/{steeringSettings.FlagellumSenseInterval:G9}");
 
     private static float SafeMovementValue(float value, float fallback, float min, float max) =>
         GeodesicLocomotionSettings.Safe(value, fallback, min, max);
@@ -100,9 +100,11 @@ public sealed partial class GeodesicBiologyRuntime
             resources.TryGetConcentration(cell, layer, GeodesicOceanResource.H2, out float h2);
             resources.TryGetConcentration(cell, layer, GeodesicOceanResource.CO2, out float co2);
             resources.TryGetConcentration(cell, layer, GeodesicOceanResource.O2, out float o2);
+            resources.TryGetConcentration(cell, layer, GeodesicOceanResource.H2S, out float h2s);
             movementSamples[node] = new MovementHabitatSample
             {
                 h2 = SafeMovementValue(h2, 0f, 0f, float.MaxValue),
+                h2s = SafeMovementValue(h2s, 0f, 0f, float.MaxValue),
                 co2 = SafeMovementValue(co2, 0f, 0f, float.MaxValue),
                 o2 = SafeMovementValue(o2, 0f, 0f, float.MaxValue)
             };
@@ -111,6 +113,9 @@ public sealed partial class GeodesicBiologyRuntime
             double volume = grid.PhysicalLayerVolumeKm3[node];
             movementSamples[node].resourceReferenceTicks = GeodesicFoodSignal.HydrogenotrophyTicks(
                 movementSamples[node].co2, movementSamples[node].h2, volume, movementHydrogenCo2, movementHydrogenH2);
+            movementSamples[node].sulfurReferenceTicks = sulfurActivity > 0f
+                ? GeodesicFoodSignal.SulfurChemosynthesisTicks(movementSamples[node].co2,
+                    movementSamples[node].h2s, volume, movementSulfurCO2, movementSulfurH2S) : 0d;
             movementSampleStamps[node] = movementSampleGeneration;
         }
         return movementSamples[node];
@@ -143,6 +148,13 @@ public sealed partial class GeodesicBiologyRuntime
                 observation.oxygenEfficiency = movementO2Inhibition
                     ? CalculateAnaerobeO2Efficiency(sample.o2, movementO2Comfort, movementO2Stress, movementO2Floor) : 1f;
                 observation.reactionReadiness = GeodesicFoodSignal.Readiness(sample.resourceReferenceTicks,
+                    observation.performance, observation.oxygenEfficiency);
+                observation.suitability = BoundedReactionReadiness(observation.reactionReadiness);
+                break;
+            case MetabolismType.SulfurChemosynthesis:
+                observation.oxygenEfficiency = sulfurO2Inhibition
+                    ? CalculateAnaerobeO2Efficiency(sample.o2, movementO2Comfort, movementO2Stress, sulfurO2Floor) : 1f;
+                observation.reactionReadiness = GeodesicFoodSignal.Readiness(sample.sulfurReferenceTicks,
                     observation.performance, observation.oxygenEfficiency);
                 observation.suitability = BoundedReactionReadiness(observation.reactionReadiness);
                 break;

@@ -56,7 +56,6 @@ public sealed class GeodesicFoodGradientTests
     }
 
     [Serializable] private sealed class Support { public string metabolism; public bool reactionDefined; public double withoutRelevantFood, withRelevantFood; }
-    [TestCase(MetabolismType.SulfurChemosynthesis, true)]
     [TestCase(MetabolismType.Methanogenesis, true)]
     [TestCase(MetabolismType.Methanotrophy, true)]
     [TestCase(MetabolismType.Photosynthesis, true)]

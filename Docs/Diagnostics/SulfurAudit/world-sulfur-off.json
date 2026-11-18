@@ -1,0 +1,126 @@
+{
+    "mode": "sulfur-off",
+    "protocol": "fixed 1/30s: biology; sun; surface-temperature (ocean event); resource transport/chemistry",
+    "seed": 283,
+    "subdivision": 6,
+    "peakAmoeboid": 3271,
+    "finalPopulation": 10519,
+    "peakSulfur": 0,
+    "finalMetabolisms": [
+        0,
+        10519,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+    ],
+    "sulfurLocomotion": [
+        0,
+        0,
+        0,
+        0
+    ],
+    "sulfurParentBirths": [
+        0,
+        0,
+        0,
+        0
+    ],
+    "sulfurSampleSeconds": 0.0,
+    "sulfurViableSampleSeconds": 0.0,
+    "sulfurZeroPerformanceSamples": 0.0,
+    "sulfurH2SConcentrationSum": 0.0,
+    "sulfurO2Samples": 0,
+    "sulfurInhibitedSamples": 0,
+    "sulfurPrecisionRejected": 0,
+    "sulfurMeanO2Efficiency": 0.0,
+    "mutationAttempts": 0,
+    "mutationsAllowed": 0,
+    "mutationsBlocked": 0,
+    "sulfurBirths": 0,
+    "sulfurDeaths": 0,
+    "sulfurExtent": 0.0,
+    "sulfurCO2": 0.0,
+    "sulfurH2S": 0.0,
+    "sulfurEnergy": 0.0,
+    "sulfurCarbon": 0.0,
+    "sulfurS0": 0.0,
+    "h2sInventory": 2366.1037883074337,
+    "suspendedS0": 0.0,
+    "sedimentS0": 0.0,
+    "abioticS0": 0.0,
+    "abioticFeS": 14387.970012787791,
+    "seconds": 900.0,
+    "stepSeconds": 0.03333333507180214,
+    "firstHalfAnchored": -1.0,
+    "parentBirths": [
+        6428,
+        3253,
+        19,
+        851
+    ],
+    "deaths": [
+        52,
+        0,
+        0,
+        0
+    ],
+    "birthTransitions": [
+        6373,
+        54,
+        0,
+        1,
+        0,
+        3217,
+        35,
+        1,
+        0,
+        0,
+        19,
+        0,
+        0,
+        0,
+        0,
+        851
+    ],
+    "finalPhenotypes": [
+        6341,
+        3271,
+        54,
+        853
+    ],
+    "organismSeconds": [
+        1304615.6680410058,
+        430312.1224425249,
+        6734.40035122633,
+        46729.80243714899
+    ],
+    "viableSeconds": [
+        173170.0,
+        194720.0,
+        1747.0,
+        47175.0
+    ],
+    "unsuitableSeconds": [
+        1134755.0,
+        237296.0,
+        5014.0,
+        0.0
+    ],
+    "h2ConcentrationSeconds": [
+        3861.8805455488755,
+        598.1659962942853,
+        9.01420418479346,
+        55.42760357003131
+    ],
+    "sampledOrganismSeconds": [
+        1307925.0,
+        432016.0,
+        6761.0,
+        47175.0
+    ],
+    "resourceTransportTicks": 180,
+    "oceanSeconds": 900.0
+}

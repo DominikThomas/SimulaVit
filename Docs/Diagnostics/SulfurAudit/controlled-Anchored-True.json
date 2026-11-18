@@ -1,0 +1,19 @@
+{
+    "phenotype": "Anchored",
+    "habitat": "closed, finite CO2/H2S inventories; 350K; public production Step; seed 123456",
+    "mutations": true,
+    "finalHydrogen": 96,
+    "finalSulfur": 365,
+    "peakSulfur": 365,
+    "sulfurParentBirths": 356,
+    "seconds": 80.0,
+    "carbonResidual": 0.0,
+    "sulfurCarbon": 78.28816004097462,
+    "sulfurEnergy": 391.4408002048731,
+    "sulfurH2S": 39.14408002048731,
+    "sulfurS0": 39.14408002048731,
+    "mutationsAllowed": 9,
+    "mutationsBlocked": 1,
+    "sulfurBirths": 365,
+    "sulfurDeaths": 0
+}

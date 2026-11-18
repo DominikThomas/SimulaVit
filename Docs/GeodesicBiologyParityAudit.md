@@ -1,5 +1,7 @@
 # Geodesic biology parity audit
 
+Later milestone: [Sulfur chemosynthesis restoration](GeodesicSulfurParity.md) completes reachable sulfur evolution, conservative feeding, local O2 physiology, food taxis, yellow rendering and bounded telemetry. Its source audit and executed results supersede sulfur-related missing/partial entries below.
+
 Source audit of `345ec6535fa14651840a552e1beaaa07f5ebb256`. No runtime behavior was changed or validated by execution.
 
 **1. Branch and checkpoint**

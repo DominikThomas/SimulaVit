@@ -900,18 +900,25 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     internal GeodesicHydrogenotrophyBalance.Transfer CommitHydrogenotrophy(int node,
         double competedExtent, double co2PerTick, double h2PerTick, float energyPerTick,
         float storeBefore, float maximumStore)
+        => CommitCarbonFixation(node, GeodesicOceanResource.H2, competedExtent, co2PerTick,
+            h2PerTick, energyPerTick, storeBefore, maximumStore);
+
+    // Same measured two-input transaction for sulfur; registry coefficients are not runtime inputs.
+    internal GeodesicHydrogenotrophyBalance.Transfer CommitCarbonFixation(int node,
+        GeodesicOceanResource donor, double competedExtent, double co2PerTick, double donorPerTick,
+        float energyPerTick, float storeBefore, float maximumStore)
     {
         int co2 = (int)GeodesicOceanResource.CO2 * nodeCapacity + node;
-        int h2 = (int)GeodesicOceanResource.H2 * nodeCapacity + node;
+        int h2 = (int)donor * nodeCapacity + node;
         var transfer = GeodesicHydrogenotrophyBalance.PlanCommit(
             concentrationsByResourceThenNode[co2], concentrationsByResourceThenNode[h2],
-            sourceGrid.PhysicalLayerVolumeKm3[node], competedExtent, co2PerTick, h2PerTick,
+            sourceGrid.PhysicalLayerVolumeKm3[node], competedExtent, co2PerTick, donorPerTick,
             energyPerTick, storeBefore, maximumStore);
         if (transfer.status != GeodesicHydrogenotrophyBalance.CommitStatus.Committed) return transfer;
         concentrationsByResourceThenNode[co2] = transfer.co2After;
         concentrationsByResourceThenNode[h2] = transfer.h2After;
         resourceMayHaveSpatialVariation[(int)GeodesicOceanResource.CO2] = true;
-        resourceMayHaveSpatialVariation[(int)GeodesicOceanResource.H2] = true;
+        resourceMayHaveSpatialVariation[(int)donor] = true;
         return transfer;
     }
     internal double VentH2Rate => physicalVentH2InventoryRatePerSecond;

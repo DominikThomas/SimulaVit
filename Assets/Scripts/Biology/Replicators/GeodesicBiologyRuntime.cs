@@ -481,6 +481,7 @@ public sealed partial class GeodesicBiologyRuntime
         RefreshTemperatureCache();
         if (!hydrogenotrophyConfigLogged)
         {
+            Debug.Log(DescribeResolvedSulfurControls(sulfurCo2, sulfurH2s, sulfurEnergy, o2ComfortMax, o2StressMax));
             Debug.Log($"[GeodesicHydrogenotrophyConfig] H2PerTick={hydrogenH2:G6} CO2PerTick={hydrogenCo2:G6} EnergyPerCompletedTick={hydrogenEnergy:G6} WholeReactionActivityFraction={hydrogenStoreFraction:G6} CarbonAssimilationOfWithdrawnCO2=1 capacityLimited=true atomicMeasuredInputs=true BasalEnergyCostPerSecond={maintenance:G6} ReferenceTickSeconds={ReferenceTickSeconds:G6}");
             Debug.Log($"[GeodesicTemperatureConfig] authority=coarseOceanCellLayer dormancyFloor={temperatureSettings.DormancyFloor:G6} reproductionMinEfficiency={temperatureSettings.ReplicationMinEfficiency:G6} reproductionChance=rate*dt*performance directDamage={temperatureSettings.DirectDamageEnabled} coldExposureSeconds={temperatureSettings.ColdExposureDeathSeconds:G6} heatExposureSeconds={temperatureSettings.HeatExposureDeathSeconds:G6} recoveryPerSecond={temperatureSettings.ExposureRecoveryPerSecond:G6} extraStressMaintenanceMultiplier={temperatureSettings.StressMaintenanceMultiplier:G6} mutationChance={temperatureSettings.MutationChance:G6} mutationScaleK={temperatureSettings.MutationScale:G6} divisionEnergy=conservative-half-split");
             hydrogenotrophyConfigLogged = true;
@@ -497,6 +498,7 @@ public sealed partial class GeodesicBiologyRuntime
         state.EnsureMatchesAgentCount(agents);
         SetHydrogenotrophMovementInputs(hydrogenCo2, hydrogenH2, hydrogenO2InhibitionEnabled,
             o2ComfortMax, o2StressMax, hydrogenMinimumO2Efficiency);
+        movementSulfurCO2 = sulfurCo2; movementSulfurH2S = sulfurH2s;
         using (Movement.Auto()) RunGeodesicMovement(dt, agents, state);
         float reactionDt = ConsumeFixedInterval(ref reactionAccumulator, dt, ReactionIntervalSeconds);
         if (reactionDt > 0f)
@@ -566,7 +568,13 @@ public sealed partial class GeodesicBiologyRuntime
             state.LethalTempMargin[i], temperatureSettings.DormancyFloor);
         float oxygenEfficiency = state.Metabolism[i] == MetabolismType.Hydrogenotrophy && hO2InhibitionEnabled
             ? CalculateAnaerobeO2Efficiency(oxygenByNode[r.Node], o2ComfortMax, o2StressMax, hMinimumO2Efficiency)
-            : 1f;
+            : state.Metabolism[i] == MetabolismType.SulfurChemosynthesis && sulfurO2Inhibition
+                ? CalculateAnaerobeO2Efficiency(oxygenByNode[r.Node], o2ComfortMax, o2StressMax, sulfurO2Floor) : 1f;
+        if (r.Metabolism == MetabolismType.SulfurChemosynthesis)
+        {
+            sulfurO2Samples++; if (oxygenEfficiency < 1f) sulfurInhibitedSamples++;
+            sulfurO2Sum += oxygenByNode[r.Node]; sulfurEfficiencySum += oxygenEfficiency;
+        }
         r.Temperature = temperature;
         r.TemperaturePerformance = temperatureScale;
         AccumulateTemperature(temperature, temperatureScale);
@@ -574,6 +582,9 @@ public sealed partial class GeodesicBiologyRuntime
         r.Desired=Math.Max(0,scale*temperatureScale*oxygenEfficiency);
         if (r.Metabolism == MetabolismType.Hydrogenotrophy)
             r.Desired = GeodesicHydrogenotrophyBalance.LimitExtent(r.Desired * Mathf.Clamp01(hStoreFraction),
+                r.NeedA, r.NeedB, state.OrganicCStore[i], maximumStore);
+        else if (r.Metabolism == MetabolismType.SulfurChemosynthesis)
+            r.Desired = GeodesicHydrogenotrophyBalance.LimitExtent(r.Desired * sulfurActivity,
                 r.NeedA, r.NeedB, state.OrganicCStore[i], maximumStore);
         requests[i]=r;
     }
@@ -661,6 +672,11 @@ public sealed partial class GeodesicBiologyRuntime
             if (r.Metabolism == MetabolismType.Hydrogenotrophy)
             {
                 CommitHydrogenotrophy(i, state, maxStore, observeAccounting);
+                continue;
+            }
+            if (r.Metabolism == MetabolismType.SulfurChemosynthesis)
+            {
+                CommitSulfur(i, state, maxStore, observeAccounting);
                 continue;
             }
             float energyBefore = state.Energy[i];
@@ -755,6 +771,8 @@ public sealed partial class GeodesicBiologyRuntime
             float paid = Mathf.Max(0f, maintenance * dt) * GeodesicBiologyTemperaturePolicy.MaintenanceMultiplier(performance, temperatureSettings);
             state.Energy[i] -= paid;
             maintenancePaid += paid;
+            if (metabolicColor != null)
+                state.Color[i] = agents[i].color = metabolicColor(state.Age[i], state.MaxLifespan[i] - state.Age[i], state.Energy[i], state.Metabolism[i]);
             DeathCause cause = ClassifyLifecycleDeath(state.Energy[i], state.Age[i], state.MaxLifespan[i]);
             if (cause == DeathCause.Unknown) cause = exposureCause;
             if (cause != DeathCause.Unknown)
@@ -764,6 +782,7 @@ public sealed partial class GeodesicBiologyRuntime
                 RecordABDeath(state.Locomotion[i], cause);
                 evolutionDiagnostics.Death(i, agents[i].DiagnosticId, state.Locomotion[i], abSimulationTime);
                 deaths++;
+                if (state.Metabolism[i] == MetabolismType.SulfurChemosynthesis) sulfurDeaths++;
                 if (cause == DeathCause.EnergyDepletion) starvationDeaths++;
                 else if (cause == DeathCause.OldAge) lifespanDeaths++;
                 temperatureTelemetry.RecordDeath(cause);
@@ -812,6 +831,7 @@ public sealed partial class GeodesicBiologyRuntime
             child.optimalTempMin = state.OptimalTempMin[i];
             child.optimalTempMax = state.OptimalTempMax[i];
             child.lethalTempMargin = state.LethalTempMargin[i];
+            MutateChildMetabolism(child, state.Metabolism[i]);
             GeodesicBiologyTemperaturePolicy.MutateInheritedTraits(child, temperatureMutationRandom, temperatureSettings);
             child.canReplicate = GeodesicBiologyTemperaturePolicy.CanReproduce(CalculateTemperaturePerformance(temperature,
                 child.optimalTempMin, child.optimalTempMax, child.lethalTempMargin, temperatureSettings.DormancyFloor), temperatureSettings);
@@ -861,6 +881,9 @@ public sealed partial class GeodesicBiologyRuntime
                 child.DiagnosticId, state, grid, split, childInitialEnergy, childInitialCarbon,
                 planet.transform, visualGrowthSettings.daughterSeparationDistance);
             births++;
+            if (child.metabolism == MetabolismType.SulfurChemosynthesis) sulfurBirths++;
+            if (state.Metabolism[i] == MetabolismType.SulfurChemosynthesis && (uint)state.Locomotion[i] < 4u)
+                sulfurParentBirths[(int)state.Locomotion[i]]++;
             RecordABBirth(state.Locomotion[i]);
             RecordLocomotionBirth(state.Metabolism[i], state.Locomotion[i]);
             temperatureTelemetry.RecordBirth(performance, temperatureSettings);
@@ -933,7 +956,7 @@ public sealed partial class GeodesicBiologyRuntime
         ref Request r = ref requests[index];
         if (!r.Supported) return;
         double product = r.ProductCoefficient > 0d ? r.ProductCoefficient * r.Actual : 0d;
-        bool hydrogen = r.Metabolism == MetabolismType.Hydrogenotrophy;
+        bool hydrogen = r.Metabolism == MetabolismType.Hydrogenotrophy || r.Metabolism == MetabolismType.SulfurChemosynthesis;
         accountingDiagnostics.RecordReaction(r.Metabolism, r.A, r.B, r.Product,
             r.NeedA * r.Desired, r.NeedB * r.Desired, r.NeedA * r.Actual, r.NeedB * r.Actual, product,
             hydrogen ? r.HydrogenCo2Ratio : availabilityFactor[(int)r.A * grid.NodeCapacity + r.Node],
@@ -1440,6 +1463,7 @@ public sealed partial class GeodesicBiologyRuntime
         float divisionCost, float replicationCost, float divisionMultiple, int maxPopulation, float reproductionRate)
     {
         LogDeathRecycling();
+        LogSulfurDiagnostics(state);
         if (!chemotaxisABDiagnosticsEnabled) LogLocomotionDiagnostics(state);
         bool reportAB = BeginABPopulationReport();
         temperatureTelemetry.Log(state, oceanTemperature, temperatureSettings, carbonDivision,
@@ -1508,6 +1532,7 @@ public sealed partial class GeodesicBiologyRuntime
 #endif
         ClearChemotaxisAB();
         ClearLocomotion();
+        ClearSulfur();
         ResetVisualDiagnostics();
         planet = null; resources = null; suspended = null; oceanTemperature = null;
         experiencedTemperature = null; surfaceTemperature = null; grid = null;

@@ -1,0 +1,81 @@
+{
+  "managed_production_and_EditMode_assemblies_compiled": true,
+  "managed_selected": {
+    "passed": 55,
+    "failed": 0
+  },
+  "managed_food": {
+    "passed": 20,
+    "failed": 0
+  },
+  "native_final_sulfur": {
+    "total": "40",
+    "passed": "40",
+    "failed": "0",
+    "skipped": "0",
+    "result": "Passed",
+    "start-time": "2026-11-17 22:29:18Z",
+    "end-time": "2026-11-17 22:33:15Z"
+  },
+  "native_final_EditMode_regressions": {
+    "total": "649",
+    "passed": "632",
+    "failed": "17",
+    "skipped": "0",
+    "result": "Failed(Child)",
+    "start-time": "2026-11-17 22:38:02Z",
+    "end-time": "2026-11-17 22:38:13Z"
+  },
+  "native_baseline_HEAD_7893485": {
+    "total": "611",
+    "passed": "594",
+    "failed": "17",
+    "skipped": "0",
+    "result": "Failed(Child)",
+    "start-time": "2026-11-17 22:27:05Z",
+    "end-time": "2026-11-17 22:27:12Z"
+  },
+  "identical_baseline_failure_sets": true,
+  "new_failure_names": [],
+  "baseline_failures": [
+    "GeodesicBiologyRuntimeTests.FixedPassiveTickPreservesDisplacementWithinDocumentedTolerance",
+    "GeodesicBiologyRuntimeTests.VerticalScheduleIsDeterministicAndFinite",
+    "GeodesicDrainageDeliveryIntegrationTests.DiagnosticsRunOnceAfterFinalPassAndDoNotChangeHydrologyOrMeshes",
+    "GeodesicHydrologyTerrainIntegrationTests.RiverOnlyTogglePreservesMeshOceanSeaLevelAndPausedLakesAndRestoresOff(FineDetailRemoved)",
+    "GeodesicHydrologyTerrainIntegrationTests.RiverOnlyTogglePreservesMeshOceanSeaLevelAndPausedLakesAndRestoresOff(ReducedRidgeAndFineDetail)",
+    "GeodesicInlandUpliftIntegrationTests.StartupDefaultMissingFieldsRoundTripAndResets",
+    "GeodesicInlandUpliftTests.NoCoastProducesNoUpliftAndInvalidMagnitudeIsSafe",
+    "GeodesicLakeIntegrationTests.TinRenderDrainageUsesActiveTopologyWithoutChangingTerrain",
+    "GeodesicOceanIntegrationTests.SameSeedFilterTogglePreservesTerrainAndRemovesMarineHabitat",
+    "GeodesicRiverGradeTests.DownhillTerracesAndTwoMicroUnitRisesAreAlreadyAccepted",
+    "GeodesicRiverThresholdStartupTests.StartupThresholdsReachFirstBuildAndOnlyChangeRiverQualification",
+    "GeodesicRiverUphillDebugIntegrationTests.OffOnOffPreservesAcceptedMeshColoursRunoffTopologyMouthsLakesAndTerrain(False)",
+    "GeodesicRiverUphillDebugIntegrationTests.OffOnOffPreservesAcceptedMeshColoursRunoffTopologyMouthsLakesAndTerrain(True)",
+    "GeodesicTinSurfaceTests.SphereCoastUsesExactCompletedFacetAndProjectedPathRemainsDownhill",
+    "PlanetResourceMapMathTests.AddAndGet_IgnoreInvalidCellIndices",
+    "PlanetResourceMapMathTests.Add_ClampsAtZero_WhenApplyingNegativeDelta",
+    "ReplicatorManagerLifecycleTests.WorldClock_RemainsRunnableAcrossRepeatedBiologyDeinitialization"
+  ],
+  "world_reaction_violation_maxima": {
+    "inputTransferViolations": 0,
+    "zeroMeasuredInputWithEnergy": 0,
+    "transferViolations": 0
+  },
+  "saved_startup_SHA256_after_final_guarded_exit": "F5BA1464B5522650C2F62E8C91D5B56CC309814ED1F2D5719859D4346BC21D71",
+  "native_guard": "Disposable scene draft-save disabled; disposable startup file writer returns in batch mode. Production startup source unchanged.",
+  "raw_artifacts": "Temp/SulfurAudit/*.xml and *.log (ignored)",
+  "native_run_processes_finished": [
+    52136,
+    19940
+  ],
+  "controlled_movement": {
+    "activeSpeedMultiplier": 0.4,
+    "moveSpeed": 4,
+    "amoeboidSpeedMultiplier": 1.2,
+    "flagellarSpeedMultiplier": 2,
+    "amoeboidTurnRate": 2,
+    "flagellarTurnRate": 1.5,
+    "phenotype_selection_locomotion_mutation": 0,
+    "world_locomotion_mutation": "unchanged saved configuration"
+  }
+}

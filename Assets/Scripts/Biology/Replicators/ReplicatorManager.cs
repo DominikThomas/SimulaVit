@@ -713,6 +713,7 @@ public class ReplicatorManager : MonoBehaviour
     private GeodesicFounderSpawnSchedule geodesicFounderSpawnSchedule;
     private bool isInitialized;
     private GeodesicBiologyRuntime geodesicBiology;
+    private Func<float, float, float, MetabolismType, Color> geodesicColorResolver;
     private readonly ReplicatorSpawnSystem spawnSystem = new ReplicatorSpawnSystem();
     private readonly ReplicatorLifecycleSystem lifecycleSystem = new ReplicatorLifecycleSystem();
     private readonly ReplicatorMetabolismSystem metabolismSystem = new ReplicatorMetabolismSystem();
@@ -1035,6 +1036,12 @@ public class ReplicatorManager : MonoBehaviour
         geodesicBiology.SetChemotaxisABContext(enableGeodesicChemotacticSteering,
             enableGeodesicChemotaxisABDiagnostics, simulationTimeSeconds);
         geodesicBiology.SetVisualGrowthSettings(visualGrowthSettings);
+        geodesicColorResolver ??= CalculateAgentColor;
+        geodesicBiology.SetMetabolicColorResolver(geodesicColorResolver);
+        geodesicBiology.SetSulfurControls(chemosynthStoreFraction,
+            anaerobeO2InhibitionEnabled && anaerobeO2InhibitionAffectsSulfurChemosynthesis,
+            anaerobeO2MinEfficiencySulfurChemosynthesis, metabolismMutationChance, hydrogenToSulfurMutationChance,
+            mutationGateMinH2S, mutationGateMinCO2, sulfurChemoTempRange, defaultLethalMargin);
         geodesicBiology.SetLocomotionSettings(geodesicLocomotion, CreateSteeringSettings(), moveSpeed,
             amoeboidMoveSpeedMultiplier, flagellumMoveSpeedMultiplier, amoeboidTurnRate, flagellumTurnRate,
             locomotionMutationChance, locomotionUpgradeChance, locomotionAnchoredMutationChance,

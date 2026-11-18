@@ -18,4 +18,7 @@ public static class GeodesicFoodSignal
         double value = ticks * thermalPerformance * oxygenEfficiency;
         return double.IsFinite(value) && value >= 0d ? value : 0d;
     }
+
+    public static double SulfurChemosynthesisTicks(double co2, double h2s, double volume, double needCo2, double needH2s)
+        => HydrogenotrophyTicks(co2, h2s, volume, needCo2, needH2s);
 }

@@ -1,5 +1,7 @@
 # Geodesic food sensing and steering audit — 17 November 2026
 
+Later milestone: [Sulfur restoration](GeodesicSulfurParity.md) extends production sensing to local CO2/H2S, individual temperature and configured O2 efficiency. Hydrogen sensing arithmetic and the hard-zero thermal limitation are unchanged. Earlier hydrogen-only scope statements below describe the audited baseline.
+
 ## Findings established before changing response or speed
 
 Hydrogenotroph steering genuinely senses both H2 and CO2 from the organism's
