@@ -72,7 +72,7 @@ public sealed class SimulationStartupEvolutionTests
                     Assert.That(restarted.Controller.CurrentConfig.biology.hydrogenToSulfurMutationChance,Is.EqualTo(.4f));
                     Assert.That(restarted.Controller.CurrentConfig.biology.hydrogenToFermentationMutationChance,Is.EqualTo(.27f));
                 }
-                Assert.That(File.ReadAllText(f.Path),Does.Contain("\"version\": 23"));
+                Assert.That(File.ReadAllText(f.Path),Does.Contain("\"version\": 24"));
             } finally { window.Close(); }
         }
     }

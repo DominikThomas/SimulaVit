@@ -34,7 +34,7 @@ public partial class SimulationStartupController : MonoBehaviour
     public const float GeodesicVentPhysicalMaxPerSecond = 1000f;
     private const int InitialSpawnMin = 0;
     private const int InitialSpawnMax = 10000;
-    private const int SavedStartupConfigVersion = 23;
+    private const int SavedStartupConfigVersion = 24;
     public const float NormalAtmospherePressureMaxBar = 5f;
     public const float DenseAtmospherePressureMaxBar = 600f;
     public const float DefaultApproximateThermalIntervalSeconds = 2f;
@@ -206,6 +206,10 @@ public partial class SimulationStartupController : MonoBehaviour
         {
             defaults.initialSpawnCount = replicatorManager.initialSpawnCount;
             defaults.geodesicBiologySpawnDelaySeconds = replicatorManager.geodesicBiologySpawnDelaySeconds;
+            defaults.geodesicFounderEmergenceMode = replicatorManager.geodesicFounderEmergenceMode;
+            defaults.geodesicFounderMeanIntervalSeconds = replicatorManager.geodesicFounderMeanIntervalSeconds;
+            defaults.geodesicFounderOngoingEmergence = replicatorManager.geodesicFounderOngoingEmergence;
+            defaults.geodesicFounderOngoingMeanIntervalSeconds = replicatorManager.geodesicFounderOngoingMeanIntervalSeconds;
             defaults.biology ??= new SimulationStartupBiologyConfig();
             defaults.biology.Capture(replicatorManager);
             resumeStepsPerFrame = Mathf.Max(1, replicatorManager.ConfiguredSimulationStepsPerFrame);
@@ -505,6 +509,10 @@ public partial class SimulationStartupController : MonoBehaviour
         destination.atmosphereInventoryPerBar = source.atmosphereInventoryPerBar;
         destination.airSeaExchangeHalfLifeSeconds = source.airSeaExchangeHalfLifeSeconds;
         destination.geodesicBiologySpawnDelaySeconds = source.geodesicBiologySpawnDelaySeconds;
+        destination.geodesicFounderEmergenceMode = source.geodesicFounderEmergenceMode;
+        destination.geodesicFounderMeanIntervalSeconds = source.geodesicFounderMeanIntervalSeconds;
+        destination.geodesicFounderOngoingEmergence = source.geodesicFounderOngoingEmergence;
+        destination.geodesicFounderOngoingMeanIntervalSeconds = source.geodesicFounderOngoingMeanIntervalSeconds;
         destination.approximateThermalIntervalSeconds = source.approximateThermalIntervalSeconds;
         destination.geodesicResourceTransportIntervalSeconds = source.geodesicResourceTransportIntervalSeconds;
         destination.chemistryTelemetryIntervalSimSeconds = source.chemistryTelemetryIntervalSimSeconds;
@@ -799,6 +807,10 @@ public partial class SimulationStartupController : MonoBehaviour
             config.biology?.Apply(replicatorManager);
             replicatorManager.initialSpawnCount = Mathf.Max(0, config.initialSpawnCount);
             replicatorManager.geodesicBiologySpawnDelaySeconds = Mathf.Max(0f, config.geodesicBiologySpawnDelaySeconds);
+            replicatorManager.geodesicFounderEmergenceMode = config.geodesicFounderEmergenceMode;
+            replicatorManager.geodesicFounderMeanIntervalSeconds = config.geodesicFounderMeanIntervalSeconds;
+            replicatorManager.geodesicFounderOngoingEmergence = config.geodesicFounderOngoingEmergence;
+            replicatorManager.geodesicFounderOngoingMeanIntervalSeconds = config.geodesicFounderOngoingMeanIntervalSeconds;
         }
     }
 
@@ -935,7 +947,11 @@ public partial class SimulationStartupController : MonoBehaviour
         NormalizeAtmosphereComposition(config);
         config.atmosphereInventoryPerBar = Mathf.Max(1e-6f, config.atmosphereInventoryPerBar);
         config.airSeaExchangeHalfLifeSeconds = Mathf.Max(0f, config.airSeaExchangeHalfLifeSeconds);
-        config.geodesicBiologySpawnDelaySeconds = Mathf.Max(0f, config.geodesicBiologySpawnDelaySeconds);
+        config.geodesicBiologySpawnDelaySeconds = float.IsFinite(config.geodesicBiologySpawnDelaySeconds) ? Mathf.Max(0f,config.geodesicBiologySpawnDelaySeconds) : 0f;
+        config.geodesicFounderEmergenceMode = config.geodesicFounderEmergenceMode == GeodesicFounderEmergenceMode.Gradual
+            ? GeodesicFounderEmergenceMode.Gradual : GeodesicFounderEmergenceMode.Batch;
+        config.geodesicFounderMeanIntervalSeconds = GeodesicFounderEmergenceSchedule.NormalizeInterval(config.geodesicFounderMeanIntervalSeconds);
+        config.geodesicFounderOngoingMeanIntervalSeconds = GeodesicFounderEmergenceSchedule.NormalizeInterval(config.geodesicFounderOngoingMeanIntervalSeconds,300f);
         config.initialDissolvedFe2Plus = Mathf.Clamp(config.initialDissolvedFe2Plus, InitialFe2Min, InitialFe2Max);
         config.ventH2PerTick = Mathf.Clamp(config.ventH2PerTick, VentPerTickMin, VentH2MaxPerTick);
         config.ventH2SPerTick = Mathf.Clamp(config.ventH2SPerTick, VentPerTickMin, VentH2SMaxPerTick);
@@ -1073,6 +1089,7 @@ public partial class SimulationStartupController : MonoBehaviour
         builder.AppendLine($"Atmosphere Inventory / bar (authoring, pre-physical-scale): {config.atmosphereInventoryPerBar:0.###}");
         builder.AppendLine($"Air-Sea Exchange Half-Life: {config.airSeaExchangeHalfLifeSeconds:0.###} simulated s (0 disabled)");
         builder.AppendLine($"Geodesic Prebiotic Biology Delay: {config.geodesicBiologySpawnDelaySeconds:0.###} simulated s");
+        builder.AppendLine($"Geodesic Founder Emergence: {config.geodesicFounderEmergenceMode}; initial event cap={config.initialSpawnCount}; mean interval={config.geodesicFounderMeanIntervalSeconds:G9}s; ongoing={config.geodesicFounderOngoingEmergence}; ongoing mean interval={config.geodesicFounderOngoingMeanIntervalSeconds:G9}s");
         builder.AppendLine($"Initial Dissolved Fe2+: {config.initialDissolvedFe2Plus:0.###}");
         builder.AppendLine($"Vent Clustering: {config.ventClustering:0.###}");
         if (config.gridType == PlanetGridType.GeodesicIcosphere)
@@ -1099,6 +1116,8 @@ public partial class SimulationStartupController : MonoBehaviour
     {
         SimulationStartupConfig authoritativeFallback = fallback ?? new SimulationStartupConfig();
         SavedStartupConfig saved = SavedStartupConfig.FromDefaults(authoritativeFallback);
+        saved.geodesicFounderEmergenceMode = GeodesicFounderEmergenceMode.Batch;
+        saved.geodesicFounderOngoingEmergence = false;
         // Older startup files omit this field. An explicitly saved zero still disables production.
         saved.geodesicVentProductionMultiplier = SimulationStartupConfig.DefaultVentProductionMultiplier;
         // Missing fields use the historical river defaults even with customized scene defaults.
@@ -1251,6 +1270,7 @@ public partial class SimulationStartupController : MonoBehaviour
                 chemistryTelemetryIntervalSimSeconds = config.chemistryTelemetryIntervalSimSeconds
             };
             saved.CaptureV23(config);
+            saved.CaptureV24(config);
             return saved;
         }
 
@@ -1334,6 +1354,7 @@ public partial class SimulationStartupController : MonoBehaviour
             config.geodesicResourceTransportIntervalSeconds = geodesicResourceTransportIntervalSeconds;
             config.chemistryTelemetryIntervalSimSeconds = version >= 5 ? chemistryTelemetryIntervalSimSeconds : config.chemistryTelemetryIntervalSimSeconds;
             RestoreV23(config);
+            RestoreV24(config);
             return config;
         }
     }

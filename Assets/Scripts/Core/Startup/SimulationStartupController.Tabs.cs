@@ -235,8 +235,26 @@ public partial class SimulationStartupController
     {
         var b = currentConfig.biology;
         SetupSection("Population and reproduction");
-        SetupInt("Initial replicator count", ref currentConfig.initialSpawnCount, InitialSpawnMin, InitialSpawnMax);
-        if (IsGeodesicSetup) SetupFloat("Prebiotic biology spawn delay (sim s)", ref currentConfig.geodesicBiologySpawnDelaySeconds, 0f, 5000f);
+        if (IsGeodesicSetup)
+        {
+            currentConfig.geodesicFounderEmergenceMode = (GeodesicFounderEmergenceMode)GUILayout.SelectionGrid(
+                (int)currentConfig.geodesicFounderEmergenceMode, new[] { "Founder batch", "Gradual emergence" }, 2, buttonStyle, GUILayout.Height(30f));
+        }
+        bool gradualEmergence = IsGeodesicSetup && currentConfig.geodesicFounderEmergenceMode == GeodesicFounderEmergenceMode.Gradual;
+        SetupInt(gradualEmergence ? "Maximum initial founder events" : "Initial replicator count", ref currentConfig.initialSpawnCount, InitialSpawnMin, InitialSpawnMax);
+        if (IsGeodesicSetup)
+        {
+            SetupFloat("Initial emergence delay (sim s)", ref currentConfig.geodesicBiologySpawnDelaySeconds, 0f, 5000f);
+            if (gradualEmergence)
+            {
+                SetupFloat("Mean initial emergence interval (sim s)", ref currentConfig.geodesicFounderMeanIntervalSeconds, .01f, 1000000f);
+                SetupBool("Ongoing independent emergence", ref currentConfig.geodesicFounderOngoingEmergence);
+                if (currentConfig.geodesicFounderOngoingEmergence)
+                    SetupFloat("Mean ongoing emergence interval (sim s)", ref currentConfig.geodesicFounderOngoingMeanIntervalSeconds, .01f, 1000000f);
+                SetupHelp("Individual stochastic events start after the delay. The initial count caps attempts, including rejected events; it does not guarantee survivors. Ongoing emergence is independent of reproduction and starts after the initial event phase. Only locally viable submarine vent injection habitats are eligible. All founders respect the population cap.");
+            }
+            else SetupHelp("The whole founder batch appears immediately at zero delay, or together after the simulated-time delay. Placement retains vent-production weighting and respects the population cap.");
+        }
         SetupInt("Maximum population", ref b.maxPopulation, 0, int.MaxValue);
         SetupFloat("Reproduction rate (/sim s)", ref b.reproductionRate);
         SetupBool("Carbon-limited division", ref b.enableCarbonLimitedDivision);
@@ -253,7 +271,7 @@ public partial class SimulationStartupController
         SetupFloat("Division biomass multiple", ref b.divisionBiomassMultiple, 1.2f, 3f);
         SetupFloat("Division carbon fraction to child", ref b.divisionCarbonSplitToChild, 0.3f, 0.7f);
         SetupHelp(IsGeodesicSetup
-            ? "Energy costs and biomass thresholds retain the existing division gates. Geodesic population limits gate reproduction; the requested founder count is independent of that cap."
+            ? "Energy costs and biomass thresholds retain the existing division gates. Geodesic population limits gate both founder emergence and reproduction."
             : "Energy costs and biomass thresholds retain the existing division gates. Legacy population limits apply to initial/spontaneous spawning and reproduction.");
 
         SetupSection("Evolution");

@@ -140,6 +140,10 @@ public class SimulationStartupConfig
     public float airSeaExchangeHalfLifeSeconds = DefaultAirSeaExchangeHalfLifeSeconds;
     [Tooltip("Simulated-time environmental warmup before normal Geodesic founders appear. Zero preserves immediate spawning.")]
     public float geodesicBiologySpawnDelaySeconds = 0f;
+    public GeodesicFounderEmergenceMode geodesicFounderEmergenceMode = GeodesicFounderEmergenceMode.Batch;
+    public float geodesicFounderMeanIntervalSeconds = GeodesicFounderEmergenceSchedule.DefaultMeanInterval;
+    public bool geodesicFounderOngoingEmergence = false;
+    public float geodesicFounderOngoingMeanIntervalSeconds = GeodesicFounderEmergenceSchedule.DefaultOngoingMeanInterval;
 
     internal static float NormalizeVentProductionMultiplier(float value) =>
         float.IsFinite(value) ? Mathf.Clamp(value, 0f, MaximumVentProductionMultiplier) : DefaultVentProductionMultiplier;

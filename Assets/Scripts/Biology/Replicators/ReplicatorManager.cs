@@ -96,6 +96,10 @@ public class ReplicatorManager : MonoBehaviour
     [Header("Population")]
     public int initialSpawnCount = 100;
     [Min(0f)] public float geodesicBiologySpawnDelaySeconds;
+    public GeodesicFounderEmergenceMode geodesicFounderEmergenceMode;
+    [Min(.01f)] public float geodesicFounderMeanIntervalSeconds = GeodesicFounderEmergenceSchedule.DefaultMeanInterval;
+    public bool geodesicFounderOngoingEmergence;
+    [Min(.01f)] public float geodesicFounderOngoingMeanIntervalSeconds = GeodesicFounderEmergenceSchedule.DefaultOngoingMeanInterval;
     public int maxPopulation = 50000;
     [Tooltip("When disabled, the manager initializes references but waits for an external startup controller to spawn the initial population.")]
     public bool autoStartOnSceneLoad = true;
@@ -887,7 +891,9 @@ public class ReplicatorManager : MonoBehaviour
             geodesicBiology = new GeodesicBiologyRuntime();
             geodesicBiology.SetAccountingDiagnostics(biologyDiagnostics);
             float spawnDelay = spawnInitialPopulation ? Mathf.Max(0f, geodesicBiologySpawnDelaySeconds) : 0f;
-            int immediateFounderCount = spawnInitialPopulation && spawnDelay <= 0f ? initialSpawnCount : 0;
+            bool gradual = geodesicFounderEmergenceMode == GeodesicFounderEmergenceMode.Gradual;
+            int immediateFounderCount = spawnInitialPopulation && !gradual && spawnDelay <= 0f
+                ? Mathf.Clamp(initialSpawnCount, 0, Mathf.Max(0,maxPopulation)) : 0;
             if (!geodesicBiology.Initialize(planetGenerator, agents, populationState, immediateFounderCount,
                 minLifespan, maxLifespan, baseAgentColor, defaultBiomassTarget,
                 hydrogenTempRange, defaultLethalMargin))
@@ -899,7 +905,12 @@ public class ReplicatorManager : MonoBehaviour
             ApplyGeodesicRuntimeControls();
             Debug.Log(geodesicBiology.DescribeResolvedLocomotionControls(), this);
             geodesicFounderSpawnSchedule.Configure(0d, spawnDelay,
-                spawnInitialPopulation ? initialSpawnCount : 0);
+                spawnInitialPopulation && !gradual ? initialSpawnCount : 0);
+            if (spawnInitialPopulation && gradual)
+                geodesicBiology.ConfigureGradualEmergence(initialSpawnCount,spawnDelay,geodesicFounderMeanIntervalSeconds,
+                    geodesicFounderOngoingEmergence,geodesicFounderOngoingMeanIntervalSeconds);
+            if (spawnInitialPopulation && !gradual && spawnDelay <= 0f)
+                geodesicBiology.RecordCappedFounderEvents(Mathf.Max(0,initialSpawnCount-immediateFounderCount));
             if (geodesicFounderSpawnSchedule.IsPending)
                 Debug.Log($"[GeodesicBiology] founder spawn deferred until simTime={geodesicFounderSpawnSchedule.SpawnAtSimulationTime:G6}", this);
             isInitialized = true;
@@ -1080,9 +1091,12 @@ public class ReplicatorManager : MonoBehaviour
         if (geodesicFounderSpawnSchedule.TryConsume(simulationTimeSeconds, out int requestedFounders))
         {
             int spawned = geodesicBiology.SpawnDeferredFounders(requestedFounders, agents, populationState,
-                simulationTimeSeconds);
+                simulationTimeSeconds, maxPopulation);
             Debug.Log($"[GeodesicBiology] deferred founder spawn simTime={simulationTimeSeconds:G6} requested={requestedFounders} spawned={spawned}", this);
         }
+        geodesicBiology.AdvanceFounderEmergence(simulationTimeSeconds,maxPopulation,hydrogenotrophyCO2PerTick,hydrogenotrophyH2PerTick,
+            anaerobeO2InhibitionEnabled && anaerobeO2InhibitionAffectsHydrogenotrophy,
+            anaerobeO2ComfortMax,anaerobeO2StressMax,anaerobeO2MinEfficiencyHydrogenotrophy,agents,populationState);
         movementDiagnostics.ObserveSimulationStep(agents, populationState, planetGenerator.transform,
             geodesicBiology.MovementGrid, simulationStepCount, simulationTimeSeconds, stepDeltaTime,
             geodesicBiology.LastMovementKinematicsSeconds);
