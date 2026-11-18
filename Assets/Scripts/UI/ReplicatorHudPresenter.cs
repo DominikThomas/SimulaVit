@@ -158,7 +158,7 @@ public class ReplicatorHudPresenter
         float safeTotal = Mathf.Max(1f, totalAgents);
         string replicatorsText =
             "Replicators (Passive/Amoeboid/Flagellum/Anchored)\n" +
-            $"Total: {FormatLocomotionCounts(totalByLocomotion)}";
+            $"Total: {FormatLocomotionCounts(totalByLocomotion)} ({FormatTotalCount(totalByLocomotion)})";
 
         // --- Build ALL metabolisms (including Hydrogen) ---
         var metabolisms = new List<(string label, string color, int count, string locomotion)>
@@ -452,6 +452,12 @@ public class ReplicatorHudPresenter
     {
         return $"{counts[0]}/{counts[1]}/{counts[2]}/{counts[3]}";
     }
+
+    private static string FormatTotalCount(int[] counts)
+    {
+        return $"{counts[0] + counts[1] + counts[2] + counts[3]}";
+    }
+
 
     private void UpdateGuiScale()
     {
