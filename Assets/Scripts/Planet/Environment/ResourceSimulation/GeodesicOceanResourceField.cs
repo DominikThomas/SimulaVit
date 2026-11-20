@@ -28,6 +28,7 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     private const int ResourceCount = 7;
     private static readonly ProfilerMarker InitializeMarker = new ProfilerMarker("GeodesicOceanResource.Initialize");
     private static readonly ProfilerMarker TransportMarker = new ProfilerMarker("GeodesicOceanResource.Transport");
+    private static readonly ProfilerMarker UpdateMarker = new ProfilerMarker("GeodesicOceanResource.Update");
     private static readonly ProfilerMarker HorizontalMarker = new ProfilerMarker("GeodesicOceanResource.HorizontalMixing");
     private static readonly ProfilerMarker VerticalMarker = new ProfilerMarker("GeodesicOceanResource.VerticalMixing");
     private static readonly ProfilerMarker VentMarker = new ProfilerMarker("GeodesicOceanResource.VentSources");
@@ -235,6 +236,7 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     {
         if (!initialized || simulationClock == null) return;
         if (planetGenerator == null || planetGenerator.CurrentGridType != PlanetGridType.GeodesicIcosphere) return;
+        using var performanceScope = UpdateMarker.Auto();
         double target = Math.Max(0d, simulationClock.SimulationTimeSeconds);
         resourceTicksExecutedThisFrame = 0; resourceSimSecondsProcessedThisFrame = 0f;
         if (target < lastObservedSimulationTime) { transportIntegrationCursorTime = target; unconsumedTransportRemainderSeconds = 0d; }

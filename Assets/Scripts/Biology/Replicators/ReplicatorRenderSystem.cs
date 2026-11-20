@@ -3,6 +3,7 @@ using UnityEngine;
 
 public class ReplicatorRenderSystem
 {
+    private static readonly Unity.Profiling.ProfilerMarker RenderMarker = new Unity.Profiling.ProfilerMarker("ReplicatorRenderSystem.RenderAgents");
     private readonly Matrix4x4[] matrixBatch = new Matrix4x4[1023];
     private readonly Vector4[] colorBatch = new Vector4[1023];
     private MaterialPropertyBlock propertyBlock;
@@ -36,6 +37,7 @@ public class ReplicatorRenderSystem
         bool geodesicVisualGrowth = false, ReplicatorVisualGrowthSettings? growthSettings = null,
         float divisionBiomassMultiple = 2f, Transform planet = null)
     {
+        using var performanceScope = RenderMarker.Auto();
         if (agents == null || replicatorMesh == null || replicatorMaterial == null)
         {
             return;

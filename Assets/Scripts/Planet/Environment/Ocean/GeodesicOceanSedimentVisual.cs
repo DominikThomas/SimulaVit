@@ -7,6 +7,7 @@ using UnityEngine.Rendering;
 [DisallowMultipleComponent]
 public sealed class GeodesicOceanSedimentVisual : MonoBehaviour
 {
+    private static readonly Unity.Profiling.ProfilerMarker UpdateMarker = new Unity.Profiling.ProfilerMarker("GeodesicOceanSedimentVisual.Update");
     private const int TintUvChannel = 2;
     // Fixed per-species display scales for gradually deposited inventories, not ocean-wide peak normalization.
     private const double TintFloorFraction = 0.002d;
@@ -196,6 +197,7 @@ public sealed class GeodesicOceanSedimentVisual : MonoBehaviour
 
     private void Update()
     {
+        using var performanceScope = UpdateMarker.Auto();
         if (sediments == null || !sediments.IsInitialized) return;
         Mesh liveMesh = terrainFilter != null ? terrainFilter.sharedMesh : null;
         if (liveMesh != mesh || (IsInitialized && mesh.vertexCount != tintStream.Count))

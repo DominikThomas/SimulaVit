@@ -17,6 +17,7 @@ public struct GeodesicAbioticReactionResult
 public sealed class GeodesicAbioticChemistry : MonoBehaviour
 {
     private static readonly ProfilerMarker ChemistryMarker = new ProfilerMarker("GeodesicOceanResource.AbioticChemistry");
+    private static readonly ProfilerMarker TotalMarker = new ProfilerMarker("GeodesicOceanResource.Chemistry.Total");
     private static readonly ProfilerMarker ChemistryScanMarker = new ProfilerMarker("GeodesicOceanResource.Chemistry.Scan");
     private static readonly ProfilerMarker VisualMemoryMarker = new ProfilerMarker("GeodesicOceanResource.Chemistry.VisualMemoryDecay");
     private static ProfilerCounterValue<int> ActiveNodesCounter = new ProfilerCounterValue<int>(ProfilerCategory.Scripts, "Geodesic Chemistry Active Nodes Total", ProfilerMarkerDataUnit.Count, ProfilerCounterOptions.FlushOnEndOfFrame);
@@ -87,15 +88,20 @@ public sealed class GeodesicAbioticChemistry : MonoBehaviour
     public int ReactionsApplied => reactionsApplied;
     public int SkippedNoReactants => skippedNoReactants;
     public long ChemistryTicks => chemistryTicks;
+    // Monotonic observation counters: unlike the last-tick readouts, these retain
+    // every chemistry invocation when several transport ticks occur in one frame.
+    public long TotalPerformanceCandidates { get; private set; }
+    public long TotalPerformanceNodesProcessed { get; private set; }
     public long DenseFallbackTicks => denseFallbackTicks;
     public float GetRecentOxidizedIronSignal(int cell) => recentOxidizedIronByCell != null && cell >= 0 && cell < recentOxidizedIronByCell.Length ? recentOxidizedIronByCell[cell] : 0f;
 
     public void ResetCounters()
-    { reactedH2 = reactedH2S = reactedFe2 = consumedO2 = precipitatedS0 = precipitatedFe3 = precipitatedFeS = 0d; activeNodesTotal = chemistryCandidateNodes = nodesProcessed = oxidationCandidateNodes = feSCandidateNodes = sedimentProducingNodes = reactiveNodes = reactionsApplied = skippedNoReactants = 0; chemistryTicks = denseFallbackTicks = 0; recentOxidizedIronByCell = null; }
+    { reactedH2 = reactedH2S = reactedFe2 = consumedO2 = precipitatedS0 = precipitatedFe3 = precipitatedFeS = 0d; activeNodesTotal = chemistryCandidateNodes = nodesProcessed = oxidationCandidateNodes = feSCandidateNodes = sedimentProducingNodes = reactiveNodes = reactionsApplied = skippedNoReactants = 0; chemistryTicks = denseFallbackTicks = 0; TotalPerformanceCandidates = TotalPerformanceNodesProcessed = 0; recentOxidizedIronByCell = null; }
 
     internal void Step(GeodesicOceanResourceField resources, GeodesicOceanSedimentField sediments, float simulatedDeltaTime)
     {
         if (resources == null || sediments == null || !resources.IsInitialized || !sediments.IsInitialized || simulatedDeltaTime <= 0f) return;
+        using var performanceScope = TotalMarker.Auto();
         double h2Fraction = ReactionFraction(simulatedDeltaTime, h2OxidationHalfLifeSeconds);
         double h2sFraction = ReactionFraction(simulatedDeltaTime, h2sOxidationHalfLifeSeconds);
         double fe2Fraction = ReactionFraction(simulatedDeltaTime, fe2OxidationHalfLifeSeconds);
@@ -161,6 +167,8 @@ public sealed class GeodesicAbioticChemistry : MonoBehaviour
             }
             nodesProcessed = candidateCount; oxidationCandidateNodes = oxidationCandidates; feSCandidateNodes = feSCandidates; sedimentProducingNodes = sedimentNodes;
             chemistryTicks++;
+            TotalPerformanceCandidates += chemistryCandidateNodes;
+            TotalPerformanceNodesProcessed += nodesProcessed;
             if (chemistryCandidateNodes == activeNodesTotal) denseFallbackTicks++;
             ActiveNodesCounter.Value = activeNodesTotal; CandidateCounter.Value = chemistryCandidateNodes; ProcessedCounter.Value = nodesProcessed; OxidationCandidateCounter.Value = oxidationCandidateNodes; FeSCandidateCounter.Value = feSCandidateNodes; SedimentCounter.Value = sedimentProducingNodes;
             TickCounter.Value = chemistryTicks >= int.MaxValue ? int.MaxValue : (int)chemistryTicks; ReactiveCounter.Value = reactiveNodes; ReactionsCounter.Value = reactionsApplied; SkippedCounter.Value = skippedNoReactants; DenseTicksCounter.Value = denseFallbackTicks >= int.MaxValue ? int.MaxValue : (int)denseFallbackTicks;

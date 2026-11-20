@@ -5,6 +5,7 @@ using UnityEngine.Rendering.Universal;
 
 public partial class VentVisualizer
 {
+    private static readonly Unity.Profiling.ProfilerMarker VentUpdateMarker = new Unity.Profiling.ProfilerMarker("VentVisualizer.LateUpdate");
     public enum SmokerAppearance { Black, White, Mixed }
 
     [Header("Hydrothermal Effects")]
@@ -381,6 +382,7 @@ public partial class VentVisualizer
 
     private void LateUpdate()
     {
+        using var performanceScope = VentUpdateMarker.Auto();
         if (appearanceDirty) RefreshVisualConfiguration();
         if (effectsRoot == null || planetGenerator == null) return;
         if (effectsRoot.transform.position != planetGenerator.transform.position || effectsRoot.transform.rotation != planetGenerator.transform.rotation)

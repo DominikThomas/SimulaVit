@@ -1,11 +1,13 @@
 using System;
 using System.Text;
+using Unity.Profiling;
 using UnityEngine;
 
 /// <summary>Diagnostic-only periodic summaries of authoritative Geodesic ocean chemistry.</summary>
 [DisallowMultipleComponent]
 public sealed class GeodesicChemistryTelemetry : MonoBehaviour
 {
+    private static readonly ProfilerMarker UpdateMarker = new ProfilerMarker("GeodesicChemistryTelemetry.Update");
     private const int ResourceCount = 7;
     private const int LayerCount = GeodesicOceanLayerGrid.AbsoluteMaximumLayerCount;
 
@@ -66,6 +68,7 @@ public sealed class GeodesicChemistryTelemetry : MonoBehaviour
 
     private void Update()
     {
+        using var performanceScope = UpdateMarker.Auto();
         if (!telemetryEnabled || !initialized || simulationClock == null) return;
         double now = Math.Max(0d, simulationClock.SimulationTimeSeconds);
         if (!schedule.TryTakeSnapshot(true, chemistryTelemetryIntervalSimSeconds, EffectiveMinimumRealIntervalSeconds, now, Time.unscaledTimeAsDouble)) return;

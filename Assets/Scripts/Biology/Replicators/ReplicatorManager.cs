@@ -50,6 +50,10 @@ public class ReplicatorManager : MonoBehaviour
     private static readonly ProfilerMarker PredatorScentUpdateMarker = new ProfilerMarker("ReplicatorManager.UpdateScentFields");
     private static readonly ProfilerMarker PredatorScentSkipNoPredatorsMarker = new ProfilerMarker("ReplicatorManager.SkipScentFields.NoPredators");
     private static readonly ProfilerMarker PopulationStatePrepareForLocomotionMarker = new ProfilerMarker("ReplicatorManager.PopulationStatePrepareForLocomotion");
+    private static readonly ProfilerMarker GeodesicDiagnosticsMarker = new ProfilerMarker("ReplicatorManager.GeodesicDiagnostics");
+    private static readonly ProfilerMarker FounderLifecycleMarker = new ProfilerMarker("GeodesicBiology.FounderLifecycle");
+    private static readonly ProfilerMarker HudMarker = new ProfilerMarker("ReplicatorManager.Hud");
+    private static readonly ProfilerMarker GeodesicControlSyncMarker = new ProfilerMarker("ReplicatorManager.GeodesicControlSync");
     private static readonly ProfilerMarker SteeringThrottleSkipMarker = new ProfilerMarker("ReplicatorManager.SteeringThrottleSkip");
 
     private struct MetabolismMutationGateRequirements
@@ -1050,6 +1054,7 @@ public class ReplicatorManager : MonoBehaviour
 
     private void ApplyGeodesicRuntimeControls()
     {
+        using var performanceScope = GeodesicControlSyncMarker.Auto();
         geodesicBiology.SetChemotaxisABContext(enableGeodesicChemotacticSteering,
             enableGeodesicChemotaxisABDiagnostics, simulationTimeSeconds);
         geodesicBiology.SetVisualGrowthSettings(visualGrowthSettings);
@@ -1094,19 +1099,25 @@ public class ReplicatorManager : MonoBehaviour
                 ExposureRecoveryPerSecond = geodesicTemperatureExposureRecoveryPerSecond,
                 MutationChance = tempMutationChance, MutationScale = tempMutationScale
             });
-        if (geodesicFounderSpawnSchedule.TryConsume(simulationTimeSeconds, out int requestedFounders))
+        using (FounderLifecycleMarker.Auto())
         {
-            int spawned = geodesicBiology.SpawnDeferredFounders(requestedFounders, agents, populationState,
-                simulationTimeSeconds, maxPopulation);
-            Debug.Log($"[GeodesicBiology] deferred founder spawn simTime={simulationTimeSeconds:G6} requested={requestedFounders} spawned={spawned}", this);
+            if (geodesicFounderSpawnSchedule.TryConsume(simulationTimeSeconds, out int requestedFounders))
+            {
+                int spawned = geodesicBiology.SpawnDeferredFounders(requestedFounders, agents, populationState,
+                    simulationTimeSeconds, maxPopulation);
+                Debug.Log($"[GeodesicBiology] deferred founder spawn simTime={simulationTimeSeconds:G6} requested={requestedFounders} spawned={spawned}", this);
+            }
+            geodesicBiology.AdvanceFounderEmergence(simulationTimeSeconds,maxPopulation,hydrogenotrophyCO2PerTick,hydrogenotrophyH2PerTick,
+                anaerobeO2InhibitionEnabled && anaerobeO2InhibitionAffectsHydrogenotrophy,
+                anaerobeO2ComfortMax,anaerobeO2StressMax,anaerobeO2MinEfficiencyHydrogenotrophy,agents,populationState);
         }
-        geodesicBiology.AdvanceFounderEmergence(simulationTimeSeconds,maxPopulation,hydrogenotrophyCO2PerTick,hydrogenotrophyH2PerTick,
-            anaerobeO2InhibitionEnabled && anaerobeO2InhibitionAffectsHydrogenotrophy,
-            anaerobeO2ComfortMax,anaerobeO2StressMax,anaerobeO2MinEfficiencyHydrogenotrophy,agents,populationState);
-        movementDiagnostics.ObserveSimulationStep(agents, populationState, planetGenerator.transform,
-            geodesicBiology.MovementGrid, simulationStepCount, simulationTimeSeconds, stepDeltaTime,
-            geodesicBiology.LastMovementKinematicsSeconds);
-        if (!enableRendering) movementDiagnostics.LogIfDue(this);
+        using (GeodesicDiagnosticsMarker.Auto())
+        {
+            movementDiagnostics.ObserveSimulationStep(agents, populationState, planetGenerator.transform,
+                geodesicBiology.MovementGrid, simulationStepCount, simulationTimeSeconds, stepDeltaTime,
+                geodesicBiology.LastMovementKinematicsSeconds);
+            if (!enableRendering) movementDiagnostics.LogIfDue(this);
+        }
         return true;
     }
 
@@ -1151,6 +1162,7 @@ public class ReplicatorManager : MonoBehaviour
 
     void OnGUI()
     {
+        using var performanceScope = HudMarker.Auto();
         // The runtime menu and Escape handling are world UI, not biology lifecycle work.
         if (!showSimulationHud || SimulationStartupController.IsStartupBlockingHud)
         {

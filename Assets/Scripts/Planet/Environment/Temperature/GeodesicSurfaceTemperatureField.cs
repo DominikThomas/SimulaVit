@@ -37,6 +37,8 @@ public static class GeodesicAtmosphereClimateModel
 public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
 {
     private static readonly ProfilerMarker TickMarker = new ProfilerMarker("GeodesicTemperature.SurfaceTick");
+    private static readonly ProfilerMarker UpdateMarker = new ProfilerMarker("GeodesicTemperature.Update");
+    private static readonly ProfilerMarker DiagnosticsMarker = new ProfilerMarker("GeodesicTemperature.Diagnostics");
     private static readonly ProfilerMarker TargetAndResponseMarker = new ProfilerMarker("GeodesicTemperature.TargetAndSurfaceResponse");
     private static readonly ProfilerMarker DiffusionMarker = new ProfilerMarker("GeodesicTemperature.HorizontalDiffusion");
     private static readonly ProfilerMarker CommitMarker = new ProfilerMarker("GeodesicTemperature.CommittedEvent");
@@ -208,6 +210,7 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
     private void Update()
     {
         if (!initialized || !enableGeodesicSurfaceTemperature || planetGenerator.CurrentGridType != PlanetGridType.GeodesicIcosphere) return;
+        using var performanceScope = UpdateMarker.Auto();
         ResolveClockOnly();
         if (simulationClock == null) return;
         double target = Math.Max(0d, simulationClock.SimulationTimeSeconds);
@@ -241,6 +244,7 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
         }
         if (thermalTicksCurrentRenderedFrame > 0 && Time.unscaledTimeAsDouble >= nextDiagnosticSnapshotUnscaledTime)
         {
+            using var diagnosticScope = DiagnosticsMarker.Auto();
             UpdateDiagnostics();
             UpdateSampledCycleDiagnostics(thermalIntegrationCursorTime - interval * 0.5d);
             nextDiagnosticSnapshotUnscaledTime = Time.unscaledTimeAsDouble + Mathf.Max(0.05f, diagnosticSnapshotIntervalSeconds);

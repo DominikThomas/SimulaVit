@@ -7,6 +7,7 @@ using UnityEngine;
 public sealed partial class GeodesicBiologyRuntime
 {
     private static readonly ProfilerMarker Evaluation = new ProfilerMarker("GeodesicBiology.ReactionEvaluation");
+    private static readonly ProfilerMarker Telemetry = new ProfilerMarker("GeodesicBiology.Telemetry");
     private static readonly ProfilerMarker HabitatSampling = new ProfilerMarker("GeodesicBiology.ReactionEvaluation.HabitatSampling");
     private static readonly ProfilerMarker RequestBuild = new ProfilerMarker("GeodesicBiology.ReactionEvaluation.RequestBuild");
     private static readonly ProfilerMarker DemandAggregation = new ProfilerMarker("GeodesicBiology.ReactionEvaluation.DemandAggregation");
@@ -1483,6 +1484,7 @@ public sealed partial class GeodesicBiologyRuntime
     private void LogDiagnostics(ReplicatorPopulationState state, List<Replicator> agents, bool carbonDivision,
         float divisionCost, float replicationCost, float divisionMultiple, int maxPopulation, float reproductionRate)
     {
+        using var performanceScope = Telemetry.Auto();
         LogDeathRecycling();
         LogSulfurDiagnostics(state);
         LogFermentationDiagnostics(state);
