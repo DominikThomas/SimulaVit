@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 
 [DisallowMultipleComponent]
-public class VentVisualizer : MonoBehaviour
+public partial class VentVisualizer : MonoBehaviour
 {
     [Header("References")]
     public PlanetResourceMap resourceMap;
@@ -59,15 +59,19 @@ public class VentVisualizer : MonoBehaviour
     private void OnEnable()
     {
         SubscribeToResourceMap();
+        if (effectsRoot != null) effectsRoot.SetActive(true);
+        nextVisibilityUpdate = 0f;
     }
 
     private void OnDisable()
     {
         UnsubscribeFromResourceMap();
+        if (effectsRoot != null) effectsRoot.SetActive(false);
     }
 
     private void Start()
     {
+        if (geodesicEffects) return;
         Debug.Log("[VentVisualizer] Start deferred; waiting for explicit final PlanetResourceMap initialization.", this);
         ClearVentVisuals("startup deferred before final planet");
     }
@@ -81,7 +85,7 @@ public class VentVisualizer : MonoBehaviour
     {
         if (resourceMap == null || !resourceMap.IsLegacyWorldAuthoritative)
         {
-            ClearVentVisuals(reason);
+            if (!geodesicEffects) ClearVentVisuals(reason);
             return;
         }
 
@@ -203,8 +207,14 @@ public class VentVisualizer : MonoBehaviour
         ClearVentVisuals(reason);
     }
 
-    private void ClearVentVisuals(string reason)
+    public void ClearLegacyRuntimeVisuals(string reason)
     {
+        ClearVentVisuals(reason, !geodesicEffects);
+    }
+
+    private void ClearVentVisuals(string reason, bool includeEffects = true)
+    {
+        if (includeEffects) ClearEffects();
         int cleared = 0;
         List<GameObject> trackedVisuals = new List<GameObject>(spawnedVentVisuals);
         for (int i = spawnedVentVisuals.Count - 1; i >= 0; i--)
@@ -215,7 +225,8 @@ public class VentVisualizer : MonoBehaviour
                 continue;
             }
 
-            Destroy(visual);
+            visual.SetActive(false);
+            DestroyVisualObject(visual);
             cleared++;
         }
 
@@ -228,7 +239,8 @@ public class VentVisualizer : MonoBehaviour
                 Transform child = parent.GetChild(i);
                 if (child != null && (child.name.StartsWith("Vent_") || child.name.StartsWith("VentCluster_")) && !trackedVisuals.Contains(child.gameObject))
                 {
-                    Destroy(child.gameObject);
+                    child.gameObject.SetActive(false);
+                    DestroyVisualObject(child.gameObject);
                     cleared++;
                 }
             }
@@ -296,88 +308,9 @@ public class VentVisualizer : MonoBehaviour
         propertyBlock.SetColor("_EmissionColor", Color.red * emission);
         renderer.SetPropertyBlock(propertyBlock);
 
-        AttachSoot(marker.transform, normalizedStrength);
+        AttachSoot(marker.transform.position, anchor, normalizedStrength, cell);
 
         return true;
-    }
-
-    private void AttachSoot(Transform marker, float normalizedStrength)
-    {
-        ParticleSystem soot = sootPrefab != null
-            ? Instantiate(sootPrefab, marker)
-            : CreateRuntimeSoot(marker);
-
-        soot.transform.localPosition = Vector3.zero;
-        soot.transform.localRotation = Quaternion.identity;
-
-        ParticleSystem.EmissionModule emission = soot.emission;
-        emission.rateOverTime = Mathf.Lerp(3f, 18f, normalizedStrength);
-
-        ParticleSystem.MainModule main = soot.main;
-        main.startSpeed = new ParticleSystem.MinMaxCurve(Mathf.Lerp(0.05f, 0.2f, normalizedStrength));
-
-        if (!soot.isPlaying)
-        {
-            soot.Play(true);
-        }
-    }
-
-    private ParticleSystem CreateRuntimeSoot(Transform marker)
-    {
-        GameObject sootObj = new GameObject("Soot");
-        sootObj.transform.SetParent(marker, false);
-
-        ParticleSystem ps = sootObj.AddComponent<ParticleSystem>();
-        ParticleSystemRenderer psRenderer = sootObj.GetComponent<ParticleSystemRenderer>();
-        psRenderer.renderMode = ParticleSystemRenderMode.Billboard;
-
-        ParticleSystem.MainModule main = ps.main;
-        main.loop = true;
-        main.playOnAwake = true;
-        main.startLifetime = new ParticleSystem.MinMaxCurve(2f, 5f);
-        main.startSize = new ParticleSystem.MinMaxCurve(0.02f, 0.06f);
-        main.startSpeed = new ParticleSystem.MinMaxCurve(0.05f, 0.2f);
-        main.startColor = new ParticleSystem.MinMaxGradient(new Color(0.05f, 0.05f, 0.05f, 0.55f), new Color(0.15f, 0.15f, 0.15f, 0.35f));
-        main.simulationSpace = ParticleSystemSimulationSpace.World;
-
-        ParticleSystem.EmissionModule emission = ps.emission;
-        emission.rateOverTime = 8f;
-
-        ParticleSystem.ShapeModule shape = ps.shape;
-        shape.enabled = true;
-        shape.shapeType = ParticleSystemShapeType.Cone;
-        shape.radius = 0.03f;
-        shape.angle = 20f;
-
-        ParticleSystem.ColorOverLifetimeModule colorOverLifetime = ps.colorOverLifetime;
-        colorOverLifetime.enabled = true;
-        Gradient fadeGradient = new Gradient();
-        fadeGradient.SetKeys(
-            new[]
-            {
-                new GradientColorKey(new Color(0.08f, 0.08f, 0.08f), 0f),
-                new GradientColorKey(new Color(0.18f, 0.18f, 0.18f), 1f)
-            },
-            new[]
-            {
-                new GradientAlphaKey(0.55f, 0f),
-                new GradientAlphaKey(0f, 1f)
-            });
-        colorOverLifetime.color = fadeGradient;
-
-        ParticleSystem.SizeOverLifetimeModule sizeOverLifetime = ps.sizeOverLifetime;
-        sizeOverLifetime.enabled = true;
-        AnimationCurve sizeCurve = new AnimationCurve(
-            new Keyframe(0f, 0.8f),
-            new Keyframe(1f, 1.35f));
-        sizeOverLifetime.size = new ParticleSystem.MinMaxCurve(1f, sizeCurve);
-
-        ParticleSystem.NoiseModule noise = ps.noise;
-        noise.enabled = true;
-        noise.strength = 0.08f;
-        noise.frequency = 0.35f;
-
-        return ps;
     }
 
     private static Mesh GetMarkerMesh()
@@ -557,7 +490,7 @@ public class VentVisualizer : MonoBehaviour
         propertyBlock.SetColor("_EmissionColor", Color.red * emission);
         renderer.SetPropertyBlock(propertyBlock);
 
-        AttachSoot(marker.transform, normalizedStrength);
+        AttachSoot(marker.transform.position, anchor, normalizedStrength, cl.representativeCell);
         return true;
     }
 

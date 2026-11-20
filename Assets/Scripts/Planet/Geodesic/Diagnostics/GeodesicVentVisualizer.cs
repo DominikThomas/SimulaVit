@@ -15,6 +15,7 @@ public sealed class GeodesicVentVisualizer : MonoBehaviour
     private GameObject markerRoot;
     private Material sharedMarkerMaterial;
     private Mesh sharedMarkerMesh;
+    private VentVisualizer ventEffects;
 
     public bool ShowVentMarkers
     {
@@ -28,6 +29,11 @@ public sealed class GeodesicVentVisualizer : MonoBehaviour
     {
         ClearMarkers();
         if (temperatureField == null || !temperatureField.IsInitialized || generator == null) return;
+        // Reuse the scene's configured legacy visualizer/assets as the common VFX owner.
+        // The authoritative compact outlets and their clustering remain unchanged.
+        ventEffects = generator.GetComponentInChildren<VentVisualizer>(true);
+        if (ventEffects == null) ventEffects = generator.gameObject.AddComponent<VentVisualizer>();
+        ventEffects.BeginGeodesicEffects(generator);
         markerRoot = new GameObject("Geodesic Vent Markers"); markerRoot.transform.SetParent(transform, false); markerRoot.layer = gameObject.layer; markerRoot.SetActive(showVentMarkers);
         sharedMarkerMesh = BuildSharedDiscMesh(); Shader shader = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
         if (shader != null) { sharedMarkerMaterial = new Material(shader) { name = "Geodesic Vent Marker (Runtime)", color = markerColor }; if (sharedMarkerMaterial.HasProperty("_BaseColor")) sharedMarkerMaterial.SetColor("_BaseColor", markerColor); sharedMarkerMaterial.EnableKeyword("_EMISSION"); if (sharedMarkerMaterial.HasProperty("_EmissionColor")) sharedMarkerMaterial.SetColor("_EmissionColor", markerColor * emissionIntensity); }
@@ -35,6 +41,7 @@ public sealed class GeodesicVentVisualizer : MonoBehaviour
         for (int i = 0; i < temperatureField.OutletCount; i++)
         {
             if (!temperatureField.TryGetOutlet(i, out GeodesicVentOutlet outlet)) continue;
+            ventEffects.AddGeodesicOutletEffect(outlet);
             GameObject marker = new GameObject($"{outlet.Habitat} Vent Outlet {i + 1}"); marker.layer = gameObject.layer; marker.transform.SetParent(markerRoot.transform, false);
             Vector3 normal = outlet.PlanetLocalNormal; marker.transform.localPosition = outlet.PlanetLocalPosition + normal * seafloorOffset;
             int markerCell = FindNearestCell(marker.transform.localPosition.normalized, generator.GeodesicTopology.CellDirections);
@@ -87,8 +94,10 @@ public sealed class GeodesicVentVisualizer : MonoBehaviour
 
     public void ClearMarkers()
     {
+        if (ventEffects != null) ventEffects.ClearRuntimeVisuals("geodesic outlets cleared");
+        ventEffects = null;
         markerCount = 0;
-        if (markerRoot != null) Destroy(markerRoot);
+        if (markerRoot != null) { markerRoot.SetActive(false); Destroy(markerRoot); }
         markerRoot = null;
         if (sharedMarkerMaterial != null) Destroy(sharedMarkerMaterial);
         sharedMarkerMaterial = null;

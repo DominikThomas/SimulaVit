@@ -794,7 +794,7 @@ public partial class SimulationStartupController : MonoBehaviour
         {
             planetResourceMap?.DeinitializeForStartupMenu("geodesic prototype mode selected");
             Debug.Log("[StartupLifecycle] Geodesic mode: skipping legacy PlanetResourceMap resource initialization and vent/resource overlays; GeodesicOceanResourceField owns dissolved-ocean concentrations.", this);
-            ventVisualizer?.ClearRuntimeVisuals("geodesic prototype mode selected");
+            ventVisualizer?.ClearLegacyRuntimeVisuals("geodesic prototype mode selected");
             planetGenerator?.GetComponent<PlanetTemperatureIceVisuals>()?.ClearForGeodesicMode();
             if (planetResourceMap != null && planetResourceMap.IsInitialized)
             {

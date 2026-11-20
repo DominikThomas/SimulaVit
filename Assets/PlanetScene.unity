@@ -539,6 +539,7 @@ MonoBehaviour:
   parent: {fileID: 0}
   ventGlowMaterial: {fileID: 2100000, guid: fd3b47395b8aac74eb6c82092e0ced9f, type: 2}
   sootPrefab: {fileID: 3282405601032870620, guid: a752e0287c9c41b47b0182c1e99ef265, type: 3}
+  heatDistortionMaterial: {fileID: 2100000, guid: 597220b770474dd799e4bf1ee664f5eb, type: 2}
   glowRadiusMin: 0.05
   glowRadiusMax: 0.15
   glowEmissionMin: 1
