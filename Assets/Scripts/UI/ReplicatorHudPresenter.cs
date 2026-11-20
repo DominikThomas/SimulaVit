@@ -151,9 +151,9 @@ public class ReplicatorHudPresenter
               $"O2: {globalO2:0.000} ({o2Pct:0.0}%)\n" +
               $"CH4: {globalCH4:0.000} ({ch4Pct:0.0}%)\n" +
               dissolvedOceanText +
-              $"Temp Mean: {ReplicatorManager.FormatTemperature(hudMeanTempKelvin, temperatureDisplayUnit)}\n" +
-              $"Temp Min: {ReplicatorManager.FormatTemperature(hudMinTempKelvin, temperatureDisplayUnit)}\n" +
-              $"Temp Max: {ReplicatorManager.FormatTemperature(hudMaxTempKelvin, temperatureDisplayUnit)}";
+              $"{(geodesicTemperatureField != null && geodesicTemperatureField.IsInitialized ? "Surface mean" : "Temp Mean")}: {ReplicatorManager.FormatTemperature(hudMeanTempKelvin, temperatureDisplayUnit)}\n" +
+              $"{(geodesicTemperatureField != null && geodesicTemperatureField.IsInitialized ? "Surface min" : "Temp Min")}: {ReplicatorManager.FormatTemperature(hudMinTempKelvin, temperatureDisplayUnit)}\n" +
+              $"{(geodesicTemperatureField != null && geodesicTemperatureField.IsInitialized ? "Surface max" : "Temp Max")}: {ReplicatorManager.FormatTemperature(hudMaxTempKelvin, temperatureDisplayUnit)}";
 
         float safeTotal = Mathf.Max(1f, totalAgents);
         string replicatorsText =

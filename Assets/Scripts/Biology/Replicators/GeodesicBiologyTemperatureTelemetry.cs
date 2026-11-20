@@ -108,7 +108,7 @@ public sealed class GeodesicBiologyTemperatureTelemetry
 
     public void Log(ReplicatorPopulationState state, GeodesicOceanTemperatureField ocean,
         in GeodesicBiologyTemperatureSettings settings, bool carbonDivision, float divisionCost,
-        float replicationCost, float divisionMultiple, int maxPopulation, Func<int, int, float> getTemperature)
+        float replicationCost, float divisionMultiple, int maxPopulation, Func<int, ReplicatorPopulationState, GeodesicVentTemperatureSample> getTemperature)
     {
         if (grid == null) return;
         var populations = new int[3];
@@ -119,14 +119,21 @@ public sealed class GeodesicBiologyTemperatureTelemetry
         var margins = new Range();
         int invalid = 0, dormant = 0, coldStressed = 0, heatStressed = 0, coldExposure = 0, heatExposure = 0;
         int temperatureBlocked = 0, temperatureOnlyBlocked = 0;
+        int overheatedCores=0,favorableVentRegions=0,outsideVentInfluence=0;
         double unsuitableEnergy = 0d;
         for (int i = 0; i < state.Count; i++)
         {
             int cell = state.GeodesicCellIndex[i], layer = state.CurrentOceanLayerIndex[i];
-            float temperature = getTemperature(cell, layer);
+            var thermal=getTemperature(i,state);
+            float temperature=thermal.TemperatureKelvin;
             if (!grid.IsNodeActive(cell, layer) || !float.IsFinite(temperature)) { invalid++; continue; }
             float performance = GeodesicBiologyRuntime.CalculateTemperaturePerformance(temperature,
                 state.OptimalTempMin[i], state.OptimalTempMax[i], state.LethalTempMargin[i], settings.DormancyFloor);
+            if(thermal.Influence<=0f) outsideVentInfluence++;
+            else {
+                if(thermal.InsideHotCore && temperature>state.OptimalTempMax[i]) overheatedCores++;
+                if(GeodesicBiologyTemperaturePolicy.CanReproduce(performance,settings)) favorableVentRegions++;
+            }
             var band = GeodesicBiologyTemperaturePolicy.GetBand(performance, settings);
             populations[(int)band]++;
             if (band == GeodesicBiologyTemperaturePolicy.SuitabilityBand.Unsuitable) unsuitableEnergy += state.Energy[i];
@@ -152,14 +159,15 @@ public sealed class GeodesicBiologyTemperatureTelemetry
         double meanUnsuitableEnergy = populations[2] > 0 ? unsuitableEnergy / populations[2] : double.NaN;
         Debug.Log($"[GeodesicBiologyTemperature] bandOrder=suitable/marginal/unsuitable reproductionMinEfficiency={settings.ReplicationMinEfficiency:G6} dormancyFloor={settings.DormancyFloor:G6} directDamage={settings.DirectDamageEnabled} population={populations[0]}/{populations[1]}/{populations[2]} birthsCumulative={birthsByBand[0]}/{birthsByBand[1]}/{birthsByBand[2]} deathsCumulative(cold/heat/starvation/oldAge)={coldDeaths}/{heatDeaths}/{starvationDeaths}/{oldAgeDeaths} temperatureBlocked={temperatureBlocked} temperatureOnlyBlocked(energy+carbonReady+belowCap)={temperatureOnlyBlocked} unsuitableMeanEnergy={meanUnsuitableEnergy:G6} dormant={dormant} stressed(cold/heat)={coldStressed}/{heatStressed} accumulatedExposure(cold/heat)={coldExposure}/{heatExposure} invalidHabitatTemperature={invalid} optimumMinK({optimumMinimums}) optimumMaxK({optimumMaximums}) toleranceMarginK({margins})");
 
-        var text = new StringBuilder("[GeodesicBiologyVentRings] authority=coarseOceanCellLayer ring=oceanNeighborHopsFromNearestActiveSubmarineOutlet");
+        Debug.Log($"[GeodesicVentThermalNiches] sampledLivingPopulation=true overheatedCore={overheatedCores} temperatureReproductionPermittedWithinInfluence={favorableVentRegions} outsideLocalInfluence={outsideVentInfluence} temperatureDeathsCumulative(cold/heat)={coldDeaths}/{heatDeaths}");
+        var text = new StringBuilder("[GeodesicBiologyVentRings] authority=positionDependentExperiencedTemperature ring=oceanNeighborHopsFromNearestActiveSubmarineOutlet");
         for (int band = 0; band < RingBandCount; band++)
             text.Append(" ring=").Append(RingNames[band]).Append(" organismK(").Append(organismTemperatures[band])
                 .Append(") performance(").Append(organismPerformances[band]).Append(')');
         Debug.Log(text.ToString());
 
         text.Clear();
-        text.Append("[GeodesicVentHabitatProfile] oceanTick=").Append(ocean.LastCompletedOceanTemperatureTick.ToString("G9"))
+        text.Append("[GeodesicVentHabitatProfile] authority=coarseOceanCellLayer oceanTick=").Append(ocean.LastCompletedOceanTemperatureTick.ToString("G9"))
             .Append(" activeSubmarineOutlets=").Append(activeOutlets).Append(" strongestOutletCell=").Append(strongestOutletCell)
             .Append(" strongestOutletBottomLayer=").Append(strongestOutletCell >= 0 ? grid.GetBottomLayerIndex(strongestOutletCell) : -1)
             .Append(" strongestInfluence=").Append(strongestOutletInfluence.ToString("G6"))

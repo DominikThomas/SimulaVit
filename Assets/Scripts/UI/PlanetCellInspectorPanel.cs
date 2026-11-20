@@ -112,9 +112,12 @@ public class PlanetCellInspectorPanel : MonoBehaviour
         sb.AppendLine($"Active Layers: {snapshot.ActiveLayerCount}");
         sb.AppendLine($"Insolation: {snapshot.Insolation:0.###}");
         sb.AppendLine($"Vent Strength: {snapshot.VentStrength:0.###}");
-        sb.AppendLine($"Temp: {ReplicatorManager.FormatTemperature(snapshot.EffectiveTemperatureKelvin, temperatureDisplayUnit)}");
+        sb.AppendLine($"{(snapshot.IsGeodesic ? "Selected surface" : "Temp")}: {ReplicatorManager.FormatTemperature(snapshot.EffectiveTemperatureKelvin, temperatureDisplayUnit)}");
+        if(snapshot.IsGeodesic && snapshot.HasExperiencedProbe) {
+            sb.AppendLine($"Experienced bottom-center probe L{snapshot.ExperiencedProbeLayer}: {ReplicatorManager.FormatTemperature(snapshot.ThermalProbe.TemperatureKelvin,temperatureDisplayUnit)}");
+        }
         sb.AppendLine();
-        sb.AppendLine("Effective Summary");
+        sb.AppendLine(snapshot.IsGeodesic ? "Column volume-weighted mean concentrations" : "Effective Summary");
         sb.AppendLine($"CO2: {snapshot.EffectiveCO2:0.####}");
         sb.AppendLine($"O2: {snapshot.EffectiveO2:0.####}");
         sb.AppendLine($"CH4: {snapshot.EffectiveCH4:0.####}");
@@ -122,7 +125,7 @@ public class PlanetCellInspectorPanel : MonoBehaviour
         sb.AppendLine($"H2: {snapshot.EffectiveH2:0.####}");
         sb.AppendLine($"H2S: {snapshot.EffectiveH2S:0.####}");
         sb.AppendLine($"DissolvedFe2+: {snapshot.EffectiveDissolvedFe2Plus:0.####}");
-        sb.AppendLine($"Light Factor: {snapshot.EffectiveLegacy.LightFactor:0.####}");
+        if(!snapshot.IsGeodesic) sb.AppendLine($"Light Factor: {snapshot.EffectiveLegacy.LightFactor:0.####}");
     }
 
     private static void BuildLayers(PlanetResourceMap.CellInspectionSnapshot snapshot, StringBuilder sb, TemperatureDisplayUnit temperatureDisplayUnit)
@@ -157,15 +160,20 @@ public class PlanetCellInspectorPanel : MonoBehaviour
             }
             sb.AppendLine($"  O2: {layer.O2:0.###}, CO2: {layer.CO2:0.###}");
             sb.AppendLine($"  DissolvedFe2+: {layer.DissolvedFe2Plus:0.###}");
-            sb.AppendLine($"  Visual precip: S0 {layer.SulfurPrecipitateVisual:0.###}, FeOx {layer.IronOxidePrecipitateVisual:0.###}");
+            if(!snapshot.IsGeodesic) sb.AppendLine($"  Visual precip: S0 {layer.SulfurPrecipitateVisual:0.###}, FeOx {layer.IronOxidePrecipitateVisual:0.###}");
             sb.AppendLine($"  CH4: {layer.CH4:0.###}, H2: {layer.H2:0.###}, H2S: {layer.H2S:0.###}");
             sb.AppendLine($"  Light: {layer.LightFactor:0.###}, OrganicC: {layer.OrganicC:0.###}");
-            if (layer.LayerIndex == snapshot.OceanLayers.Length - 1)
+            if (!snapshot.IsGeodesic && layer.LayerIndex == snapshot.OceanLayers.Length - 1)
             {
                 sb.AppendLine($"  Bottom tint: S0 {layer.BottomSulfurTintVisual:0.###}, FeOx {layer.BottomIronOxideTintVisual:0.###}");
             }
-            sb.AppendLine($"  Temp Estimate: {ReplicatorManager.FormatTemperature(layer.TemperatureKelvinEstimate, temperatureDisplayUnit)}");
+            sb.AppendLine($"  {(snapshot.IsGeodesic ? "Coarse ocean temperature" : "Temp Estimate")}: {ReplicatorManager.FormatTemperature(snapshot.IsGeodesic ? layer.CoarseTemperatureKelvin : layer.TemperatureKelvinEstimate, temperatureDisplayUnit)}");
             sb.AppendLine();
+        }
+        if(snapshot.IsGeodesic && snapshot.HasExperiencedProbe) {
+            sb.AppendLine($"Thermal probe: selected direction at L{snapshot.ExperiencedProbeLayer} center radius");
+            sb.AppendLine($"World position: {snapshot.ExperiencedProbeWorldPosition}");
+            sb.AppendLine(GeodesicExperiencedTemperatureField.DescribeTemperatureSample(snapshot.ThermalProbe,temperatureDisplayUnit));
         }
     }
 }

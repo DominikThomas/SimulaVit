@@ -16,6 +16,9 @@ public struct GeodesicGrowthSnapshot
     public MetabolismType metabolism;
     public float organicC, biomassTarget, requiredCarbon, carbonProgress;
     public float energy, requiredEnergy, temperatureKelvin, temperaturePerformance;
+    public GeodesicVentTemperatureSample thermal;
+    public float optimalTempMin, optimalTempMax, lethalTempMargin, coldExposureSeconds, heatExposureSeconds;
+    public bool accumulatingColdExposure, accumulatingHeatExposure;
     public float probabilityPerStep, age, visualSize;
     public float matureSize, visualDiameterMultiplier, growthCycleCarbonBaseline, visualGrowthProgress;
     public float cycleStartDiameterMultiplier;

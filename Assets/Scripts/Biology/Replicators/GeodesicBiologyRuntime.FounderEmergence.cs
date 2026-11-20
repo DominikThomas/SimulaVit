@@ -12,6 +12,7 @@ public sealed partial class GeodesicBiologyRuntime
         public int firstVentNode, distinctFounderVents, inhabitedVents, indirectlyColonizedVents, unoccupiedVents, submarineOutlets;
         public int livingFounders, initialEventsRemaining;
         public long founderDeaths, founderParentBirths, descendantParentBirths, candidateRefreshes;
+        public long thermalCandidateRejections, foodCandidateRejections, invalidCandidateRejections, placementFailuresWithThermalRejections;
     }
 
     private struct FounderVentCandidate { public GeodesicVentSourceOutlet outlet; public double weight; }
@@ -44,6 +45,7 @@ public sealed partial class GeodesicBiologyRuntime
         List<Replicator> agents, ReplicatorPopulationState state)
     {
         if (emergenceSchedule == null || grid == null) return;
+        founderCO2Need=co2Need; founderH2Need=h2Need;
         // Fixed work bound for pathological intervals/backlogs. Remaining due events stay queued.
         for (int n = 0; n < 64 && emergenceSchedule.TryConsume(simulationTime, out double due); n++)
         {
@@ -83,6 +85,7 @@ public sealed partial class GeodesicBiologyRuntime
             int packed = SpawnFounderAtVent(emergenceVents[selected].outlet, emergenceTraitsRandom, emergenceVisualRandom,
                 agents, state, founderMinLife, founderMaxLife, founderColor, founderBiomassTarget,
                 founderHydrogenTemperatureRange, founderLethalMargin, true);
+            if(packed<0) { emergenceRejectedHabitat++; emergenceVents[selected].weight=0d; continue; }
             InitializePassiveSchedulesAtSpawn(state, packed, passiveMovementTime);
         }
     }
@@ -92,19 +95,19 @@ public sealed partial class GeodesicBiologyRuntime
     {
         int cell = outlet.SourceNode / grid.MaximumLayerCount, layer = outlet.SourceNode % grid.MaximumLayerCount;
         if (!grid.IsNodeActive(cell,layer)) return 0d;
-        resources.TryGetConcentration(cell,layer,GeodesicOceanResource.CO2,out float co2);
-        resources.TryGetConcentration(cell,layer,GeodesicOceanResource.H2,out float h2);
+        // Rank cached resource opportunity. Thermal suitability is resolved at candidate positions,
+        // never at the source center (which is expected to be hot).
+        double ready=FounderFoodReadiness(cell,layer,co2Need,h2Need);
+        for(int k=0;k<grid.SourceTopology.NeighborCounts[cell];k++) {
+            int neighbor=grid.SourceTopology.Neighbors6[cell*6+k];
+            ready=Math.Max(ready,FounderFoodReadiness(neighbor,grid.GetBottomLayerIndex(neighbor),co2Need,h2Need));
+        }
+        if(ready<1d) return 0d;
         resources.TryGetConcentration(cell,layer,GeodesicOceanResource.O2,out float o2);
-        double ready = GeodesicFoodSignal.HydrogenotrophyTicks(co2,h2,grid.PhysicalLayerVolumeKm3[outlet.SourceNode],co2Need,h2Need);
-        float thermal = CalculateTemperaturePerformance(GetHabitatTemperature(cell,layer),
-            Mathf.Min(founderHydrogenTemperatureRange.x,founderHydrogenTemperatureRange.y),
-            Mathf.Max(founderHydrogenTemperatureRange.x,founderHydrogenTemperatureRange.y),
-            Mathf.Max(1f,founderLethalMargin),temperatureSettings.DormancyFloor);
-        float oxygen = oxygenInhibition ? CalculateAnaerobeO2Efficiency(o2,oxygenComfort,oxygenStress,oxygenFloor) : 1f;
-        // Require at least one local reference reaction, then prefer fuller, thermally productive habitats.
-        if (!double.IsFinite(ready) || ready < 1d || !float.IsFinite(thermal) || thermal <= 0f || !float.IsFinite(oxygen) || oxygen <= 0f) return 0d;
-        double production = (double)outlet.SystemBudgetWeight * outlet.WithinSystemWeight;
-        return double.IsFinite(production) && production > 0d ? production * (ready / (1d+ready)) * thermal * oxygen : 0d;
+        float oxygen=oxygenInhibition ? CalculateAnaerobeO2Efficiency(o2,oxygenComfort,oxygenStress,oxygenFloor) : 1f;
+        if(!float.IsFinite(oxygen) || oxygen<=0f) return 0d;
+        double production=(double)outlet.SystemBudgetWeight*outlet.WithinSystemWeight;
+        return double.IsFinite(production) && production>0d ? production*(ready/(1d+ready))*oxygen : 0d;
     }
 
     private void EnsureFounderVentCatalog()
@@ -171,7 +174,9 @@ public sealed partial class GeodesicBiologyRuntime
             unoccupiedVents=emergenceVents.Length-inhabited, submarineOutlets=emergenceVents.Length,
             livingFounders=livingDirectFounders.Count, founderDeaths=emergenceFounderDeaths,
             founderParentBirths=emergenceFounderBirths, descendantParentBirths=emergenceDescendantBirths,
-            initialEventsRemaining=emergenceSchedule?.InitialEventsRemaining??0, candidateRefreshes=emergenceCandidateRefreshes };
+            initialEventsRemaining=emergenceSchedule?.InitialEventsRemaining??0, candidateRefreshes=emergenceCandidateRefreshes,
+            thermalCandidateRejections=founderThermalCandidateRejections, foodCandidateRejections=founderFoodCandidateRejections,
+            invalidCandidateRejections=founderInvalidCandidateRejections, placementFailuresWithThermalRejections=founderThermalPlacementFailures };
     }
 
     private void LogFounderEmergence(ReplicatorPopulationState state) =>

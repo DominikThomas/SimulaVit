@@ -138,7 +138,7 @@ public sealed partial class GeodesicBiologyRuntime
         var observation = new GeodesicTaxisObservation { cell = cell, layer = layer };
         if (!grid.IsNodeActive(cell, layer)) return observation;
         observation.valid = true;
-        observation.temperature = GetHabitatTemperature(cell, layer);
+        observation.temperature = GetBiologicalTemperature(i,state);
         observation.performance = CalculateTemperaturePerformance(observation.temperature, state.OptimalTempMin[i],
             state.OptimalTempMax[i], state.LethalTempMargin[i], temperatureSettings.DormancyFloor);
         MovementHabitatSample sample = SampleMovementHabitat(cell, layer);

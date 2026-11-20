@@ -896,7 +896,8 @@ public class ReplicatorManager : MonoBehaviour
                 ? Mathf.Clamp(initialSpawnCount, 0, Mathf.Max(0,maxPopulation)) : 0;
             if (!geodesicBiology.Initialize(planetGenerator, agents, populationState, immediateFounderCount,
                 minLifespan, maxLifespan, baseAgentColor, defaultBiomassTarget,
-                hydrogenTempRange, defaultLethalMargin))
+                hydrogenTempRange, defaultLethalMargin,hydrogenotrophyCO2PerTick,hydrogenotrophyH2PerTick,
+                temperatureReplicationMinEfficiency,temperatureDormancyFloor))
             {
                 geodesicBiology = null;
                 isInitialized = false;
@@ -1025,6 +1026,11 @@ public class ReplicatorManager : MonoBehaviour
             ? TryGetGeodesicGrowthSnapshot(0, out snapshot)
             : TryGetGeodesicGrowthSnapshotById(biologyDiagnostics.SelectedOrganismId, out snapshot);
         biologyDiagnostics.SetSelectedGrowth(found, snapshot);
+        if(found) {
+            float displayMargin=temperatureDisplayUnit==TemperatureDisplayUnit.Fahrenheit ? snapshot.lethalTempMargin*1.8f : snapshot.lethalTempMargin;
+            string marginUnit=temperatureDisplayUnit==TemperatureDisplayUnit.Fahrenheit ? "F" : temperatureDisplayUnit==TemperatureDisplayUnit.Celsius ? "C" : "K";
+            Debug.Log($"[SelectedGeodesicThermal] organism={snapshot.organismId} cell/layer={snapshot.cell}/{snapshot.layer} worldPosition={snapshot.worldPosition}\n{GeodesicExperiencedTemperatureField.DescribeTemperatureSample(snapshot.thermal,temperatureDisplayUnit,"organism position")}\nIndividual preferred range: {FormatTemperature(snapshot.optimalTempMin,temperatureDisplayUnit)} to {FormatTemperature(snapshot.optimalTempMax,temperatureDisplayUnit)}; tolerance margin={displayMargin:G5} {marginUnit}\nPerformance={snapshot.temperaturePerformance:G5}; temperature reproduction permitted={snapshot.temperatureReady}; accumulating cold/heat exposure={snapshot.accumulatingColdExposure}/{snapshot.accumulatingHeatExposure}; exposure seconds={snapshot.coldExposureSeconds:G5}/{snapshot.heatExposureSeconds:G5}",this);
+        }
     }
 
     [ContextMenu("Biology Diagnostics/Reset Accounting Readouts")]

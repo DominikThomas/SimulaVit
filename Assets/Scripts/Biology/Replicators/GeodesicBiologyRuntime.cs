@@ -171,7 +171,8 @@ public sealed partial class GeodesicBiologyRuntime
         if (grid == null || state == null || agents == null || index < 0 || index >= state.Count || index >= agents.Count) return false;
         // External inspection can happen after an environmental tick, before the next biology step.
         RefreshTemperatureCache();
-        float temperature = GetHabitatTemperature(state.GeodesicCellIndex[index], state.CurrentOceanLayerIndex[index]);
+        BeginBiologicalThermalStep();
+        float temperature = GetBiologicalTemperature(index,state);
         float performance = CalculateTemperaturePerformance(temperature, state.OptimalTempMin[index],
             state.OptimalTempMax[index], state.LethalTempMargin[index], temperatureSettings.DormancyFloor);
         snapshot = CaptureGrowthSnapshot(index, agents[index].DiagnosticId, state, temperature, performance,
@@ -192,6 +193,11 @@ public sealed partial class GeodesicBiologyRuntime
         var snapshot = new GeodesicGrowthSnapshot
         {
             organismId = id, packedIndex = index, cell = state.GeodesicCellIndex[index], layer = state.CurrentOceanLayerIndex[index],
+            thermal = GetAgentTemperatureSample(index,state),
+            optimalTempMin=state.OptimalTempMin[index], optimalTempMax=state.OptimalTempMax[index], lethalTempMargin=state.LethalTempMargin[index],
+            coldExposureSeconds=state.ColdTemperatureExposureSeconds[index], heatExposureSeconds=state.HeatTemperatureExposureSeconds[index],
+            accumulatingColdExposure=temperatureSettings.DirectDamageEnabled && temperatureSettings.ColdExposureDeathSeconds>0f && temperature<state.OptimalTempMin[index]-state.LethalTempMargin[index],
+            accumulatingHeatExposure=temperatureSettings.DirectDamageEnabled && temperatureSettings.HeatExposureDeathSeconds>0f && temperature>state.OptimalTempMax[index]+state.LethalTempMargin[index],
             metabolism = state.Metabolism[index], organicC = state.OrganicCStore[index], biomassTarget = state.BiomassTarget[index],
             requiredCarbon = requiredCarbon, carbonProgress = requiredCarbon > 0f ? state.OrganicCStore[index] / requiredCarbon : float.NaN,
             energy = state.Energy[index], requiredEnergy = requiredEnergy, temperatureKelvin = temperature, temperaturePerformance = performance,
@@ -243,7 +249,8 @@ public sealed partial class GeodesicBiologyRuntime
 
     public bool Initialize(PlanetGenerator generator, List<Replicator> agents, ReplicatorPopulationState state,
         int requestedFounders, float minLife, float maxLife, Color color, float biomassTarget,
-        Vector2 hydrogenTemperatureRange, float lethalTemperatureMargin)
+        Vector2 hydrogenTemperatureRange, float lethalTemperatureMargin,
+        float founderCo2Requirement=.01f,float founderH2Requirement=.02f,float founderReproductionMinEfficiency=.15f,float founderDormancyFloor=0f)
     {
         Clear();
         planet = generator;
@@ -276,6 +283,9 @@ public sealed partial class GeodesicBiologyRuntime
         founderMinLife = minLife; founderMaxLife = maxLife; founderColor = color;
         founderBiomassTarget = biomassTarget; founderHydrogenTemperatureRange = hydrogenTemperatureRange;
         founderLethalMargin = lethalTemperatureMargin;
+        founderCO2Need=founderCo2Requirement; founderH2Need=founderH2Requirement;
+        temperatureSettings.ReplicationMinEfficiency=founderReproductionMinEfficiency;
+        temperatureSettings.DormancyFloor=founderDormancyFloor;
         var random = new System.Random(biologySeed);
         var visualRandom = new System.Random(biologySeed ^ 0x3419A7D);
         reproductionRandom = new System.Random(biologySeed ^ 0x5EED123);
@@ -341,7 +351,7 @@ public sealed partial class GeodesicBiologyRuntime
             totalVentWeight += GetFounderVentWeight(outlet);
         }
         if (count > 0 && validVents == 0) { emergenceRejectedHabitat += count; Debug.LogWarning("[GeodesicBiology] No valid submarine vent habitat; no founders were spawned."); return 0; }
-        int firstFounder = state.Count, bottomMatches = 0, exactVentCells = 0, visualCellMismatches = 0, visualLayerMismatches = 0;
+        int firstFounder = state.Count, spawnedCount=0, bottomMatches = 0, exactVentCells = 0, visualCellMismatches = 0, visualLayerMismatches = 0;
         var usedVentCells = new HashSet<int>();
         var layerHistogram = new int[grid.MaximumLayerCount];
         for (int i = 0; i < count; i++)
@@ -356,40 +366,40 @@ public sealed partial class GeodesicBiologyRuntime
             }
             int packed = SpawnFounderAtVent(selected, random, visualRandom, agents, state,
                 minLife, maxLife, color, biomassTarget, hydrogenTemperatureRange, lethalTemperatureMargin, forceZeroAge);
-            int sourceCell = selected.SourceNode / grid.MaximumLayerCount;
-            int bottomLayer = grid.GetBottomLayerIndex(sourceCell);
-            float layerRadius = grid.LayerCenterRadius[selected.SourceNode];
+            if(packed<0) { emergenceRejectedHabitat++; continue; }
+            spawnedCount++;
+            int sourceCell = state.GeodesicCellIndex[packed];
+            int bottomLayer = state.CurrentOceanLayerIndex[packed];
+            float layerRadius = grid.LayerCenterRadius[grid.GetNodeIndex(sourceCell,bottomLayer)];
             Vector3 visualLocalPosition = planet.transform.InverseTransformPoint(state.Position[packed]);
-            Replicator agent = agents[packed];
-            usedVentCells.Add(sourceCell);
-            if (state.GeodesicCellIndex[packed] == sourceCell) exactVentCells++;
+            usedVentCells.Add(selected.CellIndex);
+            if (state.GeodesicCellIndex[packed] == selected.CellIndex) exactVentCells++;
             if (state.CurrentOceanLayerIndex[packed] == grid.GetBottomLayerIndex(state.GeodesicCellIndex[packed])) bottomMatches++;
             layerHistogram[bottomLayer]++;
-            int visualCell = FindNearestCell(visualLocalPosition.normalized, planet.GeodesicTopology.CellDirections);
-            if (visualCell != sourceCell) visualCellMismatches++;
+            if (!DirectionInsideCell(sourceCell,visualLocalPosition.normalized,grid.SourceTopology)) visualCellMismatches++;
             if (Mathf.Abs(visualLocalPosition.magnitude - layerRadius) > 1e-4f) visualLayerMismatches++;
-            if (i < 3) LogFounderPositionAudit(packed, agent, sourceCell, bottomLayer, layerRadius, state);
+
         }
-        Debug.Log($"[GeodesicFounderSpawn] founders={count} submarineVentOutletsUsed={usedVentCells.Count} authoritativeBottomLayer={bottomMatches}/{count} exactVentCell={exactVentCells}/{count} maxCellDistanceFromSelectedVent=0 invalidVentCandidates={invalidVents} visualCellMismatch={visualCellMismatches} visualLayerMismatch={visualLayerMismatches} layers={FormatLayerHistogram(layerHistogram)} packedRange={firstFounder}-{state.Count - 1}");
-        return count;
+        Debug.Log($"[GeodesicFounderSpawn] requested={count} spawned={spawnedCount} selectedSubmarineOutlets={usedVentCells.Count} actualBottomLayer={bottomMatches}/{spawnedCount} remainedInSourceCell={exactVentCells}/{spawnedCount} invalidVentCandidates={invalidVents} visualCellMismatch={visualCellMismatches} visualLayerMismatch={visualLayerMismatches} placement=bounded-local-thermal-and-food-sampling layers={FormatLayerHistogram(layerHistogram)} packedRange={firstFounder}-{state.Count-1}");
+        return spawnedCount;
     }
 
     private int SpawnFounderAtVent(GeodesicVentSourceOutlet selected, System.Random random, System.Random visualRandom,
         List<Replicator> agents, ReplicatorPopulationState state, float minLife, float maxLife, Color color,
         float biomassTarget, Vector2 hydrogenTemperatureRange, float lethalTemperatureMargin, bool forceZeroAge)
     {
+        if(!TryFindFounderPosition(selected,out var placement)) return -1;
         MetabolismType metabolism = NormalFounderMetabolism;
-        int sourceCell = selected.SourceNode / grid.MaximumLayerCount;
-        int bottomLayer = grid.GetBottomLayerIndex(sourceCell);
-        Vector3 direction = grid.SourceTopology.CellDirections[sourceCell]; // planet-local
-        float layerRadius = grid.LayerCenterRadius[selected.SourceNode];
-        float safeScatterRadians = GetMinimumNeighborSpacingRadians(sourceCell) * 0.1f;
-        Vector3 visualLocalPosition = CalculateVisualFounderPosition(direction, layerRadius, safeScatterRadians,
-            (float)visualRandom.NextDouble(), (float)visualRandom.NextDouble());
+        int sourceCell=placement.cell,bottomLayer=placement.layer;
+        float layerRadius=grid.LayerCenterRadius[grid.GetNodeIndex(sourceCell,bottomLayer)];
+        Vector3 visualLocalPosition=placement.local;
         Vector3 position = planet.transform.TransformPoint(visualLocalPosition);
         float life = Mathf.Lerp(minLife, maxLife, (float)random.NextDouble());
         var agent = new Replicator(position, Quaternion.FromToRotation(Vector3.up, visualLocalPosition.normalized), life, color,
             new Replicator.Traits(true, true, true, 0f), (float)random.NextDouble(), metabolism, NormalFounderLocomotion);
+        agent.currentDirection=planet.transform.TransformDirection(visualLocalPosition.normalized).normalized;
+        agent.moveDirection=agent.currentDirection;
+        agent.rotation=Quaternion.FromToRotation(Vector3.up,agent.currentDirection);
         float initialEnergy = Mathf.Lerp(0.1f, 0.5f, (float)random.NextDouble());
         float sampledAge = Mathf.Lerp(0f, life * 0.5f, (float)random.NextDouble());
         InitializeFounderBiologicalState(agent, sourceCell, bottomLayer, hydrogenTemperatureRange,
@@ -408,25 +418,6 @@ public sealed partial class GeodesicBiologyRuntime
         state.Position[packed] = position; // world-space
         RegisterFounderPlacement(agent.DiagnosticId, selected.SourceNode);
         return packed;
-    }
-
-    private void LogFounderPositionAudit(int founder, Replicator companion, int sourceCell, int layer,
-        float expectedLayerRadius, ReplicatorPopulationState state)
-    {
-        Vector3 sourceDirection = planet.GeodesicTopology.CellDirections[sourceCell];
-        Vector3 packedLocal = planet.transform.InverseTransformPoint(state.Position[founder]);
-        Vector3 companionLocal = planet.transform.InverseTransformPoint(companion.position);
-        Vector3 renderedWorld = ReplicatorRenderSystem.ResolvePassiveRenderPosition(state.Position[founder]);
-        Vector3 renderedLocal = planet.transform.InverseTransformPoint(renderedWorld);
-        int markerCell = -1; float sourceMarkerDegrees = float.NaN, markerRadius = float.NaN;
-        for (int i = 0; i < experiencedTemperature.OutletCount; i++)
-            if (experiencedTemperature.TryGetOutlet(i, out GeodesicVentOutlet marker) && marker.Habitat == GeodesicVentHabitat.Submarine && marker.CellIndex == sourceCell)
-            { markerCell = FindNearestCell(marker.PlanetLocalPosition.normalized, planet.GeodesicTopology.CellDirections); markerRadius = marker.PlanetLocalPosition.magnitude; sourceMarkerDegrees = Vector3.Angle(sourceDirection, marker.PlanetLocalPosition); break; }
-        float sourceFounderDegrees = Vector3.Angle(sourceDirection, packedLocal);
-        float packedRenderedDegrees = Vector3.Angle(packedLocal, renderedLocal);
-        int activeLayers = grid.ActiveLayerCountByCell[sourceCell], expectedBottom = activeLayers - 1;
-        Debug.Assert(layer == expectedBottom && state.GeodesicCellIndex[founder] == sourceCell);
-        Debug.Log($"[GeodesicFounderPositionAudit] founder={founder} ventSourceCell={sourceCell} markerCell={markerCell} founderCell={state.GeodesicCellIndex[founder]} layer={layer}/{expectedBottom} activeLayerCount={activeLayers} node={grid.GetNodeIndex(sourceCell, layer)} expectedLayerRadius={expectedLayerRadius:F6} packedRadius={packedLocal.magnitude:F6} companionRadius={companionLocal.magnitude:F6} renderedRadius={renderedLocal.magnitude:F6} oceanTopRadius={grid.OceanSurfaceRadius:F6} seafloorRadius={grid.SourceSeafloorRadius[sourceCell]:F6} markerRadius={markerRadius:F6} angularDegrees(source-marker/source-founder/packed-rendered)={sourceMarkerDegrees:F6}/{sourceFounderDegrees:F6}/{packedRenderedDegrees:F6}");
     }
 
     private bool TryResolveFounderVent(int outletIndex, out GeodesicVentSourceOutlet outlet, out int sourceCell, out int sourceLayer)
@@ -472,13 +463,6 @@ public sealed partial class GeodesicBiologyRuntime
         return double.IsFinite(weight) && weight > 0d ? weight : double.Epsilon;
     }
 
-    private static int FindNearestCell(Vector3 direction, Vector3[] directions)
-    {
-        int nearest = -1; float best = -2f;
-        for (int i = 0; i < directions.Length; i++) { float dot = Vector3.Dot(direction, directions[i]); if (dot > best) { best = dot; nearest = i; } }
-        return nearest;
-    }
-
     public static string FormatLayerHistogram(int[] histogram)
     {
         var text = new System.Text.StringBuilder();
@@ -500,12 +484,13 @@ public sealed partial class GeodesicBiologyRuntime
         bool observeAccounting = accountingDiagnostics != null && accountingDiagnostics.Enabled;
         if (observeAccounting) accountingDiagnostics.AdvanceObservedTime(dt);
         RefreshTemperatureCache();
+        BeginBiologicalThermalStep();
         if (!hydrogenotrophyConfigLogged)
         {
             Debug.Log(DescribeResolvedFermentationControls(o2ComfortMax,o2StressMax,maxStore));
             Debug.Log(DescribeResolvedSulfurControls(sulfurCo2, sulfurH2s, sulfurEnergy, o2ComfortMax, o2StressMax));
             Debug.Log($"[GeodesicHydrogenotrophyConfig] H2PerTick={hydrogenH2:G6} CO2PerTick={hydrogenCo2:G6} EnergyPerCompletedTick={hydrogenEnergy:G6} WholeReactionActivityFraction={hydrogenStoreFraction:G6} CarbonAssimilationOfWithdrawnCO2=1 capacityLimited=true atomicMeasuredInputs=true BasalEnergyCostPerSecond={maintenance:G6} ReferenceTickSeconds={ReferenceTickSeconds:G6}");
-            Debug.Log($"[GeodesicTemperatureConfig] authority=coarseOceanCellLayer dormancyFloor={temperatureSettings.DormancyFloor:G6} reproductionMinEfficiency={temperatureSettings.ReplicationMinEfficiency:G6} reproductionChance=rate*dt*performance directDamage={temperatureSettings.DirectDamageEnabled} coldExposureSeconds={temperatureSettings.ColdExposureDeathSeconds:G6} heatExposureSeconds={temperatureSettings.HeatExposureDeathSeconds:G6} recoveryPerSecond={temperatureSettings.ExposureRecoveryPerSecond:G6} extraStressMaintenanceMultiplier={temperatureSettings.StressMaintenanceMultiplier:G6} mutationChance={temperatureSettings.MutationChance:G6} mutationScaleK={temperatureSettings.MutationScale:G6} divisionEnergy=conservative-half-split");
+            Debug.Log($"[GeodesicTemperatureConfig] authority=positionDependentExperiencedTemperature coarseCache=cellLayer biologicalCache=organismPosition dormancyFloor={temperatureSettings.DormancyFloor:G6} reproductionMinEfficiency={temperatureSettings.ReplicationMinEfficiency:G6} reproductionChance=rate*dt*performance directDamage={temperatureSettings.DirectDamageEnabled} coldExposureSeconds={temperatureSettings.ColdExposureDeathSeconds:G6} heatExposureSeconds={temperatureSettings.HeatExposureDeathSeconds:G6} recoveryPerSecond={temperatureSettings.ExposureRecoveryPerSecond:G6} extraStressMaintenanceMultiplier={temperatureSettings.StressMaintenanceMultiplier:G6} mutationChance={temperatureSettings.MutationChance:G6} mutationScaleK={temperatureSettings.MutationScale:G6} divisionEnergy=conservative-half-split");
             hydrogenotrophyConfigLogged = true;
         }
         biologySteps++;
@@ -583,9 +568,7 @@ public sealed partial class GeodesicBiologyRuntime
         }
         r.Supported = true;
         EnsureHabitatSample(r.Node, cell, layer);
-        // Habitat temperature is the authoritative ocean cell/layer value. The separate
-        // vent-core query can approach source-fluid temperature and is not a biology input.
-        float temperature = temperatureByNode[r.Node];
+        float temperature = GetBiologicalTemperature(i,state);
         float optimumMin = state.OptimalTempMin[i], optimumMax = state.OptimalTempMax[i];
         float temperatureScale = CalculateTemperaturePerformance(temperature, optimumMin, optimumMax,
             state.LethalTempMargin[i], temperatureSettings.DormancyFloor);
@@ -788,7 +771,7 @@ public sealed partial class GeodesicBiologyRuntime
             if (recordReactions) RecordReactionAccounting(i);
             ReplicatorVisualGrowth.AdvanceDivision(ref state.VisualGrowth[i], dt);
             state.Age[i] += dt;
-            float temperature = GetHabitatTemperature(state.GeodesicCellIndex[i], state.CurrentOceanLayerIndex[i]);
+            float temperature = GetBiologicalTemperature(i,state);
             float performance = CalculateTemperaturePerformance(temperature, state.OptimalTempMin[i],
                 state.OptimalTempMax[i], state.LethalTempMargin[i], temperatureSettings.DormancyFloor);
             state.CanReplicate[i] = GeodesicBiologyTemperaturePolicy.CanReproduce(performance, temperatureSettings);
@@ -862,13 +845,14 @@ public sealed partial class GeodesicBiologyRuntime
             child.lethalTempMargin = state.LethalTempMargin[i];
             MutateChildMetabolism(child, state.Metabolism[i], carbon ? state.OrganicCStore[i]*Mathf.Clamp01(split) : child.organicCStore);
             GeodesicBiologyTemperaturePolicy.MutateInheritedTraits(child, temperatureMutationRandom, temperatureSettings);
-            child.canReplicate = GeodesicBiologyTemperaturePolicy.CanReproduce(CalculateTemperaturePerformance(temperature,
-                child.optimalTempMin, child.optimalTempMax, child.lethalTempMargin, temperatureSettings.DormancyFloor), temperatureSettings);
             SplitDivisionEnergy(state.Energy[i], energyCost, out float parentEnergy, out float childEnergy);
             state.Energy[i] = parentEnergy;
             child.energy = childEnergy;
             if (carbon) { child.organicCStore = state.OrganicCStore[i] * Mathf.Clamp01(split); state.OrganicCStore[i] -= child.organicCStore; }
             PlaceDaughter(i, child, state);
+            float childTemperature=SampleBiologicalTemperature(child.geodesicCellIndex,child.currentOceanLayerIndex,child.position).TemperatureKelvin;
+            child.canReplicate=GeodesicBiologyTemperaturePolicy.CanReproduce(CalculateTemperaturePerformance(childTemperature,
+                child.optimalTempMin,child.optimalTempMax,child.lethalTempMargin,temperatureSettings.DormancyFloor),temperatureSettings);
             if (child.locomotion != LocomotionType.PassiveDrift)
             {
                 Vector3 birthNormal = planet.transform.InverseTransformPoint(child.position).normalized;
@@ -1387,6 +1371,7 @@ public sealed partial class GeodesicBiologyRuntime
         }
     }
 
+    // Coarse background only. Organism consumers must use GetBiologicalTemperature / GetAgentTemperatureSample.
     private float GetHabitatTemperature(int cell, int layer)
     {
         if (grid == null || !grid.IsNodeActive(cell, layer)) return float.NaN;
@@ -1504,7 +1489,7 @@ public sealed partial class GeodesicBiologyRuntime
         if (!chemotaxisABDiagnosticsEnabled) LogLocomotionDiagnostics(state);
         bool reportAB = BeginABPopulationReport();
         temperatureTelemetry.Log(state, oceanTemperature, temperatureSettings, carbonDivision,
-            divisionCost, replicationCost, divisionMultiple, maxPopulation, GetHabitatTemperature);
+            divisionCost, replicationCost, divisionMultiple, maxPopulation, GetAgentTemperatureSample);
         int hydrogen=0,sulfur=0,methanogenesis=0,photosynthesis=0,methanotrophy=0,passive=0,amoeboid=0,flagellum=0,anchored=0;
         bool observeAccounting = accountingDiagnostics != null && accountingDiagnostics.Enabled;
         if (observeAccounting) accountingDiagnostics.BeginPopulationReport();
@@ -1572,6 +1557,8 @@ public sealed partial class GeodesicBiologyRuntime
         ClearSulfur();
         ClearFermentation();
         ClearFounderEmergence();
+        ClearBiologicalThermalCache();
+        ClearFounderThermalPlacement();
         ResetVisualDiagnostics();
         planet = null; resources = null; suspended = null; oceanTemperature = null;
         experiencedTemperature = null; surfaceTemperature = null; grid = null;
