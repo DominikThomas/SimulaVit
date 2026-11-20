@@ -30,10 +30,10 @@ Construction costs sorting plus incidence unions and materializing footprints. D
 
 ## Validation and seed 123456
 
-Run:
+Historical managed run: **Unity 6000.3.19f1**. For command reuse, set `$env:UNITY_EDITOR_DATA` to the selected Editor's `Editor/Data` directory; use the [current project Editor](../README.md) for future work. Results below were not rerun after the upgrade.
 
 ```powershell
-python Tools/ValidateTinHydrology.py --unity-data 'C:/Program Files/Unity/Hub/Editor/6000.3.19f1/Editor/Data' --output Artifacts/TinBasins/managed --benchmark 7
+python Tools/ValidateTinHydrology.py --unity-data "$env:UNITY_EDITOR_DATA" --output Artifacts/TinBasins/managed --benchmark 7
 ```
 
 The existing benchmark reconstructs seed 123456 with Earthlike sampling, simulation-threshold subdivision 6, render subdivision 7, Visible heights, no filtering and the unchanged threshold 8 (area threshold 0.157071963). It is **not** the completed live scene with all serialized settings and terrain edits. Lakes remain visually disabled. Generated logs/compilation products are ignored under `Artifacts/TinBasins/`.

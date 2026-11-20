@@ -1,6 +1,6 @@
 # Planetary lighting refinement
 
-Unity 6000.3.19f1 / URP 17.3.0. Refined 2026-11-05.
+Historical refinement/validation environment: **Unity 6000.3.19f1 / URP 17.3.0**, 2026-11-05. Results below were not reproduced on the upgraded Editor; use the [current project Editor](../README.md) for future work.
 
 ## Atmosphere
 

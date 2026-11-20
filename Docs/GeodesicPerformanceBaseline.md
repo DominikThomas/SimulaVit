@@ -4,7 +4,7 @@ This pass adds observation only. No chemistry, biological rules, movement, RNG, 
 
 ## Running a reproducible benchmark
 
-1. Use Unity **6000.3.19f1**. Start from the same saved world/configuration and seed for every comparison; retain a copy of the existing configuration instead of resetting defaults. Record the Git revision and local diff, hardware, build target, resolution, camera position, population, geodesic subdivision/layers, thermal model, speed, rendering state, and enabled diagnostic observers.
+1. Use Unity **6000.3.29f1**, matching [ProjectVersion.txt](../ProjectSettings/ProjectVersion.txt), with packages from [manifest.json](../Packages/manifest.json). Start from the same saved world/configuration and seed for every comparison; retain a copy of the existing configuration instead of resetting defaults. Record the exact Editor/package versions, Git revision and local diff, hardware, build target, resolution, camera position, population, geodesic subdivision/layers, thermal model, speed, rendering state, and enabled diagnostic observers. Keep pre-upgrade captures separate; collect a new baseline before comparing performance on the upgraded Editor.
 2. Prefer a Development Build for performance comparisons. In the Editor keep the Game view size, Profiler connection, VSync/frame cap, focused window, and Inspector selections constant. Leave Deep Profile and allocation call stacks off during baseline collection. Main-thread elapsed time can contain waits and Editor overhead; it is not a GPU timing or hardware CPU utilization measurement.
 3. Add `SimulationPerformanceAnalyzer` to a separate active GameObject. References resolve automatically; they can also be assigned explicitly. Adding the component during Play mode avoids saving a scene change. If startup creates resource/chemistry components later, missing references are retried at the summary interval.
 4. Warm up for at least **30 real seconds** after world initialization or restore, then disable/re-enable the analyzer to begin a fresh capture. Set **Summary Interval Seconds = 5** (or 10), **Write Csv = true**, **Append Timestamp = true**, and preferably **Log Summary To Console = false**. The Inspector's Latest Summary updates regardless of Console logging. This only changes analyzer output settings.
@@ -66,7 +66,9 @@ These are priorities for measurement, **not a measured ranking**.
 
 A larger follow-up candidate, after measurement, is reducing **display-only** diagnostic work with real-time throttling and reusable report buffers. That must preserve accounting windows, simulation-consumed caches and biological observations. Population pass fusion and sparse particulate tracking are later changes requiring much stronger parity checks. They have not been implemented here.
 
-## Validation
+## Historical validation (Unity 6000.3.19f1)
+
+The results below are the original record, not validation on Unity **6000.3.29f1**. They were not repeated by this documentation maintenance pass.
 
 Native validation used a disposable project under `Temp/PerformanceBaseline/UnityValidation`, with a separate company identity and a startup-config save guard only in that disposable copy. The working project's scene/configuration was not rewritten for the test run. Unity licensing required execution outside the restricted sandbox; no license or project settings were changed.
 

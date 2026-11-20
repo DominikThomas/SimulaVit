@@ -86,10 +86,10 @@ Final lake routing is unchanged. A focused regression builds an actual two-lake 
 
 Production assembly compilation succeeded using the project's existing Unity response-file references and sources, with outputs redirected under `Artifacts/DrainageDelivery/`. It reported 12 existing unused-field warnings outside these hydrology changes.
 
-Focused command:
+Historical run: **Unity 6000.3.19f1**. For command reuse, set `$env:UNITY_EDITOR_DATA` to the selected Editor's `Editor/Data` directory; use the [current project Editor](../README.md) for future work. Results below were not rerun after the upgrade.
 
 ```powershell
-python Tools/ValidateTinHydrology.py --unity-data 'C:/Program Files/Unity/Hub/Editor/6000.3.19f1/Editor/Data' --ocean-plan-only --output Artifacts/DrainageDelivery/multi-basin
+python Tools/ValidateTinHydrology.py --unity-data "$env:UNITY_EDITOR_DATA" --ocean-plan-only --output Artifacts/DrainageDelivery/multi-basin
 ```
 
 **20 focused tests passed; 0 failed.** No full suite, planet startup or benchmark was run. Coverage includes A→B→ocean, A→B→C→ocean, a terminal B, shared trunks, jointly eligible small tributaries, overlapping incompatible packages, removal of orphan cuts, dependency-aware capacity, deterministic selection, actual lake overflow, conservation, retained ocean evidence and no-uphill safeguards.
