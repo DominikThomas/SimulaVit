@@ -292,6 +292,7 @@ public sealed partial class GeodesicBiologyRuntime
         temperatureMutationRandom = new System.Random(biologySeed ^ 0x54454D50);
         locomotionMutationRandom = new System.Random(biologySeed ^ 0x4C4F434F);
         temperatureTelemetry.Initialize(grid, resources, biologySeed);
+        EnsureFounderVentCatalog();
         int spawned = SpawnFounders(requestedFounders, random, visualRandom, agents, state, minLife, maxLife, color, biomassTarget,
             hydrogenTemperatureRange, lethalTemperatureMargin, false);
         int occupiedCells = 0, occupiedLayers = 0;
@@ -416,7 +417,7 @@ public sealed partial class GeodesicBiologyRuntime
         state.PassiveDriftDirection[packed] = visualLocalPosition.normalized; // planet-local
         state.PassiveDriftTangent[packed] = CreateInitialPassiveTangent(state.PassiveDriftDirection[packed], seed);
         state.Position[packed] = position; // world-space
-        RegisterFounderPlacement(agent.DiagnosticId, selected.SourceNode);
+        RegisterFounderPlacement(agent.DiagnosticId, selected);
         return packed;
     }
 

@@ -13,12 +13,30 @@ public sealed partial class GeodesicBiologyRuntime
         public int livingFounders, initialEventsRemaining;
         public long founderDeaths, founderParentBirths, descendantParentBirths, candidateRefreshes;
         public long thermalCandidateRejections, foodCandidateRejections, invalidCandidateRejections, placementFailuresWithThermalRejections;
+        public int directlySeededSystems, neverSeededSystems, directlySeededOutlets, neverSeededOutlets;
+        public long minFoundersPerSystem, maxFoundersPerSystem, minFoundersPerOutlet, maxFoundersPerOutlet;
+        public double meanFoundersPerSystem, meanFoundersPerOutlet;
     }
 
-    private struct FounderVentCandidate { public GeodesicVentSourceOutlet outlet; public double weight; }
+    private struct FounderVentCandidate
+    {
+        public GeodesicVentSourceOutlet outlet;
+        public double weight, initialRetryTime;
+        public int initialPlacementFailures;
+    }
+    private sealed class FounderVentSystemCandidate
+    {
+        public int systemIndex;
+        public double initialWeight;
+        public readonly List<int> vents = new List<int>();
+    }
     private GeodesicFounderEmergenceSchedule emergenceSchedule;
     private System.Random emergenceSelectionRandom, emergenceTraitsRandom, emergenceVisualRandom;
     private FounderVentCandidate[] emergenceVents = Array.Empty<FounderVentCandidate>();
+    private FounderVentSystemCandidate[] emergenceSystems = Array.Empty<FounderVentSystemCandidate>();
+    // World identities, independent of the filtered candidate-array positions. Cleared by Initialize/Clear.
+    private readonly Dictionary<int, long> founderPlacementsBySystem = new Dictionary<int, long>();
+    private readonly Dictionary<int, long> founderPlacementsByOutlet = new Dictionary<int, long>();
     private readonly HashSet<long> livingDirectFounders = new HashSet<long>();
     private readonly HashSet<int> directFounderNodes = new HashSet<int>();
     private readonly Dictionary<int, List<int>> ventNeighborhoods = new Dictionary<int, List<int>>();
@@ -47,8 +65,11 @@ public sealed partial class GeodesicBiologyRuntime
         if (emergenceSchedule == null || grid == null) return;
         founderCO2Need=co2Need; founderH2Need=h2Need;
         // Fixed work bound for pathological intervals/backlogs. Remaining due events stay queued.
-        for (int n = 0; n < 64 && emergenceSchedule.TryConsume(simulationTime, out double due); n++)
+        for (int n = 0; n < 64; n++)
         {
+            // Capture before consumption so the final initial event still uses initial selection.
+            bool initialEvent = emergenceSchedule.InitialEventsRemaining > 0;
+            if (!emergenceSchedule.TryConsume(simulationTime, out double due)) break;
             emergenceAttempts++;
             if (state.Count >= Math.Max(0, maximumPopulation)) { emergenceRejectedCap++; continue; }
             EnsureFounderVentCatalog();
@@ -63,14 +84,19 @@ public sealed partial class GeodesicBiologyRuntime
             int selected = -1;
             for (int sample = 0; sample < 8; sample++)
             {
-                double total = 0d;
-                for (int i = 0; i < emergenceVents.Length; i++) total += emergenceVents[i].weight;
-                if (!(total > 0d)) break;
-                double pick = emergenceSelectionRandom.NextDouble() * total;
-                for (int i = 0; i < emergenceVents.Length; i++)
+                if (initialEvent) selected = SelectInitialFounderVent(simulationTime);
+                else
                 {
-                    pick -= emergenceVents[i].weight;
-                    if (pick < 0d) { selected = i; break; }
+                    // Existing ongoing-emergence selection: global production/readiness weights.
+                    double total = 0d;
+                    for (int i = 0; i < emergenceVents.Length; i++) total += emergenceVents[i].weight;
+                    if (!(total > 0d)) break;
+                    double pick = emergenceSelectionRandom.NextDouble() * total;
+                    for (int i = 0; i < emergenceVents.Length; i++)
+                    {
+                        pick -= emergenceVents[i].weight;
+                        if (pick < 0d) { selected = i; break; }
+                    }
                 }
                 if (selected < 0) break;
                 if (ViableFounderWeight(emergenceVents[selected].outlet, co2Need, h2Need,
@@ -85,9 +111,68 @@ public sealed partial class GeodesicBiologyRuntime
             int packed = SpawnFounderAtVent(emergenceVents[selected].outlet, emergenceTraitsRandom, emergenceVisualRandom,
                 agents, state, founderMinLife, founderMaxLife, founderColor, founderBiomassTarget,
                 founderHydrogenTemperatureRange, founderLethalMargin, true);
-            if(packed<0) { emergenceRejectedHabitat++; emergenceVents[selected].weight=0d; continue; }
+            if(packed<0)
+            {
+                emergenceRejectedHabitat++; emergenceVents[selected].weight=0d;
+                if (initialEvent)
+                {
+                    // A food-ready outlet can still have no valid thermal position. Back off repeated
+                    // failures for 10, 20, 40, 80, 160, then 300 simulated seconds; never retry this event.
+                    int failures = Math.Min(6, emergenceVents[selected].initialPlacementFailures + 1);
+                    emergenceVents[selected].initialPlacementFailures = failures;
+                    emergenceVents[selected].initialRetryTime = simulationTime + Math.Min(300d, 10d * (1 << (failures - 1)));
+                }
+                continue;
+            }
+            if (initialEvent)
+            {
+                emergenceVents[selected].initialPlacementFailures = 0;
+                emergenceVents[selected].initialRetryTime = 0d;
+            }
             InitializePassiveSchedulesAtSpawn(state, packed, passiveMovementTime);
         }
+    }
+
+    private double InitialFounderOutletWeight(int index, double simulationTime)
+    {
+        var candidate = emergenceVents[index];
+        if (!(candidate.weight > 0d) || simulationTime < candidate.initialRetryTime) return 0d;
+        return 1d / (1d + founderPlacementsByOutlet[candidate.outlet.SourceNode]);
+    }
+
+    private int SelectInitialFounderVent(double simulationTime)
+    {
+        double total = 0d;
+        for (int i = 0; i < emergenceSystems.Length; i++)
+        {
+            var system = emergenceSystems[i];
+            bool eligible = false;
+            for (int k = 0; k < system.vents.Count; k++)
+                if (InitialFounderOutletWeight(system.vents[k], simulationTime) > 0d) { eligible = true; break; }
+            // Count the system once, regardless of outlet count, production share or food abundance.
+            system.initialWeight = eligible ? 1d / (1d + founderPlacementsBySystem[system.systemIndex]) : 0d;
+            total += system.initialWeight;
+        }
+        if (!(total > 0d)) return -1;
+        double pick = emergenceSelectionRandom.NextDouble() * total;
+        for (int i = 0; i < emergenceSystems.Length; i++)
+        {
+            var system = emergenceSystems[i];
+            pick -= system.initialWeight;
+            if (pick >= 0d) continue;
+            double outletTotal = 0d;
+            for (int k = 0; k < system.vents.Count; k++)
+                outletTotal += InitialFounderOutletWeight(system.vents[k], simulationTime);
+            double outletPick = emergenceSelectionRandom.NextDouble() * outletTotal;
+            for (int k = 0; k < system.vents.Count; k++)
+            {
+                int index = system.vents[k];
+                outletPick -= InitialFounderOutletWeight(index, simulationTime);
+                if (outletPick < 0d) return index;
+            }
+            return -1;
+        }
+        return -1;
     }
 
     private double ViableFounderWeight(GeodesicVentSourceOutlet outlet, float co2Need, float h2Need,
@@ -115,8 +200,28 @@ public sealed partial class GeodesicBiologyRuntime
         if (grid == null || resources == null || cachedOutletCount == resources.CompactOutletCount) return;
         cachedOutletCount = resources.CompactOutletCount;
         var candidates = new List<FounderVentCandidate>();
+        var systems = new List<FounderVentSystemCandidate>();
+        var systemLookup = new Dictionary<int, int>();
+        // Include never-eligible systems/outlets (and systems without outlets) in coverage statistics.
+        for (int i = 0; i < resources.VentCount; i++)
+            if (resources.TryGetVentSystem(i, out var system) && system.Habitat == GeodesicVentHabitat.Submarine
+                && !founderPlacementsBySystem.ContainsKey(i)) founderPlacementsBySystem.Add(i, 0L);
         for (int i = 0; i < cachedOutletCount; i++)
-            if (TryResolveFounderVent(i,out var outlet,out _,out _)) candidates.Add(new FounderVentCandidate { outlet=outlet });
+        {
+            if (!resources.TryGetVentOutlet(i, out var outlet) || outlet.Habitat != GeodesicVentHabitat.Submarine) continue;
+            if (!founderPlacementsBySystem.ContainsKey(outlet.SystemIndex)) founderPlacementsBySystem.Add(outlet.SystemIndex, 0L);
+            if (!founderPlacementsByOutlet.ContainsKey(outlet.SourceNode)) founderPlacementsByOutlet.Add(outlet.SourceNode, 0L);
+            if (!TryResolveFounderVent(i, out outlet, out _, out _)) continue;
+            if (!systemLookup.TryGetValue(outlet.SystemIndex, out int systemIndex))
+            {
+                systemIndex = systems.Count; systemLookup.Add(outlet.SystemIndex, systemIndex);
+                systems.Add(new FounderVentSystemCandidate { systemIndex = outlet.SystemIndex });
+            }
+            systems[systemIndex].vents.Add(candidates.Count);
+            candidates.Add(new FounderVentCandidate { outlet=outlet });
+        }
+        // Preserve resource-catalog order; never use dictionary enumeration for random selection.
+        emergenceSystems = systems.ToArray();
         emergenceVents = candidates.ToArray(); occupiedEmergenceVents = new bool[emergenceVents.Length];
         ventNeighborhoods.Clear();
         for (int i = 0; i < emergenceVents.Length; i++)
@@ -142,8 +247,13 @@ public sealed partial class GeodesicBiologyRuntime
         }
     }
 
-    private void RegisterFounderPlacement(long id, int node)
+    private void RegisterFounderPlacement(long id, GeodesicVentSourceOutlet outlet)
     {
+        int node = outlet.SourceNode;
+        founderPlacementsBySystem.TryGetValue(outlet.SystemIndex, out long systemCount);
+        founderPlacementsByOutlet.TryGetValue(node, out long outletCount);
+        founderPlacementsBySystem[outlet.SystemIndex] = systemCount + 1;
+        founderPlacementsByOutlet[node] = outletCount + 1;
         emergenceSuccesses++; livingDirectFounders.Add(id); directFounderNodes.Add(node);
         if (firstEmergenceNode >= 0) return;
         firstEmergenceNode = node; firstEmergenceTime = emergencePlacementTime; firstEmergenceScheduledTime = emergenceScheduledTime;
@@ -153,6 +263,19 @@ public sealed partial class GeodesicBiologyRuntime
     private void RecordFounderDeath(long id) { if (livingDirectFounders.Remove(id)) emergenceFounderDeaths++; }
     private void RecordFounderParentBirth(long id)
     { if (livingDirectFounders.Contains(id)) emergenceFounderBirths++; else emergenceDescendantBirths++; }
+
+    private static void FounderPlacementStatistics(Dictionary<int, long> counts, out int seeded,
+        out long minimum, out double mean, out long maximum)
+    {
+        seeded = 0; minimum = counts.Count > 0 ? long.MaxValue : 0; maximum = 0;
+        long total = 0;
+        foreach (long count in counts.Values)
+        {
+            if (count > 0) seeded++;
+            minimum = Math.Min(minimum, count); maximum = Math.Max(maximum, count); total += count;
+        }
+        mean = counts.Count > 0 ? total / (double)counts.Count : 0d;
+    }
 
     public FounderEmergenceSnapshot CaptureFounderEmergence(ReplicatorPopulationState state)
     {
@@ -167,6 +290,10 @@ public sealed partial class GeodesicBiologyRuntime
         int inhabited=0, indirect=0;
         for (int i=0;i<occupiedEmergenceVents.Length;i++) if (occupiedEmergenceVents[i])
         { inhabited++; if (!directFounderNodes.Contains(emergenceVents[i].outlet.SourceNode)) indirect++; }
+        FounderPlacementStatistics(founderPlacementsBySystem, out int seededSystems,
+            out long systemMin, out double systemMean, out long systemMax);
+        FounderPlacementStatistics(founderPlacementsByOutlet, out int seededOutlets,
+            out long outletMin, out double outletMean, out long outletMax);
         return new FounderEmergenceSnapshot { attempts=emergenceAttempts, successes=emergenceSuccesses,
             rejectedPopulationCap=emergenceRejectedCap, rejectedHabitat=emergenceRejectedHabitat,
             firstEmergenceTime=firstEmergenceTime, firstScheduledTime=firstEmergenceScheduledTime, firstVentNode=firstEmergenceNode,
@@ -175,6 +302,10 @@ public sealed partial class GeodesicBiologyRuntime
             livingFounders=livingDirectFounders.Count, founderDeaths=emergenceFounderDeaths,
             founderParentBirths=emergenceFounderBirths, descendantParentBirths=emergenceDescendantBirths,
             initialEventsRemaining=emergenceSchedule?.InitialEventsRemaining??0, candidateRefreshes=emergenceCandidateRefreshes,
+            directlySeededSystems=seededSystems, neverSeededSystems=founderPlacementsBySystem.Count-seededSystems,
+            directlySeededOutlets=seededOutlets, neverSeededOutlets=founderPlacementsByOutlet.Count-seededOutlets,
+            minFoundersPerSystem=systemMin, meanFoundersPerSystem=systemMean, maxFoundersPerSystem=systemMax,
+            minFoundersPerOutlet=outletMin, meanFoundersPerOutlet=outletMean, maxFoundersPerOutlet=outletMax,
             thermalCandidateRejections=founderThermalCandidateRejections, foodCandidateRejections=founderFoodCandidateRejections,
             invalidCandidateRejections=founderInvalidCandidateRejections, placementFailuresWithThermalRejections=founderThermalPlacementFailures };
     }
@@ -186,6 +317,8 @@ public sealed partial class GeodesicBiologyRuntime
     {
         emergenceSchedule=null; emergenceSelectionRandom=emergenceTraitsRandom=emergenceVisualRandom=null;
         emergenceVents=Array.Empty<FounderVentCandidate>(); occupiedEmergenceVents=Array.Empty<bool>(); cachedOutletCount=-1;
+        emergenceSystems=Array.Empty<FounderVentSystemCandidate>();
+        founderPlacementsBySystem.Clear(); founderPlacementsByOutlet.Clear();
         livingDirectFounders.Clear(); directFounderNodes.Clear(); ventNeighborhoods.Clear();
         nextCandidateRefresh=emergencePlacementTime=emergenceScheduledTime=0d;
         emergenceAttempts=emergenceSuccesses=emergenceRejectedCap=emergenceRejectedHabitat=0;
