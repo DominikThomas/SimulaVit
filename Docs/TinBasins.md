@@ -1,5 +1,8 @@
 # TIN basin topology
 
+> **Original read-only basin-audit stage.** “No water rendering” below describes this audit entry point, not the whole current river runtime. Later [TIN lakes](TinLakes.md) and [lake routing](TinLakeRouting.md) consume basin information during generation; [live inspector](TinBasinsLive.md) remains a diagnostic overlay. Current migration status: [roadmap](GEODESIC_MIGRATION_ROADMAP.md).
+
+
 `GeodesicTinBasins.Build(activeTin)` is an optional, read-only topology audit. It does not execute during startup or river generation. The river component offers **Audit TIN Basin Topology** (summary) and **Log Selected TIN Basin And Termination Matches** (selected floor-vertex ID plus detailed closed/noise matches). There is no water rendering, outlet creation, river clipping, receiver rewriting, or debug mesh in this step.
 
 ## Terrain audit and method

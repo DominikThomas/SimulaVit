@@ -1,7 +1,4 @@
-Status: Partially implemented
-Last reviewed: 2026-06-28
-Current summary: Many ReplicatorManager extraction targets now exist as separate systems, while ReplicatorManager remains the orchestration and compatibility hub. PlanetResourceMap has gained layered/state/persistence APIs but most proposed PlanetResourceMap subsystem extractions remain future work.
-See also: Docs/PROJECT_STATUS_AND_NEXT_STEPS.md
+> **Legacy/incremental architecture design, scope reviewed 2026-11-20.** Many extracted Replicator systems exist; the geodesic runtime is a separate path, and legacy `PlanetResourceMap` extraction is not automatically a geodesic v1 blocker. Keep this detailed design as a reference. Current ownership: [hot-state audit](GEODESIC_BIOLOGY_HOT_STATE_AUDIT.md); current sequencing/cleanup gates: [roadmap](GEODESIC_MIGRATION_ROADMAP.md).
 
 # Incremental Refactor Plan: `ReplicatorManager` and `PlanetResourceMap`
 

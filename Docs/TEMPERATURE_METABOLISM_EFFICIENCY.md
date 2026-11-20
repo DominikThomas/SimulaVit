@@ -1,5 +1,8 @@
 # Temperature Metabolism Efficiency
 
+> **Legacy/helper physiology reference.** Current geodesic eligibility/exposure behavior is documented in [temperature constraints](GeodesicHydrogenotrophTemperatureConstraints.md), with the newer [actual-position vent temperature](GeodesicPositionDependentVentTemperature.md) as sampling authority. Do not infer identical reproduction or stress semantics in both modes from this overview. Current gates: [roadmap](GEODESIC_MIGRATION_ROADMAP.md).
+
+
 Temperature ranges are now treated primarily as metabolism-efficiency curves rather than hard survival boxes. Each organism keeps its existing `optimalTempMin`, `optimalTempMax`, and `lethalTempMargin` traits, but runtime metabolism interprets those values as the center and width of a smooth efficiency response.
 
 ## Efficiency curve

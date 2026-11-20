@@ -1,7 +1,4 @@
-Status: Implemented
-Last reviewed: 2026-06-28
-Current summary: The May audit largely matches current code. Persistence has since advanced: save/load captures and restores authoritative layered ocean arrays, including CO2/O2/OrganicC/H2/H2S/CH4/S0/Fe2+ and layered scent/leak/waste resources.
-See also: Docs/PROJECT_STATUS_AND_NEXT_STEPS.md
+> **Historical legacy audit, scope clarified 2026-11-20.** The May audit and June persistence update below refer to the legacy `PlanetResourceMap` pathway. They do not establish geodesic predation, marine snow, resource ownership or save/load parity. Use the [current roadmap](GEODESIC_MIGRATION_ROADMAP.md) for geodesic status; preserve the body as checkpoint evidence.
 
 # Layered Ocean Migration Audit (May 3, 2026)
 

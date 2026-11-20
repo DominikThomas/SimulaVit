@@ -1,5 +1,8 @@
 # Complete multi-basin drainage chains
 
+> **Historical planner-v3 checkpoint.** The source/results below concern that selection revision. Later [basin-overflow analysis](BasinOverflowInvestigation.md), [all-lakes/cache design record](GeodesicHydrologyCachingInvestigation.md) and [sediment/presentation work](GeodesicRiverPresentationCache.md) extend the active runtime. Its validation limits must not be promoted to current whole-world acceptance. Current sequencing: [roadmap](GEODESIC_MIGRATION_ROADMAP.md).
+
+
 2026-11-05. Final planner revision: `GeodesicOceanDrainagePlan.Version = 3`.
 
 The planner now admits complete compatible downstream packages, reserves candidate capacity for their connectors, and retains the immediate basin-to-basin target in diagnostics. Final seed-123456 improvement is **not established**. No full Unity generation or benchmark was launched by this work. Production compilation and 20 focused managed tests passed; manual validation of the finished revision remains necessary.

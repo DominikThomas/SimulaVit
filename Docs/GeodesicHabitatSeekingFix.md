@@ -1,5 +1,7 @@
 # Geodesic habitat-seeking correction
 
+> **Implementation checkpoint:** the signal correction below remains a useful contract; current individual temperature inputs come from [position-dependent vent sampling](GeodesicPositionDependentVentTemperature.md). Later [food-sensing experiments](GeodesicFoodTaxisAudit.md) provide bounded execution evidence for their own checkpoint, not the newest thermal integration. Current priorities: [roadmap](GEODESIC_MIGRATION_ROADMAP.md).
+
 Implemented on `codex/geodesic-biology-parity`. Source inspection and static syntax/whitespace checks only: no Unity, automated tests, builds, simulation runs, benchmarks or parameter sweeps. Runtime ecological results remain for manual validation.
 
 ## Confirmed source defect

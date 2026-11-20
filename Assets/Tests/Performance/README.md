@@ -1,5 +1,8 @@
 # Performance benchmark tests
 
+> **Benchmark scope:** this fixture constructs the legacy planet/runtime; it is not a current geodesic throughput baseline. Geodesic measurement and regression criteria are tracked in [roadmap A7/C1](../../../Docs/GEODESIC_MIGRATION_ROADMAP.md). Instructions below describe the existing fixture and do not authorize running it; project testing remains user-owned unless explicitly requested.
+
+
 `PerformanceBenchmarks` runs a deterministic, code-driven `PerfBenchmarkScene` and captures:
 
 - `AvgFrameMs` over measured frames

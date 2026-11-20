@@ -1,5 +1,8 @@
 # Geodesic drainage, stage 1
 
+> **Historical graph-based stage-1 implementation.** Active geodesic rivers use [continuous TIN hydrology](TinHydrology.md) with later [lake routing](TinLakeRouting.md), [sediment channels](SedimentRiverMeanders.md) and [presentation caching](GeodesicRiverPresentationCache.md). Keep this stage for design/diagnostic history; its branch/status and next steps are checkpoint-specific. Current priority authority: [roadmap](GEODESIC_MIGRATION_ROADMAP.md).
+
+
 Branch: `codex/implement-geodesic-river-drainage`, based on local `codex/implement-geodesic-planet-prototype-mode` at `bab3082`. Changes are local and uncommitted.
 
 ## Terrain audit and authority

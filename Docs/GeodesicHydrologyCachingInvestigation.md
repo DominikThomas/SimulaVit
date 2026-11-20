@@ -1,5 +1,8 @@
 # Geodesic terrain and hydrology caching investigation
 
+> **Historical proposal and measured baseline at `97cec50`; supersession reviewed 2026-11-20.** Persistent physical/carving and TIN/lake/delivery snapshot stages now exist in `PlanetGenerationCache.Geodesic.cs`, `PlanetGenerator.PhysicalSnapshot.cs` and `GeodesicRiverSystem.Snapshots.cs`; the [final river presentation cache](GeodesicRiverPresentationCache.md) documents the later stage 6. Preserve the design, risks and measurements below; do not treat its milestone list as unimplemented current work. These are generated-state caches, not complete simulation save/load. Current validation priorities: [roadmap](GEODESIC_MIGRATION_ROADMAP.md).
+
+
 9 November 2026 · Persistent snapshot proposal for review · Source inspected at `97cec50`
 
 **Recommend option B, a persistent completed-planet snapshot with authoritative hydrology.** It serves the repeat-development workflow across game and Unity restarts. Restore physical terrain and ocean classification, the exact post-carving surface, final TIN, all-lakes routing, verified sediment corridors and shoreline connections, and final delivery/destination data. Rebuild visible lakes, sediment terrain, crossings and ribbons from that authority, then initialize each game's dynamic systems normally.

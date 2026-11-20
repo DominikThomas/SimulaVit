@@ -1,10 +1,12 @@
-# Geodesic Planet Implementation Plan
+# Geodesic development record and architectural contracts
+
+> **Role clarified 2026-11-20:** this is the preserved architectural and implementation-history record. The **[Geodesic migration roadmap](GEODESIC_MIGRATION_ROADMAP.md)** is the single authority for current status, priorities, milestone dependencies and next steps. Its concise parity matrix supersedes outdated missing-feature statements here. All numbered phase sequences, “next recommended phase” sections and embedded Codex prompts below describe their original checkpoints; do not use them as a competing current plan. Keep useful contracts, decisions and measurements, and add new technical evidence to focused subsystem reports. See the [documentation inventory/audit](README.md) and [current status entry](PROJECT_STATUS_AND_NEXT_STEPS.md).
 
 ## Purpose
 
-This document is the persistent roadmap for migrating SimulaVit from the legacy cube-sphere grid to a geodesic icosphere-based planet.
+This document preserves the architectural contracts and development history of migrating SimulaVit from the legacy cube-sphere grid to a geodesic icosphere-based planet.
 
-Future Codex prompts should reference this file and update it whenever a phase is completed, changed, or split.
+Future Codex tasks should select and update a milestone in the [current migration roadmap](GEODESIC_MIGRATION_ROADMAP.md). Reference this file for existing contracts and checkpoint history; place new detailed evidence in the relevant subsystem report.
 
 The long-term target is:
 
@@ -157,7 +159,7 @@ Old saves without grid metadata are legacy cube-sphere saves. Geodesic saves mus
 
 ---
 
-# 2. Current implementation status
+# 2. Historical implementation checkpoints
 
 ## Atmosphere v1 authority
 
@@ -490,7 +492,7 @@ Placement rules for this structure:
 
 ---
 
-# 3. Implementation roadmap
+# 3. Original implementation roadmap (historical)
 
 ## Phase 0 — Project organization and shared generation contract
 
@@ -881,7 +883,7 @@ Rules:
 
 ---
 
-# 4. Immediate next Codex prompt
+# 4. Original next Codex prompt (historical)
 
 ```text
 Read Docs/GEODESIC_PLANET_IMPLEMENTATION_PLAN.md first.
@@ -1623,7 +1625,7 @@ Current limitations:
 - no sea ice, ice shell, climate, layered ocean, chemistry, vents, replicators, biology, or save/load migration is implemented here;
 - render/collider sub-cell peak coverage is protected by the current conservative terrain fine-detail margin and validated by diagnostics; a later implementation may resolve the water surface after temporary render/collider terrain sampling if stronger guarantees are required.
 
-## 18.3 Revised dependency-aware roadmap
+## 18.3 Checkpoint dependency-aware roadmap (historical)
 
 1. OceanWorld mode.
 2. Isolated geodesic surface-temperature scalar.

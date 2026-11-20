@@ -1,5 +1,7 @@
 # Passive geodesic visual growth and division
 
+> **Original passive milestone; scope extended later.** Current `ReplicatorRenderSystem` and `GeodesicBiologyRuntime` apply growth/division presentation to **passive, amoeboid and flagellar** geodesic organisms; anchored bodies retain their existing presentation. The [active-locomotion report](GeodesicActiveLocomotion.md) documents that extension. Passive-only statements below describe this original implementation checkpoint. Manual visual/performance acceptance of the current combined behavior remains pending; see [roadmap A6](GEODESIC_MIGRATION_ROADMAP.md#phase-a--stabilize-the-existing-simulation).
+
 Implemented on `codex/geodesic-biology-parity`. The volume-sizing follow-up is uncommitted for manual Unity review. Earlier milestone documentation is preserved.
 
 ## Carbon to diameter

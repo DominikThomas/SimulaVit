@@ -1,5 +1,8 @@
 # Anaerobe O2 Inhibition
 
+> **Primarily legacy physiology/settings reference.** Current geodesic local O2 throughput inhibition is wired for [hydrogenotrophy](GeodesicHydrogenotrophyConservation.md), [sulfur](GeodesicSulfurParity.md) and [fermentation](GeodesicFermentationParity.md). The other geodesic strategies/direct-damage effects are not established by these shared fields. See the [roadmap](GEODESIC_MIGRATION_ROADMAP.md).
+
+
 Runtime oxygen pressure is modeled primarily as **metabolism reaction inhibition**, not as a simple concentration-based death timer.
 
 ## Mutation gate vs runtime inhibition vs direct damage

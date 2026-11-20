@@ -1,5 +1,8 @@
 # Continuous TIN river drainage: implementation and validation
 
+> **Foundation implementation record, not a current license/test-status report.** The October license failure and original visual gate below are historical. Later [lake surfaces/live results](TinLakes.md), [routing](TinLakeRouting.md), [drainage planning](OceanDirectedDrainagePlanning.md), [sediment channels](SedimentRiverMeanders.md) and [presentation cache](GeodesicRiverPresentationCache.md) extend this foundation. Complete current hydrology visual acceptance still is not established by those individual reports. Current migration gates: [roadmap](GEODESIC_MIGRATION_ROADMAP.md).
+
+
 2026-10-11. Branch: `codex/implement-geodesic-river-drainage`.
 
 **VISUAL ACCEPTANCE PENDING.** The Unity Editor started but exited with “No valid Unity Editor license found” and missing `com.unity.editor.headless` entitlement. No licensed seed-123456 screenshot was produced or inspected. Native Unity integration tests and actual ribbon rendering remain unverified. The managed results below establish algorithm behavior; they do not establish the requested planet appearance.

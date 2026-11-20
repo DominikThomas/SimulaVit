@@ -1,5 +1,7 @@
 # Geodesic active locomotion and evolution
 
+> Current sampling follow-up: [position-dependent vent temperature](GeodesicPositionDependentVentTemperature.md) now supplies individual biological temperature to food readiness and lifecycle. Earlier matched ecology results below predate that integration and the latest [founder coverage weighting](GeodesicFounderEmergence.md); current balance/validation gates are in the [roadmap](GEODESIC_MIGRATION_ROADMAP.md).
+
 For the seed-283 probability, lineage-selection and effective-steering investigation,
 see [GeodesicLocomotionEvolutionAudit.md](GeodesicLocomotionEvolutionAudit.md).
 The follow-up [food-sensing audit](GeodesicFoodTaxisAudit.md) records successful

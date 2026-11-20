@@ -1,5 +1,8 @@
 # Startup Biology: metabolic evolution controls
 
+> **UI checkpoint with later extensions.** [Gradual founder controls](GeodesicFounderEmergence.md) and [vent visual controls](HydrothermalVentVfx.md) now supplement this report. The [roadmap](GEODESIC_MIGRATION_ROADMAP.md) owns current reachability/status; enabled settings alone are not proof of an implemented gameplay pathway. Preserve saved Hydrogen → Fermentation **0.02**.
+
+
 Later milestone: [Fermentation restoration](GeodesicFermentationParity.md) activates Hydrogen → Fermentation, its reaction parameters and its thermal template in geodesic mode. The earlier unsupported-fermentation entries below describe the prior UI.
 
 The Biology tab now exposes the existing general metabolism mutation chance and Hydrogen → Sulfur conditional probability in both grid modes. Values are read from and edited directly in `currentConfig.biology`; they remain probabilities in the existing 0–1 representation.
