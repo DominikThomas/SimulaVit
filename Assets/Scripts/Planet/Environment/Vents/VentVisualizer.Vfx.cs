@@ -10,17 +10,19 @@ public partial class VentVisualizer
     [Header("Hydrothermal Effects")]
     public bool enableSmoke = true;
     public bool enableHeatDistortion = true;
-    [Min(0f)] public float smokeIntensityMultiplier = 1f;
-    [Min(0f)] public float smokeHeightMultiplier = 1f;
-    [Min(0f)] public float smokeWidthMultiplier = 1f;
+    [Range(VentVisualSettings.MinGlowSize, VentVisualSettings.MaxGlowSize)] public float ventGlowSizeMultiplier = 0.85f;
+    [Range(0f, VentVisualSettings.MaxSmokeIntensity)] public float smokeIntensityMultiplier = 1f;
+    [Range(0f, VentVisualSettings.MaxSmokeHeight)] public float smokeHeightMultiplier = 1f;
+    [Range(0f, VentVisualSettings.MaxSmokeWidth), InspectorName("Smoke Base Width Multiplier")]
+    public float smokeWidthMultiplier = 1.75f;
     [Min(0.01f)] public float smokeUpwardSpeedMultiplier = 1f;
     [Range(0f, 1f)] public float smokeTurbulenceStrength = 0.25f;
     public SmokerAppearance smokerAppearance = SmokerAppearance.Mixed;
     [Range(0f, 0.2f), Tooltip("URP particle distortion strength; deliberately very small for underwater mixing.")]
     public float distortionStrength = 0.03f;
-    [Min(0f), Tooltip("Camera-to-outlet distance in world units. Effects fade over the last half of this range.")]
+    [Min(0f), Tooltip("Rendering distance in world units. Smoke keeps simulating and emitting beyond this distance.")]
     public float vfxVisibilityDistance = 6f;
-    [Min(1), Tooltip("Only the closest eligible outlets simulate particles. Each outlet has at most 96 soot and 12 heat particles.")]
+    [Min(1), Tooltip("Maximum rendered outlets. All smoke emitters continue simulating, with at most 96 particles each.")]
     public int maxActiveVentEffects = 48;
     [Tooltip("Shared URP Particles/Unlit material with distortion, normal mapping and soft particles enabled.")]
     public Material heatDistortionMaterial;
@@ -44,10 +46,12 @@ public partial class VentVisualizer
 
     private readonly List<VentEffect> ventEffects = new List<VentEffect>();
     private readonly List<VentEffect> visibleEffects = new List<VentEffect>();
+    private readonly List<(Transform marker, float baseSize)> glowVisuals = new List<(Transform, float)>();
+    private SimulationStartupConfig boundStartupConfig;
     private GameObject effectsRoot;
     private Material sharedSootMaterial, sharedHeatMaterial;
     private Texture2D plumeMask, mixingNormals;
-    private bool geodesicEffects, appearanceDirty, effectsDormant = true;
+    private bool geodesicEffects, appearanceDirty, renderingDormant = true;
     private float nextVisibilityUpdate, maximumEffectRadius;
 
     // The root follows planet translation/rotation, but never inherits marker or parent scale.
@@ -115,6 +119,8 @@ public partial class VentVisualizer
         effect.HeatRenderer = effect.Heat.GetComponent<ParticleSystemRenderer>();
         ConfigureEffect(effect);
         ventEffects.Add(effect);
+        anchor.SetActive(true);
+        ApplySmokeSimulation(effect);
         maximumEffectRadius = Mathf.Max(maximumEffectRadius, radius + depth);
         nextVisibilityUpdate = 0f;
     }
@@ -152,12 +158,12 @@ public partial class VentVisualizer
         // Size growth, shape radius and lateral noise together stay inside the remaining water column.
         float growth = white ? 3.6f : 2.8f;
         float size = Mathf.Min(Mathf.Min(effect.Radius * 0.0025f, effect.CoreRadius * 0.6f)
-            * Mathf.Max(0f, smokeWidthMultiplier) * (white ? 1.2f : 1f), effect.Depth * 0.16f / growth);
+            * Mathf.Max(0f, smokeWidthMultiplier) * (white ? 1.2f : 1f), effect.Depth * 0.24f / growth);
         size = Mathf.Max(0.00001f, size);
         float speed = Mathf.Min(effect.Radius * 0.012f * Mathf.Max(0.01f, smokeUpwardSpeedMultiplier), Mathf.Max(0.00001f, height / 0.05f));
         float lifetime = Mathf.Min(6f, height / (speed * 1.08f));
         effect.SmokeRate = Mathf.Min(40f, Mathf.Lerp(12f, 22f, effect.Strength) * Mathf.Max(0f, smokeIntensityMultiplier));
-        ConfigureParticles(effect.Smoke, size, speed, lifetime, effect.SmokeRate, 96, sharedSootMaterial);
+        ConfigureParticles(effect.Smoke, size, speed, lifetime, effect.SmokeRate, 96, sharedSootMaterial, true);
         var main = effect.Smoke.main;
         main.startColor = white ? new Color(0.72f, 0.77f, 0.79f, 0.45f) : new Color(0.10f, 0.12f, 0.13f, 0.72f);
         var sizeOverLifetime = effect.Smoke.sizeOverLifetime;
@@ -196,9 +202,10 @@ public partial class VentVisualizer
         var rotation = effect.Heat.rotationOverLifetime;
         rotation.enabled = true;
         rotation.z = new ParticleSystem.MinMaxCurve(-0.18f, 0.18f);
+        ApplySmokeSimulation(effect);
     }
 
-    private static void ConfigureParticles(ParticleSystem ps, float size, float speed, float lifetime, float rate, int limit, Material material)
+    private static void ConfigureParticles(ParticleSystem ps, float size, float speed, float lifetime, float rate, int limit, Material material, bool continuous = false)
     {
         ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
         ps.gameObject.layer = ps.transform.parent.gameObject.layer;
@@ -207,7 +214,7 @@ public partial class VentVisualizer
         ps.transform.localScale = Vector3.one;
         var main = ps.main;
         main.loop = true;
-        main.prewarm = false;
+        main.prewarm = continuous;
         main.playOnAwake = false;
         main.startDelay = 0f;
         main.duration = 6f;
@@ -224,7 +231,7 @@ public partial class VentVisualizer
         main.useUnscaledTime = true;
         main.maxParticles = limit;
         main.stopAction = ParticleSystemStopAction.None;
-        main.cullingMode = ParticleSystemCullingMode.Pause;
+        main.cullingMode = continuous ? ParticleSystemCullingMode.AlwaysSimulate : ParticleSystemCullingMode.Pause;
         var emission = ps.emission;
         emission.enabled = true;
         emission.rateOverTime = rate;
@@ -267,6 +274,7 @@ public partial class VentVisualizer
                 new GradientAlphaKey(0.65f, 0.5f), new GradientAlphaKey(0f, 1f) });
         color.color = fade;
         var renderer = ps.GetComponent<ParticleSystemRenderer>();
+        renderer.enabled = false;
         renderer.sharedMaterial = material;
         renderer.renderMode = ParticleSystemRenderMode.Billboard;
         renderer.alignment = ParticleSystemRenderSpace.View;
@@ -359,17 +367,24 @@ public partial class VentVisualizer
         mixingNormals.SetPixels(normals); mixingNormals.Apply(false, true);
     }
 
-    private void OnValidate() { appearanceDirty = true; nextVisibilityUpdate = 0f; }
+    private void OnValidate()
+    {
+        // The Inspector edits the same pending startup values as the GUI, without frame-by-frame copying.
+        if (boundStartupConfig != null)
+        {
+            boundStartupConfig.ventVisuals = CaptureVisualSettings().Normalized();
+            AssignVisualSettings(boundStartupConfig.ventVisuals);
+        }
+        appearanceDirty = true;
+        nextVisibilityUpdate = 0f;
+    }
 
     private void LateUpdate()
     {
+        if (appearanceDirty) RefreshVisualConfiguration();
         if (effectsRoot == null || planetGenerator == null) return;
-        effectsRoot.transform.SetPositionAndRotation(planetGenerator.transform.position, planetGenerator.transform.rotation);
-        if (appearanceDirty)
-        {
-            for (int i = 0; i < ventEffects.Count; i++) ConfigureEffect(ventEffects[i]);
-            appearanceDirty = false;
-        }
+        if (effectsRoot.transform.position != planetGenerator.transform.position || effectsRoot.transform.rotation != planetGenerator.transform.rotation)
+            effectsRoot.transform.SetPositionAndRotation(planetGenerator.transform.position, planetGenerator.transform.rotation);
         if (Time.unscaledTime < nextVisibilityUpdate) return;
         nextVisibilityUpdate = Time.unscaledTime + 0.25f;
         UpdateEffectVisibility(Camera.main);
@@ -382,8 +397,8 @@ public partial class VentVisualizer
         bool canView = camera != null && distanceLimit > 0f && (enableSmoke || enableHeatDistortion);
         if (canView && Vector3.Distance(camera.transform.position, planetGenerator.transform.position)
             > maximumEffectRadius + distanceLimit) canView = false;
-        // Whole-planet view: after the first clear, there are no per-outlet native calls or allocations.
-        if (!canView && effectsDormant) return;
+        // Whole-planet view: renderers stay off, but every smoke emitter keeps its complete plume.
+        if (!canView && renderingDormant) return;
         bool canRefract = canView && SupportsRefraction(camera);
         if (sharedHeatMaterial != null)
         {
@@ -408,7 +423,7 @@ public partial class VentVisualizer
         visibleEffects.Sort(EffectDistanceComparer.Instance);
         int activeCount = Mathf.Min(Mathf.Max(1, maxActiveVentEffects), visibleEffects.Count);
         for (int i = 0; i < activeCount; i++) visibleEffects[i].Selected = true;
-        effectsDormant = true;
+        renderingDormant = true;
         for (int i = 0; i < ventEffects.Count; i++)
         {
             VentEffect effect = ventEffects[i];
@@ -416,18 +431,14 @@ public partial class VentVisualizer
                 Mathf.InverseLerp(distanceLimit * 0.5f, distanceLimit, Mathf.Sqrt(effect.DistanceSquared))) : 0f;
             bool smoke = fade > 0.01f && enableSmoke && smokeIntensityMultiplier > 0f && smokeHeightMultiplier > 0f && smokeWidthMultiplier > 0f;
             bool heat = fade > 0.01f && enableHeatDistortion && canRefract && distortionStrength > 0f;
-            if (!smoke && !heat && !effect.Anchor.gameObject.activeSelf) continue;
-            if (smoke || heat)
-            {
-                effectsDormant = false;
-                effect.Anchor.gameObject.SetActive(true);
-            }
+            if (!smoke && !heat && !effect.SmokeRenderer.enabled && !effect.HeatRenderer.enabled) continue;
+            if (smoke || heat) renderingDormant = false;
             effect.FadeProperties.SetColor("_BaseColor", new Color(1f, 1f, 1f, fade));
             effect.SmokeRenderer.SetPropertyBlock(effect.FadeProperties);
             effect.HeatRenderer.SetPropertyBlock(effect.FadeProperties);
-            UpdateParticleVisibility(effect.Smoke, effect.SmokeRenderer, smoke, effect.SmokeRate * fade);
+            // Camera visibility never changes smoke emission, simulation state or particle age.
+            effect.SmokeRenderer.enabled = smoke && sharedSootMaterial != null;
             UpdateParticleVisibility(effect.Heat, effect.HeatRenderer, heat, effect.HeatRate * fade);
-            if (!smoke && !heat) effect.Anchor.gameObject.SetActive(false);
         }
     }
 
@@ -438,6 +449,22 @@ public partial class VentVisualizer
         renderer.enabled = visible && renderer.sharedMaterial != null;
         if (visible && !ps.isPlaying) ps.Play(false);
         else if (!visible && !ps.isStopped) ps.Stop(false, ParticleSystemStopBehavior.StopEmittingAndClear);
+    }
+
+    private bool SmokeSimulationEnabled => enableSmoke && smokeIntensityMultiplier > 0f && smokeHeightMultiplier > 0f && smokeWidthMultiplier > 0f;
+
+    private void ApplySmokeSimulation(VentEffect effect)
+    {
+        if (SmokeSimulationEnabled)
+        {
+            if (effect.Smoke.gameObject.activeInHierarchy && !effect.Smoke.isPlaying) effect.Smoke.Play(false);
+        }
+        else if (!effect.Smoke.isStopped) effect.Smoke.Stop(false, ParticleSystemStopBehavior.StopEmittingAndClear);
+    }
+
+    private void ResumeSmokeSimulation()
+    {
+        for (int i = 0; i < ventEffects.Count; i++) ApplySmokeSimulation(ventEffects[i]);
     }
 
     private static bool SupportsRefraction(Camera camera)
@@ -457,8 +484,10 @@ public partial class VentVisualizer
         }
         effectsRoot = null;
         ventEffects.Clear(); visibleEffects.Clear();
+        glowVisuals.Clear();
         geodesicEffects = false;
-        effectsDormant = true;
+        renderingDormant = true;
+        appearanceDirty = false; // Rebuilt emitters will use the current values directly.
         maximumEffectRadius = 0f;
     }
 

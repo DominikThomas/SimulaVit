@@ -436,6 +436,7 @@ public partial class SimulationStartupController
 
     private void DrawAdvancedTab()
     {
+        DrawVentVisualEffects();
         if (IsGeodesicSetup)
         {
             SetupSection("Geodesic geometry and sea level");
@@ -487,7 +488,7 @@ public partial class SimulationStartupController
         else SetupHelp("Geodesic subdivision, hydrology, lake/terrain reconstruction, finite atmosphere and environment timing controls apply only to Geodesic Icosphere. Existing Inspector terrain settings remain available.");
         GUILayout.Space(8f);
         if (GUILayout.Button("Reset Advanced to Defaults", buttonStyle, GUILayout.Height(32f))) ResetAdvancedToDefaults();
-        SetupHelp("Reset Advanced retains its existing scope, including base temperature, terrestrial vent fraction, air–sea exchange, prebiotic delay, and the advanced planet settings, even where their controls now live in other tabs.");
+        SetupHelp("Reset Advanced includes vent visuals, base temperature, terrestrial vent fraction, air–sea exchange, prebiotic delay, and the advanced planet settings, even where their controls live in other tabs.");
     }
 
     private void DrawDebugTab()

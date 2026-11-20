@@ -52,8 +52,8 @@ public sealed class GeodesicVentVisualizer : MonoBehaviour
                 ventVisualRadiusMismatch++;
             Vector3 tangent = Vector3.Cross(normal, Vector3.up); if (tangent.sqrMagnitude < 1e-8f) tangent = Vector3.Cross(normal, Vector3.right);
             marker.transform.localRotation = Quaternion.LookRotation(normal, Vector3.Cross(tangent.normalized, normal));
-            // The disc has unit diameter. Its edge is therefore exactly the thermal hot-core edge.
-            marker.transform.localScale = Vector3.one * (outlet.HotCoreRadius * 2f);
+            // Scale only the visible disc; the thermal hot-core footprint remains authoritative and unchanged.
+            ventEffects.RegisterVentGlow(marker.transform, outlet.HotCoreRadius * 2f);
             marker.AddComponent<MeshFilter>().sharedMesh = sharedMarkerMesh; marker.AddComponent<MeshRenderer>().sharedMaterial = sharedMarkerMaterial; markerCount++;
         }
         Debug.Log($"[GeodesicVentVisualizer] outlets={markerCount}, authority=GeodesicOceanResourceField.SourceNode, ventVisualCellMismatch={ventVisualCellMismatch}, maxVentVisualAngularError={maxVentVisualAngularError:F6}deg, ventVisualRadiusMismatch={ventVisualRadiusMismatch}, anchors=source-cell direction at completed visible seafloor radius", this);

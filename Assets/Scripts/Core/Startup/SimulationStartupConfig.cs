@@ -76,6 +76,9 @@ public class SimulationStartupConfig
     public float geodesicVentFe2PhysicalPerSecond = 0f;
     [Range(0f, 1f)] public float terrestrialVentFraction = 0.25f;
 
+    [Header("Advanced Vent Visual Effects")]
+    public VentVisualSettings ventVisuals = VentVisualSettings.Defaults;
+
     [Header("Debug Settings / River Debug")]
     [Tooltip("Displays river reaches omitted because they rise uphill. Diagnostic only; these do not become valid drainage routes.")]
     public bool showRejectedUphillRiverSegments;

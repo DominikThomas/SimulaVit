@@ -34,7 +34,7 @@ public partial class SimulationStartupController : MonoBehaviour
     public const float GeodesicVentPhysicalMaxPerSecond = 1000f;
     private const int InitialSpawnMin = 0;
     private const int InitialSpawnMax = 10000;
-    private const int SavedStartupConfigVersion = 24;
+    private const int SavedStartupConfigVersion = 25;
     public const float NormalAtmospherePressureMaxBar = 5f;
     public const float DenseAtmospherePressureMaxBar = 600f;
     public const float DefaultApproximateThermalIntervalSeconds = 2f;
@@ -123,6 +123,7 @@ public partial class SimulationStartupController : MonoBehaviour
         CaptureSceneDefaults();
         ResetAllToDefaults();
         LoadSavedStartupConfigIfEnabled();
+        ApplyVentVisualSettings();
         PrepareDeferredStartup();
     }
 
@@ -214,6 +215,7 @@ public partial class SimulationStartupController : MonoBehaviour
             defaults.biology.Capture(replicatorManager);
             resumeStepsPerFrame = Mathf.Max(1, replicatorManager.ConfiguredSimulationStepsPerFrame);
         }
+        if (ventVisualizer != null) defaults.ventVisuals = ventVisualizer.CaptureVisualSettings().Normalized();
         CaptureAdditionalSceneDefaults();
     }
 
@@ -418,6 +420,7 @@ public partial class SimulationStartupController : MonoBehaviour
     {
         if (currentConfig == null) currentConfig = new SimulationStartupConfig();
         CopyAdvancedSettings(defaults ?? new SimulationStartupConfig(), currentConfig);
+        ApplyVentVisualSettings();
         numericFieldEdits.Clear();
         integerFieldEdits.Clear();
         RefreshStartupPanels();
@@ -516,6 +519,7 @@ public partial class SimulationStartupController : MonoBehaviour
         destination.approximateThermalIntervalSeconds = source.approximateThermalIntervalSeconds;
         destination.geodesicResourceTransportIntervalSeconds = source.geodesicResourceTransportIntervalSeconds;
         destination.chemistryTelemetryIntervalSimSeconds = source.chemistryTelemetryIntervalSimSeconds;
+        destination.ventVisuals = source.ventVisuals;
     }
 
     public void StartSimulation()
@@ -702,6 +706,9 @@ public partial class SimulationStartupController : MonoBehaviour
         int seed = requestedRandomSeed ? GenerateConcreteSeed() : config.planetSeed;
         config.planetSeed = seed;
 
+        // Bind the selected visual settings before either rendering path creates its outlets.
+        ApplyVentVisualSettings();
+
         simulationPipeline?.ResetClockForNewSimulation();
         replicatorManager?.ClearPopulation();
 
@@ -882,6 +889,7 @@ public partial class SimulationStartupController : MonoBehaviour
 
             currentConfig = DeserializeSavedConfig(json, defaults);
             ClampLoadedConfig(currentConfig);
+            ApplyVentVisualSettings();
 
             if (logAppliedStartupConfig)
             {
@@ -1271,6 +1279,7 @@ public partial class SimulationStartupController : MonoBehaviour
             };
             saved.CaptureV23(config);
             saved.CaptureV24(config);
+            saved.CaptureV25(config);
             return saved;
         }
 
@@ -1355,6 +1364,7 @@ public partial class SimulationStartupController : MonoBehaviour
             config.chemistryTelemetryIntervalSimSeconds = version >= 5 ? chemistryTelemetryIntervalSimSeconds : config.chemistryTelemetryIntervalSimSeconds;
             RestoreV23(config);
             RestoreV24(config);
+            RestoreV25(config);
             return config;
         }
     }

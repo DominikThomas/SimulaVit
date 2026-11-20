@@ -60,6 +60,7 @@ public partial class VentVisualizer : MonoBehaviour
     {
         SubscribeToResourceMap();
         if (effectsRoot != null) effectsRoot.SetActive(true);
+        ResumeSmokeSimulation();
         nextVisibilityUpdate = 0f;
     }
 
@@ -293,7 +294,7 @@ public partial class VentVisualizer : MonoBehaviour
         marker.transform.SetParent(parent, true);
         marker.transform.position = worldPos;
         marker.transform.rotation = Quaternion.LookRotation(-dir);
-        marker.transform.localScale = Vector3.one * scale;
+        RegisterVentGlow(marker.transform, scale);
 
         MeshFilter filter = marker.AddComponent<MeshFilter>();
         filter.sharedMesh = GetQuadMesh();
@@ -477,7 +478,7 @@ public partial class VentVisualizer : MonoBehaviour
         marker.transform.SetParent(parent, true);
         marker.transform.position = worldPos;
         marker.transform.rotation = Quaternion.LookRotation(-dir);
-        marker.transform.localScale = Vector3.one * scale;
+        RegisterVentGlow(marker.transform, scale);
 
         MeshFilter filter = marker.AddComponent<MeshFilter>();
         filter.sharedMesh = GetQuadMesh();
