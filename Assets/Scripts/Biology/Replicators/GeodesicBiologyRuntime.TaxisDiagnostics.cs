@@ -21,6 +21,7 @@ public sealed partial class GeodesicBiologyRuntime
 
     private GeodesicTaxisObservation ObserveSteeringHabitat(int i, ReplicatorPopulationState state)
     {
+        movementPerformance.HabitatObservations++;
         GeodesicTaxisObservation observation = ObserveMovementHabitat(i, state);
         if (!steeringSettings.ActiveMovementMetabolismSuitabilityEnabled)
         {
@@ -131,10 +132,9 @@ public sealed partial class GeodesicBiologyRuntime
         && a.oxygenEfficiency == b.oxygenEfficiency && a.reactionReadiness == b.reactionReadiness;
 
     private void RecordHorizontalTaxis(in GeodesicTaxisObservation current, in GeodesicTaxisObservation previous,
-        in TaxisComparison comparison, int crossings, float interval)
+        in TaxisComparison comparison, int crossings, float interval, bool unchanged)
     {
         horizontalDeltaStats.Observe(comparison);
-        bool unchanged = SameExperiencedInputs(current, previous);
         if (unchanged) unchangedInputSamples++; else changedInputSamples++;
         if (current.cell == previous.cell && current.layer == previous.layer) sameHabitatSenses++; else changedHabitatSenses++;
         if (comparison.trend == TaxisTrend.Neutral)

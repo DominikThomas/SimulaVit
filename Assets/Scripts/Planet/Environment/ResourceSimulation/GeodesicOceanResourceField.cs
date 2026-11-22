@@ -925,6 +925,23 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     internal double[] ConcentrationsForChemistry => concentrationsByResourceThenNode;
     internal int NodeCapacityForChemistry => nodeCapacity;
     internal double GetRawConcentration(GeodesicOceanResource resource, int node) => concentrationsByResourceThenNode[(int)resource * nodeCapacity + node];
+    internal void ReadTaxisConcentrations(int cell, int layer, out float h2, out float co2,
+        out float o2, out float h2s, out float organicC)
+    {
+        if (!TryResolveNode(cell, layer, GeodesicOceanResource.CO2, out int co2Offset))
+        {
+            // Preserve the five failed channel reads in the resource diagnostics.
+            invalidQueryCount += 4;
+            h2 = co2 = o2 = h2s = organicC = 0f;
+            return;
+        }
+        int node = co2Offset - (int)GeodesicOceanResource.CO2 * nodeCapacity;
+        co2 = (float)concentrationsByResourceThenNode[co2Offset];
+        h2 = (float)GetRawConcentration(GeodesicOceanResource.H2, node);
+        o2 = (float)GetRawConcentration(GeodesicOceanResource.O2, node);
+        h2s = (float)GetRawConcentration(GeodesicOceanResource.H2S, node);
+        organicC = (float)GetRawConcentration(GeodesicOceanResource.OrganicC, node);
+    }
     internal double ApplyDirectExchangeInventory(GeodesicOceanResource resource, int node, double inventoryDelta)
     {
         int offset = (int)resource * nodeCapacity + node; double volume = sourceGrid.PhysicalLayerVolumeKm3[node];

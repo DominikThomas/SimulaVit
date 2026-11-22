@@ -152,7 +152,8 @@ public sealed partial class GeodesicBiologyRuntime
         && double.IsFinite(observation.reactionReadiness) && observation.reactionReadiness >= 0d;
 
     private void RecordABChemotaxisComparison(in GeodesicTaxisObservation current, in GeodesicTaxisObservation previous,
-        in TaxisComparison comparison, MetabolismType metabolism, bool hadMemory, float chosenProbability, bool tumbled, int crossings)
+        in TaxisComparison comparison, MetabolismType metabolism, bool hadMemory, float chosenProbability, bool tumbled,
+        int crossings, bool unchangedInputs)
     {
         if (!chemotaxisABDiagnosticsEnabled) return;
         if (!hadMemory) { abInitialSenses++; return; }
@@ -170,7 +171,7 @@ public sealed partial class GeodesicBiologyRuntime
             current.suitability, previous.suitability);
         group.experiencedChanges.Observe(experienced);
         group.sampleTrends[(int)experienced.trend]++;
-        if (SameExperiencedInputs(current, previous))
+        if (unchangedInputs)
         {
             group.unchangedInputs++;
             if (comparison.rawReadinessDelta != 0d) group.unchangedWithMemoryLag++;

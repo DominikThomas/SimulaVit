@@ -33,6 +33,44 @@ public sealed partial class GeodesicBiologyRuntime
     private double completedRunSeconds, activeDistanceKm, activeHorizontalKm, activeVerticalKm, locomotionEnergyPaid;
     private long activeCellCrossings, activeLayerTransitions, depthBoundaryRejections, energyLimitedSteps;
 
+    internal struct MovementWork
+    {
+        public long PassiveSteps, AmoeboidSteps, FlagellarSteps, AnchoredSteps;
+        public long IntegrationSteps, Senses, BoundarySearches, NeighborEvaluations, HabitatObservations;
+        public long CellCrossings, VerticalTrials;
+        public long ActiveSteps => AmoeboidSteps + FlagellarSteps;
+
+        public void AddSince(in MovementWork current, in MovementWork previous)
+        {
+            PassiveSteps += Delta(current.PassiveSteps, previous.PassiveSteps);
+            AmoeboidSteps += Delta(current.AmoeboidSteps, previous.AmoeboidSteps);
+            FlagellarSteps += Delta(current.FlagellarSteps, previous.FlagellarSteps);
+            AnchoredSteps += Delta(current.AnchoredSteps, previous.AnchoredSteps);
+            IntegrationSteps += Delta(current.IntegrationSteps, previous.IntegrationSteps);
+            Senses += Delta(current.Senses, previous.Senses);
+            BoundarySearches += Delta(current.BoundarySearches, previous.BoundarySearches);
+            NeighborEvaluations += Delta(current.NeighborEvaluations, previous.NeighborEvaluations);
+            HabitatObservations += Delta(current.HabitatObservations, previous.HabitatObservations);
+            CellCrossings += Delta(current.CellCrossings, previous.CellCrossings);
+            VerticalTrials += Delta(current.VerticalTrials, previous.VerticalTrials);
+        }
+
+        private static long Delta(long current, long previous) => Math.Max(0, current - previous);
+    }
+
+    private MovementWork movementPerformance;
+
+    internal MovementWork MovementPerformance
+    {
+        get
+        {
+            MovementWork snapshot = movementPerformance;
+            snapshot.CellCrossings = activeCellCrossings;
+            snapshot.VerticalTrials = verticalTrials;
+            return snapshot;
+        }
+    }
+
     public void SetLocomotionSettings(GeodesicLocomotionSettings settings, ReplicatorSteeringSystem.Settings steering,
         float moveSpeed, float amoebaSpeed, float flagellumSpeed, float amoebaTurn, float flagellumTurn,
         float mutation, float upgrade, float anchor, bool releaseAnchor, float releaseChance)
@@ -97,11 +135,8 @@ public sealed partial class GeodesicBiologyRuntime
         int node = grid.GetNodeIndex(cell, layer);
         if (movementSampleStamps[node] != movementSampleGeneration)
         {
-            resources.TryGetConcentration(cell, layer, GeodesicOceanResource.H2, out float h2);
-            resources.TryGetConcentration(cell, layer, GeodesicOceanResource.CO2, out float co2);
-            resources.TryGetConcentration(cell, layer, GeodesicOceanResource.O2, out float o2);
-            resources.TryGetConcentration(cell, layer, GeodesicOceanResource.H2S, out float h2s);
-            resources.TryGetConcentration(cell,layer,GeodesicOceanResource.OrganicC,out float organicC);
+            resources.ReadTaxisConcentrations(cell, layer, out float h2, out float co2,
+                out float o2, out float h2s, out float organicC);
             movementSamples[node] = new MovementHabitatSample
             {
                 h2 = SafeMovementValue(h2, 0f, 0f, float.MaxValue),
@@ -183,6 +218,7 @@ public sealed partial class GeodesicBiologyRuntime
 
     private void AccumulateActiveMovementTime(float dt, ReplicatorPopulationState state)
     {
+        int passive = 0, amoeboid = 0, flagellar = 0, anchored = 0;
         for (int i = 0; i < state.Count; i++)
         {
             if ((uint)state.Locomotion[i] > (uint)LocomotionType.Anchored)
@@ -191,9 +227,19 @@ public sealed partial class GeodesicBiologyRuntime
                 state.ActiveMovement[i] = default;
                 inheritanceCorrections++;
             }
-            if (IsActive(state.Locomotion[i]))
-                state.ActiveMovement[i].pendingSeconds = SafeMovementValue(state.ActiveMovement[i].pendingSeconds, 0f, 0f, 60f) + dt;
+            switch (state.Locomotion[i])
+            {
+                case LocomotionType.PassiveDrift: passive++; continue;
+                case LocomotionType.Anchored: anchored++; continue;
+                case LocomotionType.Amoeboid: amoeboid++; break;
+                case LocomotionType.Flagellum: flagellar++; break;
+            }
+            state.ActiveMovement[i].pendingSeconds = SafeMovementValue(state.ActiveMovement[i].pendingSeconds, 0f, 0f, 60f) + dt;
         }
+        movementPerformance.PassiveSteps += passive;
+        movementPerformance.AmoeboidSteps += amoeboid;
+        movementPerformance.FlagellarSteps += flagellar;
+        movementPerformance.AnchoredSteps += anchored;
     }
 
     private float ActiveAngularSpeed(LocomotionType type) => PassiveAngularSpeedRadiansPerSecond
@@ -233,15 +279,17 @@ public sealed partial class GeodesicBiologyRuntime
             float speed = ActiveAngularSpeed(type);
             // Bounded catch-up; never enlarge a geometric step to absorb excess elapsed time.
             // Normal pipeline ticks are <= 1/30s and movement batches are 0.1s.
-            for (int step = 0; remaining > 1e-6f && step < MaximumKinematicCatchUpSteps; step++)
+            int step = 0;
+            for (; remaining > 1e-6f && step < MaximumKinematicCatchUpSteps; step++)
             {
                 cell = state.GeodesicCellIndex[i];
                 if (!(movementSafeAngles[cell] > 0f))
                     movementSafeAngles[cell] = Mathf.Max(1e-7f, GetMinimumNeighborSpacingRadians(cell) * 0.2f);
                 float stepDt = Mathf.Min(remaining, PassiveKinematicsIntervalSeconds);
                 if (speed > 0f) stepDt = Mathf.Min(stepDt, movementSafeAngles[cell] / speed);
-                using (ActiveSensingMarker.Auto()) SenseActiveHabitat(i, state, stepDt, trackedSlot);
-                using (ActiveVerticalMarker.Auto()) PrepareVerticalExploration(i, state, stepDt);
+                bool canReuseObservation;
+                using (ActiveSensingMarker.Auto()) canReuseObservation = SenseActiveHabitat(i, state, stepDt, trackedSlot);
+                using (ActiveVerticalMarker.Auto()) PrepareVerticalExploration(i, state, stepDt, canReuseObservation);
                 float rate = type == LocomotionType.Flagellum ? locomotionSettings.flagellumEnergyPerSecond : locomotionSettings.amoeboidEnergyPerSecond;
                 bool hasPropulsion = speed > 0f || (active.verticalMoving && locomotionSettings.verticalSpeedMetersPerSecond > 0f);
                 float energy = state.Energy[i];
@@ -262,8 +310,9 @@ public sealed partial class GeodesicBiologyRuntime
                     movementCorrections++;
                 }
                 float turnRate = type == LocomotionType.Flagellum ? flagellarTurn : amoeboidTurn;
-                float desiredAngle = Mathf.Atan2(Vector3.Dot(direction, Vector3.Cross(tangent, desired.normalized)),
-                    Mathf.Clamp(Vector3.Dot(tangent, desired.normalized), -1f, 1f));
+                Vector3 unitDesired = desired.normalized;
+                float desiredAngle = Mathf.Atan2(Vector3.Dot(direction, Vector3.Cross(tangent, unitDesired)),
+                    Mathf.Clamp(Vector3.Dot(tangent, unitDesired), -1f, 1f));
                 float turn = Mathf.Clamp(desiredAngle, -turnRate * effortDt, turnRate * effortDt);
                 tangent = (tangent * Mathf.Cos(turn) + Vector3.Cross(direction, tangent) * Mathf.Sin(turn)).normalized;
                 if (type == LocomotionType.Amoeboid)
@@ -296,6 +345,7 @@ public sealed partial class GeodesicBiologyRuntime
                 movementUpdates++;
                 continuousKinematicUpdates++;
             }
+            movementPerformance.IntegrationSteps += step;
             Vector3 normal = state.PassiveDriftDirection[i];
             Vector3 worldNormal = localToWorld.MultiplyVector(normal).normalized;
             Vector3 worldTangent = localToWorld.MultiplyVector(state.PassiveDriftTangent[i]).normalized;
@@ -373,12 +423,17 @@ public sealed partial class GeodesicBiologyRuntime
     private float NextActiveRandom(int i, ReplicatorPopulationState state) =>
         ToUnitFloat(Hash(MovementSeedBits(state.MovementSeed[i]) ^ 0xAC714E5u, state.ActiveMovement[i].sequence++));
 
-    private void SenseActiveHabitat(int i, ReplicatorPopulationState state, float dt, int trackedSlot)
+    private bool SenseActiveHabitat(int i, ReplicatorPopulationState state, float dt, int trackedSlot)
     {
         ref GeodesicActiveMovementState active = ref state.ActiveMovement[i];
         active.senseCountdown -= dt;
         active.lastSenseInterval += dt;
-        if (active.senseCountdown > 0f) return;
+        if (active.senseCountdown > 0f) return false;
+        movementPerformance.Senses++;
+        bool canReuseObservation = true;
+#if UNITY_EDITOR
+        canReuseObservation = DiagnosticSteeringObservationOverride == null;
+#endif
         bool flagellar = state.Locomotion[i] == LocomotionType.Flagellum;
         GeodesicTaxisObservation observation = ObserveSteeringHabitat(i, state);
         bool hadMemory = active.hasSuitability;
@@ -393,11 +448,12 @@ public sealed partial class GeodesicBiologyRuntime
             hadMemory, (GeodesicTaxisPolicy.Trend)comparison.trend, steeringSettings.BaseTumbleProbability,
             steeringSettings.MovementTumbleChanceWhenBetter, steeringSettings.MovementTumbleChanceWhenWorse,
             steeringSettings.MovementTumbleChanceNeutral);
+        bool unchangedInputs = hadMemory && SameExperiencedInputs(observation, active.lastTaxisObservation);
         if (hadMemory)
         {
             if (better) suitabilityImproving++; else if (worse) suitabilityWorsening++; else suitabilityNeutral++;
             RecordHorizontalTaxis(observation, active.lastTaxisObservation, comparison,
-                active.cellCrossingsSinceSense, active.lastSenseInterval);
+                active.cellCrossingsSinceSense, active.lastSenseInterval, unchangedInputs);
         }
         float min = SafeMovementValue(steeringSettings.MinTumbleProbability, 0.02f, 0f, 1f);
         float max = SafeMovementValue(steeringSettings.MaxTumbleProbability, 0.9f, min, 1f);
@@ -421,7 +477,7 @@ public sealed partial class GeodesicBiologyRuntime
         }
         if (hadMemory) RecordTaxisTumble(comparison.trend, tumble, tumbled);
         RecordABChemotaxisComparison(observation, active.lastTaxisObservation, comparison,
-            state.Metabolism[i], hadMemory, tumble, tumbled, active.cellCrossingsSinceSense);
+            state.Metabolism[i], hadMemory, tumble, tumbled, active.cellCrossingsSinceSense, unchangedInputs);
         RecordDetailedTaxisSense(trackedSlot, observation, previousSuitability, previousReadiness,
             comparison, probability, tumble, tumbled, !hadMemory, active.cellCrossingsSinceSense, active.lastSenseInterval);
         double blend = SafeMovementValue(steeringSettings.MovementSuitabilityMemoryBlend, 0.35f, 0f, 1f);
@@ -477,9 +533,10 @@ public sealed partial class GeodesicBiologyRuntime
         jitter = SafeMovementValue(jitter, 0f, 0f, interval * 0.9f);
         active.senseCountdown = Mathf.Max(0.1f, interval + (NextActiveRandom(i, state) * 2f - 1f) * jitter);
         active.lastSenseInterval = 0f;
+        return canReuseObservation;
     }
 
-    private void PrepareVerticalExploration(int i, ReplicatorPopulationState state, float dt)
+    private void PrepareVerticalExploration(int i, ReplicatorPopulationState state, float dt, bool canReuseObservation)
     {
         ref GeodesicActiveMovementState active = ref state.ActiveMovement[i];
         active.verticalCountdown -= dt;
@@ -496,7 +553,9 @@ public sealed partial class GeodesicBiologyRuntime
         }
         active.verticalCountdown = locomotionSettings.verticalExplorationIntervalSeconds * (0.5f + NextActiveRandom(i, state));
         if (target == layer || !grid.IsNodeActive(cell, target)) { verticalBlocked++; return; }
-        GeodesicTaxisObservation origin = ObserveSteeringHabitat(i, state);
+        // Sensing and trial preparation see the same habitat before any movement.
+        // Arrival always samples at its original point in the integration.
+        GeodesicTaxisObservation origin = canReuseObservation ? active.lastTaxisObservation : ObserveSteeringHabitat(i, state);
         active.verticalBaseline = origin.suitability;
         active.verticalReadinessBefore = origin.reactionReadiness;
         active.verticalOriginCell = cell;
@@ -561,6 +620,11 @@ public sealed partial class GeodesicBiologyRuntime
         int cell = state.GeodesicCellIndex[i];
         for (int crossing = 0; crossing < MaximumBoundaryCrossingsPerStep; crossing++)
         {
+            if (active)
+            {
+                movementPerformance.BoundarySearches++;
+                movementPerformance.NeighborEvaluations += topology.NeighborCounts[cell];
+            }
             int candidate;
             using (MovementBoundaryCandidates.Auto()) candidate = FindCloserRealNeighbor(cell, direction, centers, topology.Neighbors6, topology.NeighborCounts);
             if (candidate < 0) break;
@@ -678,6 +742,7 @@ public sealed partial class GeodesicBiologyRuntime
     private void ClearLocomotion()
     {
         ClearTaxisDiagnostics();
+        movementPerformance = default;
         locomotionMutationRandom = null;
         movementSamples = Array.Empty<MovementHabitatSample>(); movementSampleStamps = Array.Empty<int>(); movementSafeAngles = Array.Empty<float>();
         movementSampleGeneration = 1;

@@ -1074,6 +1074,9 @@ public class ReplicatorManager : MonoBehaviour
             allowAnchoredToAmoeboidMutation, anchoredToAmoeboidMutationChance);
     }
 
+    internal GeodesicBiologyRuntime.MovementWork GeodesicMovementPerformance =>
+        geodesicBiology?.MovementPerformance ?? default;
+
     internal bool RunGeodesicBiologyStep(float stepDeltaTime)
     {
         if (geodesicBiology == null) return false;

@@ -41,7 +41,7 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
         "GeodesicOceanResource.Suspended.Settling", "GeodesicTemperature.TargetAndSurfaceResponse",
         "GeodesicTemperature.HorizontalDiffusion", "GeodesicTemperature.CommittedEvent",
         "GeodesicOceanTemperature.RelaxApproximateProfiles", "GeodesicOceanTemperature.SolveImplicitColumns",
-        "GeodesicTemperature.ResponseCoefficients"
+        "GeodesicTemperature.ResponseCoefficients", "GeodesicBiology.ActiveMovement.Vertical"
     };
     private static readonly string[] AggregateNames =
     {
@@ -81,6 +81,7 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
     private long previousCandidates, previousProcessed, previousChemistryTicks;
     private double populationSum, speedSum, gcBytes;
     private long steps, candidates, processed, chemistryTicks, activeNodesSum;
+    private GeodesicBiologyRuntime.MovementWork previousMovement, movement;
     private int endFrame;
     private bool csvFailed;
 
@@ -131,6 +132,7 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
                 steps += pending.Steps; simulatedSeconds += pending.SimulatedSeconds;
                 activeNodesSum += pending.ActiveNodes;
                 candidates += pending.Candidates; processed += pending.Processed; chemistryTicks += pending.ChemistryTicks;
+                movement.AddSince(pending.Movement, default);
                 if (cpuFrameRecorder.Valid && cpuFrameRecorder.Count > 0)
                     cpuFrames[cpuSamples++] = cpuFrameRecorder.LastValue * 1e-6d;
                 if (gcRecorder.Valid && gcRecorder.Count > 0) { gcBytes += gcRecorder.LastValue; gcSamples++; }
@@ -167,6 +169,9 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
             long currentCandidates = chemistry != null ? chemistry.TotalPerformanceCandidates : 0;
             long currentProcessed = chemistry != null ? chemistry.TotalPerformanceNodesProcessed : 0;
             long currentTicks = chemistry != null ? chemistry.ChemistryTicks : 0;
+            var currentMovement = replicatorManager != null ? replicatorManager.GeodesicMovementPerformance : default;
+            var movementDelta = default(GeodesicBiologyRuntime.MovementWork);
+            if (hasClock && currentSteps >= previousSteps) movementDelta.AddSince(currentMovement, previousMovement);
             pending = new FrameContext
             {
                 Frame = Time.frameCount,
@@ -177,10 +182,12 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
                 ActiveNodes = resources != null && resources.IsInitialized ? resources.ActiveNodeCount : 0,
                 Candidates = hasClock ? Math.Max(0L, currentCandidates - previousCandidates) : 0L,
                 Processed = hasClock ? Math.Max(0L, currentProcessed - previousProcessed) : 0L,
-                ChemistryTicks = hasClock ? Math.Max(0L, currentTicks - previousChemistryTicks) : 0L
+                ChemistryTicks = hasClock ? Math.Max(0L, currentTicks - previousChemistryTicks) : 0L,
+                Movement = movementDelta
             };
             previousSteps = currentSteps; previousSimulationTime = currentTime;
             previousCandidates = currentCandidates; previousProcessed = currentProcessed; previousChemistryTicks = currentTicks;
+            previousMovement = currentMovement;
             hasPending = hasClock; // Discard the first partial frame after enabling.
             hasClock = true;
         }
@@ -234,6 +241,14 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
         summary.Append(" GC_B_per_frame="); AppendOptional(summary, gcBytes, gcSamples);
         summary.Append(" active_nodes_avg="); AppendNumber(summary, (double)activeNodesSum / frames);
         summary.Append(" chemistry_candidates/processed/ticks=").Append(candidates).Append('/').Append(processed).Append('/').Append(chemistryTicks);
+        summary.Append(" locomotion_P/A/F/X_avg=");
+        AppendOptional(summary, movement.PassiveSteps, steps); summary.Append('/');
+        AppendOptional(summary, movement.AmoeboidSteps, steps); summary.Append('/');
+        AppendOptional(summary, movement.FlagellarSteps, steps); summary.Append('/');
+        AppendOptional(summary, movement.AnchoredSteps, steps);
+        summary.Append(" active_us_per_organism_step="); AppendOptional(summary, aggregates[4] * 1000d, movement.ActiveSteps);
+        summary.Append(" active_integrations/senses/crossings=").Append(movement.IntegrationSteps)
+            .Append('/').Append(movement.Senses).Append('/').Append(movement.CellCrossings);
         for (int i = 0; i < aggregates.Length; i++) { summary.Append(' ').Append(AggregateNames[i]).Append("_ms="); AppendNumber(summary, aggregates[i] / frames); }
         if (capacityReached) summary.Append(" window_capacity_reached=true");
         latestSummary = summary.ToString();
@@ -257,6 +272,16 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
                 csvBuffer.Append(',');
                 if (markers[i].Valid) AppendNumber(csvBuffer, markerTotals[i] / frames); else csvBuffer.Append("n/a");
             }
+            csvBuffer.Append(',');
+            AppendCsvOptional(movement.PassiveSteps, steps);
+            AppendCsvOptional(movement.AmoeboidSteps, steps);
+            AppendCsvOptional(movement.FlagellarSteps, steps);
+            AppendCsvOptional(movement.AnchoredSteps, steps);
+            AppendCsvOptional(aggregates[4] * 1000d, movement.ActiveSteps);
+            csvBuffer.Append(movement.ActiveSteps).Append(',').Append(movement.IntegrationSteps).Append(',')
+                .Append(movement.Senses).Append(',').Append(movement.HabitatObservations).Append(',')
+                .Append(movement.BoundarySearches).Append(',').Append(movement.NeighborEvaluations).Append(',')
+                .Append(movement.CellCrossings).Append(',').Append(movement.VerticalTrials);
             csvBuffer.AppendLine();
             if (++csvSamplesPending >= Math.Max(1, flushCsvEveryNSamples)) FlushCsvBuffer();
         }
@@ -274,6 +299,7 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
         frames = cpuSamples = gcSamples = 0;
         windowSeconds = simulatedSeconds = populationSum = speedSum = gcBytes = 0d;
         steps = candidates = processed = chemistryTicks = activeNodesSum = 0;
+        movement = default;
         Array.Clear(markerTotals, 0, markerTotals.Length); Array.Clear(aggregates, 0, aggregates.Length);
     }
 
@@ -289,6 +315,7 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
             csvBuffer.Append("end_frame,frames,real_seconds,rendered_fps,frame_avg_ms,frame_p95_ms,cpu_main_thread_avg_ms,cpu_main_thread_p95_ms,cpu_samples,gc_bytes_per_frame,gc_samples,population_avg,requested_speed_avg,steps_executed,steps_per_frame,simulated_seconds,simulated_seconds_per_real_second,active_chemistry_nodes_avg,chemistry_candidates_processed,chemistry_nodes_processed,chemistry_ticks,window_capacity_reached");
             foreach (string name in AggregateNames) csvBuffer.Append(',').Append(name).Append("_avg_ms");
             foreach (string name in MarkerNames) csvBuffer.Append(',').Append(name).Append("_avg_ms");
+            csvBuffer.Append(",passive_avg,amoeboid_avg,flagellar_avg,anchored_avg,active_us_per_organism_step,active_organism_steps,active_integration_steps,active_senses,active_habitat_observations,active_boundary_searches,active_neighbor_evaluations,active_cell_crossings,active_vertical_trials");
             bool existing = File.Exists(csvOutputPath) && new FileInfo(csvOutputPath).Length > 0;
             if (existing)
             {
@@ -324,10 +351,10 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
         hasPending = false;
     }
     private static void AppendNumber(StringBuilder builder, double value) => builder.Append(value.ToString("F4", CultureInfo.InvariantCulture));
-    private static void AppendOptional(StringBuilder builder, double total, int count)
+    private static void AppendOptional(StringBuilder builder, double total, long count)
     { if (count > 0) AppendNumber(builder, total / count); else builder.Append("n/a"); }
     private void AppendCsvNumber(double value) { AppendNumber(csvBuffer, value); csvBuffer.Append(','); }
-    private void AppendCsvOptional(double total, int count) { AppendOptional(csvBuffer, total, count); csvBuffer.Append(','); }
+    private void AppendCsvOptional(double total, long count) { AppendOptional(csvBuffer, total, count); csvBuffer.Append(','); }
 
     private struct FrameContext
     {
@@ -335,6 +362,7 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
         public float Speed;
         public double SimulatedSeconds;
         public long Candidates, Processed, ChemistryTicks;
+        public GeodesicBiologyRuntime.MovementWork Movement;
     }
     private readonly struct MarkerRecorder : IDisposable
     {
