@@ -33,7 +33,15 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
         "ReplicatorMovementSystem.CopyToCompanionObjects", "JobHandle.Complete",
         "GeodesicOceanResource.AbioticChemistry", "ReplicatorRenderSystem.RenderAgents",
         "GeodesicOceanTemperature.DiagnosticSnapshot", "VentVisualizer.LateUpdate",
-        "ReplicatorManager.GeodesicControlSync"
+        "ReplicatorManager.GeodesicControlSync",
+        "GeodesicOceanResource.StagingClear", "GeodesicOceanResource.TransportCoefficients",
+        "GeodesicOceanResource.Suspended.Total", "GeodesicOceanResource.Suspended.Mixing",
+        "GeodesicOceanResource.Suspended.Clear", "GeodesicOceanResource.Suspended.CollectOutgoing",
+        "GeodesicOceanResource.Suspended.StageIncoming", "GeodesicOceanResource.Suspended.Commit",
+        "GeodesicOceanResource.Suspended.Settling", "GeodesicTemperature.TargetAndSurfaceResponse",
+        "GeodesicTemperature.HorizontalDiffusion", "GeodesicTemperature.CommittedEvent",
+        "GeodesicOceanTemperature.RelaxApproximateProfiles", "GeodesicOceanTemperature.SolveImplicitColumns",
+        "GeodesicTemperature.ResponseCoefficients"
     };
     private static readonly string[] AggregateNames =
     {

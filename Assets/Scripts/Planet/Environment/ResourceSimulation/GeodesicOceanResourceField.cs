@@ -34,6 +34,13 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     private static readonly ProfilerMarker VentMarker = new ProfilerMarker("GeodesicOceanResource.VentSources");
     private static readonly ProfilerMarker ChemistryCandidateRefreshMarker = new ProfilerMarker("GeodesicOceanResource.Chemistry.CandidateRefresh");
     private static readonly ProfilerMarker DiagnosticsMarker = new ProfilerMarker("GeodesicOceanResource.RecurringDiagnostics");
+    private static readonly ProfilerMarker StagingClearMarker = new ProfilerMarker("GeodesicOceanResource.StagingClear");
+    private static readonly ProfilerMarker CoefficientsMarker = new ProfilerMarker("GeodesicOceanResource.TransportCoefficients");
+    private static readonly ProfilerMarker SuspendedMixingMarker = new ProfilerMarker("GeodesicOceanResource.Suspended.Mixing");
+    private static readonly ProfilerMarker SuspendedClearMarker = new ProfilerMarker("GeodesicOceanResource.Suspended.Clear");
+    private static readonly ProfilerMarker SuspendedOutgoingMarker = new ProfilerMarker("GeodesicOceanResource.Suspended.CollectOutgoing");
+    private static readonly ProfilerMarker SuspendedIncomingMarker = new ProfilerMarker("GeodesicOceanResource.Suspended.StageIncoming");
+    private static readonly ProfilerMarker SuspendedCommitMarker = new ProfilerMarker("GeodesicOceanResource.Suspended.Commit");
     private static ProfilerCounterValue<int> TicksPerFrameCounter = new ProfilerCounterValue<int>(ProfilerCategory.Scripts, "Geodesic Resource Ticks / Frame", ProfilerMarkerDataUnit.Count, ProfilerCounterOptions.FlushOnEndOfFrame);
     private static ProfilerCounterValue<float> SimSecondsPerFrameCounter = new ProfilerCounterValue<float>(ProfilerCategory.Scripts, "Geodesic Resource Sim Seconds / Frame", ProfilerMarkerDataUnit.Count, ProfilerCounterOptions.FlushOnEndOfFrame);
     private static ProfilerCounterValue<float> BacklogCounter = new ProfilerCounterValue<float>(ProfilerCategory.Scripts, "Geodesic Resource Backlog Seconds", ProfilerMarkerDataUnit.Count, ProfilerCounterOptions.FlushOnEndOfFrame);
@@ -125,6 +132,9 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     private float preparedTickDeltaTime;
     private float[] horizontalConductanceBase;
     private float[] verticalConductanceBase;
+    // Scratch reused across mineral species/ticks. Every entry is overwritten by
+    // the outgoing pass, including zero fluxes; no extra clear or save data is needed.
+    private double[] suspendedLinkTransfers;
     private bool[] resourceMayHaveSpatialVariation;
     private GeodesicVentSystem[] ventSystems;
     private GeodesicVentSourceOutlet[] ventOutlets;
@@ -437,6 +447,7 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     public void ClearField() => ClearField(true);
     private void ClearField(bool countClear)
     {
+        suspendedLinkTransfers = null;
         sedimentField?.Clear(); suspendedField?.Clear(); abioticChemistry?.ResetCounters();
         chemistryTelemetry?.ClearWorld(); airSeaGasExchange?.ClearWorld(); atmosphereField?.ClearField(); concentrationsByResourceThenNode = null; activeNodeIndices = null; activeNodeVolumes = null; chemistryCandidateNodes = null; chemistryCandidateCount = 0; sourceGrid = null; stagedInventoryDelta = null; horizontalTickCoefficients = null; verticalTickCoefficients = null; resourceMayHaveSpatialVariation = null; preparedTickDeltaTime = 0f; horizontalConductanceBase = null; verticalConductanceBase = null; ventSystems = null; ventOutlets = null; submarineThermalInfluenceByCell = terrestrialThermalInfluenceByCell = null; directThermalSourceByCell = null; initialized = false; cellCount = nodeCapacity = activeNodeCount = horizontalLinkCount = verticalLinkCount = ventCount = rawVentCandidateCount = submarineVentCount = terrestrialVentCount = resourceTicksExecutedThisFrame = horizontalActiveResourceChannelsLastTick = horizontalSkippedUniformChannelsLastTick = horizontalLinkResourceEvaluationsLastTick = 0; resourceSimSecondsProcessedThisFrame = normalizedSubmarineWeightSum = 0f; submarineGasProductionFraction = terrestrialGasProductionFraction = 0d; activeOceanVolume = 0d; approximateRuntimeMemoryBytes = transportCacheMemoryBytes = stagingBufferMemoryBytes = 0; transportIntegrationCursorTime = lastObservedSimulationTime = unconsumedTransportRemainderSeconds = 0d; completedTransportTicks = 0; ResetDiagnostics(); if (countClear) clearCount++;
     }
@@ -644,8 +655,8 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
             // Historically named "Per Tick" startup values are rates per simulated second.
             InjectVentSources(dt);
             airSeaGasExchange.Step(this, dt);
-            Array.Clear(stagedInventoryDelta, 0, stagedInventoryDelta.Length);
-            PrepareTickCoefficients(dt);
+            using (StagingClearMarker.Auto()) Array.Clear(stagedInventoryDelta, 0, stagedInventoryDelta.Length);
+            using (CoefficientsMarker.Auto()) PrepareTickCoefficients(dt);
             AccumulateHorizontalAllResources();
             AccumulateVerticalAllResources();
             ApplyStagedAllResources();
@@ -823,8 +834,19 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     /// <summary>Mix one particulate inventory channel using the existing bulk-water links and conductance caches.</summary>
     internal void MixSuspendedInventory(double[] inventory, int offset, double[] incoming, double[] outgoing, float dt)
     {
-        Array.Clear(incoming, 0, incoming.Length);
-        Array.Clear(outgoing, 0, outgoing.Length);
+        using var performanceScope = SuspendedMixingMarker.Auto();
+        int linkCount = horizontalLinkCount + verticalLinkCount;
+        if (suspendedLinkTransfers == null || suspendedLinkTransfers.Length != linkCount)
+        {
+            transportCacheMemoryBytes -= (long)(suspendedLinkTransfers?.Length ?? 0) * sizeof(double);
+            suspendedLinkTransfers = new double[linkCount];
+            transportCacheMemoryBytes += (long)linkCount * sizeof(double);
+        }
+        using (SuspendedClearMarker.Auto())
+        {
+            Array.Clear(incoming, 0, incoming.Length);
+            Array.Clear(outgoing, 0, outgoing.Length);
+        }
         double horizontal = Math.Max(0d, horizontalMixingRate) * dt;
         double vertical = Math.Max(0d, defaultVerticalMixingRate) * dt;
         double scale = 1d / Math.Max(1d, horizontal + vertical);
@@ -832,18 +854,27 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
         // First collect total requested outflow. Then bound every link by its donor's
         // available fraction, so unequal volumes and roundoff cannot overdraw a node.
         // Only incoming material is staged; subtraction is bounded once per donor.
-        for (int pass = 0; pass < 2; pass++)
+        using (SuspendedOutgoingMarker.Auto())
         {
             for (int link = 0; link < horizontalLinkCount; link++)
-                StageSuspendedPair(inventory, offset, incoming, outgoing,
+                CacheSuspendedOutflow(inventory, offset, outgoing,
                     sourceGrid.HorizontalNodeA[link], sourceGrid.HorizontalNodeB[link],
-                    horizontalConductanceBase[link] * horizontal, pass == 0);
+                    horizontalConductanceBase[link] * horizontal, link);
             for (int link = 0; link < verticalLinkCount; link++)
-                StageSuspendedPair(inventory, offset, incoming, outgoing,
+                CacheSuspendedOutflow(inventory, offset, outgoing,
                     sourceGrid.VerticalUpperNode[link], sourceGrid.VerticalLowerNode[link],
-                    verticalConductanceBase[link] * vertical, pass == 0);
+                    verticalConductanceBase[link] * vertical, horizontalLinkCount + link);
         }
-        for (int i = 0; i < activeNodeCount; i++)
+        using (SuspendedIncomingMarker.Auto())
+        {
+            for (int link = 0; link < horizontalLinkCount; link++)
+                StageCachedSuspendedPair(inventory, offset, incoming, outgoing,
+                    sourceGrid.HorizontalNodeA[link], sourceGrid.HorizontalNodeB[link], suspendedLinkTransfers[link]);
+            for (int link = 0; link < verticalLinkCount; link++)
+                StageCachedSuspendedPair(inventory, offset, incoming, outgoing,
+                    sourceGrid.VerticalUpperNode[link], sourceGrid.VerticalLowerNode[link], suspendedLinkTransfers[horizontalLinkCount + link]);
+        }
+        using (SuspendedCommitMarker.Auto()) for (int i = 0; i < activeNodeCount; i++)
         {
             int node = activeNodeIndices[i];
             double before = inventory[offset + node];
@@ -851,16 +882,23 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
         }
     }
 
-    private void StageSuspendedPair(double[] inventory, int offset, double[] incoming, double[] outgoing,
-        int a, int b, double coefficient, bool collectOutgoing)
+    private void CacheSuspendedOutflow(double[] inventory, int offset, double[] outgoing,
+        int a, int b, double coefficient, int link)
     {
         double transfer = coefficient * (inventory[offset + a] / sourceGrid.PhysicalLayerVolumeKm3[a]
             - inventory[offset + b] / sourceGrid.PhysicalLayerVolumeKm3[b]);
+        suspendedLinkTransfers[link] = transfer;
+        if (transfer == 0d) return;
+        int donor = transfer > 0d ? a : b;
+        outgoing[donor] += Math.Abs(transfer);
+    }
+
+    private static void StageCachedSuspendedPair(double[] inventory, int offset, double[] incoming, double[] outgoing,
+        int a, int b, double transfer)
+    {
         if (transfer == 0d) return;
         int donor = transfer > 0d ? a : b, receiver = transfer > 0d ? b : a;
-        double requested = Math.Abs(transfer);
-        if (collectOutgoing) outgoing[donor] += requested;
-        else incoming[receiver] += requested * Math.Min(1d, inventory[offset + donor] / outgoing[donor]);
+        incoming[receiver] += Math.Abs(transfer) * Math.Min(1d, inventory[offset + donor] / outgoing[donor]);
     }
 
     public bool TryGetCachedMeanO2ByLayer(int layer, out float mean)

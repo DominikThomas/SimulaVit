@@ -722,6 +722,7 @@ public class ReplicatorManager : MonoBehaviour
     private bool isInitialized;
     private GeodesicBiologyRuntime geodesicBiology;
     private Func<float, float, float, MetabolismType, Color> geodesicColorResolver;
+    private Action<MetabolismType, DeathCause> geodesicDeathRecorder;
     private readonly ReplicatorSpawnSystem spawnSystem = new ReplicatorSpawnSystem();
     private readonly ReplicatorLifecycleSystem lifecycleSystem = new ReplicatorLifecycleSystem();
     private readonly ReplicatorMetabolismSystem metabolismSystem = new ReplicatorMetabolismSystem();
@@ -1077,6 +1078,7 @@ public class ReplicatorManager : MonoBehaviour
     {
         if (geodesicBiology == null) return false;
         ApplyGeodesicRuntimeControls();
+        geodesicDeathRecorder ??= RegisterDeathCause;
         geodesicBiology.Step(stepDeltaTime, agents, populationState, basalEnergyCostPerSecond,
             hydrogenotrophyCO2PerTick, hydrogenotrophyH2PerTick, hydrogenotrophyEnergyPerTick, hydrogenotrophyStoreFraction,
             anaerobeO2InhibitionEnabled && anaerobeO2InhibitionAffectsHydrogenotrophy,
@@ -1086,7 +1088,7 @@ public class ReplicatorManager : MonoBehaviour
             methanotrophyCH4PerTick, methanotrophyO2PerTick, methanotrophyEnergyPerTick,
             photosynthesisCo2PerTickAtFullInsolation, photosynthesisEnergyPerCo2, maxOrganicCStore,
             reproductionRate, enableCarbonLimitedDivision, divisionEnergyCost, replicationEnergyCost,
-            divisionBiomassMultiple, divisionCarbonSplitToChild, maxPopulation, RegisterDeathCause,
+            divisionBiomassMultiple, divisionCarbonSplitToChild, maxPopulation, geodesicDeathRecorder,
             new GeodesicBiologyTemperatureSettings
             {
                 DormancyFloor = temperatureDormancyFloor,

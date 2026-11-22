@@ -56,10 +56,19 @@ public static class GeodesicBiologyTemperaturePolicy
         // broad extreme settings anchor full severity, rather than causing instant death.
         float coldEdge = optimumMin - margin;
         float heatEdge = optimumMax + margin;
-        float coldExtreme = settings.ExtremeColdKelvin > 0f ? Mathf.Min(coldEdge, settings.ExtremeColdKelvin) : optimumMin - 2f * margin;
-        float heatExtreme = settings.ExtremeHeatKelvin > 0f ? Mathf.Max(heatEdge, settings.ExtremeHeatKelvin) : optimumMax + 2f * margin;
-        float coldSeverity = Mathf.Clamp01((coldEdge - temperature) / Mathf.Max(0.0001f, coldEdge - coldExtreme));
-        float heatSeverity = Mathf.Clamp01((temperature - heatEdge) / Mathf.Max(0.0001f, heatExtreme - heatEdge));
+        // A nonpositive severity always takes the existing recovery branch. Evaluate
+        // the corresponding extreme and division only outside the tolerance edge.
+        float coldSeverity = 0f, heatSeverity = 0f;
+        if (temperature < coldEdge && settings.ColdExposureDeathSeconds > 0f)
+        {
+            float coldExtreme = settings.ExtremeColdKelvin > 0f ? Mathf.Min(coldEdge, settings.ExtremeColdKelvin) : optimumMin - 2f * margin;
+            coldSeverity = Mathf.Clamp01((coldEdge - temperature) / Mathf.Max(0.0001f, coldEdge - coldExtreme));
+        }
+        if (temperature > heatEdge && settings.HeatExposureDeathSeconds > 0f)
+        {
+            float heatExtreme = settings.ExtremeHeatKelvin > 0f ? Mathf.Max(heatEdge, settings.ExtremeHeatKelvin) : optimumMax + 2f * margin;
+            heatSeverity = Mathf.Clamp01((temperature - heatEdge) / Mathf.Max(0.0001f, heatExtreme - heatEdge));
+        }
         float recovery = Mathf.Max(0f, settings.ExposureRecoveryPerSecond) * dt;
         coldExposure = settings.ColdExposureDeathSeconds > 0f
             ? (coldSeverity > 0f ? Mathf.Max(0f, coldExposure) + coldSeverity * dt : Mathf.Max(0f, coldExposure - recovery)) : 0f;

@@ -1,5 +1,6 @@
 using System;
 using System.Text;
+using Unity.Profiling;
 using UnityEngine;
 
 public enum GeodesicSuspendedMineral { S0 = 0, Fe3 = 1, FeS = 2 }
@@ -9,6 +10,8 @@ public enum GeodesicSuspendedMineral { S0 = 0, Fe3 = 1, FeS = 2 }
 public sealed class GeodesicOceanSuspendedField : MonoBehaviour
 {
     private const int SpeciesCount = 3;
+    private static readonly ProfilerMarker StepMarker = new ProfilerMarker("GeodesicOceanResource.Suspended.Total");
+    private static readonly ProfilerMarker SettlingMarker = new ProfilerMarker("GeodesicOceanResource.Suspended.Settling");
     private const int LayerCount = GeodesicOceanLayerGrid.AbsoluteMaximumLayerCount;
 
     [Header("Settling speeds (metres per simulated second)")]
@@ -71,6 +74,7 @@ public sealed class GeodesicOceanSuspendedField : MonoBehaviour
     internal void Step(GeodesicOceanResourceField resources, GeodesicOceanSedimentField sediment, float dt)
     {
         if (!IsInitialized || !float.IsFinite(dt) || dt <= 0f) return;
+        using var performanceScope = StepMarker.Auto();
         for (int species = 0; species < SpeciesCount; species++)
         {
             if (produced[species] <= 0d) continue;
@@ -79,7 +83,7 @@ public sealed class GeodesicOceanSuspendedField : MonoBehaviour
             resources.MixSuspendedInventory(inventories, offset, incoming, outgoing, dt);
             double speedKmPerSecond = GetSpeed(species) * 0.001d;
             if (!double.IsFinite(speedKmPerSecond) || speedKmPerSecond <= 0d) continue;
-            for (int cell = 0; cell < grid.CellCount; cell++)
+            using (SettlingMarker.Auto()) for (int cell = 0; cell < grid.CellCount; cell++)
             {
                 int bottom = grid.GetBottomLayerIndex(cell);
                 // Bottom first: freshly arrived particles cannot fall through multiple layers in this tick.

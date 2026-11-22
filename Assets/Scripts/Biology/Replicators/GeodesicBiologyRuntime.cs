@@ -1377,7 +1377,11 @@ public sealed partial class GeodesicBiologyRuntime
     private float GetHabitatTemperature(int cell, int layer)
     {
         if (grid == null || !grid.IsNodeActive(cell, layer)) return float.NaN;
-        int node = grid.GetNodeIndex(cell, layer);
+        return GetHabitatTemperatureAtNode(grid.GetNodeIndex(cell, layer), cell, layer);
+    }
+
+    private float GetHabitatTemperatureAtNode(int node, int cell, int layer)
+    {
         if (temperatureStamps[node] != temperatureGeneration)
         {
             temperatureByNode[node] = oceanTemperature.GetLayerTemperatureKelvin(cell, layer);

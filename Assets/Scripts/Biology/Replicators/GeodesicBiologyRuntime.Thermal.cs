@@ -7,7 +7,7 @@ public sealed partial class GeodesicBiologyRuntime
     {
         public int step, coarseEpoch, node;
         public Vector3 position;
-        public GeodesicVentTemperatureSample sample;
+        public float kelvin;
     }
     private BiologicalThermalCache[] biologicalThermalCache=Array.Empty<BiologicalThermalCache>();
     private int biologicalThermalStep=1;
@@ -27,28 +27,41 @@ public sealed partial class GeodesicBiologyRuntime
         return GeodesicVentTemperatureSample.Background(coarse);
     }
 
-    private GeodesicVentTemperatureSample GetAgentTemperatureSample(int index,ReplicatorPopulationState state)
+    // Inspection and periodic reports request the full outlet and distance readout.
+    private GeodesicVentTemperatureSample GetAgentTemperatureSample(int index, ReplicatorPopulationState state)
     {
-        int cell=state.GeodesicCellIndex[index],layer=state.CurrentOceanLayerIndex[index];
-        if(!grid.IsNodeActive(cell,layer)) return GeodesicVentTemperatureSample.Background(float.NaN);
-        if(experiencedTemperature==null || !experiencedTemperature.HasLocalInfluenceCandidates(cell,layer))
-            return SampleBiologicalTemperature(cell,layer,state.Position[index]);
-        if(biologicalThermalCache.Length<=index)
-            Array.Resize(ref biologicalThermalCache,Mathf.NextPowerOfTwo(Mathf.Max(1,state.Count)));
-        int node=grid.GetNodeIndex(cell,layer);
-        ref var cached=ref biologicalThermalCache[index];
-        if(cached.step!=biologicalThermalStep || cached.coarseEpoch!=temperatureGeneration
-            || cached.node!=node || !cached.position.Equals(state.Position[index]))
-        {
-            cached.sample=SampleBiologicalTemperature(cell,layer,state.Position[index]);
-            cached.step=biologicalThermalStep; cached.coarseEpoch=temperatureGeneration;
-            cached.node=node; cached.position=state.Position[index];
-        }
-        return cached.sample;
+        return SampleBiologicalTemperature(state.GeodesicCellIndex[index], state.CurrentOceanLayerIndex[index],
+            state.Position[index]);
     }
 
-    private float GetBiologicalTemperature(int index,ReplicatorPopulationState state) =>
-        GetAgentTemperatureSample(index,state).TemperatureKelvin;
+    private float GetBiologicalTemperature(int index, ReplicatorPopulationState state)
+    {
+        int cell = state.GeodesicCellIndex[index], layer = state.CurrentOceanLayerIndex[index];
+        if (!grid.IsNodeActive(cell, layer)) return float.NaN;
+        int node = grid.GetNodeIndex(cell, layer);
+        Vector3 position = state.Position[index];
+        if (experiencedTemperature == null || !experiencedTemperature.HasLocalInfluenceCandidates(cell, layer))
+        {
+            float background = GetHabitatTemperatureAtNode(node, cell, layer);
+            return GeodesicBiologyDiagnostics.FinitePosition(position) ? background : float.NaN;
+        }
+
+        if (biologicalThermalCache.Length <= index)
+            Array.Resize(ref biologicalThermalCache, Mathf.NextPowerOfTwo(Mathf.Max(1, state.Count)));
+        ref var cached = ref biologicalThermalCache[index];
+        if (cached.step != biologicalThermalStep || cached.coarseEpoch != temperatureGeneration
+            || cached.node != node || !cached.position.Equals(position))
+        {
+            float background = GetHabitatTemperatureAtNode(node, cell, layer);
+            cached.kelvin = !GeodesicBiologyDiagnostics.FinitePosition(position) ? float.NaN
+                : experiencedTemperature.SampleKnownOceanTemperature(cell, layer, position, background);
+            cached.step = biologicalThermalStep;
+            cached.coarseEpoch = temperatureGeneration;
+            cached.node = node;
+            cached.position = position;
+        }
+        return cached.kelvin;
+    }
 
     private void ClearBiologicalThermalCache()
     { biologicalThermalCache=Array.Empty<BiologicalThermalCache>(); biologicalThermalStep=1; }

@@ -231,22 +231,7 @@ public sealed partial class GeodesicExperiencedTemperatureField : MonoBehaviour
         if(!HasLocalInfluenceCandidates(cell,layer)) return true;
         Vector3 local=transform.InverseTransformPoint(worldPosition);
         if(!float.IsFinite(local.x)||!float.IsFinite(local.y)||!float.IsFinite(local.z)) return false;
-        int selected=-1,nearest=-1; float strongest=0f,nearestDistance=float.PositiveInfinity;
-        for(int cursor=cellOffsets[cell];cursor<cellOffsets[cell+1];cursor++)
-        {
-            int index=outletIndices[cursor]; var outlet=outlets[index];
-            if(!GeodesicVentThermalModel.IsHabitatEligible(outlet.Habitat,isOcean,layer,bottom)) continue;
-            // Submarine source extends through its unresolved seafloor-to-bottom-center segment.
-            // Above/below that segment the actual radial offset attenuates normally.
-            float axial=Vector3.Dot(local,outlet.PlanetLocalNormal);
-            float anchorRadius=outlet.PlanetLocalPosition.magnitude;
-            float reference=isOcean ? Mathf.Clamp(axial,anchorRadius,outletColumnTopRadius[index]) : anchorRadius;
-            float distance=(local-outlet.PlanetLocalNormal*reference).magnitude;
-            if(distance<nearestDistance) { nearestDistance=distance; nearest=index; }
-            float influence=GeodesicVentThermalModel.EvaluateInfluence(distance,outlet.HotCoreRadius,ventMicrothermalFalloffDistance,outlet.Strength01);
-            if(influence>strongest) { strongest=influence; selected=index; }
-        }
-        if(selected<0) selected=nearest;
+        int selected = SelectOutlet(cell, layer, bottom, isOcean, local, out float strongest);
         if(selected>=0)
         {
             var outlet=outlets[selected]; float axial=Vector3.Dot(local,outlet.PlanetLocalNormal);
@@ -264,6 +249,41 @@ public sealed partial class GeodesicExperiencedTemperatureField : MonoBehaviour
             sample.TemperatureKelvin=GeodesicVentThermalModel.BlendKelvin(coarseKelvin,sample.SourceKelvin,strongest);
         }
         return float.IsFinite(sample.TemperatureKelvin);
+    }
+
+    // The caller has already checked the ocean node, candidate index and world position.
+    // Shares outlet selection with inspection while omitting its distance readouts.
+    internal float SampleKnownOceanTemperature(int cell, int layer, Vector3 worldPosition, float coarseKelvin)
+    {
+        if (!float.IsFinite(coarseKelvin)) return coarseKelvin;
+        Vector3 local = transform.InverseTransformPoint(worldPosition);
+        if (!float.IsFinite(local.x) || !float.IsFinite(local.y) || !float.IsFinite(local.z)) return coarseKelvin;
+        int bottom = resources.SourceGrid.GetBottomLayerIndex(cell);
+        int selected = SelectOutlet(cell, layer, bottom, true, local, out float strongest);
+        if (selected < 0) return coarseKelvin;
+        float kelvin = GeodesicVentThermalModel.BlendKelvin(coarseKelvin, SourceTemperatureC + 273.15f, strongest);
+        return float.IsFinite(kelvin) ? kelvin : coarseKelvin;
+    }
+
+    private int SelectOutlet(int cell, int layer, int bottom, bool isOcean, Vector3 local, out float strongest)
+    {
+        int selected=-1,nearest=-1; float nearestDistance=float.PositiveInfinity;
+        strongest = 0f;
+        for(int cursor=cellOffsets[cell];cursor<cellOffsets[cell+1];cursor++)
+        {
+            int index=outletIndices[cursor]; var outlet=outlets[index];
+            if(!GeodesicVentThermalModel.IsHabitatEligible(outlet.Habitat,isOcean,layer,bottom)) continue;
+            // Submarine source extends through its unresolved seafloor-to-bottom-center segment.
+            // Above/below that segment the actual radial offset attenuates normally.
+            float axial=Vector3.Dot(local,outlet.PlanetLocalNormal);
+            float anchorRadius=outlet.PlanetLocalPosition.magnitude;
+            float reference=isOcean ? Mathf.Clamp(axial,anchorRadius,outletColumnTopRadius[index]) : anchorRadius;
+            float distance=(local-outlet.PlanetLocalNormal*reference).magnitude;
+            if(distance<nearestDistance) { nearestDistance=distance; nearest=index; }
+            float influence=GeodesicVentThermalModel.EvaluateInfluence(distance,outlet.HotCoreRadius,ventMicrothermalFalloffDistance,outlet.Strength01);
+            if(influence>strongest) { strongest=influence; selected=index; }
+        }
+        return selected >= 0 ? selected : nearest;
     }
 
     public bool TryGetOutlet(int index, out GeodesicVentOutlet outlet) { if (index < 0 || index >= outlets.Length) { outlet = default; return false; } outlet = outlets[index]; return true; }
