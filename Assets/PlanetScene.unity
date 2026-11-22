@@ -192,6 +192,15 @@ MonoBehaviour:
     geodesicVentCO2PhysicalPerSecond: 0
     geodesicVentFe2PhysicalPerSecond: 0
     terrestrialVentFraction: 0.25
+    ventVisuals:
+      enableSmoke: 1
+      enableHeatDistortion: 1
+      glowSizeMultiplier: 0.85
+      smokeBaseWidthMultiplier: 1.75
+      smokeHeightMultiplier: 1
+      smokeIntensityMultiplier: 1
+      smokeTurbulenceStrength: 0.25
+      heatDistortionStrength: 0.03
     showRejectedUphillRiverSegments: 0
     colourRenderedRiversByVisibleTerrainGrade: 0
     showRiverTerminationReasons: 0
@@ -308,6 +317,10 @@ MonoBehaviour:
     atmosphereInventoryPerBar: 1000
     airSeaExchangeHalfLifeSeconds: 300
     geodesicBiologySpawnDelaySeconds: 0
+    geodesicFounderEmergenceMode: 0
+    geodesicFounderMeanIntervalSeconds: 10
+    geodesicFounderOngoingEmergence: 0
+    geodesicFounderOngoingMeanIntervalSeconds: 300
   currentConfig:
     planetSeed: 12345
     useRandomSeed: 1
@@ -352,6 +365,15 @@ MonoBehaviour:
     geodesicVentCO2PhysicalPerSecond: 0
     geodesicVentFe2PhysicalPerSecond: 0
     terrestrialVentFraction: 0.25
+    ventVisuals:
+      enableSmoke: 1
+      enableHeatDistortion: 1
+      glowSizeMultiplier: 0.85
+      smokeBaseWidthMultiplier: 1.75
+      smokeHeightMultiplier: 1
+      smokeIntensityMultiplier: 1
+      smokeTurbulenceStrength: 0.25
+      heatDistortionStrength: 0.03
     showRejectedUphillRiverSegments: 0
     colourRenderedRiversByVisibleTerrainGrade: 0
     showRiverTerminationReasons: 0
@@ -468,6 +490,10 @@ MonoBehaviour:
     atmosphereInventoryPerBar: 1000
     airSeaExchangeHalfLifeSeconds: 300
     geodesicBiologySpawnDelaySeconds: 0
+    geodesicFounderEmergenceMode: 0
+    geodesicFounderMeanIntervalSeconds: 10
+    geodesicFounderOngoingEmergence: 0
+    geodesicFounderOngoingMeanIntervalSeconds: 300
   loadSavedStartupConfig: 1
   saveStartupConfigOnStart: 1
   logAppliedStartupConfig: 1
@@ -534,12 +560,24 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c9f2b6fef54d4c1d8ea9a5ec50f9a0db, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::VentVisualizer
+  enableSmoke: 1
+  enableHeatDistortion: 1
+  ventGlowSizeMultiplier: 0.85
+  smokeIntensityMultiplier: 1
+  smokeHeightMultiplier: 1
+  smokeWidthMultiplier: 1.75
+  smokeUpwardSpeedMultiplier: 1
+  smokeTurbulenceStrength: 0.25
+  smokerAppearance: 2
+  distortionStrength: 0.03
+  vfxVisibilityDistance: 6
+  maxActiveVentEffects: 48
+  heatDistortionMaterial: {fileID: 2100000, guid: 597220b770474dd799e4bf1ee664f5eb, type: 2}
   resourceMap: {fileID: 1222684993}
   planetGenerator: {fileID: 382753102}
   parent: {fileID: 0}
   ventGlowMaterial: {fileID: 2100000, guid: fd3b47395b8aac74eb6c82092e0ced9f, type: 2}
   sootPrefab: {fileID: 3282405601032870620, guid: a752e0287c9c41b47b0182c1e99ef265, type: 3}
-  heatDistortionMaterial: {fileID: 2100000, guid: 597220b770474dd799e4bf1ee664f5eb, type: 2}
   glowRadiusMin: 0.05
   glowRadiusMax: 0.15
   glowEmissionMin: 1
@@ -1900,6 +1938,62 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 581314702}
   m_CullTransparentMesh: 1
+--- !u!1 &584430243
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 584430245}
+  - component: {fileID: 584430244}
+  m_Layer: 0
+  m_Name: PerformanceAnalyzer
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &584430244
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 584430243}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2b286aa509874e3699f7a89f37c74832, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: SimulaVit::SimulationPerformanceAnalyzer
+  summaryIntervalSeconds: 5
+  maximumFramesPerWindow: 32768
+  replicatorManager: {fileID: 1064713443}
+  resources: {fileID: 0}
+  chemistry: {fileID: 0}
+  logSummaryToConsole: 1
+  writeCsv: 1
+  flushCsvEveryNSamples: 1
+  csvFileNamePrefix: simulation_performance
+  appendTimestampToCsvFileName: 1
+  latestSummary: 
+  csvOutputPath: 
+--- !u!4 &584430245
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 584430243}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &681713157
 GameObject:
   m_ObjectHideFlags: 0
@@ -2199,6 +2293,10 @@ MonoBehaviour:
   planetResourceMap: {fileID: 1222684993}
   initialSpawnCount: 0
   geodesicBiologySpawnDelaySeconds: 0
+  geodesicFounderEmergenceMode: 0
+  geodesicFounderMeanIntervalSeconds: 10
+  geodesicFounderOngoingEmergence: 0
+  geodesicFounderOngoingMeanIntervalSeconds: 300
   maxPopulation: 30000
   autoStartOnSceneLoad: 1
   baseAgentColor: {r: 1, g: 0.968804, b: 0.6084906, a: 1}
@@ -2468,6 +2566,25 @@ MonoBehaviour:
       requiredEnergy: 0
       temperatureKelvin: 0
       temperaturePerformance: 0
+      thermal:
+        CoarseKelvin: 0
+        TemperatureKelvin: 0
+        SourceKelvin: 0
+        Influence: 0
+        DistanceUnity: 0
+        SourceDistanceUnity: 0
+        SourceDistanceKm: 0
+        HotCoreRadius: 0
+        OutletIndex: 0
+        SystemIndex: 0
+        SourceCell: 0
+      optimalTempMin: 0
+      optimalTempMax: 0
+      lethalTempMargin: 0
+      coldExposureSeconds: 0
+      heatExposureSeconds: 0
+      accumulatingColdExposure: 0
+      accumulatingHeatExposure: 0
       probabilityPerStep: 0
       age: 0
       visualSize: 0
@@ -2528,6 +2645,25 @@ MonoBehaviour:
         requiredEnergy: 0
         temperatureKelvin: 0
         temperaturePerformance: 0
+        thermal:
+          CoarseKelvin: 0
+          TemperatureKelvin: 0
+          SourceKelvin: 0
+          Influence: 0
+          DistanceUnity: 0
+          SourceDistanceUnity: 0
+          SourceDistanceKm: 0
+          HotCoreRadius: 0
+          OutletIndex: 0
+          SystemIndex: 0
+          SourceCell: 0
+        optimalTempMin: 0
+        optimalTempMax: 0
+        lethalTempMargin: 0
+        coldExposureSeconds: 0
+        heatExposureSeconds: 0
+        accumulatingColdExposure: 0
+        accumulatingHeatExposure: 0
         probabilityPerStep: 0
         age: 0
         visualSize: 0
@@ -2591,6 +2727,25 @@ MonoBehaviour:
         requiredEnergy: 0
         temperatureKelvin: 0
         temperaturePerformance: 0
+        thermal:
+          CoarseKelvin: 0
+          TemperatureKelvin: 0
+          SourceKelvin: 0
+          Influence: 0
+          DistanceUnity: 0
+          SourceDistanceUnity: 0
+          SourceDistanceKm: 0
+          HotCoreRadius: 0
+          OutletIndex: 0
+          SystemIndex: 0
+          SourceCell: 0
+        optimalTempMin: 0
+        optimalTempMax: 0
+        lethalTempMargin: 0
+        coldExposureSeconds: 0
+        heatExposureSeconds: 0
+        accumulatingColdExposure: 0
+        accumulatingHeatExposure: 0
         probabilityPerStep: 0
         age: 0
         visualSize: 0
@@ -2652,6 +2807,25 @@ MonoBehaviour:
         requiredEnergy: 0
         temperatureKelvin: 0
         temperaturePerformance: 0
+        thermal:
+          CoarseKelvin: 0
+          TemperatureKelvin: 0
+          SourceKelvin: 0
+          Influence: 0
+          DistanceUnity: 0
+          SourceDistanceUnity: 0
+          SourceDistanceKm: 0
+          HotCoreRadius: 0
+          OutletIndex: 0
+          SystemIndex: 0
+          SourceCell: 0
+        optimalTempMin: 0
+        optimalTempMax: 0
+        lethalTempMargin: 0
+        coldExposureSeconds: 0
+        heatExposureSeconds: 0
+        accumulatingColdExposure: 0
+        accumulatingHeatExposure: 0
         probabilityPerStep: 0
         age: 0
         visualSize: 0
@@ -2713,6 +2887,25 @@ MonoBehaviour:
         requiredEnergy: 0
         temperatureKelvin: 0
         temperaturePerformance: 0
+        thermal:
+          CoarseKelvin: 0
+          TemperatureKelvin: 0
+          SourceKelvin: 0
+          Influence: 0
+          DistanceUnity: 0
+          SourceDistanceUnity: 0
+          SourceDistanceKm: 0
+          HotCoreRadius: 0
+          OutletIndex: 0
+          SystemIndex: 0
+          SourceCell: 0
+        optimalTempMin: 0
+        optimalTempMax: 0
+        lethalTempMargin: 0
+        coldExposureSeconds: 0
+        heatExposureSeconds: 0
+        accumulatingColdExposure: 0
+        accumulatingHeatExposure: 0
         probabilityPerStep: 0
         age: 0
         visualSize: 0
@@ -3490,6 +3683,25 @@ MonoBehaviour:
     requiredEnergy: 0
     temperatureKelvin: 0
     temperaturePerformance: 0
+    thermal:
+      CoarseKelvin: 0
+      TemperatureKelvin: 0
+      SourceKelvin: 0
+      Influence: 0
+      DistanceUnity: 0
+      SourceDistanceUnity: 0
+      SourceDistanceKm: 0
+      HotCoreRadius: 0
+      OutletIndex: 0
+      SystemIndex: 0
+      SourceCell: 0
+    optimalTempMin: 0
+    optimalTempMax: 0
+    lethalTempMargin: 0
+    coldExposureSeconds: 0
+    heatExposureSeconds: 0
+    accumulatingColdExposure: 0
+    accumulatingHeatExposure: 0
     probabilityPerStep: 0
     age: 0
     visualSize: 0
@@ -3527,6 +3739,25 @@ MonoBehaviour:
     requiredEnergy: 0
     temperatureKelvin: 0
     temperaturePerformance: 0
+    thermal:
+      CoarseKelvin: 0
+      TemperatureKelvin: 0
+      SourceKelvin: 0
+      Influence: 0
+      DistanceUnity: 0
+      SourceDistanceUnity: 0
+      SourceDistanceKm: 0
+      HotCoreRadius: 0
+      OutletIndex: 0
+      SystemIndex: 0
+      SourceCell: 0
+    optimalTempMin: 0
+    optimalTempMax: 0
+    lethalTempMargin: 0
+    coldExposureSeconds: 0
+    heatExposureSeconds: 0
+    accumulatingColdExposure: 0
+    accumulatingHeatExposure: 0
     probabilityPerStep: 0
     age: 0
     visualSize: 0
@@ -53948,3 +54179,4 @@ SceneRoots:
   - {fileID: 1435883950}
   - {fileID: 1223530472}
   - {fileID: 4324106}
+  - {fileID: 584430245}
