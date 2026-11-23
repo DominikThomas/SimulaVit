@@ -124,6 +124,7 @@ The former implementation plan is about 207 KB and mixes architectural contracts
 
 | Document | Role / disposition |
 | --- | --- |
+| [Geodesic scalability architecture assessment](GEODESIC_SCALABILITY_ARCHITECTURE_ASSESSMENT.md) | Static assessment for milestone A7. Covers execution dependencies, projections through 100,000 organisms, and a staged implementation roadmap. |
 | [SimulationRefactorPlan](SimulationRefactorPlan.md) | Legacy/incremental design reference; extracted systems exist, geodesic runtime has separate ownership. No independent priority sequence. |
 | [PopulationStateMigrationPlan](PopulationStateMigrationPlan.md) | Historical migration steps; packed geodesic lifespan/target ownership now explicit. |
 | [LAYERED_OCEAN_PLAN](LAYERED_OCEAN_PLAN.md) | Legacy implemented layered-array model; not geodesic resource/persistence status. |
