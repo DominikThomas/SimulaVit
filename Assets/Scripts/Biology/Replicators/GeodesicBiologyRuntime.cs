@@ -143,6 +143,8 @@ public sealed partial class GeodesicBiologyRuntime
     public static MetabolismType NormalFounderMetabolism => MetabolismType.Hydrogenotrophy;
     public static LocomotionType NormalFounderLocomotion => LocomotionType.PassiveDrift;
 
+    private GeodesicBiologyAvailability availability = GeodesicBiologyAvailability.Default;
+
     private struct Request
     {
         public int Node;
@@ -255,7 +257,7 @@ public sealed partial class GeodesicBiologyRuntime
         int requestedFounders, float minLife, float maxLife, Color color, float biomassTarget,
         Vector2 hydrogenTemperatureRange, float lethalTemperatureMargin,
         float founderCo2Requirement=.01f,float founderH2Requirement=.02f,float founderReproductionMinEfficiency=.15f,float founderDormancyFloor=0f,
-        bool logBiologyReports = false)
+        bool logBiologyReports = false, GeodesicBiologyAvailability? startupAvailability = null)
     {
         Clear();
         SetBiologyReportsEnabled(logBiologyReports);
@@ -274,6 +276,8 @@ public sealed partial class GeodesicBiologyRuntime
             return false;
         }
 
+        availability = (startupAvailability ?? GeodesicBiologyAvailability.Default).Normalized();
+        bool allowFounders = availability.AllowsFounders;
         demand = new double[grid.NodeCapacity * ResourceCount];
         availabilityFactor = new double[grid.NodeCapacity * ResourceCount];
         delta = new double[grid.NodeCapacity * ResourceCount];
@@ -284,7 +288,7 @@ public sealed partial class GeodesicBiologyRuntime
         temperatureStamps = new int[grid.NodeCapacity];
         lightByNode = new float[grid.NodeCapacity];
         oxygenByNode = new float[grid.NodeCapacity];
-        requests = new Request[Mathf.Max(1, requestedFounders)];
+        requests = new Request[allowFounders ? Mathf.Max(1, requestedFounders) : 1];
         biologySeed = PlanetSeedUtility.DeriveSeed(generator.randomSeed, PlanetSeedDomain.Biology, PlanetGenerator.GenerationVersion);
         founderMinLife = minLife; founderMaxLife = maxLife; founderColor = color;
         founderBiomassTarget = biomassTarget; founderHydrogenTemperatureRange = hydrogenTemperatureRange;
@@ -297,16 +301,19 @@ public sealed partial class GeodesicBiologyRuntime
         reproductionRandom = new System.Random(biologySeed ^ 0x5EED123);
         temperatureMutationRandom = new System.Random(biologySeed ^ 0x54454D50);
         locomotionMutationRandom = new System.Random(biologySeed ^ 0x4C4F434F);
-        EnsureFounderVentCatalog();
-        SpawnFounders(requestedFounders, random, visualRandom, agents, state, minLife, maxLife, color, biomassTarget,
-            hydrogenTemperatureRange, lethalTemperatureMargin, false);
+        if (allowFounders)
+        {
+            EnsureFounderVentCatalog();
+            SpawnFounders(requestedFounders, random, visualRandom, agents, state, minLife, maxLife, color, biomassTarget,
+                hydrogenTemperatureRange, lethalTemperatureMargin, false);
+        }
         return true;
     }
 
     public int SpawnDeferredFounders(int requestedFounders, List<Replicator> agents,
         ReplicatorPopulationState state, double spawnSimulationTime, int maximumPopulation = int.MaxValue)
     {
-        if (grid == null || requestedFounders <= 0) return 0;
+        if (grid == null || requestedFounders <= 0 || !availability.AllowsFounders) return 0;
         int allowed = Math.Min(requestedFounders,Math.Max(0,Math.Max(0,maximumPopulation)-state.Count));
         RecordCappedFounderEvents(requestedFounders-allowed);
         requestedFounders = allowed;
@@ -1613,6 +1620,7 @@ public sealed partial class GeodesicBiologyRuntime
 #if UNITY_EDITOR
         DiagnosticSteeringObservationOverride = null;
 #endif
+        availability = GeodesicBiologyAvailability.Default;
         ClearChemotaxisAB();
         ClearLocomotion();
         ClearSulfur();

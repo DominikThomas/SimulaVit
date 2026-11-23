@@ -25,7 +25,8 @@ public sealed partial class GeodesicBiologyRuntime
         fermentationAssimilation = float.IsFinite(assimilation) ? Mathf.Clamp01(assimilation) : float.NaN;
         fermentationO2Inhibition = oxygenInhibition;
         fermentationO2Floor = float.IsFinite(oxygenFloor) ? Mathf.Clamp01(oxygenFloor) : .65f;
-        hydrogenFermentationChance = float.IsFinite(transitionChance) ? Mathf.Clamp01(transitionChance) : 0f;
+        hydrogenFermentationChance = availability.Allows(MetabolismType.Fermentation) && float.IsFinite(transitionChance)
+            ? Mathf.Clamp01(transitionChance) : 0f;
         fermentationGate = float.IsFinite(minimumOrganicC) ? Mathf.Max(0f,minimumOrganicC) : float.NaN;
         fermentationRange = temperatureRange; fermentationMargin = lethalMargin;
     }

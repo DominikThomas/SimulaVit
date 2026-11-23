@@ -708,7 +708,7 @@ public sealed partial class GeodesicBiologyRuntime
         };
         bool bottom = grid != null && grid.IsNodeActive(cell, layer)
             && layer == grid.ActiveLayerCountByCell[cell] - 1;
-        outcome = GeodesicLocomotionMutationPolicy.Sample(source, bottom, settings, locomotionMutationRandom);
+        outcome = GeodesicLocomotionMutationPolicy.Sample(source, bottom, settings, locomotionMutationRandom, availability.locomotionMask);
         if (outcome.correctedInheritance) inheritanceCorrections++;
         if (outcome.attempted)
         {

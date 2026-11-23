@@ -234,6 +234,7 @@ public partial class SimulationStartupController
     private void DrawBiologyTab()
     {
         var b = currentConfig.biology;
+        if (IsGeodesicSetup) DrawBiologyAvailability(ref b.geodesicAvailability);
         SetupSection("Population and reproduction");
         if (IsGeodesicSetup)
         {
@@ -320,6 +321,60 @@ public partial class SimulationStartupController
         // section methods here. No placeholder controls or changes to oxygen mechanics.
     }
 
+    private void DrawBiologyAvailability(ref GeodesicBiologyAvailability availability)
+    {
+        SetupSection("Biology availability");
+        SetupHelp("Controls which traits Geodesic founders and mutations can acquire. Living organisms keep their traits and can pass them to offspring.");
+
+        GUILayout.BeginHorizontal();
+        if (GUILayout.Button("All implemented pathways", buttonStyle))
+        {
+            availability.metabolismMask = GeodesicBiologyAvailability.ImplementedMetabolisms;
+            availability.locomotionMask = GeodesicBiologyAvailability.AllLocomotions;
+        }
+        if (GUILayout.Button("Existing core biology only", buttonStyle))
+            availability = GeodesicBiologyAvailability.Default;
+        GUILayout.EndHorizontal();
+        GUILayout.BeginHorizontal();
+        if (GUILayout.Button("Passive-only movement", buttonStyle))
+            availability.locomotionMask = GeodesicBiologyAvailability.PassiveLocomotion;
+        if (GUILayout.Button("Photosynthesis-focused", buttonStyle))
+            availability.metabolismMask = (1 << (int)MetabolismType.Hydrogenotrophy) | (1 << (int)MetabolismType.Photosynthesis);
+        GUILayout.EndHorizontal();
+
+        GUILayout.BeginHorizontal();
+        GUILayout.BeginVertical(GUILayout.ExpandWidth(true));
+        GUILayout.Label("Metabolisms", setupSectionStyle);
+        DrawAvailabilityToggle("Hydrogenotrophy", ref availability.metabolismMask, (int)MetabolismType.Hydrogenotrophy);
+        DrawAvailabilityToggle("Sulfur chemosynthesis", ref availability.metabolismMask, (int)MetabolismType.SulfurChemosynthesis);
+        DrawAvailabilityToggle("Fermentation", ref availability.metabolismMask, (int)MetabolismType.Fermentation);
+        DrawAvailabilityToggle("Oxygenic photosynthesis", ref availability.metabolismMask, (int)MetabolismType.Photosynthesis);
+        DrawAvailabilityToggle("Aerobic saprotrophy", ref availability.metabolismMask, (int)MetabolismType.Saprotrophy);
+        DrawAvailabilityToggle("Methanogenesis", ref availability.metabolismMask, (int)MetabolismType.Methanogenesis);
+        DrawAvailabilityToggle("Methanotrophy", ref availability.metabolismMask, (int)MetabolismType.Methanotrophy);
+        DrawAvailabilityToggle("Predation", ref availability.metabolismMask, (int)MetabolismType.Predation);
+        GUILayout.EndVertical();
+        GUILayout.BeginVertical(GUILayout.ExpandWidth(true));
+        GUILayout.Label("Locomotion", setupSectionStyle);
+        DrawAvailabilityToggle("Passive drift", ref availability.locomotionMask, (int)LocomotionType.PassiveDrift);
+        DrawAvailabilityToggle("Amoeboid", ref availability.locomotionMask, (int)LocomotionType.Amoeboid);
+        DrawAvailabilityToggle("Flagellar", ref availability.locomotionMask, (int)LocomotionType.Flagellum);
+        DrawAvailabilityToggle("Anchored / sessile", ref availability.locomotionMask, (int)LocomotionType.Anchored);
+        GUILayout.EndVertical();
+        GUILayout.EndHorizontal();
+
+        SetupHelp("Hydrogenotrophy, sulfur chemosynthesis and fermentation can arise in Geodesic mode today. The other toggles save availability for future transitions.");
+        SetupHelp(availability.FounderStatus);
+    }
+
+    private void DrawAvailabilityToggle(string label, ref int mask, int typeIndex)
+    {
+        int bit = 1 << typeIndex;
+        bool available = (mask & bit) != 0;
+        SetupBool(label, ref available);
+        mask = available ? mask | bit : mask & ~bit;
+    }
+
     private void DrawMetabolicEvolution(SimulationStartupBiologyConfig b)
     {
         SetupSection("Metabolic evolution");
@@ -327,7 +382,7 @@ public partial class SimulationStartupController
         SetupFloat("Hydrogen → sulfur chemosynthesis probability", ref b.hydrogenToSulfurMutationChance, 0f, 1f);
         SetupFloat("Hydrogen → fermentation probability", ref b.hydrogenToFermentationMutationChance, 0f, 1f);
         SetupHelp(IsGeodesicSetup
-            ? "General metabolism mutation chance is checked first. Sulfur is selected before fermentation; a selected sulfur attempt suppresses fermentation even if its habitat gate fails. Each transition has a subsequent conditional roll and local resource requirements. Inherited carbon can satisfy fermentation eligibility but is not fermentation food."
+            ? "The general mutation chance is checked first. When both destinations are available, a selected sulfur attempt takes priority over fermentation even if its habitat gate fails. Each transition keeps its conditional roll and local resource requirements. Inherited carbon can satisfy fermentation eligibility. The reaction consumes dissolved organic carbon."
             : "For Hydrogen → Sulfur or Fermentation, general metabolism mutation chance is checked first, followed by the ordered conditional rolls. Earlier transition checks, unlocks and local resource requirements still apply; other legacy transitions retain their existing ordering and gates.");
 
         SetupSection("Other metabolic transitions");

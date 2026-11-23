@@ -50,6 +50,7 @@ public sealed partial class GeodesicBiologyRuntime
 
     public void ConfigureGradualEmergence(int initialCount, float delay, float meanInterval, bool ongoing, float ongoingInterval)
     {
+        if (!availability.AllowsFounders) return;
         emergenceSchedule = new GeodesicFounderEmergenceSchedule();
         emergenceSchedule.Configure(biologySeed, 0d, delay, initialCount, meanInterval, ongoing, ongoingInterval);
         emergenceSelectionRandom = new System.Random(unchecked(biologySeed ^ 0x56454E54));

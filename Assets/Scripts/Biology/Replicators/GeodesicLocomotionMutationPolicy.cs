@@ -13,7 +13,7 @@ public static class GeodesicLocomotionMutationPolicy
     public enum NoChangeReason
     {
         None, AttemptGateNotSelected, UpgradeRollNotSelected, AnchorOutsideBottomAndUpgradeNotSelected,
-        NoUpgradePath, AnchoredReleaseDisabled, AnchoredReleaseRollFailed
+        NoUpgradePath, AnchoredReleaseDisabled, AnchoredReleaseRollFailed, DestinationUnavailable
     }
 
     public struct Result
@@ -27,7 +27,8 @@ public static class GeodesicLocomotionMutationPolicy
 
     // Deliberately preserves branch/RNG order, including the ineffectual upgrade roll
     // for an anchored/flagellar parent after an unsuccessful anchoring/release branch.
-    public static Result Sample(LocomotionType source, bool activeBottomLayer, in Settings settings, Random random)
+    public static Result Sample(LocomotionType source, bool activeBottomLayer, in Settings settings, Random random,
+        int allowedLocomotionMask = GeodesicBiologyAvailability.AllLocomotions)
     {
         var result = new Result { source = source, target = source };
         if ((uint)source > (uint)LocomotionType.Anchored)
@@ -41,24 +42,32 @@ public static class GeodesicLocomotionMutationPolicy
         result.attempted = true;
         result.anchorSelected = Next(random, ref result) < settings.anchor;
         result.anchorEligible = source != LocomotionType.Anchored && activeBottomLayer;
+        LocomotionType candidate = source;
         if (result.anchorSelected)
         {
-            if (result.anchorEligible) result.target = LocomotionType.Anchored;
+            if (result.anchorEligible) candidate = LocomotionType.Anchored;
             else if (source == LocomotionType.Anchored && settings.allowRelease)
             {
                 result.releaseRolled = true;
-                if (Next(random, ref result) < settings.release) result.target = LocomotionType.Amoeboid;
+                if (Next(random, ref result) < settings.release) candidate = LocomotionType.Amoeboid;
             }
         }
-        if (result.target == source)
+        if (candidate == source)
         {
             result.upgradeSelected = Next(random, ref result) < settings.upgrade;
             if (result.upgradeSelected)
             {
-                if (source == LocomotionType.PassiveDrift) result.target = LocomotionType.Amoeboid;
-                else if (source == LocomotionType.Amoeboid) result.target = LocomotionType.Flagellum;
+                if (source == LocomotionType.PassiveDrift) candidate = LocomotionType.Amoeboid;
+                else if (source == LocomotionType.Amoeboid) candidate = LocomotionType.Flagellum;
             }
         }
+        // Retain the parent's type when the chosen destination is unavailable. Keep the original roll order.
+        if (candidate != source && !AllowsDestination(allowedLocomotionMask, candidate))
+        {
+            result.reason = NoChangeReason.DestinationUnavailable;
+            return result;
+        }
+        result.target = candidate;
         if (!result.Changed)
         {
             if (source == LocomotionType.Anchored && result.anchorSelected)
@@ -73,17 +82,23 @@ public static class GeodesicLocomotionMutationPolicy
 
     private static double Next(Random random, ref Result result) { result.randomDraws++; return random.NextDouble(); }
 
+    private static bool AllowsDestination(int mask, LocomotionType type) => (mask & (1 << (int)type)) != 0;
+
     /// <summary>Rows/columns P,A,F,X. Exact probabilities for the sanitized runtime values.</summary>
-    public static double[] TransitionMatrix(in Settings settings, bool activeBottomLayer)
+    public static double[] TransitionMatrix(in Settings settings, bool activeBottomLayer,
+        int allowedLocomotionMask = GeodesicBiologyAvailability.AllLocomotions)
     {
         var matrix = new double[16];
         double m = settings.EffectiveMutation, a = settings.anchor, u = settings.upgrade;
-        double anchor = activeBottomLayer ? m * a : 0d;
+        double anchor = activeBottomLayer && AllowsDestination(allowedLocomotionMask, LocomotionType.Anchored) ? m * a : 0d;
         double upgrade = m * (1d - (activeBottomLayer ? a : 0d)) * u;
-        matrix[0] = 1d - anchor - upgrade; matrix[1] = upgrade; matrix[3] = anchor;
-        matrix[5] = 1d - anchor - upgrade; matrix[6] = upgrade; matrix[7] = anchor;
+        bool allowAmoeboid = AllowsDestination(allowedLocomotionMask, LocomotionType.Amoeboid);
+        double upgradeToAmoeboid = allowAmoeboid ? upgrade : 0d;
+        double upgradeToFlagellum = AllowsDestination(allowedLocomotionMask, LocomotionType.Flagellum) ? upgrade : 0d;
+        matrix[0] = 1d - anchor - upgradeToAmoeboid; matrix[1] = upgradeToAmoeboid; matrix[3] = anchor;
+        matrix[5] = 1d - anchor - upgradeToFlagellum; matrix[6] = upgradeToFlagellum; matrix[7] = anchor;
         matrix[10] = 1d - anchor; matrix[11] = anchor;
-        matrix[13] = settings.allowRelease ? m * a * settings.release : 0d;
+        matrix[13] = settings.allowRelease && allowAmoeboid ? m * a * settings.release : 0d;
         matrix[15] = 1d - matrix[13];
         return matrix;
     }

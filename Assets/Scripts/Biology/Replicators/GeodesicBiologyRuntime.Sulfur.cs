@@ -27,7 +27,8 @@ public sealed partial class GeodesicBiologyRuntime
         sulfurO2Inhibition = oxygenInhibition;
         sulfurO2Floor = float.IsFinite(minimumOxygenEfficiency) ? Mathf.Clamp01(minimumOxygenEfficiency) : .6f;
         metabolicMutationChance = float.IsFinite(mutationChance) ? Mathf.Clamp01(mutationChance) : 0f;
-        hydrogenSulfurChance = float.IsFinite(transitionChance) ? Mathf.Clamp01(transitionChance) : 0f;
+        hydrogenSulfurChance = availability.Allows(MetabolismType.SulfurChemosynthesis) && float.IsFinite(transitionChance)
+            ? Mathf.Clamp01(transitionChance) : 0f;
         sulfurGateH2S = Mathf.Max(0f, minimumH2S); sulfurGateCO2 = Mathf.Max(0f, minimumCO2);
         sulfurTemperatureRange = temperatureRange; sulfurLethalMargin = lethalMargin;
     }

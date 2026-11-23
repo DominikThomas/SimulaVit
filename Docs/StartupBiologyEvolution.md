@@ -1,4 +1,34 @@
-# Startup Biology: metabolic evolution controls
+# Startup Biology controls
+
+## B2.1 Geodesic biology availability
+
+In **New Game → Biology → Biology availability**, each of the eight metabolisms and four locomotion types has its own checkbox. Availability applies at world startup and gates acquisition by founders and offspring mutations. Living organisms continue to use their traits and can pass the same traits to offspring. Legacy Cube Sphere uses its existing biology rules.
+
+Geodesic founders require **Hydrogenotrophy** and **Passive drift**. Disabling either starts the world without founders, including delayed batches and ongoing gradual emergence. An empty metabolism or locomotion selection has the same result. Setup shows the reason, and the Console logs one `[GeodesicBiologyAvailability]` summary per world startup.
+
+Availability leaves the current division, habitat, resource, and temperature requirements in effect. If sulfur is enabled and its roll selects it, it retains priority over fermentation even when its habitat check fails. Disabling sulfur uses the existing fermentation-only draw sequence, as when the sulfur probability is zero. Disabling fermentation excludes its roll. A locomotion roll for a disabled destination yields ordinary inheritance with the original draws and no retry. For example, enabling flagellar movement alone cannot skip the amoeboid step.
+
+Fresh configurations use the scene's startup defaults, which in the supplied scene enable Hydrogenotrophy, Sulfur chemosynthesis, Fermentation and all four locomotion types. Startup JSON files missing the new fields get those same availability defaults. Explicit empty selections are saved and restored. Availability is stored in two optional fields in the existing startup JSON format. Mutation probabilities, reaction rates and temperatures remain separately saved, including the configured Hydrogen → Fermentation probability of **0.02**.
+
+| Preset | Availability selected |
+|---|---|
+| All implemented pathways | Hydrogenotrophy, Sulfur chemosynthesis, Fermentation, plus Photosynthesis, Methanogenesis and Methanotrophy, which have existing reaction code. Enables all four locomotion types. |
+| Existing core biology only | Hydrogenotrophy, Sulfur chemosynthesis, Fermentation and all four locomotion types. |
+| Passive-only movement | Passive drift only. Keeps the selected metabolisms. |
+| Photosynthesis-focused | Hydrogenotrophy and Oxygenic photosynthesis only. Keeps the selected locomotion types. |
+
+Hydrogenotrophy, Sulfur chemosynthesis and Fermentation are currently the only metabolisms reachable from normal Geodesic founders. The other checkboxes store availability for future entry paths. The Photosynthesis-focused preset keeps Hydrogenotrophy enabled for founders.
+
+### User-run manual validation checklist
+
+- **Persistence and migration.** Back up the startup JSON (normally `startup_config.json`) and load a pre-B2.1 copy containing the saved `0.02` probability. Confirm the core metabolism and all-locomotion defaults. Change toggles, save through setup, and restart to verify the exact selections. Repeat with an empty metabolism selection and an empty locomotion selection independently. Verify the probability is still `0.02`.
+- **Presets and startup summary.** Apply each preset and compare the checkboxes to the table. Verify the mutation probabilities, reaction rates and temperatures stay as configured. Start a world and check for one resolved availability summary. Let the world advance and confirm that line does not recur.
+- **Founder restrictions.** Try immediate batch startup with Hydrogenotrophy off, delayed batch startup with Passive drift off, and gradual startup with ongoing emergence enabled and an empty selection. Confirm that the world starts, setup and the startup log explain the restriction, and the population stays empty after the configured delay or event times. Re-enable both founder traits and confirm founders emerge at eligible vents.
+- **Metabolic transitions.** With eligible parent births and habitat, compare Sulfur and Fermentation enabled against each disabled individually. Confirm disabled destinations produce no new mutants and enabled destinations still require their existing resources and other gates. With the core preset, compare a fixed-seed run against the preceding version at identical settings and simulated times.
+- **Locomotion and inheritance.** With Passive-only movement and high mutation probabilities, confirm founder descendants stay passive. Enable the alternate types individually and verify the existing upgrade order, bottom-layer anchoring requirement and anchored release setting. If checking existing disabled types with a diagnostic fixture, confirm the organisms still react, move and can pass their current traits to descendants.
+- **Legacy isolation.** Save restrictive Geodesic availability, then start Legacy Cube Sphere. Confirm its founding and mutations still use the legacy settings. Return to Geodesic setup and confirm the selections were retained.
+
+## Historical evolution controls checkpoint
 
 > **UI checkpoint with later extensions.** [Gradual founder controls](GeodesicFounderEmergence.md) and [vent visual controls](HydrothermalVentVfx.md) now supplement this report. The [roadmap](GEODESIC_MIGRATION_ROADMAP.md) owns current reachability/status; enabled settings alone are not proof of an implemented gameplay pathway. Preserve saved Hydrogen → Fermentation **0.02**.
 

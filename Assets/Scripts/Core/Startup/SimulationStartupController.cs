@@ -1124,6 +1124,10 @@ public partial class SimulationStartupController : MonoBehaviour
     {
         SimulationStartupConfig authoritativeFallback = fallback ?? new SimulationStartupConfig();
         SavedStartupConfig saved = SavedStartupConfig.FromDefaults(authoritativeFallback);
+        // Startup files without availability fields retain the previously reachable biology.
+        // JSON overwrite preserves explicit empty masks.
+        saved.geodesicMetabolismMask = GeodesicBiologyAvailability.CoreMetabolisms;
+        saved.geodesicLocomotionMask = GeodesicBiologyAvailability.AllLocomotions;
         saved.geodesicFounderEmergenceMode = GeodesicFounderEmergenceMode.Batch;
         saved.geodesicFounderOngoingEmergence = false;
         // Older startup files omit this field. An explicitly saved zero still disables production.
@@ -1200,6 +1204,8 @@ public partial class SimulationStartupController : MonoBehaviour
         public float ventClustering;
         public float terrestrialVentFraction;
         public int initialSpawnCount;
+        public int geodesicMetabolismMask;
+        public int geodesicLocomotionMask;
         public bool startPaused;
         public float approximateThermalIntervalSeconds;
         public float geodesicResourceTransportIntervalSeconds;
@@ -1213,6 +1219,7 @@ public partial class SimulationStartupController : MonoBehaviour
         public static SavedStartupConfig FromConfig(SimulationStartupConfig config)
         {
             config ??= new SimulationStartupConfig();
+            var availability = (config.biology?.geodesicAvailability ?? GeodesicBiologyAvailability.Default).Normalized();
             var saved = new SavedStartupConfig
             {
                 version = SavedStartupConfigVersion,
@@ -1272,6 +1279,8 @@ public partial class SimulationStartupController : MonoBehaviour
                 ventClustering = config.ventClustering,
                 terrestrialVentFraction = config.terrestrialVentFraction,
                 initialSpawnCount = config.initialSpawnCount,
+                geodesicMetabolismMask = availability.metabolismMask,
+                geodesicLocomotionMask = availability.locomotionMask,
                 startPaused = config.startPaused,
                 approximateThermalIntervalSeconds = config.approximateThermalIntervalSeconds,
                 geodesicResourceTransportIntervalSeconds = config.geodesicResourceTransportIntervalSeconds,
@@ -1365,6 +1374,11 @@ public partial class SimulationStartupController : MonoBehaviour
             RestoreV23(config);
             RestoreV24(config);
             RestoreV25(config);
+            config.biology.geodesicAvailability = new GeodesicBiologyAvailability
+            {
+                metabolismMask = geodesicMetabolismMask,
+                locomotionMask = geodesicLocomotionMask
+            };
             return config;
         }
     }

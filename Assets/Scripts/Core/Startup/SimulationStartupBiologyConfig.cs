@@ -8,6 +8,7 @@ using UnityEngine;
 [Serializable]
 public sealed class SimulationStartupBiologyConfig
 {
+    public GeodesicBiologyAvailability geodesicAvailability = GeodesicBiologyAvailability.Default;
     public int maxPopulation = 50000;
     public float reproductionRate = 0.1f;
     public float moveEnergyCostPerSecond = 0.05f;
@@ -97,6 +98,7 @@ public sealed class SimulationStartupBiologyConfig
     public void Capture(ReplicatorManager manager)
     {
         if (manager == null) return;
+        geodesicAvailability = manager.geodesicBiologyAvailability;
         maxPopulation = manager.maxPopulation;
         reproductionRate = manager.reproductionRate;
         moveEnergyCostPerSecond = manager.moveEnergyCostPerSecond;
@@ -185,6 +187,7 @@ public sealed class SimulationStartupBiologyConfig
     public void Apply(ReplicatorManager manager)
     {
         if (manager == null) return;
+        manager.geodesicBiologyAvailability = geodesicAvailability;
         manager.maxPopulation = maxPopulation;
         manager.reproductionRate = reproductionRate;
         manager.moveEnergyCostPerSecond = moveEnergyCostPerSecond;
@@ -276,6 +279,7 @@ public sealed class SimulationStartupBiologyConfig
     public void Normalize(SimulationStartupBiologyConfig fallback = null)
     {
         fallback ??= new SimulationStartupBiologyConfig();
+        geodesicAvailability = geodesicAvailability.Normalized();
         maxPopulation = Mathf.Max(0, maxPopulation);
         reproductionRate = FiniteClamp(reproductionRate, fallback.reproductionRate, 0f, float.MaxValue);
         moveEnergyCostPerSecond = FiniteClamp(moveEnergyCostPerSecond, fallback.moveEnergyCostPerSecond, 0f, float.MaxValue);
