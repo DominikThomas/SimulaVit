@@ -13,7 +13,7 @@ public sealed class GeodesicChemistryTelemetry : MonoBehaviour
 
     [Header("Periodic chemistry telemetry (diagnostic only)")]
     [SerializeField, Tooltip("Authoritative simulated seconds between summaries. Zero or less disables periodic telemetry.")]
-    private float chemistryTelemetryIntervalSimSeconds = 60f;
+    private float chemistryTelemetryIntervalSimSeconds;
     [SerializeField, Tooltip("Enables detailed chemistry summaries. Disabled updates do not scan ocean or sediment state.")]
     private bool telemetryEnabled = true;
     [SerializeField, Min(0f), Tooltip("Minimum unscaled real seconds between expensive whole-ocean telemetry snapshots.")]
@@ -56,8 +56,6 @@ public sealed class GeodesicChemistryTelemetry : MonoBehaviour
         initialized = resources != null && resources.IsInitialized;
         previousCounters = ReadCounters();
         schedule.Reset(simulationTime, Time.unscaledTimeAsDouble, chemistryTelemetryIntervalSimSeconds, EffectiveMinimumRealIntervalSeconds);
-        BuildVentFootprint();
-        Debug.Log($"[GeodesicChemistryTelemetry] initialized atmosphere=global-authoritative telemetryInterval={chemistryTelemetryIntervalSimSeconds:G6}s anoxicO2Threshold={telemetryAnoxicO2Threshold:G6} concentrationUnits physicalVentInventoryRates={{H2={resources.VentH2Rate:G6},H2S={resources.VentH2SRate:G6},CO2={resources.VentCO2Rate:G6},Fe2={resources.VentFe2Rate:G6}}} inventoryUnit=concentration*km3/s", this);
     }
 
     internal void ClearWorld()
@@ -68,8 +66,8 @@ public sealed class GeodesicChemistryTelemetry : MonoBehaviour
 
     private void Update()
     {
+        if (!telemetryEnabled || !(chemistryTelemetryIntervalSimSeconds > 0f) || !initialized || simulationClock == null) return;
         using var performanceScope = UpdateMarker.Auto();
-        if (!telemetryEnabled || !initialized || simulationClock == null) return;
         double now = Math.Max(0d, simulationClock.SimulationTimeSeconds);
         if (!schedule.TryTakeSnapshot(true, chemistryTelemetryIntervalSimSeconds, EffectiveMinimumRealIntervalSeconds, now, Time.unscaledTimeAsDouble)) return;
         Emit(now);
@@ -80,6 +78,7 @@ public sealed class GeodesicChemistryTelemetry : MonoBehaviour
 
     internal string BuildCurrentRecord(double simulationTime)
     {
+        if (ventFootprintCells == null) BuildVentFootprint();
         ResetStatistics();
         GeodesicOceanLayerGrid grid = resources.SourceGrid;
         var sedimentVisual = GetComponent<GeodesicOceanSedimentVisual>();

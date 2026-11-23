@@ -54,12 +54,17 @@ public sealed partial class GeodesicBiologyRuntime
             probabilitySum = 0d; unchangedInputs = unchangedWithMemoryLag = crossings = sameEndpointWithCrossings = 0;
         }
     }
-    private readonly ABComparisonGroup[] abComparisons =
-    {
-        new ABComparisonGroup(), new ABComparisonGroup(), new ABComparisonGroup(), new ABComparisonGroup()
-    };
+    private ABComparisonGroup[] abComparisons;
 
-    /// <summary>Called with the authoritative pipeline clock. Mode selection does not reset gameplay state.</summary>
+    public void SetLocomotionContext(bool steeringEnabled, double simulationTime)
+    {
+        chemotacticSteeringEnabled = steeringEnabled;
+        abSimulationTime = simulationTime;
+        abExternalClock = true;
+    }
+
+#if UNITY_EDITOR
+    /// <summary>Historical experiment entry point for explicit editor fixtures.</summary>
     public void SetChemotaxisABContext(bool steeringEnabled, bool diagnosticsEnabled, double simulationTime)
     {
         if (abContextSeen && chemotacticSteeringEnabled != steeringEnabled)
@@ -73,11 +78,10 @@ public sealed partial class GeodesicBiologyRuntime
             abCoverageStartPending = true;
         }
         abContextSeen = true;
-        chemotacticSteeringEnabled = steeringEnabled;
         chemotaxisABDiagnosticsEnabled = diagnosticsEnabled;
-        abSimulationTime = simulationTime;
-        abExternalClock = true;
+        SetLocomotionContext(steeringEnabled, simulationTime);
     }
+#endif
 
     private ABMovementBaseline CaptureABBaseline() => new ABMovementBaseline
     {
@@ -94,6 +98,10 @@ public sealed partial class GeodesicBiologyRuntime
         if (!chemotaxisABDiagnosticsEnabled) return;
         if (abResetPending)
         {
+            abComparisons ??= new[]
+            {
+                new ABComparisonGroup(), new ABComparisonGroup(), new ABComparisonGroup(), new ABComparisonGroup()
+            };
             ResetABWindow(abSimulationTime - dt);
             if (abCoverageStartPending) abCoverageStart = abWindowStart;
             abCoverageStartPending = abResetPending = false;
@@ -110,10 +118,8 @@ public sealed partial class GeodesicBiologyRuntime
         return band >= 0 ? band : ABRingCount - 1;
     }
 
-    private void ObserveABOrganismTime(int i, long organismId, ReplicatorPopulationState state, float dt)
+    private void ObserveABOrganismTime(int i, ReplicatorPopulationState state, float dt)
     {
-        evolutionDiagnostics.Observe(i, organismId, state.Locomotion[i], dt, abSimulationTime);
-        if (!chemotaxisABDiagnosticsEnabled) return;
         int group = ABLocomotionIndex(state.Locomotion[i]);
         if (group < 0) { abInvalidStates++; return; }
         // Folded into the existing lifecycle pass, before death/removal or birth. Each organism
@@ -286,7 +292,8 @@ public sealed partial class GeodesicBiologyRuntime
         Array.Clear(abOrganismSeconds, 0, abOrganismSeconds.Length); Array.Clear(abMetabolicEnergy, 0, abMetabolicEnergy.Length);
         Array.Clear(abResidenceSeconds, 0, abResidenceSeconds.Length); Array.Clear(abParentBirths, 0, abParentBirths.Length);
         Array.Clear(abDeaths, 0, abDeaths.Length); Array.Clear(abDeathCauses, 0, abDeathCauses.Length);
-        foreach (ABComparisonGroup comparison in abComparisons) comparison.Reset();
+        if (abComparisons != null)
+            foreach (ABComparisonGroup comparison in abComparisons) comparison.Reset();
         abInvalidComparisons = abUnsupportedComparisons = abNoReadinessComparisons = abSubFloorComparisons = abInitialSenses = abInvalidStates = 0;
     }
 
@@ -295,6 +302,7 @@ public sealed partial class GeodesicBiologyRuntime
         chemotacticSteeringEnabled = true; chemotaxisABDiagnosticsEnabled = abContextSeen = abExternalClock = false;
         abResetPending = abCoverageStartPending = true; abMixedWindow = false;
         abSimulationTime = abWindowStart = abWindowSeconds = abCoverageStart = 0d; abModeSwitches = 0;
+        abComparisons = null;
         ResetABWindow(0d);
     }
 }

@@ -55,7 +55,8 @@ public sealed partial class GeodesicBiologyRuntime
         emergenceSelectionRandom = new System.Random(unchecked(biologySeed ^ 0x56454E54));
         emergenceTraitsRandom = new System.Random(unchecked(biologySeed ^ 0x464F554E));
         emergenceVisualRandom = new System.Random(unchecked(biologySeed ^ 0x56495355));
-        Debug.Log(FormattableString.Invariant($"[GeodesicFounderEmergenceConfig] mode=Gradual initialEventCap={Math.Max(0,initialCount)} delay={delay:G9} meanInitialInterval={GeodesicFounderEmergenceSchedule.NormalizeInterval(meanInterval):G9} ongoing={ongoing} meanOngoingInterval={GeodesicFounderEmergenceSchedule.NormalizeInterval(ongoingInterval,300f):G9} firstDue={emergenceSchedule.NextEventTime:G9} seed={biologySeed} rejectedEventsConsumeCap=true maxEventsPerStep=64 viabilityCacheSeconds=10"));
+        if (biologyReportsEnabled)
+            Debug.Log(FormattableString.Invariant($"[GeodesicFounderEmergenceConfig] mode=Gradual initialEventCap={Math.Max(0,initialCount)} delay={delay:G9} meanInitialInterval={GeodesicFounderEmergenceSchedule.NormalizeInterval(meanInterval):G9} ongoing={ongoing} meanOngoingInterval={GeodesicFounderEmergenceSchedule.NormalizeInterval(ongoingInterval,300f):G9} firstDue={emergenceSchedule.NextEventTime:G9} seed={biologySeed} rejectedEventsConsumeCap=true maxEventsPerStep=64 viabilityCacheSeconds=10"));
     }
 
     public void AdvanceFounderEmergence(double simulationTime, int maximumPopulation, float co2Need, float h2Need,

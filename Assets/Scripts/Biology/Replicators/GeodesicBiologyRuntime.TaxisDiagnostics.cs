@@ -55,7 +55,7 @@ public sealed partial class GeodesicBiologyRuntime
         active.lastTaxisObservation = default;
         active.cellCrossingsSinceSense = 0;
         active.verticalOriginRecorded = false;
-        taxisMemoryInitializations++;
+        if (locomotionSettings.logDiagnostics) taxisMemoryInitializations++;
     }
 
     private TaxisComparison CompareTaxis(double current, double remembered, float score, float rememberedScore)
@@ -191,25 +191,31 @@ public sealed partial class GeodesicBiologyRuntime
         public TaxisSenseDetail latest, peak;
         public VerticalTaxisDetail vertical;
     }
-    private readonly TrackedTaxisOrganism[] trackedTaxis = new TrackedTaxisOrganism[4];
-    private bool detailedTaxisWasEnabled;
+    private TrackedTaxisOrganism[] trackedTaxis;
     private long detailedTaxisSelectedId;
     private int detailedTaxisLimit;
     private float nextDetailedTaxisLogTime;
 
     private void BeginDetailedTaxisBatch()
     {
-        bool enabled = locomotionSettings.detailedTaxisDiagnostics;
+        if (!locomotionSettings.detailedTaxisDiagnostics)
+        {
+            trackedTaxis = null;
+            return;
+        }
         int limit = locomotionSettings.trackedTaxisOrganismId > 0 ? 1 : locomotionSettings.maximumTrackedTaxisOrganisms;
-        if (enabled != detailedTaxisWasEnabled || detailedTaxisSelectedId != locomotionSettings.trackedTaxisOrganismId || detailedTaxisLimit != limit)
+        if (trackedTaxis == null)
+        {
+            trackedTaxis = new TrackedTaxisOrganism[4];
+            nextDetailedTaxisLogTime = 0f;
+        }
+        else if (detailedTaxisSelectedId != locomotionSettings.trackedTaxisOrganismId || detailedTaxisLimit != limit)
         {
             Array.Clear(trackedTaxis, 0, trackedTaxis.Length);
             nextDetailedTaxisLogTime = 0f;
         }
-        detailedTaxisWasEnabled = enabled;
         detailedTaxisSelectedId = locomotionSettings.trackedTaxisOrganismId;
         detailedTaxisLimit = limit;
-        if (!enabled) return;
         for (int slot = 0; slot < limit; slot++) trackedTaxis[slot].seen = false;
     }
 
@@ -309,7 +315,7 @@ public sealed partial class GeodesicBiologyRuntime
         maximumCrossingsBetweenSenses = 0; senseIntervalSum = 0d;
         Array.Clear(crossingHistogram, 0, crossingHistogram.Length); Array.Clear(trendSenseCounts, 0, trendSenseCounts.Length);
         Array.Clear(trendTumbles, 0, trendTumbles.Length); Array.Clear(trendTumbleProbability, 0, trendTumbleProbability.Length);
-        Array.Clear(trackedTaxis, 0, trackedTaxis.Length);
-        detailedTaxisWasEnabled = false; detailedTaxisSelectedId = 0; detailedTaxisLimit = 0; nextDetailedTaxisLogTime = 0f;
+        trackedTaxis = null;
+        detailedTaxisSelectedId = 0; detailedTaxisLimit = 0; nextDetailedTaxisLogTime = 0f;
     }
 }

@@ -21,9 +21,11 @@ public struct GeodesicLocomotionSettings
     public bool mutationRateOverrideEnabled;
     [Range(0f, 1f), Tooltip("Diagnostic per-birth mutation rate. Normal operation uses locomotionMutationChance.")]
     public float diagnosticMutationChance;
+    [Tooltip("Collects locomotion distributions and evolution cohorts for periodic Console reports.")]
     public bool logDiagnostics;
     [Min(0.000000001f), Tooltip("Minimum detectable reaction readiness, in full-reference-tick equivalents. Relative taxis deltas below this floor fade to zero; this is not a raw concentration threshold.")]
     public float taxisReadinessFloor;
+    [Tooltip("Tracks recent sensing events for selected active organisms and logs them at the configured real-time interval.")]
     public bool detailedTaxisDiagnostics;
     [Range(1, 4)] public int maximumTrackedTaxisOrganisms;
     [Tooltip("0 automatically follows a few stable IDs. A positive ID follows only that organism, even through packed swap-back.")]
@@ -37,7 +39,7 @@ public struct GeodesicLocomotionSettings
         flagellumTumbleMultiplier = 0.3f, tumbleReferenceSeconds = 0.5f,
         verticalSpeedMetersPerSecond = 10f, verticalExplorationIntervalSeconds = 20f,
         verticalContinueWhenBetter = 0.8f, verticalReverseWhenWorse = 0.8f,
-        diagnosticMutationChance = 1f, logDiagnostics = true,
+        diagnosticMutationChance = 1f,
         taxisReadinessFloor = 0.0001f, maximumTrackedTaxisOrganisms = 2, detailedTaxisLogIntervalRealSeconds = 2f
     };
 

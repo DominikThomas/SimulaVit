@@ -88,7 +88,7 @@ public sealed class SimulationStartupBiologyConfig
     public float geodesicHeatExposureDeathSeconds = 60f;
     public float geodesicTemperatureExposureRecoveryPerSecond = 1f;
     public bool enableGeodesicChemotacticSteering = true;
-    public bool enableGeodesicChemotaxisABDiagnostics;
+    [HideInInspector] public bool enableGeodesicChemotaxisABDiagnostics; // Historical startup/save field.
     public float geodesicAmoeboidEnergyPerSecond = 0.02f;
     public float geodesicFlagellumEnergyPerSecond = 0.04f;
 

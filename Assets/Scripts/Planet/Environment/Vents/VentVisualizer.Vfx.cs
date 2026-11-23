@@ -59,7 +59,7 @@ public partial class VentVisualizer
     // Local simulation keeps already emitted particles attached to a moving/rotating planet.
     public void BeginGeodesicEffects(PlanetGenerator generator)
     {
-        ClearVentVisuals("geodesic outlet effects initialized");
+        ClearVentVisuals();
         planetGenerator = generator;
         geodesicEffects = true;
         EnsureEffectsRoot();

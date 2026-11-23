@@ -442,18 +442,22 @@ public sealed partial class GeodesicBiologyRuntime
         TaxisComparison comparison = hadMemory
             ? CompareTaxis(observation.reactionReadiness, previousReadiness, observation.suitability, previousSuitability)
             : CompareTaxis(observation.reactionReadiness, observation.reactionReadiness, observation.suitability, observation.suitability);
-        bool better = hadMemory && comparison.trend == TaxisTrend.Improving;
         bool worse = hadMemory && comparison.trend == TaxisTrend.Worsening;
         float probability = GeodesicTaxisPolicy.ReferenceTumbleProbability(chemotacticSteeringEnabled,
             hadMemory, (GeodesicTaxisPolicy.Trend)comparison.trend, steeringSettings.BaseTumbleProbability,
             steeringSettings.MovementTumbleChanceWhenBetter, steeringSettings.MovementTumbleChanceWhenWorse,
             steeringSettings.MovementTumbleChanceNeutral);
-        bool unchangedInputs = hadMemory && SameExperiencedInputs(observation, active.lastTaxisObservation);
-        if (hadMemory)
+        bool reportTaxis = locomotionSettings.logDiagnostics;
+        bool observeTaxis = reportTaxis || chemotaxisABDiagnosticsEnabled;
+        bool unchangedInputs = observeTaxis && hadMemory && SameExperiencedInputs(observation, active.lastTaxisObservation);
+        if (observeTaxis && hadMemory)
         {
-            if (better) suitabilityImproving++; else if (worse) suitabilityWorsening++; else suitabilityNeutral++;
-            RecordHorizontalTaxis(observation, active.lastTaxisObservation, comparison,
-                active.cellCrossingsSinceSense, active.lastSenseInterval, unchangedInputs);
+            if (comparison.trend == TaxisTrend.Improving) suitabilityImproving++;
+            else if (worse) suitabilityWorsening++;
+            else suitabilityNeutral++;
+            if (reportTaxis)
+                RecordHorizontalTaxis(observation, active.lastTaxisObservation, comparison,
+                    active.cellCrossingsSinceSense, active.lastSenseInterval, unchangedInputs);
         }
         float min = SafeMovementValue(steeringSettings.MinTumbleProbability, 0.02f, 0f, 1f);
         float max = SafeMovementValue(steeringSettings.MaxTumbleProbability, 0.9f, min, 1f);
@@ -475,11 +479,13 @@ public sealed partial class GeodesicBiologyRuntime
             completedRuns++;
             active.runSeconds = 0f;
         }
-        if (hadMemory) RecordTaxisTumble(comparison.trend, tumble, tumbled);
-        RecordABChemotaxisComparison(observation, active.lastTaxisObservation, comparison,
-            state.Metabolism[i], hadMemory, tumble, tumbled, active.cellCrossingsSinceSense, unchangedInputs);
-        RecordDetailedTaxisSense(trackedSlot, observation, previousSuitability, previousReadiness,
-            comparison, probability, tumble, tumbled, !hadMemory, active.cellCrossingsSinceSense, active.lastSenseInterval);
+        if (reportTaxis && hadMemory) RecordTaxisTumble(comparison.trend, tumble, tumbled);
+        if (chemotaxisABDiagnosticsEnabled)
+            RecordABChemotaxisComparison(observation, active.lastTaxisObservation, comparison,
+                state.Metabolism[i], hadMemory, tumble, tumbled, active.cellCrossingsSinceSense, unchangedInputs);
+        if (trackedSlot >= 0)
+            RecordDetailedTaxisSense(trackedSlot, observation, previousSuitability, previousReadiness,
+                comparison, probability, tumble, tumbled, !hadMemory, active.cellCrossingsSinceSense, active.lastSenseInterval);
         double blend = SafeMovementValue(steeringSettings.MovementSuitabilityMemoryBlend, 0.35f, 0f, 1f);
         active.reactionReadinessMemory = hadMemory
             ? previousReadiness + (observation.reactionReadiness - previousReadiness) * blend : observation.reactionReadiness;
@@ -522,8 +528,8 @@ public sealed partial class GeodesicBiologyRuntime
                 verticalNeutral++;
                 if (NextActiveRandom(i, state) < 0.5f) active.verticalDirection *= -1;
             }
-            if (paired) verticalDeltaStats.Observe(vertical);
-            RecordDetailedVerticalTaxis(trackedSlot, active, vertical, trialDirection, paired);
+            if (reportTaxis && paired) verticalDeltaStats.Observe(vertical);
+            if (trackedSlot >= 0) RecordDetailedVerticalTaxis(trackedSlot, active, vertical, trialDirection, paired);
             active.verticalObservationPending = false;
             active.verticalOriginRecorded = false;
         }

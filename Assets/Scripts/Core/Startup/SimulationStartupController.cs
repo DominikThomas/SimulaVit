@@ -39,7 +39,7 @@ public partial class SimulationStartupController : MonoBehaviour
     public const float DenseAtmospherePressureMaxBar = 600f;
     public const float DefaultApproximateThermalIntervalSeconds = 2f;
     public const float DefaultResourceTransportIntervalSeconds = 5f;
-    public const float DefaultChemistryTelemetryIntervalSimSeconds = 60f;
+    public const float DefaultChemistryTelemetryIntervalSimSeconds = 0f;
     public static readonly float[] ApproximateThermalIntervalPresets = { 0.5f, 1f, 2f, 5f };
     public static readonly float[] ResourceTransportIntervalPresets = { 1f, 2f, 5f, 10f };
 

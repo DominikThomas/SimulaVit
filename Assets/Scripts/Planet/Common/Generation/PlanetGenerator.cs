@@ -75,6 +75,8 @@ public partial class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, IS
     public int geodesicColliderSubdivisionLevel = 6;
     [Tooltip("Warn once per geodesic generation when an estimated render/collider triangle count exceeds this threshold.")]
     public int geodesicDiagnosticTriangleWarningThreshold = 350000;
+    [SerializeField, Tooltip("Prints detailed generation timings, terrain statistics, and renderer inventories.")]
+    private bool logGenerationDiagnostics;
     private long geodesicSurfaceRadiusQueryCount;
     private long geodesicDirectionToCellQueryCount;
     private long geodesicDirectionCandidateCellsInspected;
@@ -855,7 +857,8 @@ public partial class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, IS
         void LogStage(string stage, System.Diagnostics.Stopwatch stageWatch)
         {
             stageWatch.Stop();
-            Debug.Log($"[GeodesicGenerationProfile] stage={stage}, durationMs={stageWatch.Elapsed.TotalMilliseconds:F2}", this);
+            if (logGenerationDiagnostics)
+                Debug.Log($"[GeodesicGenerationProfile] stage={stage}, durationMs={stageWatch.Elapsed.TotalMilliseconds:F2}", this);
         }
 
         int simulationSubdivision = Mathf.Clamp(geodesicSimulationSubdivisionLevel, 0, GeodesicGridTopology.MaxSupportedSubdivision);
@@ -1144,14 +1147,18 @@ public partial class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, IS
         PopulateRuntimeDescriptor(GeodesicTopology.CellCount);
         LogPlanetGenerationValidation(meshCollider);
         geodesicLastCoreGenerationMilliseconds = total.Elapsed.TotalMilliseconds;
-        stage = System.Diagnostics.Stopwatch.StartNew();
-        LogGeodesicTerrainDiagnostics(mesh, simulationSubdivision, renderSubdivision, geodesicCurrentRenderTerrainData);
-        LogStage("terrain diagnostics", stage);
-        LogGeodesicQueryDiagnostics();
-        LogModeTransitionRendererInventory("after generation", PlanetGridType.GeodesicIcosphere);
+        if (logGenerationDiagnostics)
+        {
+            stage = System.Diagnostics.Stopwatch.StartNew();
+            LogGeodesicTerrainDiagnostics(mesh, simulationSubdivision, renderSubdivision, geodesicCurrentRenderTerrainData);
+            LogStage("terrain diagnostics", stage);
+            LogGeodesicQueryDiagnostics();
+            LogModeTransitionRendererInventory("after generation", PlanetGridType.GeodesicIcosphere);
+        }
         total.Stop();
         geodesicLastFullSynchronousGenerationMilliseconds = total.Elapsed.TotalMilliseconds;
-        Debug.Log($"[GeodesicPrototype] coreGenerationDurationMs={geodesicLastCoreGenerationMilliseconds:F2}, fullSynchronousGenerationDurationMs={geodesicLastFullSynchronousGenerationMilliseconds:F2}, profilingBoundaryDifferenceMs={(geodesicLastFullSynchronousGenerationMilliseconds - geodesicLastCoreGenerationMilliseconds):F2}, profilingBoundaryDifference=post-core synchronous diagnostics/query logging/inventory reporting,  simulationSubdivision={simulationSubdivision}, renderSubdivision={renderSubdivision}, colliderSubdivision={colliderSubdivision}, oceanSubdivision={geodesicOceanRenderSubdivisionLevel}, atmosphereSubdivision={geodesicAtmosphereRenderSubdivisionLevel}, cells={GeodesicTopology.CellCount}, renderVertices={mesh.vertexCount}, renderTriangles={mesh.triangles.Length / 3}, colliderVertices={colliderMesh.vertexCount}, colliderTriangles={colliderMesh.triangles.Length / 3}, simulationTriangles={GeodesicTopology.TriangleCount}, edges={GeodesicTopology.EdgeCount}, durationMs={geodesicLastFullSynchronousGenerationMilliseconds:F2}, approxSimulationTopologyMemory={GeodesicTopology.ApproximateMemoryBytes} bytes, approxRenderGeometryMemory={renderGeometry.ApproximateManagedBytes} bytes, approxColliderGeometryMemory={colliderGeometry.ApproximateManagedBytes} bytes, approxRenderMappingMemory={renderMapping.ApproximateManagedBytes} bytes, approxColliderMappingMemory={colliderMapping.ApproximateManagedBytes} bytes, mappingCacheEntries={IcosphereDirectionMappingCache.CachedMappingCount}, renderGeometryCacheEntries={IcosphereRenderGeometryCache.CachedSubdivisionCount}. Validation: {validation}", this);
+        if (logGenerationDiagnostics)
+            Debug.Log($"[GeodesicPrototype] coreGenerationDurationMs={geodesicLastCoreGenerationMilliseconds:F2}, fullSynchronousGenerationDurationMs={geodesicLastFullSynchronousGenerationMilliseconds:F2}, profilingBoundaryDifferenceMs={(geodesicLastFullSynchronousGenerationMilliseconds - geodesicLastCoreGenerationMilliseconds):F2}, profilingBoundaryDifference=post-core synchronous diagnostics/query logging/inventory reporting,  simulationSubdivision={simulationSubdivision}, renderSubdivision={renderSubdivision}, colliderSubdivision={colliderSubdivision}, oceanSubdivision={geodesicOceanRenderSubdivisionLevel}, atmosphereSubdivision={geodesicAtmosphereRenderSubdivisionLevel}, cells={GeodesicTopology.CellCount}, renderVertices={mesh.vertexCount}, renderTriangles={mesh.triangles.Length / 3}, colliderVertices={colliderMesh.vertexCount}, colliderTriangles={colliderMesh.triangles.Length / 3}, simulationTriangles={GeodesicTopology.TriangleCount}, edges={GeodesicTopology.EdgeCount}, durationMs={geodesicLastFullSynchronousGenerationMilliseconds:F2}, approxSimulationTopologyMemory={GeodesicTopology.ApproximateMemoryBytes} bytes, approxRenderGeometryMemory={renderGeometry.ApproximateManagedBytes} bytes, approxColliderGeometryMemory={colliderGeometry.ApproximateManagedBytes} bytes, approxRenderMappingMemory={renderMapping.ApproximateManagedBytes} bytes, approxColliderMappingMemory={colliderMapping.ApproximateManagedBytes} bytes, mappingCacheEntries={IcosphereDirectionMappingCache.CachedMappingCount}, renderGeometryCacheEntries={IcosphereRenderGeometryCache.CachedSubdivisionCount}. Validation: {validation}", this);
     }
 
 
@@ -3497,6 +3504,7 @@ public partial class PlanetGenerator : MonoBehaviour, IPlanetSurfaceGeometry, IS
 
     private void LogModeTransitionRendererInventory(string stage, PlanetGridType targetGridMode)
     {
+        if (!logGenerationDiagnostics) return;
         Renderer[] renderers = GetComponentsInChildren<Renderer>(true);
         System.Text.StringBuilder sb = new System.Text.StringBuilder(1024);
         sb.Append($"[PlanetModeTransitionDiagnostics] stage={stage}, targetGridMode={targetGridMode}, childRenderers=");

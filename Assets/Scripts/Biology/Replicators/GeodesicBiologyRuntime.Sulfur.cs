@@ -87,7 +87,7 @@ public sealed partial class GeodesicBiologyRuntime
         suspended.AddPrecipitate(r.Cell, r.Layer, transfer.h2Withdrawn, 0d);
         state.OrganicCStore[index] = transfer.storeAfter;
         state.Energy[index] += transfer.energy;
-        RecordABMetabolicEnergy(state.Locomotion[index], transfer.energy);
+        if (chemotaxisABDiagnosticsEnabled) RecordABMetabolicEnergy(state.Locomotion[index], transfer.energy);
         extentByMetabolism[(int)r.Metabolism] += transfer.extent;
         energyByMetabolism[(int)r.Metabolism] += transfer.energy;
         sulfurCO2Consumed += transfer.co2Withdrawn; sulfurH2SConsumed += transfer.h2Withdrawn;

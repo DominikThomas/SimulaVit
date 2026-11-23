@@ -78,7 +78,7 @@ public sealed partial class GeodesicBiologyRuntime
         if(t.status == GeodesicHydrogenotrophyBalance.CommitStatus.Invalid) fermentationInvalid++;
         if(t.status != GeodesicHydrogenotrophyBalance.CommitStatus.Committed) return;
         state.OrganicCStore[index] = t.storeAfter; state.Energy[index] += t.energy;
-        RecordABMetabolicEnergy(state.Locomotion[index],t.energy);
+        if (chemotaxisABDiagnosticsEnabled) RecordABMetabolicEnergy(state.Locomotion[index],t.energy);
         extentByMetabolism[(int)MetabolismType.Fermentation] += t.extent;
         energyByMetabolism[(int)MetabolismType.Fermentation] += t.energy;
         fermentationConsumed += t.consumed; fermentationStored += (double)t.storeAfter-before;

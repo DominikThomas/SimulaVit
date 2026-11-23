@@ -138,7 +138,7 @@ public sealed class GeodesicBiologyDiagnostics
         public double energyCost, maxAbsEnergyResidual, maxAbsCarbonResidual, maxPlacementError;
     }
 
-    [SerializeField, Tooltip("Read-only growth and accounting aggregates on the existing ten-simulated-second biology schedule.")]
+    [SerializeField, Tooltip("Read-only reaction and division accounting. Population reports require ten simulated seconds and are limited to once every five real seconds.")]
     private bool enabled = true;
     [SerializeField, Tooltip("Off by default. At most one latest birth plus three unusual examples per report, never a log per birth.")]
     private bool logDetailedDivisionExamples;
@@ -171,6 +171,9 @@ public sealed class GeodesicBiologyDiagnostics
     [NonSerialized] private ResourceAmounts requestedNet, measuredNet, netTransferResidual;
     [NonSerialized] private long mixedPairs, transferViolations;
     [NonSerialized] private bool divisionRecordedThisInterval;
+
+    public GeodesicBiologyDiagnostics() { }
+    public GeodesicBiologyDiagnostics(bool enabled) => this.enabled = enabled;
 
     public bool Enabled => enabled;
     public long SelectedOrganismId => selectedOrganismId;

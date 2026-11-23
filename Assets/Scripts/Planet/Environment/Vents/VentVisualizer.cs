@@ -73,8 +73,7 @@ public partial class VentVisualizer : MonoBehaviour
     private void Start()
     {
         if (geodesicEffects) return;
-        Debug.Log("[VentVisualizer] Start deferred; waiting for explicit final PlanetResourceMap initialization.", this);
-        ClearVentVisuals("startup deferred before final planet");
+        ClearVentVisuals();
     }
 
     public void BuildVentVisuals()
@@ -86,18 +85,18 @@ public partial class VentVisualizer : MonoBehaviour
     {
         if (resourceMap == null || !resourceMap.IsLegacyWorldAuthoritative)
         {
-            if (!geodesicEffects) ClearVentVisuals(reason);
+            if (!geodesicEffects) ClearVentVisuals();
             return;
         }
 
         if (resourceMap == null || planetGenerator == null || resourceMap.ventStrength == null)
         {
-            ClearVentVisuals(reason);
+            ClearVentVisuals();
             Debug.Log($"[VentVisualizer] resourceMap == null || planetGenerator == null || resourceMap.ventStrength == null. Rebuild skipped. Reason: {reason}");
             return;
         }
 
-        ClearVentVisuals(reason);
+        ClearVentVisuals();
 
         int[] vents = resourceMap.VentCells;
         Vector3[] cellDirs = resourceMap.CellDirs;
@@ -148,12 +147,7 @@ public partial class VentVisualizer : MonoBehaviour
             }
 
             LogRebuildComplete(reason, vents.Length, spawned, "vent clusters");
-            Debug.Log($"[StartupLifecycle] Vent visuals built. Spawned={spawned}, sourceVents={vents.Length}", this);
             return;
-        }
-        else
-        {
-            Debug.Log($"[VentVisualizer] No vents exist yet. Count is: {(vents == null ? 0 : vents.Length)}.");
         }
 
         for (int cell = 0; cell < resourceMap.ventStrength.Length; cell++)
@@ -196,7 +190,6 @@ public partial class VentVisualizer : MonoBehaviour
 
         if (SimulationStartupController.IsSetupActive && reason != null && reason.StartsWith("initial PlanetResourceMap Start"))
         {
-            Debug.Log($"[VentVisualizer] Rebuild skipped for non-final startup resources while setup is active. Reason: {reason}", this);
             return;
         }
 
@@ -205,18 +198,17 @@ public partial class VentVisualizer : MonoBehaviour
 
     public void ClearRuntimeVisuals(string reason)
     {
-        ClearVentVisuals(reason);
+        ClearVentVisuals();
     }
 
     public void ClearLegacyRuntimeVisuals(string reason)
     {
-        ClearVentVisuals(reason, !geodesicEffects);
+        ClearVentVisuals(!geodesicEffects);
     }
 
-    private void ClearVentVisuals(string reason, bool includeEffects = true)
+    private void ClearVentVisuals(bool includeEffects = true)
     {
         if (includeEffects) ClearEffects();
-        int cleared = 0;
         List<GameObject> trackedVisuals = new List<GameObject>(spawnedVentVisuals);
         for (int i = spawnedVentVisuals.Count - 1; i >= 0; i--)
         {
@@ -228,7 +220,6 @@ public partial class VentVisualizer : MonoBehaviour
 
             visual.SetActive(false);
             DestroyVisualObject(visual);
-            cleared++;
         }
 
         spawnedVentVisuals.Clear();
@@ -242,13 +233,11 @@ public partial class VentVisualizer : MonoBehaviour
                 {
                     child.gameObject.SetActive(false);
                     DestroyVisualObject(child.gameObject);
-                    cleared++;
                 }
             }
         }
 
         spawnedVentIndex = 0;
-        Debug.Log($"[VentVisualizer] Cleared {cleared} old vent visuals and soot particle children before rebuild. Reason: {reason}", this);
     }
 
     private void LogRebuildComplete(string reason, int ventCellCount, int spawned, string visualKind)

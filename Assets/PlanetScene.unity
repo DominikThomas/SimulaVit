@@ -313,7 +313,7 @@ MonoBehaviour:
     minimumLakeDepth: 0.005
     approximateThermalIntervalSeconds: 2
     geodesicResourceTransportIntervalSeconds: 5
-    chemistryTelemetryIntervalSimSeconds: 60
+    chemistryTelemetryIntervalSimSeconds: 0
     atmosphereInventoryPerBar: 1000
     airSeaExchangeHalfLifeSeconds: 300
     geodesicBiologySpawnDelaySeconds: 0
@@ -486,7 +486,7 @@ MonoBehaviour:
     minimumLakeDepth: 0.005
     approximateThermalIntervalSeconds: 2
     geodesicResourceTransportIntervalSeconds: 5
-    chemistryTelemetryIntervalSimSeconds: 60
+    chemistryTelemetryIntervalSimSeconds: 0
     atmosphereInventoryPerBar: 1000
     airSeaExchangeHalfLifeSeconds: 300
     geodesicBiologySpawnDelaySeconds: 0
@@ -585,7 +585,7 @@ MonoBehaviour:
   surfaceOffset: 0.001
   showLandVents: 1
   showUnderwaterVents: 1
-  logVentAnchors: 1
+  logVentAnchors: 0
   maxVentAnchorLogs: 10
   clusterAngleMultiplier: 10
   minClusterStrengthToRender: 0
@@ -1962,7 +1962,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 584430243}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 2b286aa509874e3699f7a89f37c74832, type: 3}
   m_Name: 
@@ -1972,7 +1972,7 @@ MonoBehaviour:
   replicatorManager: {fileID: 1064713443}
   resources: {fileID: 0}
   chemistry: {fileID: 0}
-  logSummaryToConsole: 1
+  logSummaryToConsole: 0
   writeCsv: 1
   flushCsvEveryNSamples: 1
   csvFileNamePrefix: simulation_performance
@@ -2478,7 +2478,7 @@ MonoBehaviour:
   movementTumbleChanceWhenBetter: 0.05
   movementTumbleChanceNeutral: 0.2
   enableGeodesicChemotacticSteering: 1
-  enableGeodesicChemotaxisABDiagnostics: 1
+  enableGeodesicChemotaxisABDiagnostics: 0
   geodesicLocomotion:
     activeSpeedMultiplier: 0.4
     amoeboidEnergyPerSecond: 0.02
@@ -2491,7 +2491,7 @@ MonoBehaviour:
     verticalReverseWhenWorse: 0.8
     mutationRateOverrideEnabled: 0
     diagnosticMutationChance: 1
-    logDiagnostics: 1
+    logDiagnostics: 0
     taxisReadinessFloor: 0.0001
     detailedTaxisDiagnostics: 0
     maximumTrackedTaxisOrganisms: 2
@@ -2548,7 +2548,7 @@ MonoBehaviour:
     localPositionTolerance: 0.0001
     trackedOrganisms: []
   biologyDiagnostics:
-    enabled: 1
+    enabled: 0
     logDetailedDivisionExamples: 0
     selectedOrganismId: 0
     selectedOrganismFound: 0

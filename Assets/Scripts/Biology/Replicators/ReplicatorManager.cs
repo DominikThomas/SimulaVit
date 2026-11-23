@@ -392,11 +392,16 @@ public class ReplicatorManager : MonoBehaviour
     [Range(0f, 1f)] public float movementTumbleChanceNeutral = 0.2f;
 
     [Header("Geodesic Active Locomotion")]
-    [Tooltip("A/B control: disable only environmental feedback on horizontal tumbles and vertical persistence. Active swimming, neutral exploration, costs and evolution remain enabled.")]
+    [Tooltip("Disables environmental feedback on horizontal tumbles and vertical persistence when off. Active swimming, neutral exploration, costs and evolution remain enabled.")]
     public bool enableGeodesicChemotacticSteering = true;
-    [Tooltip("Opt-in controlled-experiment summaries at the existing ten-simulated-second biology cadence. Replaces the verbose locomotion/taxis summary block while enabled.")]
-    public bool enableGeodesicChemotaxisABDiagnostics;
+    [HideInInspector] public bool enableGeodesicChemotaxisABDiagnostics; // Historical startup/save field.
     public GeodesicLocomotionSettings geodesicLocomotion = GeodesicLocomotionSettings.Default;
+
+    [Header("Console Diagnostics (Opt-in)")]
+    [SerializeField, Tooltip("Prints geodesic biology, thermal, metabolic and founder reports. Population summaries are limited to once per five real seconds.")]
+    private bool logGeodesicBiologyReports;
+    [SerializeField, Tooltip("Prints the general metabolism and death summary every three real seconds.")]
+    private bool logMetabolismReports;
 
     [Header("Scent-Based Predation")]
     public bool useScentPredation = true;
@@ -487,7 +492,7 @@ public class ReplicatorManager : MonoBehaviour
     [Header("Geodesic Movement Diagnostics")]
     [SerializeField] private ReplicatorMovementDiagnostics movementDiagnostics = new ReplicatorMovementDiagnostics();
     [Header("Geodesic Growth and Accounting Diagnostics")]
-    [SerializeField] private GeodesicBiologyDiagnostics biologyDiagnostics = new GeodesicBiologyDiagnostics();
+    [SerializeField] private GeodesicBiologyDiagnostics biologyDiagnostics = new GeodesicBiologyDiagnostics(false);
 
     [Header("Geodesic Visual Growth and Division")]
     public ReplicatorVisualGrowthSettings visualGrowthSettings = ReplicatorVisualGrowthSettings.Default;
@@ -902,14 +907,15 @@ public class ReplicatorManager : MonoBehaviour
             if (!geodesicBiology.Initialize(planetGenerator, agents, populationState, immediateFounderCount,
                 minLifespan, maxLifespan, baseAgentColor, defaultBiomassTarget,
                 hydrogenTempRange, defaultLethalMargin,hydrogenotrophyCO2PerTick,hydrogenotrophyH2PerTick,
-                temperatureReplicationMinEfficiency,temperatureDormancyFloor))
+                temperatureReplicationMinEfficiency,temperatureDormancyFloor,logGeodesicBiologyReports))
             {
                 geodesicBiology = null;
                 isInitialized = false;
                 return false;
             }
             ApplyGeodesicRuntimeControls();
-            Debug.Log(geodesicBiology.DescribeResolvedLocomotionControls(), this);
+            if (geodesicLocomotion.logDiagnostics)
+                Debug.Log(geodesicBiology.DescribeResolvedLocomotionControls(), this);
             geodesicFounderSpawnSchedule.Configure(0d, spawnDelay,
                 spawnInitialPopulation && !gradual ? initialSpawnCount : 0);
             if (spawnInitialPopulation && gradual)
@@ -917,7 +923,7 @@ public class ReplicatorManager : MonoBehaviour
                     geodesicFounderOngoingEmergence,geodesicFounderOngoingMeanIntervalSeconds);
             if (spawnInitialPopulation && !gradual && spawnDelay <= 0f)
                 geodesicBiology.RecordCappedFounderEvents(Mathf.Max(0,initialSpawnCount-immediateFounderCount));
-            if (geodesicFounderSpawnSchedule.IsPending)
+            if (logGeodesicBiologyReports && geodesicFounderSpawnSchedule.IsPending)
                 Debug.Log($"[GeodesicBiology] founder spawn deferred until simTime={geodesicFounderSpawnSchedule.SpawnAtSimulationTime:G6}", this);
             isInitialized = true;
             EnsureDeathCauseCounters();
@@ -1056,8 +1062,8 @@ public class ReplicatorManager : MonoBehaviour
     private void ApplyGeodesicRuntimeControls()
     {
         using var performanceScope = GeodesicControlSyncMarker.Auto();
-        geodesicBiology.SetChemotaxisABContext(enableGeodesicChemotacticSteering,
-            enableGeodesicChemotaxisABDiagnostics, simulationTimeSeconds);
+        geodesicBiology.SetLocomotionContext(enableGeodesicChemotacticSteering, simulationTimeSeconds);
+        geodesicBiology.SetBiologyReportsEnabled(logGeodesicBiologyReports);
         geodesicBiology.SetVisualGrowthSettings(visualGrowthSettings);
         geodesicColorResolver ??= CalculateAgentColor;
         geodesicBiology.SetMetabolicColorResolver(geodesicColorResolver);
@@ -1110,7 +1116,8 @@ public class ReplicatorManager : MonoBehaviour
             {
                 int spawned = geodesicBiology.SpawnDeferredFounders(requestedFounders, agents, populationState,
                     simulationTimeSeconds, maxPopulation);
-                Debug.Log($"[GeodesicBiology] deferred founder spawn simTime={simulationTimeSeconds:G6} requested={requestedFounders} spawned={spawned}", this);
+                if (logGeodesicBiologyReports)
+                    Debug.Log($"[GeodesicBiology] deferred founder spawn simTime={simulationTimeSeconds:G6} requested={requestedFounders} spawned={spawned}", this);
             }
             geodesicBiology.AdvanceFounderEmergence(simulationTimeSeconds,maxPopulation,hydrogenotrophyCO2PerTick,hydrogenotrophyH2PerTick,
                 anaerobeO2InhibitionEnabled && anaerobeO2InhibitionAffectsHydrogenotrophy,
@@ -1266,7 +1273,7 @@ public class ReplicatorManager : MonoBehaviour
     {
         // Building this snapshot scans the legacy resource arrays and used to happen every
         // rendered frame even though the result is emitted only once every three seconds.
-        if (!debugTelemetry.IsMetabolismDebugLogDue())
+        if (!logMetabolismReports || !debugTelemetry.IsMetabolismDebugLogDue())
         {
             return;
         }

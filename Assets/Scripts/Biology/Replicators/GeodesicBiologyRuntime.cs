@@ -66,7 +66,8 @@ public sealed partial class GeodesicBiologyRuntime
     private System.Random reproductionRandom;
     private System.Random temperatureMutationRandom;
     private GeodesicBiologyTemperatureSettings temperatureSettings = GeodesicBiologyTemperatureSettings.Default;
-    private readonly GeodesicBiologyTemperatureTelemetry temperatureTelemetry = new GeodesicBiologyTemperatureTelemetry();
+    private GeodesicBiologyTemperatureTelemetry temperatureTelemetry;
+    private HashSet<int> reportOccupiedNodes;
     private GeodesicBiologyDiagnostics accountingDiagnostics;
     private readonly long[] requestedByMetabolism = new long[Enum.GetValues(typeof(MetabolismType)).Length];
     private readonly long[] achievedByMetabolism = new long[Enum.GetValues(typeof(MetabolismType)).Length];
@@ -91,6 +92,8 @@ public sealed partial class GeodesicBiologyRuntime
     private long invalidBiologicalStates;
     private double maintenancePaid;
     private double diagnosticElapsed;
+    private double nextDiagnosticReportRealTime;
+    private bool biologyReportsEnabled;
     private double temperatureSum;
     private float temperatureMin = float.PositiveInfinity;
     private float temperatureMax = float.NegativeInfinity;
@@ -251,9 +254,11 @@ public sealed partial class GeodesicBiologyRuntime
     public bool Initialize(PlanetGenerator generator, List<Replicator> agents, ReplicatorPopulationState state,
         int requestedFounders, float minLife, float maxLife, Color color, float biomassTarget,
         Vector2 hydrogenTemperatureRange, float lethalTemperatureMargin,
-        float founderCo2Requirement=.01f,float founderH2Requirement=.02f,float founderReproductionMinEfficiency=.15f,float founderDormancyFloor=0f)
+        float founderCo2Requirement=.01f,float founderH2Requirement=.02f,float founderReproductionMinEfficiency=.15f,float founderDormancyFloor=0f,
+        bool logBiologyReports = false)
     {
         Clear();
+        SetBiologyReportsEnabled(logBiologyReports);
         planet = generator;
         resources = generator != null ? generator.GetComponent<GeodesicOceanResourceField>() : null;
         suspended = resources != null ? resources.SuspendedMinerals : null;
@@ -292,14 +297,9 @@ public sealed partial class GeodesicBiologyRuntime
         reproductionRandom = new System.Random(biologySeed ^ 0x5EED123);
         temperatureMutationRandom = new System.Random(biologySeed ^ 0x54454D50);
         locomotionMutationRandom = new System.Random(biologySeed ^ 0x4C4F434F);
-        temperatureTelemetry.Initialize(grid, resources, biologySeed);
         EnsureFounderVentCatalog();
-        int spawned = SpawnFounders(requestedFounders, random, visualRandom, agents, state, minLife, maxLife, color, biomassTarget,
+        SpawnFounders(requestedFounders, random, visualRandom, agents, state, minLife, maxLife, color, biomassTarget,
             hydrogenTemperatureRange, lethalTemperatureMargin, false);
-        int occupiedCells = 0, occupiedLayers = 0;
-        var cellSeen = new bool[grid.CellCount]; var layerSeen = new bool[grid.MaximumLayerCount];
-        for (int i = 0; i < spawned; i++) { int cell=state.GeodesicCellIndex[i]; if (!cellSeen[cell]) { cellSeen[cell] = true; occupiedCells++; } int layer=state.CurrentOceanLayerIndex[i]; if(!layerSeen[layer]){layerSeen[layer]=true;occupiedLayers++;} }
-        Debug.Log($"[GeodesicBiology] mode=Geodesic biologySeed={biologySeed} requested={requestedFounders} spawned={spawned} hydrogenotrophy={spawned} passiveDrift={spawned} occupiedCells={occupiedCells} occupiedLayers={occupiedLayers} ventFounders={spawned} founders=hydrogenotrophy-passive-drift-compact-submarine-vent-bottom");
         return true;
     }
 
@@ -354,8 +354,8 @@ public sealed partial class GeodesicBiologyRuntime
         }
         if (count > 0 && validVents == 0) { emergenceRejectedHabitat += count; Debug.LogWarning("[GeodesicBiology] No valid submarine vent habitat; no founders were spawned."); return 0; }
         int firstFounder = state.Count, spawnedCount=0, bottomMatches = 0, exactVentCells = 0, visualCellMismatches = 0, visualLayerMismatches = 0;
-        var usedVentCells = new HashSet<int>();
-        var layerHistogram = new int[grid.MaximumLayerCount];
+        var usedVentCells = biologyReportsEnabled ? new HashSet<int>() : null;
+        var layerHistogram = biologyReportsEnabled ? new int[grid.MaximumLayerCount] : null;
         for (int i = 0; i < count; i++)
         {
             double pick = random.NextDouble() * totalVentWeight, cumulative = 0d; GeodesicVentSourceOutlet selected = default;
@@ -370,6 +370,7 @@ public sealed partial class GeodesicBiologyRuntime
                 minLife, maxLife, color, biomassTarget, hydrogenTemperatureRange, lethalTemperatureMargin, forceZeroAge);
             if(packed<0) { emergenceRejectedHabitat++; continue; }
             spawnedCount++;
+            if (!biologyReportsEnabled) continue;
             int sourceCell = state.GeodesicCellIndex[packed];
             int bottomLayer = state.CurrentOceanLayerIndex[packed];
             float layerRadius = grid.LayerCenterRadius[grid.GetNodeIndex(sourceCell,bottomLayer)];
@@ -382,7 +383,8 @@ public sealed partial class GeodesicBiologyRuntime
             if (Mathf.Abs(visualLocalPosition.magnitude - layerRadius) > 1e-4f) visualLayerMismatches++;
 
         }
-        Debug.Log($"[GeodesicFounderSpawn] requested={count} spawned={spawnedCount} selectedSubmarineOutlets={usedVentCells.Count} actualBottomLayer={bottomMatches}/{spawnedCount} remainedInSourceCell={exactVentCells}/{spawnedCount} invalidVentCandidates={invalidVents} visualCellMismatch={visualCellMismatches} visualLayerMismatch={visualLayerMismatches} placement=bounded-local-thermal-and-food-sampling layers={FormatLayerHistogram(layerHistogram)} packedRange={firstFounder}-{state.Count-1}");
+        if (biologyReportsEnabled)
+            Debug.Log($"[GeodesicFounderSpawn] seed={biologySeed} requested={count} spawned={spawnedCount} selectedSubmarineOutlets={usedVentCells.Count} actualBottomLayer={bottomMatches}/{spawnedCount} remainedInSourceCell={exactVentCells}/{spawnedCount} invalidVentCandidates={invalidVents} visualCellMismatch={visualCellMismatches} visualLayerMismatch={visualLayerMismatches} placement=bounded-local-thermal-and-food-sampling layers={FormatLayerHistogram(layerHistogram)} packedRange={firstFounder}-{state.Count-1}");
         return spawnedCount;
     }
 
@@ -472,6 +474,8 @@ public sealed partial class GeodesicBiologyRuntime
         return text.ToString();
     }
 
+    public void SetBiologyReportsEnabled(bool enabled) => biologyReportsEnabled = enabled;
+
     public void Step(float dt, List<Replicator> agents, ReplicatorPopulationState state, float maintenance,
         float hydrogenCo2, float hydrogenH2, float hydrogenEnergy, float hydrogenStoreFraction,
         bool hydrogenO2InhibitionEnabled, float o2ComfortMax, float o2StressMax, float hydrogenMinimumO2Efficiency,
@@ -482,12 +486,17 @@ public sealed partial class GeodesicBiologyRuntime
         GeodesicBiologyTemperatureSettings? configuredTemperatureSettings = null)
     {
         temperatureSettings = configuredTemperatureSettings ?? GeodesicBiologyTemperatureSettings.Default;
+        if ((biologyReportsEnabled || chemotaxisABDiagnosticsEnabled) && temperatureTelemetry == null)
+        {
+            temperatureTelemetry = new GeodesicBiologyTemperatureTelemetry();
+            temperatureTelemetry.Initialize(grid, resources, biologySeed);
+        }
         AdvanceChemotaxisABStep(dt);
         bool observeAccounting = accountingDiagnostics != null && accountingDiagnostics.Enabled;
         if (observeAccounting) accountingDiagnostics.AdvanceObservedTime(dt);
         RefreshTemperatureCache();
         BeginBiologicalThermalStep();
-        if (!hydrogenotrophyConfigLogged)
+        if (biologyReportsEnabled && !hydrogenotrophyConfigLogged)
         {
             Debug.Log(DescribeResolvedFermentationControls(o2ComfortMax,o2StressMax,maxStore));
             Debug.Log(DescribeResolvedSulfurControls(sulfurCo2, sulfurH2s, sulfurEnergy, o2ComfortMax, o2StressMax));
@@ -500,8 +509,8 @@ public sealed partial class GeodesicBiologyRuntime
         LastMovementKinematicsSeconds = 0f;
         if (agents.Count == 0)
         {
-            diagnosticElapsed += dt;
-            if (diagnosticElapsed >= 10d) { LogDiagnostics(state, agents, carbonDivision, divisionCost, replicationCost, divisionMultiple, maxPopulation, reproductionRate); diagnosticElapsed = 0d; }
+            MaybeLogDiagnostics(dt, state, agents, carbonDivision, divisionCost, replicationCost,
+                divisionMultiple, maxPopulation, reproductionRate, observeAccounting);
             return;
         }
         state.EnsureMatchesAgentCount(agents);
@@ -530,12 +539,8 @@ public sealed partial class GeodesicBiologyRuntime
         }
         using (Lifecycle.Auto())
         using (MaintenanceAndLifecycle.Auto()) RunLifecycle(dt, agents, state, maintenance, reproductionRate, carbonDivision, divisionCost, replicationCost, divisionMultiple, childSplit, maxPopulation, registerDeathCause, observeAccounting && reactionDt > 0f, observeAccounting);
-        diagnosticElapsed += dt;
-        if (diagnosticElapsed >= 10d)
-        {
-            LogDiagnostics(state, agents, carbonDivision, divisionCost, replicationCost, divisionMultiple, maxPopulation, reproductionRate);
-            diagnosticElapsed = 0d;
-        }
+        MaybeLogDiagnostics(dt, state, agents, carbonDivision, divisionCost, replicationCost,
+            divisionMultiple, maxPopulation, reproductionRate, observeAccounting);
     }
 
     private void BuildRequest(int i, ReplicatorPopulationState state, float dt,
@@ -587,7 +592,7 @@ public sealed partial class GeodesicBiologyRuntime
         }
         r.Temperature = temperature;
         r.TemperaturePerformance = temperatureScale;
-        AccumulateTemperature(temperature, temperatureScale);
+        if (biologyReportsEnabled) AccumulateTemperature(temperature, temperatureScale);
         if (!float.IsFinite(state.Energy[i]) || !float.IsFinite(state.OrganicCStore[i]) || !float.IsFinite(temperature)) invalidBiologicalStates++;
         r.Desired=Math.Max(0,scale*temperatureScale*oxygenEfficiency);
         if(r.Metabolism == MetabolismType.Fermentation) { r.Desired=GeodesicFermentationBalance.LimitExtent(r.Desired,r.NeedA); ObserveFermentationRequest(r,oxygenEfficiency); }
@@ -704,7 +709,7 @@ public sealed partial class GeodesicBiologyRuntime
             if (r.ProductCoefficient > 0) delta[(int)r.Product*grid.NodeCapacity+r.Node] += r.ProductCoefficient*r.Actual;
             if (r.SulfurProduct) suspended.AddPrecipitate(r.Cell,r.Layer,r.NeedB*r.Actual,0);
             float gained = r.EnergyPerExtent*(float)r.Actual;
-            RecordABMetabolicEnergy(state.Locomotion[i], gained);
+            if (chemotaxisABDiagnosticsEnabled) RecordABMetabolicEnergy(state.Locomotion[i], gained);
             state.Energy[i] += gained;
             state.OrganicCStore[i] = Mathf.Min(maxStore,state.OrganicCStore[i]+r.StorePerExtent*(float)r.Actual);
             if (observeAccounting)
@@ -749,7 +754,7 @@ public sealed partial class GeodesicBiologyRuntime
         // Both authoritative substrate writes succeeded before any biological credit.
         state.OrganicCStore[index] = transfer.storeAfter;
         state.Energy[index] += transfer.energy;
-        RecordABMetabolicEnergy(state.Locomotion[index], transfer.energy);
+        if (chemotaxisABDiagnosticsEnabled) RecordABMetabolicEnergy(state.Locomotion[index], transfer.energy);
         extentByMetabolism[(int)r.Metabolism] += transfer.extent;
         energyByMetabolism[(int)r.Metabolism] += transfer.energy;
         if (!observeAccounting) return;
@@ -765,9 +770,12 @@ public sealed partial class GeodesicBiologyRuntime
         float rate, bool carbon, float divisionCost, float replicationCost, float multiple, float split,
         int maxPopulation, Action<MetabolismType, DeathCause> registerDeathCause, bool recordReactions, bool observeAccounting)
     {
+        bool observeEvolution = evolutionDiagnostics.Enabled;
         for (int i = state.Count - 1; i >= 0; i--)
         {
-            ObserveABOrganismTime(i, agents[i].DiagnosticId, state, dt);
+            if (observeEvolution)
+                evolutionDiagnostics.Observe(i, agents[i].DiagnosticId, state.Locomotion[i], dt, abSimulationTime);
+            if (chemotaxisABDiagnosticsEnabled) ObserveABOrganismTime(i, state, dt);
             // Original request indices still match here, before any reverse-loop swap-back or birth.
             // Fold accounting into this existing pass rather than scanning the population again.
             if (recordReactions) RecordReactionAccounting(i);
@@ -791,17 +799,18 @@ public sealed partial class GeodesicBiologyRuntime
             {
                 RecycleDeathInventory(i, agents[i], state, cause);
                 RecordLocomotionDeath(state.Metabolism[i], state.Locomotion[i]);
-                RecordABDeath(state.Locomotion[i], cause);
-                evolutionDiagnostics.Death(i, agents[i].DiagnosticId, state.Locomotion[i], abSimulationTime);
+                if (chemotaxisABDiagnosticsEnabled) RecordABDeath(state.Locomotion[i], cause);
+                if (observeEvolution)
+                    evolutionDiagnostics.Death(i, agents[i].DiagnosticId, state.Locomotion[i], abSimulationTime);
                 RecordFounderDeath(agents[i].DiagnosticId);
                 deaths++;
                 if (state.Metabolism[i] == MetabolismType.SulfurChemosynthesis) sulfurDeaths++;
                 if (state.Metabolism[i] == MetabolismType.Fermentation) fermentationDeaths++;
                 if (cause == DeathCause.EnergyDepletion) starvationDeaths++;
                 else if (cause == DeathCause.OldAge) lifespanDeaths++;
-                temperatureTelemetry.RecordDeath(cause);
+                if (biologyReportsEnabled) temperatureTelemetry.RecordDeath(cause);
                 registerDeathCause?.Invoke(state.Metabolism[i], cause);
-                evolutionDiagnostics.SwapBackRemoval(i, state.Count - 1);
+                if (observeEvolution) evolutionDiagnostics.SwapBackRemoval(i, state.Count - 1);
                 RemoveAgentAtSwapBack(i, agents, state);
                 continue;
             }
@@ -866,9 +875,10 @@ public sealed partial class GeodesicBiologyRuntime
             agents.Add(child);
             state.AddAgentFromReplicatorData(child);
             int childIndex = state.Count - 1;
-            evolutionDiagnostics.Birth(i, parent.DiagnosticId, state.Locomotion[i], childIndex,
-                child.DiagnosticId, child.locomotion, abSimulationTime, locomotionMutation);
-            if (evolutionDiagnostics.Enabled && grid.IsNodeActive(child.geodesicCellIndex, child.currentOceanLayerIndex))
+            if (observeEvolution)
+                evolutionDiagnostics.Birth(i, parent.DiagnosticId, state.Locomotion[i], childIndex,
+                    child.DiagnosticId, child.locomotion, abSimulationTime, locomotionMutation);
+            if (observeEvolution && grid.IsNodeActive(child.geodesicCellIndex, child.currentOceanLayerIndex))
             {
                 int birthNode = grid.GetNodeIndex(child.geodesicCellIndex, child.currentOceanLayerIndex);
                 float radius = planet.transform.InverseTransformPoint(child.position).magnitude;
@@ -902,9 +912,9 @@ public sealed partial class GeodesicBiologyRuntime
             if (state.Metabolism[i] == MetabolismType.Fermentation && (uint)state.Locomotion[i] < 4u) fermentationParentBirths[(int)state.Locomotion[i]]++;
             if (state.Metabolism[i] == MetabolismType.SulfurChemosynthesis && (uint)state.Locomotion[i] < 4u)
                 sulfurParentBirths[(int)state.Locomotion[i]]++;
-            RecordABBirth(state.Locomotion[i]);
+            if (chemotaxisABDiagnosticsEnabled) RecordABBirth(state.Locomotion[i]);
             RecordLocomotionBirth(state.Metabolism[i], state.Locomotion[i]);
-            temperatureTelemetry.RecordBirth(performance, temperatureSettings);
+            if (biologyReportsEnabled) temperatureTelemetry.RecordBirth(performance, temperatureSettings);
         }
     }
 
@@ -1485,28 +1495,71 @@ public sealed partial class GeodesicBiologyRuntime
         performanceSum += performance; performanceMin = Mathf.Min(performanceMin, performance); performanceMax = Mathf.Max(performanceMax, performance);
         temperatureSamples++; if (performance <= 0f) zeroTemperaturePerformance++;
     }
-    private void LogDiagnostics(ReplicatorPopulationState state, List<Replicator> agents, bool carbonDivision,
-        float divisionCost, float replicationCost, float divisionMultiple, int maxPopulation, float reproductionRate)
+    private void MaybeLogDiagnostics(float dt, ReplicatorPopulationState state, List<Replicator> agents,
+        bool carbonDivision, float divisionCost, float replicationCost, float divisionMultiple,
+        int maxPopulation, float reproductionRate, bool observeAccounting)
     {
+        diagnosticElapsed += dt;
+        if (diagnosticElapsed < 10d) return;
+        diagnosticElapsed = 0d;
+        if (biologyReportsEnabled || locomotionSettings.logDiagnostics || chemotaxisABDiagnosticsEnabled || observeAccounting)
+            MaybeEmitDiagnosticReports(state, agents, carbonDivision, divisionCost, replicationCost,
+                divisionMultiple, maxPopulation, reproductionRate, observeAccounting);
+
+        // These readouts retain their ten-simulated-second window even when Console reports are off.
+        biologySteps = agentEvaluations = habitatSamples = oceanTemperatureReads = photosyntheticLightReads
+            = resourceInventoryReads = competitionPairs = movementUpdates = wanderStateRefreshes = continuousKinematicUpdates
+            = horizontalBoundaryCrossings = verticalTransitions = landBoundaryRejections = invalidLayerCorrections = 0;
+    }
+
+    private void MaybeEmitDiagnosticReports(ReplicatorPopulationState state, List<Replicator> agents,
+        bool carbonDivision, float divisionCost, float replicationCost, float divisionMultiple,
+        int maxPopulation, float reproductionRate, bool observeAccounting)
+    {
+        double now = Time.unscaledTimeAsDouble;
+        if (!chemotaxisABDiagnosticsEnabled && now < nextDiagnosticReportRealTime) return;
+        nextDiagnosticReportRealTime = now + 5d;
+
         using var performanceScope = Telemetry.Auto();
+        if (biologyReportsEnabled)
+            LogBiologyReports(state, carbonDivision, divisionCost, replicationCost, divisionMultiple, maxPopulation);
+        if (!chemotaxisABDiagnosticsEnabled && locomotionSettings.logDiagnostics) LogLocomotionDiagnostics(state);
+        if (evolutionDiagnostics.Enabled)
+        {
+            Debug.Log(evolutionDiagnostics.Summary(abSimulationTime));
+            Debug.Log(evolutionDiagnostics.CohortSummary());
+        }
+        if (BeginABPopulationReport())
+        {
+            for (int i = 0; i < state.Count; i++) ObserveABPopulation(i, state);
+            LogChemotaxisABReport(state.Count);
+        }
+        if (observeAccounting)
+        {
+            accountingDiagnostics.BeginPopulationReport();
+            for (int i = 0; i < state.Count; i++)
+                if (TryGetGrowthSnapshot(i, agents, state, carbonDivision, divisionCost, replicationCost,
+                    divisionMultiple, maxPopulation, reproductionRate, lastBiologyStepSeconds, out GeodesicGrowthSnapshot growth))
+                    accountingDiagnostics.ObserveGrowth(growth);
+            accountingDiagnostics.LogAndResetInterval();
+        }
+    }
+
+    private void LogBiologyReports(ReplicatorPopulationState state, bool carbonDivision,
+        float divisionCost, float replicationCost, float divisionMultiple, int maxPopulation)
+    {
         LogDeathRecycling();
         LogSulfurDiagnostics(state);
         LogFermentationDiagnostics(state);
         LogFounderEmergence(state);
-        if (!chemotaxisABDiagnosticsEnabled) LogLocomotionDiagnostics(state);
-        bool reportAB = BeginABPopulationReport();
         temperatureTelemetry.Log(state, oceanTemperature, temperatureSettings, carbonDivision,
             divisionCost, replicationCost, divisionMultiple, maxPopulation, GetAgentTemperatureSample);
         int hydrogen=0,sulfur=0,methanogenesis=0,photosynthesis=0,methanotrophy=0,passive=0,amoeboid=0,flagellum=0,anchored=0;
-        bool observeAccounting = accountingDiagnostics != null && accountingDiagnostics.Enabled;
-        if (observeAccounting) accountingDiagnostics.BeginPopulationReport();
-        float organicMin=float.PositiveInfinity,organicMax=float.NegativeInfinity,thresholdMin=float.PositiveInfinity,thresholdMax=float.NegativeInfinity,maxDivisionCarbonFraction=0f;double organicSum=0d,thresholdSum=0d;int divisionEligible=0,occupiedNodeCount=0;
+        reportOccupiedNodes ??= new HashSet<int>();
+        reportOccupiedNodes.Clear();
+        float organicMin=float.PositiveInfinity,organicMax=float.NegativeInfinity,thresholdMin=float.PositiveInfinity,thresholdMax=float.NegativeInfinity,maxDivisionCarbonFraction=0f;double organicSum=0d,thresholdSum=0d;int divisionEligible=0;
         for (int i = 0; i < state.Count; i++)
         {
-            if (reportAB) ObserveABPopulation(i, state);
-            if (observeAccounting && TryGetGrowthSnapshot(i, agents, state, carbonDivision, divisionCost,
-                replicationCost, divisionMultiple, maxPopulation, reproductionRate, lastBiologyStepSeconds, out GeodesicGrowthSnapshot growth))
-                accountingDiagnostics.ObserveGrowth(growth);
             switch (state.Metabolism[i])
             {
                 case MetabolismType.Hydrogenotrophy: hydrogen++; break;
@@ -1530,28 +1583,29 @@ public sealed partial class GeodesicBiologyRuntime
             bool energyReady = state.Energy[i] > Mathf.Max(0f, carbonDivision ? divisionCost : replicationCost);
             if (energyReady && state.CanReplicate[i] && (!carbonDivision || store >= threshold)) divisionEligible++;
             int cell = state.GeodesicCellIndex[i], layer = state.CurrentOceanLayerIndex[i];
-            if (grid.IsNodeActive(cell, layer))
-            {
-                int node = grid.GetNodeIndex(cell, layer);
-                if (MarkTouchedNode(node, -generation, lightStamps)) touched[occupiedNodeCount++] = node;
-            }
+            if (grid.IsNodeActive(cell, layer)) reportOccupiedNodes.Add(grid.GetNodeIndex(cell, layer));
         }
         float occupiedH2Min=float.PositiveInfinity,occupiedH2Max=float.NegativeInfinity,occupiedCo2Min=float.PositiveInfinity,occupiedCo2Max=float.NegativeInfinity;double occupiedH2Sum=0d,occupiedCo2Sum=0d;int occupiedSamples=0;
-        for(int t=0;t<occupiedNodeCount;t++){int node=touched[t];int cell=node/grid.MaximumLayerCount;int layer=node%grid.MaximumLayerCount;if(resources.TryGetConcentration(cell,layer,GeodesicOceanResource.H2,out float h2Value)&&resources.TryGetConcentration(cell,layer,GeodesicOceanResource.CO2,out float co2Value)){occupiedH2Min=Mathf.Min(occupiedH2Min,h2Value);occupiedH2Max=Mathf.Max(occupiedH2Max,h2Value);occupiedH2Sum+=h2Value;occupiedCo2Min=Mathf.Min(occupiedCo2Min,co2Value);occupiedCo2Max=Mathf.Max(occupiedCo2Max,co2Value);occupiedCo2Sum+=co2Value;occupiedSamples++;}}
+        foreach (int node in reportOccupiedNodes)
+        {
+            int cell = node / grid.MaximumLayerCount;
+            int layer = node % grid.MaximumLayerCount;
+            if (!resources.TryGetConcentration(cell, layer, GeodesicOceanResource.H2, out float h2Value)
+                || !resources.TryGetConcentration(cell, layer, GeodesicOceanResource.CO2, out float co2Value)) continue;
+            occupiedH2Min = Mathf.Min(occupiedH2Min, h2Value);
+            occupiedH2Max = Mathf.Max(occupiedH2Max, h2Value);
+            occupiedH2Sum += h2Value;
+            occupiedCo2Min = Mathf.Min(occupiedCo2Min, co2Value);
+            occupiedCo2Max = Mathf.Max(occupiedCo2Max, co2Value);
+            occupiedCo2Sum += co2Value;
+            occupiedSamples++;
+        }
         if(state.Count==0){organicMin=organicMax=thresholdMin=thresholdMax=float.NaN;}if(occupiedSamples==0){occupiedH2Min=occupiedH2Max=occupiedCo2Min=occupiedCo2Max=float.NaN;}
         double samples=Math.Max(1,temperatureSamples);
         int h=(int)MetabolismType.Hydrogenotrophy,s=(int)MetabolismType.SulfurChemosynthesis,m=(int)MetabolismType.Methanogenesis,p=(int)MetabolismType.Photosynthesis,mt=(int)MetabolismType.Methanotrophy;
         double evaluationsPerHabitat=agentEvaluations/(double)Math.Max(1L,habitatSamples);
         double evaluationsPerTemperatureRead=agentEvaluations/(double)Math.Max(1L,oceanTemperatureReads);
         Debug.Log($"[GeodesicBiologyTelemetry] population={state.Count} biologySteps={biologySteps} lastStepSeconds={lastBiologyStepSeconds:G6} agentEvaluations={agentEvaluations} habitatSamples={habitatSamples} occupiedHabitatH2(min/avg/max)={occupiedH2Min:G6}/{occupiedH2Sum/Math.Max(1,occupiedSamples):G6}/{occupiedH2Max:G6} occupiedHabitatCO2(min/avg/max)={occupiedCo2Min:G6}/{occupiedCo2Sum/Math.Max(1,occupiedSamples):G6}/{occupiedCo2Max:G6} organicCStore(min/avg/max)={organicMin:G6}/{organicSum/Math.Max(1,state.Count):G6}/{organicMax:G6} divisionThreshold(min/avg/max)={thresholdMin:G6}/{thresholdSum/Math.Max(1,state.Count):G6}/{thresholdMax:G6} maxDivisionCarbonFraction={maxDivisionCarbonFraction:G6} divisionEligible={divisionEligible} oceanTemperatureReads={oceanTemperatureReads} photosyntheticLightReads={photosyntheticLightReads} resourceInventoryReads={resourceInventoryReads} competitionPairs={competitionPairs} evaluationsPerHabitat={evaluationsPerHabitat:G6} evaluationsPerTemperatureRead={evaluationsPerTemperatureRead:G6} metabolismOrder=h/s/m/p/mt populationByMetabolism={hydrogen}/{sulfur}/{methanogenesis}/{photosynthesis}/{methanotrophy} locomotionOrder=passive/amoeboid/flagellum/anchored populationByLocomotion={passive}/{amoeboid}/{flagellum}/{anchored} movementUpdates={movementUpdates} wanderStateRefreshes={wanderStateRefreshes} continuousKinematicUpdates={continuousKinematicUpdates} horizontalBoundaryCrossings={horizontalBoundaryCrossings} verticalTransitions={verticalTransitions} landBoundaryRejections={landBoundaryRejections} invalidLayerCorrections={invalidLayerCorrections} births={births} deaths={deaths} starvation={starvationDeaths} lifespan={lifespanDeaths} requests={requestedByMetabolism[h]}/{requestedByMetabolism[s]}/{requestedByMetabolism[m]}/{requestedByMetabolism[p]}/{requestedByMetabolism[mt]} achieved={achievedByMetabolism[h]}/{achievedByMetabolism[s]}/{achievedByMetabolism[m]}/{achievedByMetabolism[p]}/{achievedByMetabolism[mt]} zeroAchieved={zeroAchieved} hydrogenPrecisionRejected={hydrogenPrecisionRejected} resourceLimited={resourceLimited} extent={extentByMetabolism[h]:G6}/{extentByMetabolism[s]:G6}/{extentByMetabolism[m]:G6}/{extentByMetabolism[p]:G6}/{extentByMetabolism[mt]:G6} energy={energyByMetabolism[h]:G6}/{energyByMetabolism[s]:G6}/{energyByMetabolism[m]:G6}/{energyByMetabolism[p]:G6}/{energyByMetabolism[mt]:G6} maintenance={maintenancePaid:G6} biologyTemperatureAuthority=coarseOceanLayer temperatureK(min/avg/max)={temperatureMin:G6}/{temperatureSum/samples:G6}/{temperatureMax:G6} performance(min/avg/max)={performanceMin:G6}/{performanceSum/samples:G6}/{performanceMax:G6} zeroPerformance={zeroTemperaturePerformance} invalidHabitat={invalidHabitats} invalidState={invalidBiologicalStates}");
-        if (evolutionDiagnostics.Enabled)
-        {
-            Debug.Log(evolutionDiagnostics.Summary(abSimulationTime));
-            Debug.Log(evolutionDiagnostics.CohortSummary());
-        }
-        if (reportAB) LogChemotaxisABReport(state.Count);
-        if (observeAccounting) accountingDiagnostics.LogAndResetInterval();
-        biologySteps=agentEvaluations=habitatSamples=oceanTemperatureReads=photosyntheticLightReads=resourceInventoryReads=competitionPairs=movementUpdates=wanderStateRefreshes=continuousKinematicUpdates=horizontalBoundaryCrossings=verticalTransitions=landBoundaryRejections=invalidLayerCorrections=0;
     }
     public static float ResolvePhotosyntheticLight(float daylight, int layer) => Mathf.Clamp01(daylight) * (layer == 0 ? 1f : layer == 1 ? 0.55f : 0f);
     public void Clear()
@@ -1575,7 +1629,10 @@ public sealed partial class GeodesicBiologyRuntime
         temperatureStamps = Array.Empty<int>(); temperatureGeneration = 1; cachedOceanTemperatureTick = double.NaN;
         temperatureSettings = GeodesicBiologyTemperatureSettings.Default;
         temperatureMutationRandom = null;
-        temperatureTelemetry.Clear();
+        temperatureTelemetry = null;
+        reportOccupiedNodes = null;
+        biologyReportsEnabled = false;
+        nextDiagnosticReportRealTime = 0d;
         accountingDiagnostics?.Reset();
         evolutionDiagnostics.Clear();
         Array.Clear(requestedByMetabolism, 0, requestedByMetabolism.Length);

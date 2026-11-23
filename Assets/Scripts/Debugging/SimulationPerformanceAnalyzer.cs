@@ -58,7 +58,7 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
     [SerializeField] private GeodesicOceanResourceField resources;
     [SerializeField] private GeodesicAbioticChemistry chemistry;
     [Header("Output")]
-    [SerializeField] private bool logSummaryToConsole = true;
+    [SerializeField] private bool logSummaryToConsole;
     [SerializeField] private bool writeCsv;
     [SerializeField, Min(1)] private int flushCsvEveryNSamples = 1;
     [SerializeField] private string csvFileNamePrefix = "simulation_performance";
