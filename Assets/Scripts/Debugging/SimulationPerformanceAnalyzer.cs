@@ -71,7 +71,7 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
     private ProfilerRecorder cpuFrameRecorder, gcRecorder;
     private double[] renderedFrames, cpuFrames, markerTotals, frameMarkers;
     private readonly double[] aggregates = new double[10];
-    private readonly StringBuilder csvBuffer = new StringBuilder(16384);
+    private StringBuilder csvBuffer;
     private readonly StringBuilder summary = new StringBuilder(2048);
     private FrameContext pending;
     private bool hasPending, hasClock;
@@ -256,6 +256,7 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
         if (writeCsv && !csvFailed)
         {
             if (string.IsNullOrEmpty(csvOutputPath)) InitializeCsv();
+            if (csvFailed) return;
             csvBuffer.Append(endFrame).Append(',').Append(frames).Append(',');
             AppendCsvNumber(windowSeconds); AppendCsvNumber(frames / windowSeconds);
             AppendCsvNumber(averageFrame); AppendCsvNumber(p95);
@@ -311,6 +312,7 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
             foreach (char invalid in Path.GetInvalidFileNameChars()) prefix = prefix.Replace(invalid, '_');
             string suffix = appendTimestampToCsvFileName ? "_" + DateTime.Now.ToString("yyyyMMdd_HHmmss_fff", CultureInfo.InvariantCulture) : string.Empty;
             csvOutputPath = Path.Combine(Application.persistentDataPath, prefix + suffix + ".csv");
+            csvBuffer ??= new StringBuilder(4096);
             csvBuffer.Clear(); csvSamplesPending = 0;
             csvBuffer.Append("end_frame,frames,real_seconds,rendered_fps,frame_avg_ms,frame_p95_ms,cpu_main_thread_avg_ms,cpu_main_thread_p95_ms,cpu_samples,gc_bytes_per_frame,gc_samples,population_avg,requested_speed_avg,steps_executed,steps_per_frame,simulated_seconds,simulated_seconds_per_real_second,active_chemistry_nodes_avg,chemistry_candidates_processed,chemistry_nodes_processed,chemistry_ticks,window_capacity_reached");
             foreach (string name in AggregateNames) csvBuffer.Append(',').Append(name).Append("_avg_ms");
@@ -332,13 +334,13 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
 
     private void FlushCsvBuffer()
     {
-        if (csvFailed || string.IsNullOrEmpty(csvOutputPath) || csvBuffer.Length == 0) return;
+        if (csvFailed || string.IsNullOrEmpty(csvOutputPath) || csvBuffer == null || csvBuffer.Length == 0) return;
         try { File.AppendAllText(csvOutputPath, csvBuffer.ToString()); csvBuffer.Clear(); csvSamplesPending = 0; }
         catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException) { FailCsv(ex); }
     }
     private void FailCsv(Exception ex)
     {
-        csvFailed = true; csvBuffer.Clear();
+        csvFailed = true; csvBuffer?.Clear();
         Debug.LogWarning($"[SimulationPerformanceAnalyzer] CSV export stopped: {ex.Message}", this);
     }
     private void OnDisable()
@@ -350,7 +352,14 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
         cpuFrameRecorder.Dispose(); gcRecorder.Dispose();
         hasPending = false;
     }
-    private static void AppendNumber(StringBuilder builder, double value) => builder.Append(value.ToString("F4", CultureInfo.InvariantCulture));
+    private static void AppendNumber(StringBuilder builder, double value)
+    {
+        Span<char> characters = stackalloc char[64];
+        if (value.TryFormat(characters, out int written, "F4", CultureInfo.InvariantCulture))
+            builder.Append(characters.Slice(0, written));
+        else
+            builder.Append(value.ToString("F4", CultureInfo.InvariantCulture));
+    }
     private static void AppendOptional(StringBuilder builder, double total, long count)
     { if (count > 0) AppendNumber(builder, total / count); else builder.Append("n/a"); }
     private void AppendCsvNumber(double value) { AppendNumber(csvBuffer, value); csvBuffer.Append(','); }

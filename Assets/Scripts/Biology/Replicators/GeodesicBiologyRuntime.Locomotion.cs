@@ -33,6 +33,18 @@ public sealed partial class GeodesicBiologyRuntime
     private double completedRunSeconds, activeDistanceKm, activeHorizontalKm, activeVerticalKm, locomotionEnergyPaid;
     private long activeCellCrossings, activeLayerTransitions, depthBoundaryRejections, energyLimitedSteps;
 
+#if UNITY_EDITOR
+    internal bool CollectActiveMovementDiagnostics { private get; set; }
+#endif
+
+    private bool ObserveActiveMovementDiagnostics()
+    {
+#if UNITY_EDITOR
+        if (CollectActiveMovementDiagnostics) return true;
+#endif
+        return locomotionSettings.logDiagnostics || chemotaxisABDiagnosticsEnabled;
+    }
+
     internal struct MovementWork
     {
         public long PassiveSteps, AmoeboidSteps, FlagellarSteps, AnchoredSteps;
@@ -249,6 +261,7 @@ public sealed partial class GeodesicBiologyRuntime
     private void RunActiveMovement(float elapsed, List<Replicator> agents, ReplicatorPopulationState state, Matrix4x4 worldToLocal, Matrix4x4 localToWorld)
     {
         bool samplesReady = false;
+        bool observeMovement = ObserveActiveMovementDiagnostics();
         BeginDetailedTaxisBatch();
         for (int i = 0; i < state.Count; i++)
         {
@@ -288,7 +301,7 @@ public sealed partial class GeodesicBiologyRuntime
                 float stepDt = Mathf.Min(remaining, PassiveKinematicsIntervalSeconds);
                 if (speed > 0f) stepDt = Mathf.Min(stepDt, movementSafeAngles[cell] / speed);
                 bool canReuseObservation;
-                using (ActiveSensingMarker.Auto()) canReuseObservation = SenseActiveHabitat(i, state, stepDt, trackedSlot);
+                using (ActiveSensingMarker.Auto()) canReuseObservation = SenseActiveHabitat(i, state, stepDt, trackedSlot, observeMovement);
                 using (ActiveVerticalMarker.Auto()) PrepareVerticalExploration(i, state, stepDt, canReuseObservation);
                 float rate = type == LocomotionType.Flagellum ? locomotionSettings.flagellumEnergyPerSecond : locomotionSettings.amoeboidEnergyPerSecond;
                 bool hasPropulsion = speed > 0f || (active.verticalMoving && locomotionSettings.verticalSpeedMetersPerSecond > 0f);
@@ -298,7 +311,7 @@ public sealed partial class GeodesicBiologyRuntime
                 float effortDt = !hasPropulsion || energy <= 0f ? 0f : rate > 0f ? paid / rate : stepDt;
                 if (hasPropulsion && effortDt + 1e-6f < stepDt) energyLimitedSteps++;
                 state.Energy[i] -= paid;
-                locomotionEnergyPaid += paid;
+                if (observeMovement) locomotionEnergyPaid += paid;
                 active.runSeconds += effortDt;
                 float effortShare = active.verticalMoving ? 0.70710678f : 1f;
                 Vector3 direction = state.PassiveDriftDirection[i], tangent = state.PassiveDriftTangent[i];
@@ -327,19 +340,24 @@ public sealed partial class GeodesicBiologyRuntime
                 direction = (before * Mathf.Cos(travel) + tangent * Mathf.Sin(travel)).normalized;
                 tangent = Vector3.ProjectOnPlane(tangent, direction).normalized;
                 TraverseMovementBoundaries(i, state, ref direction, ref tangent, true);
-                // Cross-product atan2 remains accurate for tiny movements (acos(dot) does not).
-                float actualAngle = Mathf.Atan2(Vector3.Cross(before, direction).magnitude, Mathf.Clamp(Vector3.Dot(before, direction), -1f, 1f));
-                double physicalRadiusKm = grid.PhysicalOceanSurfaceRadiusKm
-                    - grid.ToPhysicalDepthKm((double)grid.OceanSurfaceRadius - state.PassiveVisualRadius[i]);
-                double distance = actualAngle * physicalRadiusKm;
-                activeHorizontalKm += distance;
+                double distance = 0d;
+                if (observeMovement)
+                {
+                    // Cross-product atan2 resolves very small angles accurately.
+                    float actualAngle = Mathf.Atan2(Vector3.Cross(before, direction).magnitude,
+                        Mathf.Clamp(Vector3.Dot(before, direction), -1f, 1f));
+                    double physicalRadiusKm = grid.PhysicalOceanSurfaceRadiusKm
+                        - grid.ToPhysicalDepthKm((double)grid.OceanSurfaceRadius - state.PassiveVisualRadius[i]);
+                    distance = actualAngle * physicalRadiusKm;
+                    activeHorizontalKm += distance;
+                }
                 state.PassiveDriftDirection[i] = direction;
                 state.PassiveDriftTangent[i] = tangent;
                 // Parallel-transport the desired run; reflected coast headings become the new run.
                 active.desiredTangentLocal = Vector3.ProjectOnPlane(active.desiredTangentLocal, direction).normalized;
                 double verticalDistance;
-                using (ActiveVerticalMarker.Auto()) verticalDistance = AdvanceActiveVertical(i, state, effortDt * effortShare);
-                activeDistanceKm += Math.Sqrt(distance * distance + verticalDistance * verticalDistance);
+                using (ActiveVerticalMarker.Auto()) verticalDistance = AdvanceActiveVertical(i, state, effortDt * effortShare, observeMovement);
+                if (observeMovement) activeDistanceKm += Math.Sqrt(distance * distance + verticalDistance * verticalDistance);
                 active.pendingSeconds = Mathf.Max(0f, active.pendingSeconds - stepDt);
                 remaining -= stepDt;
                 movementUpdates++;
@@ -423,7 +441,7 @@ public sealed partial class GeodesicBiologyRuntime
     private float NextActiveRandom(int i, ReplicatorPopulationState state) =>
         ToUnitFloat(Hash(MovementSeedBits(state.MovementSeed[i]) ^ 0xAC714E5u, state.ActiveMovement[i].sequence++));
 
-    private bool SenseActiveHabitat(int i, ReplicatorPopulationState state, float dt, int trackedSlot)
+    private bool SenseActiveHabitat(int i, ReplicatorPopulationState state, float dt, int trackedSlot, bool observeMovement)
     {
         ref GeodesicActiveMovementState active = ref state.ActiveMovement[i];
         active.senseCountdown -= dt;
@@ -448,9 +466,9 @@ public sealed partial class GeodesicBiologyRuntime
             steeringSettings.MovementTumbleChanceWhenBetter, steeringSettings.MovementTumbleChanceWhenWorse,
             steeringSettings.MovementTumbleChanceNeutral);
         bool reportTaxis = locomotionSettings.logDiagnostics;
-        bool observeTaxis = reportTaxis || chemotaxisABDiagnosticsEnabled;
-        bool unchangedInputs = observeTaxis && hadMemory && SameExperiencedInputs(observation, active.lastTaxisObservation);
-        if (observeTaxis && hadMemory)
+        bool unchangedInputs = (reportTaxis || chemotaxisABDiagnosticsEnabled) && hadMemory
+            && SameExperiencedInputs(observation, active.lastTaxisObservation);
+        if (observeMovement && hadMemory)
         {
             if (comparison.trend == TaxisTrend.Improving) suitabilityImproving++;
             else if (worse) suitabilityWorsening++;
@@ -572,7 +590,7 @@ public sealed partial class GeodesicBiologyRuntime
         verticalTrials++;
     }
 
-    private double AdvanceActiveVertical(int i, ReplicatorPopulationState state, float effortDt)
+    private double AdvanceActiveVertical(int i, ReplicatorPopulationState state, float effortDt, bool observeMovement)
     {
         ref GeodesicActiveMovementState active = ref state.ActiveMovement[i];
         if (!active.verticalMoving || effortDt <= 0f) return 0d;
@@ -590,8 +608,12 @@ public sealed partial class GeodesicBiologyRuntime
         float targetRadius = grid.LayerCenterRadius[grid.GetNodeIndex(cell, target)];
         double physicalMetresPerUnit = grid.ToPhysicalDepthKm(1d) * 1000d;
         float nextRadius = Mathf.MoveTowards(radius, targetRadius, (float)(speed * effortDt / physicalMetresPerUnit));
-        double distanceKm = grid.ToPhysicalDepthKm(Math.Abs((double)nextRadius - radius));
-        activeVerticalKm += distanceKm;
+        double distanceKm = 0d;
+        if (observeMovement)
+        {
+            distanceKm = grid.ToPhysicalDepthKm(Math.Abs((double)nextRadius - radius));
+            activeVerticalKm += distanceKm;
+        }
         state.PassiveVisualRadius[i] = nextRadius;
         int node = grid.GetNodeIndex(cell, layer);
         if (target != layer && ((target > layer && nextRadius <= grid.LayerInnerRadius[node])
@@ -747,6 +769,9 @@ public sealed partial class GeodesicBiologyRuntime
 
     private void ClearLocomotion()
     {
+#if UNITY_EDITOR
+        CollectActiveMovementDiagnostics = false;
+#endif
         ClearTaxisDiagnostics();
         movementPerformance = default;
         locomotionMutationRandom = null;

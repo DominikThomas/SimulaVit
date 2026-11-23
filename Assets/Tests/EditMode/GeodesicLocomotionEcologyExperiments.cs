@@ -154,6 +154,7 @@ public sealed class GeodesicLocomotionEcologyExperiments
             thermal = GeodesicBiologyTemperatureSettings.Default; thermal.MutationChance = 0f;
             Set(runtime, "temperatureSettings", thermal);
             runtime.SetChemotaxisABContext(steering, false, 0d);
+            runtime.CollectActiveMovementDiagnostics = true;
             var locomotion = GeodesicLocomotionSettings.Default; locomotion.logDiagnostics = false;
             runtime.SetLocomotionSettings(locomotion, Steering(), 4f, 1.2f, 2f, .5f, 1.5f, 0f, .05f, .001f, true, .01f);
             Call("SetHydrogenotrophMovementInputs", .01f, .02f, false, 0f, 1f, 1f);
