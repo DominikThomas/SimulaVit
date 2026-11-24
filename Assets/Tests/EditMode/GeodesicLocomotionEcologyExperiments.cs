@@ -201,7 +201,7 @@ public sealed class GeodesicLocomotionEcologyExperiments
                 ((int[])Get(runtime, "lightStamps"))[node] = (int)Get(runtime, "generation");
                 ((float[])Get(runtime, "lightByNode"))[node] = 1f; // Explicit known local light fixture.
                 Call("BuildRequest", 0, state, .5f, .01f, .02f, 8f, .8f, false, 0f, 1f, 1f,
-                    .02f, .01f, .1f, .04f, .08f, 3f, .06f, .06f, 8f, .02f, 4f, 6f);
+                    .02f, .01f, .1f, .06f, .06f, 8f, .02f, 4f, 6f);
                 object request = ((Array)Get(runtime, "requests")).GetValue(0);
                 return (bool)request.GetType().GetField("Supported").GetValue(request);
             }
@@ -352,7 +352,7 @@ public sealed class GeodesicLocomotionEcologyExperiments
         {
             Call("EnsureRequestCapacity", state.Count); Call("BeginSparseStep"); Call("SampleOccupiedHabitats", state.Count, state);
             for (int i = 0; i < state.Count; i++) Call("BuildRequest", i, state, dt, .01f, .02f, 8f, .8f, false, 0f, 1f, 1f,
-                0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 6f);
+                0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 6f);
             Call("AggregateDemands", state.Count); Call("ResolveAvailabilityFactors"); Call("ResolveCompetition", state.Count);
             double before = 0d; for (int i = 0; i < state.Count; i++) before += state.OrganicCStore[i];
             Call("CommitRequests", state.Count, state, 6f, false);

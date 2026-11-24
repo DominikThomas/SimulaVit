@@ -213,12 +213,41 @@ public sealed class GeodesicBiologyRuntimeTests
     }
 
     [TestCase(1.0, 1.0, 0.02, 1.0, 0.001, 0.3, TestName="SulfurChemosynthesisAchievesExtentAndEnergy")]
-    [TestCase(1.0, 1.0, 0.01, 1.0, 0.02, 0.0255, TestName="MethanogenesisAchievesExtentAndEnergy")]
-    public void SupportedVentReactionAchievesPositiveExtent(double requested, double availableA, double needA, double availableB, double needB, double energyPerExtent)
+    public void SulfurReactionAchievesPositiveExtent(double requested, double availableA, double needA, double availableB, double needB, double energyPerExtent)
     {
         double achieved = GeodesicBiologyRuntime.CalculateAchievedExtent(requested, availableA, needA, availableB, needB);
         Assert.That(achieved, Is.GreaterThan(0d));
         Assert.That(achieved * energyPerExtent, Is.GreaterThan(0d));
+    }
+
+    [TestCase(0f, 0f, 1d, 0.005d)]
+    [TestCase(10f, 0f, 1d, 0.005d)]
+    [TestCase(0f, 0f, 0.004d, 0.001d)]
+    [TestCase(0f, 0.12f, 1d, 0d)]
+    public void MethanogenesisCommitsMeasuredMethaneHydrogenCarbonAndEnergy(float store, float oxygen,
+        double initialH2, double expectedMethane)
+    {
+        using (var f = new GeodesicSulfurRuntimeTests.Fixture())
+        {
+            f.Write(GeodesicOceanResource.O2, oxygen);
+            f.Write(GeodesicOceanResource.H2, initialH2);
+            f.AddAgent(store, MetabolismType.Methanogenesis);
+            f.State.Energy[0] = 1f;
+            double initialCarbon = f.TotalCarbon;
+
+            f.runtime.Step(.5f, f.agents, f.State, 0f,
+                .01f, .02f, 8f, .8f, false, .02f, .12f, .25f, .02f, .001f, .3f,
+                .01f, .02f, .03f, 0f, 0f, 0f, 0f, 0f,
+                f.MaxStore, 0f, true, .2f, .5f, 2f, .5f, 100, null);
+
+            double methane = f.Inventory(GeodesicOceanResource.CH4);
+            Assert.That(methane, Is.EqualTo(expectedMethane).Within(1e-8d));
+            Assert.That(initialH2 - f.Inventory(GeodesicOceanResource.H2), Is.EqualTo(4d * methane).Within(1e-8d));
+            Assert.That(f.TotalCarbon + methane, Is.EqualTo(initialCarbon).Within(1e-8d));
+            double expectedStore = store == f.MaxStore ? store : store + methane * .15d / .85d;
+            Assert.That(f.State.OrganicCStore[0], Is.EqualTo(expectedStore).Within(1e-8d));
+            Assert.That((double)f.State.Energy[0] - 1d, Is.EqualTo(3d * methane).Within(2e-7d));
+        }
     }
 
     [Test]

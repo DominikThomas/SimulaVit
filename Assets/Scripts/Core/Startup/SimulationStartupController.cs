@@ -974,6 +974,7 @@ public partial class SimulationStartupController : MonoBehaviour
         config.initialSpawnCount = Mathf.Clamp(config.initialSpawnCount, InitialSpawnMin, InitialSpawnMax);
         config.biology.geodesicPhotosyntheticFounderCount = Mathf.Clamp(config.biology.geodesicPhotosyntheticFounderCount, InitialSpawnMin, InitialSpawnMax);
         config.biology.geodesicSaprotrophFounderCount = Mathf.Clamp(config.biology.geodesicSaprotrophFounderCount, InitialSpawnMin, InitialSpawnMax);
+        config.biology.geodesicMethanogenFounderCount = Mathf.Clamp(config.biology.geodesicMethanogenFounderCount, InitialSpawnMin, InitialSpawnMax);
         config.minimumOceanComponentAreaFraction = GeodesicOceanConnectivity.NormalizeThreshold(config.minimumOceanComponentAreaFraction);
         config.minimumLakeBasinAreaFraction = GeodesicLakeBasins.NormalizeArea(config.minimumLakeBasinAreaFraction);
         config.minimumLakeDepth = GeodesicLakeBasins.NormalizeDepth(config.minimumLakeDepth);
@@ -1132,6 +1133,7 @@ public partial class SimulationStartupController : MonoBehaviour
         saved.geodesicLocomotionMask = GeodesicBiologyAvailability.AllLocomotions;
         saved.geodesicPhotosyntheticFounderCount = 0;
         saved.geodesicSaprotrophFounderCount = 0;
+        saved.geodesicMethanogenFounderCount = 0;
         saved.geodesicFounderEmergenceMode = GeodesicFounderEmergenceMode.Batch;
         saved.geodesicFounderOngoingEmergence = false;
         // Older startup files omit this field. An explicitly saved zero still disables production.
@@ -1212,6 +1214,7 @@ public partial class SimulationStartupController : MonoBehaviour
         public int geodesicLocomotionMask;
         public int geodesicPhotosyntheticFounderCount;
         public int geodesicSaprotrophFounderCount;
+        public int geodesicMethanogenFounderCount;
         public bool startPaused;
         public float approximateThermalIntervalSeconds;
         public float geodesicResourceTransportIntervalSeconds;
@@ -1289,6 +1292,7 @@ public partial class SimulationStartupController : MonoBehaviour
                 geodesicLocomotionMask = availability.locomotionMask,
                 geodesicPhotosyntheticFounderCount = config.biology?.geodesicPhotosyntheticFounderCount ?? 0,
                 geodesicSaprotrophFounderCount = config.biology?.geodesicSaprotrophFounderCount ?? 0,
+                geodesicMethanogenFounderCount = config.biology?.geodesicMethanogenFounderCount ?? 0,
                 startPaused = config.startPaused,
                 approximateThermalIntervalSeconds = config.approximateThermalIntervalSeconds,
                 geodesicResourceTransportIntervalSeconds = config.geodesicResourceTransportIntervalSeconds,
@@ -1389,6 +1393,7 @@ public partial class SimulationStartupController : MonoBehaviour
             };
             config.biology.geodesicPhotosyntheticFounderCount = geodesicPhotosyntheticFounderCount;
             config.biology.geodesicSaprotrophFounderCount = geodesicSaprotrophFounderCount;
+            config.biology.geodesicMethanogenFounderCount = geodesicMethanogenFounderCount;
             return config;
         }
     }

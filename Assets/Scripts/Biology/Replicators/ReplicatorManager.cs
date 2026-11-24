@@ -107,6 +107,7 @@ public class ReplicatorManager : MonoBehaviour
     [HideInInspector] public GeodesicBiologyAvailability geodesicBiologyAvailability = GeodesicBiologyAvailability.Default;
     [HideInInspector] public int geodesicPhotosyntheticFounderCount;
     [HideInInspector] public int geodesicSaprotrophFounderCount;
+    [HideInInspector] public int geodesicMethanogenFounderCount;
     public int maxPopulation = 50000;
     [Tooltip("When disabled, the manager initializes references but waits for an external startup controller to spawn the initial population.")]
     public bool autoStartOnSceneLoad = true;
@@ -936,6 +937,13 @@ public class ReplicatorManager : MonoBehaviour
                     ? $" | Saprotroph founders: up to {geodesicSaprotrophFounderCount} at the first suitable death-recycling site"
                     : " | Saprotroph founders: require Aerobic saprotrophy and Passive drift";
             }
+            if (spawnInitialPopulation && geodesicMethanogenFounderCount > 0)
+            {
+                geodesicBiology.ConfigureMethanogenFounders(geodesicMethanogenFounderCount);
+                founderSummary += availability.AllowsMethanogenFounders
+                    ? $" | Methanogen founders: up to {geodesicMethanogenFounderCount} at the first suitable anoxic submarine outlet"
+                    : " | Methanogen founders: require Methanogenesis and Passive drift";
+            }
             Debug.Log(availability.Describe() + founderSummary, this);
             if (geodesicLocomotion.logDiagnostics)
                 Debug.Log(geodesicBiology.DescribeResolvedLocomotionControls(), this);
@@ -1104,6 +1112,10 @@ public class ReplicatorManager : MonoBehaviour
         geodesicBiology.SetSaprotrophyControls(saproCPerTick, saproAssimilationFraction, aerobicO2PerC, aerobicEnergyPerC,
             hydrogenToSaprotrophyMutationChance, saprotrophyMutationChance, mutationGateMinO2ForAerobes,
             mutationGateMinOrganicC, saproTempRange, defaultLethalMargin);
+        geodesicBiology.SetMethanogenesisControls(methanogenesisAssimilationFraction,
+            anaerobeO2InhibitionEnabled && anaerobeO2InhibitionAffectsMethanogenesis, anaerobeO2MinEfficiencyMethanogenesis,
+            fermentationToMethanogenesisMutationChance, mutationGateMinH2, mutationGateMinCO2,
+            mutationGateMaxO2ForAnaerobes, methanogenesisTempRange, defaultLethalMargin);
         geodesicBiology.SetLocomotionSettings(geodesicLocomotion, CreateSteeringSettings(), moveSpeed,
             amoeboidMoveSpeedMultiplier, flagellumMoveSpeedMultiplier, amoeboidTurnRate, flagellumTurnRate,
             locomotionMutationChance, locomotionUpgradeChance, locomotionAnchoredMutationChance,

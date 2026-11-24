@@ -1081,11 +1081,11 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
 
         // Debit only the oxidizable share and the carbon that fits in the float store.
         double carbonBudget = oxidizedPerExtent * extent + stored;
-        if (!TryPlanSaprotrophyDebit(organicBefore, volume, carbonBudget, out double organicAfter,
+        if (!TryPlanBoundedDebit(organicBefore, volume, carbonBudget, out double organicAfter,
             out double organicConsumed)) return false;
 
         double oxidized = organicConsumed - stored;
-        if (!(oxidized > 0d) || !TryPlanSaprotrophyDebit(oxygenBefore, volume, oxidized * oxygenPerC,
+        if (!(oxidized > 0d) || !TryPlanBoundedDebit(oxygenBefore, volume, oxidized * oxygenPerC,
             out double oxygenAfter, out double oxygenConsumed)) return false;
 
         double co2After = co2Before + oxidized / volume;
@@ -1093,7 +1093,7 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
         if ((co2After - co2Before) * volume > oxidized)
             co2After = BitConverter.Int64BitsToDouble(BitConverter.DoubleToInt64Bits(co2After) - 1);
         double co2Produced = (co2After - co2Before) * volume;
-        if (!MatchesSaprotrophyTransfer(oxidized, co2Produced)) return false;
+        if (!MatchesBoundedTransfer(oxidized, co2Produced)) return false;
 
         // Credit only oxidation supported by both measured transfers, rounded down in organism energy.
         double energyBudget = Math.Min(co2Produced, oxygenConsumed / oxygenPerC) * energyPerC;
@@ -1116,17 +1116,95 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
         return true;
     }
 
-    private static bool TryPlanSaprotrophyDebit(double before, double volume, double budget,
+    internal const double MethanogenesisHydrogenPerMethane = 4d;
+
+    internal struct MethanogenesisTransfer
+    {
+        public double co2Consumed, hydrogenConsumed, methaneProduced;
+        public float storeAfter, energyAfter;
+    }
+
+    internal bool TryCommitMethanogenesis(int node, double extent, double co2PerExtent, double methanePerExtent,
+        double energyPerMethane, float maximumStore, float storeBefore, float energyBefore,
+        out MethanogenesisTransfer transfer)
+    {
+        transfer = default;
+        if (!double.IsFinite(extent) || !(extent > 0d) || !double.IsFinite(co2PerExtent)
+            || !double.IsFinite(methanePerExtent) || !(methanePerExtent > 0d) || co2PerExtent < methanePerExtent
+            || !double.IsFinite(energyPerMethane) || !(energyPerMethane > 0d)
+            || !float.IsFinite(maximumStore) || maximumStore < 0f || !float.IsFinite(storeBefore) || storeBefore < 0f
+            || !float.IsFinite(energyBefore) || energyBefore < 0f) return false;
+
+        int co2Offset = (int)GeodesicOceanResource.CO2 * nodeCapacity + node;
+        int hydrogenOffset = (int)GeodesicOceanResource.H2 * nodeCapacity + node;
+        int methaneOffset = (int)GeodesicOceanResource.CH4 * nodeCapacity + node;
+        double co2Before = concentrationsByResourceThenNode[co2Offset];
+        double hydrogenBefore = concentrationsByResourceThenNode[hydrogenOffset];
+        double methaneBefore = concentrationsByResourceThenNode[methaneOffset];
+        double volume = sourceGrid.PhysicalLayerVolumeKm3[node];
+        if (!double.IsFinite(volume) || !(volume > 0d) || !double.IsFinite(co2Before) || !(co2Before > 0d)
+            || !double.IsFinite(hydrogenBefore) || !(hydrogenBefore > 0d)
+            || !double.IsFinite(methaneBefore) || methaneBefore < 0d) return false;
+
+        // Recheck the remaining inventories after other organisms' commits.
+        extent = Math.Min(extent, co2Before * volume / co2PerExtent);
+        extent = Math.Min(extent, hydrogenBefore * volume / (methanePerExtent * MethanogenesisHydrogenPerMethane));
+        if (!(extent > 0d)) return false;
+
+        double storeBudget = Math.Min((co2PerExtent - methanePerExtent) * extent,
+            Math.Max(0d, (double)maximumStore - storeBefore));
+        float storeAfter = (float)(storeBefore + storeBudget);
+        if ((double)storeAfter - storeBefore > storeBudget)
+            storeAfter = BitConverter.Int32BitsToSingle(BitConverter.SingleToInt32Bits(storeAfter) - 1);
+        double stored = (double)storeAfter - storeBefore;
+
+        // Assimilation uses only representable store capacity. The modeled H2 debit powers catabolism.
+        double plannedMethane = methanePerExtent * extent;
+        if (!TryPlanBoundedDebit(co2Before, volume, plannedMethane + stored, out double co2After,
+            out double co2Consumed)) return false;
+        double methaneBudget = Math.Min(plannedMethane, co2Consumed - stored);
+        if (!(methaneBudget > 0d) || !TryPlanBoundedDebit(hydrogenBefore, volume,
+            methaneBudget * MethanogenesisHydrogenPerMethane, out double hydrogenAfter,
+            out double hydrogenConsumed)) return false;
+        methaneBudget = hydrogenConsumed / MethanogenesisHydrogenPerMethane;
+        double methaneAfter = methaneBefore + methaneBudget / volume;
+        if (!double.IsFinite(methaneAfter) || methaneAfter > float.MaxValue) return false;
+        if ((methaneAfter - methaneBefore) * volume > methaneBudget)
+            methaneAfter = BitConverter.Int64BitsToDouble(BitConverter.DoubleToInt64Bits(methaneAfter) - 1);
+        double methaneProduced = (methaneAfter - methaneBefore) * volume;
+        if (!MatchesBoundedTransfer(plannedMethane, methaneProduced)) return false;
+
+        double energyBudget = methaneProduced * energyPerMethane;
+        float energyAfter = (float)(energyBefore + energyBudget);
+        if (!float.IsFinite(energyAfter)) return false;
+        if ((double)energyAfter - energyBefore > energyBudget)
+            energyAfter = BitConverter.Int32BitsToSingle(BitConverter.SingleToInt32Bits(energyAfter) - 1);
+
+        concentrationsByResourceThenNode[co2Offset] = co2After;
+        concentrationsByResourceThenNode[hydrogenOffset] = hydrogenAfter;
+        concentrationsByResourceThenNode[methaneOffset] = methaneAfter;
+        resourceMayHaveSpatialVariation[(int)GeodesicOceanResource.CO2] = true;
+        resourceMayHaveSpatialVariation[(int)GeodesicOceanResource.H2] = true;
+        resourceMayHaveSpatialVariation[(int)GeodesicOceanResource.CH4] = true;
+        transfer = new MethanogenesisTransfer
+        {
+            co2Consumed = co2Consumed, hydrogenConsumed = hydrogenConsumed, methaneProduced = methaneProduced,
+            storeAfter = storeAfter, energyAfter = energyAfter
+        };
+        return true;
+    }
+
+    private static bool TryPlanBoundedDebit(double before, double volume, double budget,
         out double after, out double withdrawn)
     {
         after = Math.Max(0d, before - budget / volume);
         if ((before - after) * volume > budget)
             after = BitConverter.Int64BitsToDouble(BitConverter.DoubleToInt64Bits(after) + 1);
         withdrawn = (before - after) * volume;
-        return MatchesSaprotrophyTransfer(budget, withdrawn);
+        return MatchesBoundedTransfer(budget, withdrawn);
     }
 
-    private static bool MatchesSaprotrophyTransfer(double budget, double actual) => double.IsFinite(budget) && double.IsFinite(actual)
+    private static bool MatchesBoundedTransfer(double budget, double actual) => double.IsFinite(budget) && double.IsFinite(actual)
         && actual > 0d && actual <= budget && budget - actual <= GeodesicHydrogenotrophyBalance.RelativeTolerance * budget;
 
     internal double VentH2Rate => physicalVentH2InventoryRatePerSecond;

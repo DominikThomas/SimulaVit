@@ -16,14 +16,15 @@ public sealed class SimulationStartupEvolutionTests
     internal static object Call(object owner, string name, params object[] args) => owner.GetType().GetMethod(name, Private).Invoke(owner, args);
     internal const string General = "General metabolism mutation chance";
     internal const string Sulfur = "Hydrogen → sulfur chemosynthesis probability";
-    private static readonly string[] InactiveLabels = {
-        "Hydrogen → photosynthesis probability", "Hydrogen → saprotrophy probability",
-        "Fermentation → methanogenesis probability", "Hydrogen → methanotrophy probability", "Saprotrophy mutation chance", "Predator mutation chance",
-        "Biomass mutation chance", "Biomass mutation scale" };
-    private static readonly string[] InactiveFields = {
-        "hydrogenToPhotosynthesisMutationChance", "hydrogenToSaprotrophyMutationChance",
-        "fermentationToMethanogenesisMutationChance", "hydrogenToMethanotrophyMutationChance", "saprotrophyMutationChance", "predatorMutationChance",
-        "biomassMutationChance", "biomassMutationScale" };
+    private static readonly (string label, string field, bool geodesicEditable)[] OtherControls = {
+        ("Hydrogen → photosynthesis probability", "hydrogenToPhotosynthesisMutationChance", true),
+        ("Hydrogen → saprotrophy probability", "hydrogenToSaprotrophyMutationChance", true),
+        ("Fermentation → methanogenesis probability", "fermentationToMethanogenesisMutationChance", true),
+        ("Saprotrophy mutation chance", "saprotrophyMutationChance", true),
+        ("Hydrogen → methanotrophy probability", "hydrogenToMethanotrophyMutationChance", false),
+        ("Predator mutation chance", "predatorMutationChance", false),
+        ("Biomass mutation chance", "biomassMutationChance", false),
+        ("Biomass mutation scale", "biomassMutationScale", false) };
 
     private sealed class Fixture : IDisposable
     {
@@ -59,10 +60,13 @@ public sealed class SimulationStartupEvolutionTests
                 float photosynthesisBefore=f.Controller.CurrentConfig.biology.hydrogenToPhotosynthesisMutationChance;
                 yield return Edit(window,General,"0.2"); yield return Edit(window,Sulfur,"0.4");
                 yield return Edit(window,"Hydrogen → fermentation probability","0.27");
+                yield return Edit(window,"Fermentation → methanogenesis probability","0.31");
                 Assert.That(f.Controller.CurrentConfig.biology.hydrogenToFermentationMutationChance,Is.EqualTo(.27f));
                 Assert.That(f.Controller.CurrentConfig.biology.metabolismMutationChance,Is.EqualTo(.2f));
                 Assert.That(f.Controller.CurrentConfig.biology.hydrogenToSulfurMutationChance,Is.EqualTo(.4f));
                 Assert.That(f.Controller.CurrentConfig.biology.hydrogenToPhotosynthesisMutationChance,Is.EqualTo(photosynthesisBefore));
+                Assert.That(f.Controller.CurrentConfig.biology.fermentationToMethanogenesisMutationChance,Is.EqualTo(.31f));
+                f.Controller.CurrentConfig.biology.geodesicMethanogenFounderCount = 3;
                 f.Controller.SaveCurrentStartupConfig();
                 Assert.That(File.Exists(f.Path),Is.True,"The real startup writer must write only the isolated test path.");
                 using(var restarted = new Fixture()) {
@@ -71,8 +75,10 @@ public sealed class SimulationStartupEvolutionTests
                     Assert.That(restarted.Controller.CurrentConfig.biology.metabolismMutationChance,Is.EqualTo(.2f));
                     Assert.That(restarted.Controller.CurrentConfig.biology.hydrogenToSulfurMutationChance,Is.EqualTo(.4f));
                     Assert.That(restarted.Controller.CurrentConfig.biology.hydrogenToFermentationMutationChance,Is.EqualTo(.27f));
+                    Assert.That(restarted.Controller.CurrentConfig.biology.fermentationToMethanogenesisMutationChance,Is.EqualTo(.31f));
+                    Assert.That(restarted.Controller.CurrentConfig.biology.geodesicMethanogenFounderCount,Is.EqualTo(3));
                 }
-                Assert.That(File.ReadAllText(f.Path),Does.Contain("\"version\": 24"));
+                Assert.That(File.ReadAllText(f.Path),Does.Contain("\"version\": 25"));
             } finally { window.Close(); }
         }
     }
@@ -86,9 +92,10 @@ public sealed class SimulationStartupEvolutionTests
             var window=ScriptableObject.CreateInstance<StartupEvolutionTestWindow>();
             try {
                 window.Controller=f.Controller; window.position=new Rect(0,0,900,900); window.ShowUtility(); yield return Ready(window);
-                for(int i=0;i<InactiveLabels.Length;i++) {
-                    var field=typeof(SimulationStartupBiologyConfig).GetField(InactiveFields[i]); object before=field.GetValue(f.Controller.CurrentConfig.biology);
-                    yield return Edit(window,InactiveLabels[i],"0.333"); Assert.That(field.GetValue(f.Controller.CurrentConfig.biology),Is.EqualTo(before),InactiveFields[i]);
+                foreach (var control in OtherControls) {
+                    if (control.geodesicEditable) continue;
+                    var field=typeof(SimulationStartupBiologyConfig).GetField(control.field); object before=field.GetValue(f.Controller.CurrentConfig.biology);
+                    yield return Edit(window,control.label,"0.333"); Assert.That(field.GetValue(f.Controller.CurrentConfig.biology),Is.EqualTo(before),control.field);
                 }
                 Assert.That(GUI.enabled,Is.True);
             } finally { window.Close(); }
@@ -104,9 +111,9 @@ public sealed class SimulationStartupEvolutionTests
             var window=ScriptableObject.CreateInstance<StartupEvolutionTestWindow>();
             try {
                 window.Controller=f.Controller; window.position=new Rect(0,0,900,900); window.ShowUtility(); yield return Ready(window);
-                for(int i=0;i<InactiveLabels.Length;i++) {
-                    yield return Edit(window,InactiveLabels[i],"0.333");
-                    Assert.That((float)typeof(SimulationStartupBiologyConfig).GetField(InactiveFields[i]).GetValue(f.Controller.CurrentConfig.biology),Is.EqualTo(.333f),InactiveFields[i]);
+                foreach (var control in OtherControls) {
+                    yield return Edit(window,control.label,"0.333");
+                    Assert.That((float)typeof(SimulationStartupBiologyConfig).GetField(control.field).GetValue(f.Controller.CurrentConfig.biology),Is.EqualTo(.333f),control.field);
                 }
             } finally { window.Close(); }
         }
@@ -195,7 +202,7 @@ public sealed class SimulationStartupEvolutionTests
             Assert.That(manager.RunGeodesicBiologyStep(.5f),Is.True); Assert.That(f.State.Count,Is.EqualTo(128));
             Assert.That((float)Get(f.runtime,"metabolicMutationChance"),Is.EqualTo(general)); Assert.That((float)Get(f.runtime,"hydrogenSulfurChance"),Is.EqualTo(sulfur));
             int mutants=0; for(int i=64;i<f.State.Count;i++) { if(f.State.Metabolism[i]==MetabolismType.SulfurChemosynthesis) mutants++;
-                else Assert.That(f.State.Metabolism[i],Is.EqualTo(MetabolismType.Hydrogenotrophy),"Displaying deferred settings must not activate those paths."); }
+                else Assert.That(f.State.Metabolism[i],Is.EqualTo(MetabolismType.Hydrogenotrophy),"Other transitions must respect their source metabolism and availability."); }
             Assert.That(mutants>0,Is.EqualTo(expectSulfur));
             Assert.That(manager.metabolismMutationChance,Is.EqualTo(general)); Assert.That(manager.hydrogenToSulfurMutationChance,Is.EqualTo(sulfur));
         }

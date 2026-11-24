@@ -263,6 +263,10 @@ public partial class SimulationStartupController
             SetupHelp("A positive count requests one batch at the first suitable ocean site that receives carbon from a death. Zero disables the batch.");
             if (!b.geodesicAvailability.AllowsSaprotrophFounders)
                 SetupHelp("Saprotroph founders require Aerobic saprotrophy and Passive drift.");
+            SetupInt("Experimental methanogen founders", ref b.geodesicMethanogenFounderCount, InitialSpawnMin, InitialSpawnMax);
+            SetupHelp("A positive count requests one batch at a suitable anoxic submarine outlet after dissolved H2 and CO2 become available. Zero disables the batch.");
+            if (!b.geodesicAvailability.AllowsMethanogenFounders)
+                SetupHelp("Methanogen founders require Methanogenesis and Passive drift.");
         }
         SetupInt("Maximum population", ref b.maxPopulation, 0, int.MaxValue);
         SetupFloat("Reproduction rate (/sim s)", ref b.reproductionRate);
@@ -301,14 +305,14 @@ public partial class SimulationStartupController
 
         SetupSection("Initial / inherited temperature preferences");
         SetupHelp("Editable in °C; stored in Kelvin. These ranges seed temperature traits, not absolute species-wide survival limits. Offspring retain the current inheritance and adaptation behavior. Reversed endpoints are ordered when editing finishes.");
-        if (IsGeodesicSetup) SetupHelp("Vent founders use the Hydrogenotrophy template. Photosynthetic and saprotroph founders use their own templates. New metabolism mutants start from their destination template before individual thermal mutation.");
+        if (IsGeodesicSetup) SetupHelp("Normal vent founders use the Hydrogenotrophy template. Photosynthetic, saprotroph and methanogen founders use their own templates. New metabolism mutants start from their destination template before individual thermal mutation.");
         SetupTemperatureRange("Hydrogenotrophy", ref b.hydrogenTempRange, true);
         SetupTemperatureRange("Sulfur chemosynthesis", ref b.sulfurChemoTempRange, true);
         SetupTemperatureRange("Photosynthesis", ref b.photoTempRange, true);
         SetupTemperatureRange("Saprotrophy", ref b.saproTempRange, true);
         SetupTemperatureRange("Predation", ref b.predatorTempRange, !IsGeodesicSetup);
         SetupTemperatureRange("Fermentation", ref b.fermentationTempRange, true);
-        SetupTemperatureRange("Methanogenesis", ref b.methanogenesisTempRange, !IsGeodesicSetup);
+        SetupTemperatureRange("Methanogenesis", ref b.methanogenesisTempRange, true);
         SetupTemperatureRange("Methanotrophy", ref b.methanotrophyTempRange, !IsGeodesicSetup);
         SetupFloat("Initial lethal temperature margin (K)", ref b.defaultLethalMargin, 1f);
         SetupFloat("Temperature dormancy floor", ref b.temperatureDormancyFloor, 0f, 1f);
@@ -371,7 +375,7 @@ public partial class SimulationStartupController
         GUILayout.EndVertical();
         GUILayout.EndHorizontal();
 
-        SetupHelp("Hydrogenotrophy, sulfur chemosynthesis, fermentation, oxygenic photosynthesis and aerobic saprotrophy can arise in Geodesic mode.");
+        SetupHelp("Hydrogenotrophy, sulfur chemosynthesis, fermentation, oxygenic photosynthesis, aerobic saprotrophy and methanogenesis can arise in Geodesic mode.");
         SetupHelp(availability.FounderStatus);
     }
 
@@ -396,6 +400,8 @@ public partial class SimulationStartupController
 
         if (IsGeodesicSetup)
         {
+            SetupFloat("Fermentation → methanogenesis probability", ref b.fermentationToMethanogenesisMutationChance, 0f, 1f);
+            SetupHelp("Methanogenesis uses the general mutation roll and then the fermentation-specific roll. It requires local H2 and CO2, low oxygen, and a suitable temperature.");
             SetupFloat("Hydrogen → saprotrophy probability", ref b.hydrogenToSaprotrophyMutationChance, 0f, 1f);
             SetupFloat("Saprotrophy mutation chance", ref b.saprotrophyMutationChance, 0f, 1f);
             SetupHelp("Saprotrophy rolls independently after the earlier metabolism choices. The second probability applies to sulfur, fermentation and photosynthesis parents. Acquisition requires the evolution unlock, local oxygen and organic carbon, and a suitable temperature.");
@@ -406,7 +412,7 @@ public partial class SimulationStartupController
         GUI.enabled = enabled && !IsGeodesicSetup;
         if (!IsGeodesicSetup) SetupFloat("Hydrogen → photosynthesis probability", ref b.hydrogenToPhotosynthesisMutationChance, 0f, 1f);
         if (!IsGeodesicSetup) SetupFloat("Hydrogen → saprotrophy probability", ref b.hydrogenToSaprotrophyMutationChance, 0f, 1f);
-        SetupFloat("Fermentation → methanogenesis probability", ref b.fermentationToMethanogenesisMutationChance, 0f, 1f);
+        if (!IsGeodesicSetup) SetupFloat("Fermentation → methanogenesis probability", ref b.fermentationToMethanogenesisMutationChance, 0f, 1f);
         SetupFloat("Hydrogen → methanotrophy probability", ref b.hydrogenToMethanotrophyMutationChance, 0f, 1f);
         if (!IsGeodesicSetup) SetupFloat("Saprotrophy mutation chance", ref b.saprotrophyMutationChance, 0f, 1f);
         SetupFloat("Predator mutation chance", ref b.predatorMutationChance, 0f, 1f);
@@ -459,11 +465,11 @@ public partial class SimulationStartupController
                 if (IsGeodesicSetup) SetupHelp("Dissolved OrganicC feeds fermentation. Unstored carbon returns as equal CO2 and H2 inventory; energy scales with the fermented portion. Inherited stored carbon permits mutation eligibility but is not consumed as food.");
                 break;
             case 3:
-                SetupFloat("H2 consumed / reaction tick", ref b.methanogenesisH2PerTick);
-                SetupFloat("CO2 consumed / reaction tick", ref b.methanogenesisCO2PerTick);
+                SetupFloat(IsGeodesicSetup ? "Maximum H2 use / reaction tick" : "H2 consumed / reaction tick", ref b.methanogenesisH2PerTick);
+                SetupFloat(IsGeodesicSetup ? "Maximum CO2 uptake / reaction tick" : "CO2 consumed / reaction tick", ref b.methanogenesisCO2PerTick);
                 SetupFloat("Energy parameter / completed reaction tick", ref b.methanogenesisEnergyPerTick);
-                if (!IsGeodesicSetup) SetupFloat("Carbon assimilation fraction", ref b.methanogenesisAssimilationFraction, 0f, 1f);
-                else SetupHelp("Geodesic uses the existing fixed 0.15 assimilation fraction and 0.85 energy multiplier. Editing the legacy assimilation fraction would not affect this reaction.");
+                SetupFloat("Carbon assimilation fraction", ref b.methanogenesisAssimilationFraction, 0f, 1f);
+                if (IsGeodesicSetup) SetupHelp("Each methane unit consumes four H2 units. The H2 budget caps the reaction rate. Energy scales with methane produced. Assimilation uses free carbon-store capacity.");
                 break;
             case 4:
                 SetupFloat("CH4 consumed / reaction tick", ref b.methanotrophyCH4PerTick);
