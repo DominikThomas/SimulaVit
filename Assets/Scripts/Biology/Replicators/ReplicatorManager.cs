@@ -661,6 +661,9 @@ public class ReplicatorManager : MonoBehaviour
                 return false;
             }
 
+            if (loaded.metabolism == MetabolismType.Methanogenesis || loaded.metabolism == MetabolismType.Methanotrophy)
+                loaded.color = CalculateAgentColor(loaded.age, loaded.maxLifespan - loaded.age, loaded.energy, loaded.metabolism);
+
             loadedAgents.Add(loaded);
         }
 
@@ -3731,7 +3734,14 @@ public class ReplicatorManager : MonoBehaviour
     }
 
 
-    Color GetMetabolismBaseColor(MetabolismType metabolism)
+    internal static readonly Color32 MethanogenBaseColor = new Color32(0x78, 0x38, 0xDE, 0xFF);
+    internal static readonly Color32 MethanotrophBaseColor = new Color32(0xFF, 0x9C, 0xD6, 0xFF);
+
+    // The instanced shader consumes raw vectors in the project's linear colour space.
+    internal static readonly Color MethanogenRenderColor = ((Color)MethanogenBaseColor).linear;
+    internal static readonly Color MethanotrophRenderColor = ((Color)MethanotrophBaseColor).linear;
+
+    static Color GetMetabolismBaseColor(MetabolismType metabolism)
     {
         switch (metabolism)
         {
@@ -3740,8 +3750,8 @@ public class ReplicatorManager : MonoBehaviour
             case MetabolismType.Predation: return Color.red;
             case MetabolismType.Hydrogenotrophy: return new Color(0.86f, 1f, 0.98f);
             case MetabolismType.Fermentation: return Color.orangeRed;
-            case MetabolismType.Methanogenesis: return Color.purple;
-            case MetabolismType.Methanotrophy: return Color.pink;
+            case MetabolismType.Methanogenesis: return MethanogenRenderColor;
+            case MetabolismType.Methanotrophy: return MethanotrophRenderColor;
             default: return Color.yellow;
         }
     }
@@ -3767,6 +3777,10 @@ public class ReplicatorManager : MonoBehaviour
             float energyScale = Mathf.Clamp01(energy * energyVisualMultiplier);
             intensity *= Mathf.Lerp(0.2f, 1.5f, energyScale);
         }
+
+        // Keep these two colours below HDR overdrive during the newborn and energy boosts.
+        if (intensity > 1f && (metabolism == MetabolismType.Methanogenesis || metabolism == MetabolismType.Methanotrophy))
+            intensity = 1f;
 
         Color finalColor = GetMetabolismBaseColor(metabolism) * intensity;
         finalColor.a = alpha;

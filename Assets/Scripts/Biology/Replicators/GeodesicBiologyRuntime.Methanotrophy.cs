@@ -76,7 +76,7 @@ public sealed partial class GeodesicBiologyRuntime
             || !IsMethanotrophicHabitat(child.geodesicCellIndex, child.currentOceanLayerIndex, child.position)) return;
 
         child.metabolism = MetabolismType.Methanotrophy;
-        child.color = Color.pink;
+        child.color = ReplicatorManager.MethanotrophRenderColor;
         child.optimalTempMin = methanotrophyTemperatureRange.x;
         child.optimalTempMax = methanotrophyTemperatureRange.y;
         child.lethalTempMargin = methanotrophyLethalMargin;
@@ -147,7 +147,7 @@ public sealed partial class GeodesicBiologyRuntime
         for (int i = 0; i < count; i++)
         {
             int packed = SpawnPassiveFounder(site, methanotrophFounderRandom, agents, state, founderMinLife,
-                founderMaxLife, Color.pink, founderBiomassTarget, methanotrophyTemperatureRange,
+                founderMaxLife, ReplicatorManager.MethanotrophRenderColor, founderBiomassTarget, methanotrophyTemperatureRange,
                 methanotrophyLethalMargin, true, MetabolismType.Methanotrophy);
             InitializePassiveSchedulesAtSpawn(state, packed, passiveMovementTime);
         }

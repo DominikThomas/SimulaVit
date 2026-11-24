@@ -123,7 +123,7 @@ public sealed partial class GeodesicBiologyRuntime
             || !IsMethanogenicHabitat(child.geodesicCellIndex, child.currentOceanLayerIndex, child.position)) return;
 
         child.metabolism = MetabolismType.Methanogenesis;
-        child.color = Color.purple;
+        child.color = ReplicatorManager.MethanogenRenderColor;
         child.optimalTempMin = methaneTemperatureRange.x;
         child.optimalTempMax = methaneTemperatureRange.y;
         child.lethalTempMargin = methaneLethalMargin;
@@ -176,7 +176,7 @@ public sealed partial class GeodesicBiologyRuntime
             for (int founder = 0; founder < count; founder++)
             {
                 int packed = SpawnPassiveFounder(site, random, agents, state, founderMinLife, founderMaxLife,
-                    Color.purple, founderBiomassTarget, methaneTemperatureRange, methaneLethalMargin,
+                    ReplicatorManager.MethanogenRenderColor, founderBiomassTarget, methaneTemperatureRange, methaneLethalMargin,
                     true, MetabolismType.Methanogenesis);
                 InitializePassiveSchedulesAtSpawn(state, packed, passiveMovementTime);
             }

@@ -6,6 +6,9 @@ using UnityEngine.InputSystem;
 
 public class ReplicatorHudPresenter
 {
+    private static readonly string MethanogenHudColor = "#" + ColorUtility.ToHtmlStringRGB(ReplicatorManager.MethanogenBaseColor);
+    private static readonly string MethanotrophHudColor = "#" + ColorUtility.ToHtmlStringRGB(ReplicatorManager.MethanotrophBaseColor);
+
     private readonly int[] totalByLocomotion = new int[4];
     private readonly int[] chemosynthByLocomotion = new int[4];
     private readonly int[] hydrogenByLocomotion = new int[4];
@@ -172,8 +175,8 @@ public class ReplicatorHudPresenter
             ("Sapro", "#62B0FF", saprotrophAgentCount, FormatLocomotionCounts(saprotrophByLocomotion)),
             ("Predator", "#FF5A5A", predatorAgentCount, FormatLocomotionCounts(predatorByLocomotion)),
             ("Ferment", "#FF8C1A", fermenterAgentCount, FormatLocomotionCounts(fermentByLocomotion)),
-            ("Methanogen", "#9955E6", methanogenAgentCount, FormatLocomotionCounts(methanogenByLocomotion)),
-            ("Methanotroph", "#FF73BF", methanotrophAgentCount, FormatLocomotionCounts(methanotrophByLocomotion))
+            ("Methanogen", MethanogenHudColor, methanogenAgentCount, FormatLocomotionCounts(methanogenByLocomotion)),
+            ("Methanotroph", MethanotrophHudColor, methanotrophAgentCount, FormatLocomotionCounts(methanotrophByLocomotion))
         };
 
         // --- Keep Hydrogen always, filter others ---
