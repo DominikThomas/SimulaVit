@@ -37,16 +37,19 @@ public struct GeodesicBiologyAvailability
     public bool AllowsFounders => Allows(GeodesicBiologyRuntime.NormalFounderMetabolism)
         && Allows(GeodesicBiologyRuntime.NormalFounderLocomotion);
 
+    public bool AllowsPhotosyntheticFounders => Allows(MetabolismType.Photosynthesis)
+        && Allows(GeodesicBiologyRuntime.NormalFounderLocomotion);
+
     public string FounderStatus
     {
         get
         {
-            if (AllowsFounders) return "Hydrogenotrophy with passive drift (subject to existing founder rules).";
+            if (AllowsFounders) return "Vent founders use hydrogenotrophy and passive drift.";
             if (metabolismMask == 0 && locomotionMask == 0)
-                return "No founders will emerge. No metabolisms or locomotion types are enabled.";
-            if (metabolismMask == 0) return "No founders will emerge. No metabolisms are enabled.";
-            if (locomotionMask == 0) return "No founders will emerge. No locomotion types are enabled.";
-            return "No founders will emerge. Geodesic founders require hydrogenotrophy and passive drift.";
+                return "Vent founders are disabled. No metabolisms or locomotion types are enabled.";
+            if (metabolismMask == 0) return "Vent founders are disabled. No metabolisms are enabled.";
+            if (locomotionMask == 0) return "Vent founders are disabled. No locomotion types are enabled.";
+            return "Vent founders are disabled. They require Hydrogenotrophy and Passive drift.";
         }
     }
 

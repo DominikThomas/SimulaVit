@@ -4,7 +4,7 @@
 
 In **New Game → Biology → Biology availability**, each of the eight metabolisms and four locomotion types has its own checkbox. Availability applies at world startup and gates acquisition by founders and offspring mutations. Living organisms continue to use their traits and can pass the same traits to offspring. Legacy Cube Sphere uses its existing biology rules.
 
-Geodesic founders require **Hydrogenotrophy** and **Passive drift**. Disabling either starts the world without founders, including delayed batches and ongoing gradual emergence. An empty metabolism or locomotion selection has the same result. Setup shows the reason, and the Console logs one `[GeodesicBiologyAvailability]` summary per world startup.
+Geodesic vent founders require **Hydrogenotrophy** and **Passive drift**, including delayed batches and ongoing gradual emergence. The optional B2.2 **Initial photosynthetic founders** batch requires **Oxygenic photosynthesis** and **Passive drift**. Its default count is zero. An empty metabolism or locomotion selection blocks both routes. Setup shows the availability requirements, and the Console logs one `[GeodesicBiologyAvailability]` summary per world startup. [B2.2 setup and manual validation](GeodesicOxygenicPhotosynthesis.md)
 
 Availability leaves the current division, habitat, resource, and temperature requirements in effect. If sulfur is enabled and its roll selects it, it retains priority over fermentation even when its habitat check fails. Disabling sulfur uses the existing fermentation-only draw sequence, as when the sulfur probability is zero. Disabling fermentation excludes its roll. A locomotion roll for a disabled destination yields ordinary inheritance with the original draws and no retry. For example, enabling flagellar movement alone cannot skip the amoeboid step.
 
@@ -17,7 +17,7 @@ Fresh configurations use the scene's startup defaults, which in the supplied sce
 | Passive-only movement | Passive drift only. Keeps the selected metabolisms. |
 | Photosynthesis-focused | Hydrogenotrophy and Oxygenic photosynthesis only. Keeps the selected locomotion types. |
 
-Hydrogenotrophy, Sulfur chemosynthesis and Fermentation are currently the only metabolisms reachable from normal Geodesic founders. The other checkboxes store availability for future entry paths. The Photosynthesis-focused preset keeps Hydrogenotrophy enabled for founders.
+Hydrogenotrophy, Sulfur chemosynthesis, Fermentation and Oxygenic photosynthesis are reachable. The Photosynthesis-focused preset keeps Hydrogenotrophy enabled for vent founders and leaves the optional photosynthetic founder count as configured.
 
 ### User-run manual validation checklist
 
@@ -30,7 +30,7 @@ Hydrogenotrophy, Sulfur chemosynthesis and Fermentation are currently the only m
 
 ## Historical evolution controls checkpoint
 
-> **UI checkpoint with later extensions.** [Gradual founder controls](GeodesicFounderEmergence.md) and [vent visual controls](HydrothermalVentVfx.md) now supplement this report. The [roadmap](GEODESIC_MIGRATION_ROADMAP.md) owns current reachability/status; enabled settings alone are not proof of an implemented gameplay pathway. Preserve saved Hydrogen → Fermentation **0.02**.
+> **UI checkpoint with later extensions.** The disabled photosynthesis controls described below were enabled by B2.2. Preserve saved Hydrogen → Fermentation **0.02**. [B2.2 photosynthesis](GeodesicOxygenicPhotosynthesis.md) · [Gradual founder controls](GeodesicFounderEmergence.md) · [Vent visual controls](HydrothermalVentVfx.md) · [Roadmap](GEODESIC_MIGRATION_ROADMAP.md)
 
 
 Later milestone: [Fermentation restoration](GeodesicFermentationParity.md) activates Hydrogen → Fermentation, its reaction parameters and its thermal template in geodesic mode. The earlier unsupported-fermentation entries below describe the prior UI.

@@ -978,6 +978,67 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
         resourceMayHaveSpatialVariation[(int)donor] = true;
         return transfer;
     }
+
+    internal bool TryCommitPhotosynthesis(int node, double carbonBudget, float maximumStore, float energyPerCO2,
+        float storeBefore, float energyBefore, out float storeAfter, out float energyAfter,
+        out double co2Withdrawn, out double oxygenProduced)
+    {
+        storeAfter = storeBefore;
+        energyAfter = energyBefore;
+        co2Withdrawn = oxygenProduced = 0d;
+        if (!double.IsFinite(carbonBudget) || !(carbonBudget > 0d) || !float.IsFinite(maximumStore)
+            || !float.IsFinite(storeBefore) || storeBefore < 0f || storeBefore >= maximumStore
+            || !float.IsFinite(energyBefore) || energyBefore < 0f || !float.IsFinite(energyPerCO2) || energyPerCO2 < 0f)
+            return false;
+
+        int co2Offset = (int)GeodesicOceanResource.CO2 * nodeCapacity + node;
+        int oxygenOffset = (int)GeodesicOceanResource.O2 * nodeCapacity + node;
+        double co2Before = concentrationsByResourceThenNode[co2Offset];
+        double oxygenBefore = concentrationsByResourceThenNode[oxygenOffset];
+        double volume = sourceGrid.PhysicalLayerVolumeKm3[node];
+        if (!double.IsFinite(volume) || !(volume > 0d) || !double.IsFinite(co2Before) || !(co2Before > 0d)
+            || !double.IsFinite(oxygenBefore) || oxygenBefore < 0d || oxygenBefore >= float.MaxValue) return false;
+
+        // Use the representable store increment as the target for both inventory writes.
+        carbonBudget = Math.Min(carbonBudget, co2Before * volume);
+        float nextStore = (float)Math.Min(maximumStore, storeBefore + carbonBudget);
+        if ((double)nextStore - storeBefore > carbonBudget)
+            nextStore = BitConverter.Int32BitsToSingle(BitConverter.SingleToInt32Bits(nextStore) - 1);
+        double stored = (double)nextStore - storeBefore;
+        if (!(stored > 0d)) return false;
+
+        double nextCO2 = Math.Max(0d, co2Before - stored / volume);
+        double nextO2 = oxygenBefore + stored / volume;
+        if (!double.IsFinite(nextO2) || nextO2 > float.MaxValue) return false;
+        // Round the ocean debit up and the product down when necessary. Reject transfers
+        // that cannot achieve all three quantities within the existing reaction tolerance.
+        if (nextCO2 > 0d && (co2Before - nextCO2) * volume < stored)
+            nextCO2 = BitConverter.Int64BitsToDouble(BitConverter.DoubleToInt64Bits(nextCO2) - 1);
+        if ((nextO2 - oxygenBefore) * volume > stored)
+            nextO2 = BitConverter.Int64BitsToDouble(BitConverter.DoubleToInt64Bits(nextO2) - 1);
+        double measuredCO2 = (co2Before - nextCO2) * volume;
+        double measuredO2 = (nextO2 - oxygenBefore) * volume;
+        double tolerance = GeodesicHydrogenotrophyBalance.RelativeTolerance * stored;
+        if (!(measuredCO2 >= stored && measuredCO2 - stored <= tolerance)
+            || !(measuredO2 > 0d && measuredO2 <= stored && stored - measuredO2 <= tolerance)) return false;
+
+        double energyBudget = measuredO2 * energyPerCO2;
+        float nextEnergy = (float)(energyBefore + energyBudget);
+        if (!float.IsFinite(nextEnergy)) return false;
+        if ((double)nextEnergy - energyBefore > energyBudget)
+            nextEnergy = BitConverter.Int32BitsToSingle(BitConverter.SingleToInt32Bits(nextEnergy) - 1);
+
+        concentrationsByResourceThenNode[co2Offset] = nextCO2;
+        concentrationsByResourceThenNode[oxygenOffset] = nextO2;
+        resourceMayHaveSpatialVariation[(int)GeodesicOceanResource.CO2] = true;
+        resourceMayHaveSpatialVariation[(int)GeodesicOceanResource.O2] = true;
+        storeAfter = nextStore;
+        energyAfter = nextEnergy;
+        co2Withdrawn = measuredCO2;
+        oxygenProduced = measuredO2;
+        return true;
+    }
+
     internal double VentH2Rate => physicalVentH2InventoryRatePerSecond;
     internal GeodesicFermentationBalance.Transfer CommitFermentation(int node, double extent, double need,
         float energy, float assimilation, float store, float maximumStore)

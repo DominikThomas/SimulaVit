@@ -44,14 +44,18 @@ public sealed partial class GeodesicBiologyRuntime
             // Exactly the previous sulfur stream and short-circuit draw order.
             if (metabolismMutationRandom == null) metabolismMutationRandom = new System.Random(unchecked(biologySeed ^ 0x53554C46));
             if (metabolismMutationRandom.NextDouble() >= metabolicMutationChance) return;
+            if (TryMutatePhotosyntheticChild(child)) return;
             if (metabolismMutationRandom.NextDouble() >= hydrogenSulfurChance)
             { TryMutateFermentationChild(child,inheritedCarbon); return; }
             // A selected sulfur candidate suppresses fermentation even if its habitat gate fails.
         }
         else
         {
-            if (hydrogenFermentationChance <= 0f || FermentationRandom.NextDouble() >= metabolicMutationChance) return;
-            TryMutateFermentationChild(child,inheritedCarbon); return;
+            if (hydrogenFermentationChance <= 0f && hydrogenPhotosynthesisChance <= 0f) return;
+            var random = hydrogenFermentationChance > 0f ? FermentationRandom : PhotosynthesisRandom;
+            if (random.NextDouble() >= metabolicMutationChance) return;
+            if (!TryMutatePhotosyntheticChild(child)) TryMutateFermentationChild(child,inheritedCarbon);
+            return;
         }
         sulfurMutationAttempts++;
         int cell = child.geodesicCellIndex, layer = child.currentOceanLayerIndex;

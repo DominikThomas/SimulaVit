@@ -105,6 +105,7 @@ public class ReplicatorManager : MonoBehaviour
     public bool geodesicFounderOngoingEmergence;
     [Min(.01f)] public float geodesicFounderOngoingMeanIntervalSeconds = GeodesicFounderEmergenceSchedule.DefaultOngoingMeanInterval;
     [HideInInspector] public GeodesicBiologyAvailability geodesicBiologyAvailability = GeodesicBiologyAvailability.Default;
+    [HideInInspector] public int geodesicPhotosyntheticFounderCount;
     public int maxPopulation = 50000;
     [Tooltip("When disabled, the manager initializes references but waits for an external startup controller to spawn the initial population.")]
     public bool autoStartOnSceneLoad = true;
@@ -917,7 +918,17 @@ public class ReplicatorManager : MonoBehaviour
                 return false;
             }
             ApplyGeodesicRuntimeControls();
-            Debug.Log(availability.Describe(), this);
+            string founderSummary = string.Empty;
+            if (spawnInitialPopulation && geodesicPhotosyntheticFounderCount > 0)
+            {
+                int spawned = geodesicBiology.SpawnPhotosyntheticFounders(geodesicPhotosyntheticFounderCount,
+                    maxPopulation, photosynthesisCo2PerTickAtFullInsolation, photosynthesisEnergyPerCo2,
+                    maxOrganicCStore, agents, populationState);
+                founderSummary = $" | Photosynthetic founders: {spawned}/{geodesicPhotosyntheticFounderCount} placed";
+                if (!availability.AllowsPhotosyntheticFounders)
+                    founderSummary += " (requires Oxygenic photosynthesis and Passive drift)";
+            }
+            Debug.Log(availability.Describe() + founderSummary, this);
             if (geodesicLocomotion.logDiagnostics)
                 Debug.Log(geodesicBiology.DescribeResolvedLocomotionControls(), this);
             geodesicFounderSpawnSchedule.Configure(0d, spawnDelay,
@@ -1080,6 +1091,8 @@ public class ReplicatorManager : MonoBehaviour
         geodesicBiology.SetFermentationControls(fermentationOrganicCPerTick,fermentationEnergyPerTick,fermentationAssimilationFraction,
             anaerobeO2InhibitionEnabled && anaerobeO2InhibitionAffectsFermentation,anaerobeO2MinEfficiencyFermentation,
             hydrogenToFermentationMutationChance,mutationGateMinOrganicC,fermentationTempRange,defaultLethalMargin);
+        geodesicBiology.SetPhotosynthesisControls(hydrogenToPhotosynthesisMutationChance,
+            mutationGateMinLight, mutationGateMinCO2, photoTempRange, defaultLethalMargin);
         geodesicBiology.SetLocomotionSettings(geodesicLocomotion, CreateSteeringSettings(), moveSpeed,
             amoeboidMoveSpeedMultiplier, flagellumMoveSpeedMultiplier, amoeboidTurnRate, flagellumTurnRate,
             locomotionMutationChance, locomotionUpgradeChance, locomotionAnchoredMutationChance,

@@ -377,6 +377,8 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
     public float GetTemperatureKelvinAtLocalDirection(Vector3 localDirection) { int cell = FindCellForLocalDirection(localDirection); return GetCellTemperatureKelvin(cell); }
     public float GetTemperatureKelvinAtWorldDirection(Vector3 worldDirection) => GetTemperatureKelvinAtLocalDirection(transform.InverseTransformDirection(worldDirection));
 
+    internal void SynchronizeSunDirection() => sunDirectionProvider?.SynchronizePhysicalLight(false);
+
     public float GetCellInsolationCosine(int cellIndex)
     {
         if (topology == null || cellIndex < 0 || cellIndex >= topology.CellCount || !TryGetSunDirection(out Vector3 sun)) return 0f;

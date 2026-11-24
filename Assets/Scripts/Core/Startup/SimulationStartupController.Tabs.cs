@@ -255,6 +255,10 @@ public partial class SimulationStartupController
                 SetupHelp("Individual stochastic events start after the delay. The initial count caps attempts, including rejected events; it does not guarantee survivors. Ongoing emergence is independent of reproduction and starts after the initial event phase. Only locally viable submarine vent injection habitats are eligible. All founders respect the population cap.");
             }
             else SetupHelp("The whole founder batch appears immediately at zero delay, or together after the simulated-time delay. Placement retains vent-production weighting and respects the population cap.");
+            SetupInt("Initial photosynthetic founders", ref b.geodesicPhotosyntheticFounderCount, InitialSpawnMin, InitialSpawnMax);
+            SetupHelp("Zero disables photosynthetic founding. A positive count requests an immediate batch in suitable sunlit ocean habitats, independent of vent emergence and subject to the population cap.");
+            if (!b.geodesicAvailability.AllowsPhotosyntheticFounders)
+                SetupHelp("Photosynthetic founders require Oxygenic photosynthesis and Passive drift.");
         }
         SetupInt("Maximum population", ref b.maxPopulation, 0, int.MaxValue);
         SetupFloat("Reproduction rate (/sim s)", ref b.reproductionRate);
@@ -293,10 +297,10 @@ public partial class SimulationStartupController
 
         SetupSection("Initial / inherited temperature preferences");
         SetupHelp("Editable in °C; stored in Kelvin. These ranges seed temperature traits, not absolute species-wide survival limits. Offspring retain the current inheritance and adaptation behavior. Reversed endpoints are ordered when editing finishes.");
-        if (IsGeodesicSetup) SetupHelp("Hydrogenotrophy seeds geodesic founders. New sulfur and fermentation mutants use their metabolism template before individual thermal mutation; descendants inherit and adapt their own traits. Other templates apply to legacy evolution.");
+        if (IsGeodesicSetup) SetupHelp("Vent founders use the Hydrogenotrophy template. Photosynthetic founders use the Photosynthesis template. New sulfur, fermentation and photosynthesis mutants start from their destination template before individual thermal mutation.");
         SetupTemperatureRange("Hydrogenotrophy", ref b.hydrogenTempRange, true);
         SetupTemperatureRange("Sulfur chemosynthesis", ref b.sulfurChemoTempRange, true);
-        SetupTemperatureRange("Photosynthesis", ref b.photoTempRange, !IsGeodesicSetup);
+        SetupTemperatureRange("Photosynthesis", ref b.photoTempRange, true);
         SetupTemperatureRange("Saprotrophy", ref b.saproTempRange, !IsGeodesicSetup);
         SetupTemperatureRange("Predation", ref b.predatorTempRange, !IsGeodesicSetup);
         SetupTemperatureRange("Fermentation", ref b.fermentationTempRange, true);
@@ -363,7 +367,7 @@ public partial class SimulationStartupController
         GUILayout.EndVertical();
         GUILayout.EndHorizontal();
 
-        SetupHelp("Hydrogenotrophy, sulfur chemosynthesis and fermentation can arise in Geodesic mode today. The other toggles save availability for future transitions.");
+        SetupHelp("Hydrogenotrophy, sulfur chemosynthesis, fermentation and oxygenic photosynthesis can arise in Geodesic mode. The other toggles save availability for future transitions.");
         SetupHelp(availability.FounderStatus);
     }
 
@@ -379,17 +383,18 @@ public partial class SimulationStartupController
     {
         SetupSection("Metabolic evolution");
         SetupFloat("General metabolism mutation chance", ref b.metabolismMutationChance, 0f, 1f);
+        if (IsGeodesicSetup) SetupFloat("Hydrogen → photosynthesis probability", ref b.hydrogenToPhotosynthesisMutationChance, 0f, 1f);
         SetupFloat("Hydrogen → sulfur chemosynthesis probability", ref b.hydrogenToSulfurMutationChance, 0f, 1f);
         SetupFloat("Hydrogen → fermentation probability", ref b.hydrogenToFermentationMutationChance, 0f, 1f);
         SetupHelp(IsGeodesicSetup
-            ? "The general mutation chance is checked first. When both destinations are available, a selected sulfur attempt takes priority over fermentation even if its habitat gate fails. Each transition keeps its conditional roll and local resource requirements. Inherited carbon can satisfy fermentation eligibility. The reaction consumes dissolved organic carbon."
+            ? "After the general roll, photosynthesis can arise in a lit, CO2-bearing habitat within its thermal tolerance once the evolution unlock is reached. If photosynthesis is not acquired, a selected sulfur attempt retains priority over fermentation even if the sulfur habitat gate fails. Inherited carbon can satisfy fermentation eligibility."
             : "For Hydrogen → Sulfur or Fermentation, general metabolism mutation chance is checked first, followed by the ordered conditional rolls. Earlier transition checks, unlocks and local resource requirements still apply; other legacy transitions retain their existing ordering and gates.");
 
         SetupSection("Other metabolic transitions");
         if (IsGeodesicSetup) SetupHelp("Not yet implemented in geodesic evolution. These settings are inactive here and retained for Legacy Cube Sphere.");
         bool enabled = GUI.enabled;
         GUI.enabled = enabled && !IsGeodesicSetup;
-        SetupFloat("Hydrogen → photosynthesis probability", ref b.hydrogenToPhotosynthesisMutationChance, 0f, 1f);
+        if (!IsGeodesicSetup) SetupFloat("Hydrogen → photosynthesis probability", ref b.hydrogenToPhotosynthesisMutationChance, 0f, 1f);
         SetupFloat("Hydrogen → saprotrophy probability", ref b.hydrogenToSaprotrophyMutationChance, 0f, 1f);
         SetupFloat("Fermentation → methanogenesis probability", ref b.fermentationToMethanogenesisMutationChance, 0f, 1f);
         SetupFloat("Hydrogen → methanotrophy probability", ref b.hydrogenToMethanotrophyMutationChance, 0f, 1f);
@@ -466,7 +471,7 @@ public partial class SimulationStartupController
                     SetupFloat("Photosynthetic carbon store fraction", ref b.photosynthStoreFraction);
                     SetupFloat("Night respiration carbon / tick", ref b.nightRespirationCPerTick);
                 }
-                else SetupHelp("Geodesic stores consumed CO2 using its existing conversion; legacy night respiration and store fraction do not apply.");
+                else SetupHelp("Geodesic converts withdrawn CO2 into stored carbon with equal O2 output. Light and available store capacity limit the reaction. In darkness, organisms draw down existing energy for maintenance.");
                 break;
             case 6:
                 SetupFloat("Organic carbon intake / tick", ref b.saproCPerTick);

@@ -972,6 +972,7 @@ public partial class SimulationStartupController : MonoBehaviour
         config.ventClustering = Mathf.Clamp01(config.ventClustering);
         config.terrestrialVentFraction = Mathf.Clamp01(config.terrestrialVentFraction);
         config.initialSpawnCount = Mathf.Clamp(config.initialSpawnCount, InitialSpawnMin, InitialSpawnMax);
+        config.biology.geodesicPhotosyntheticFounderCount = Mathf.Clamp(config.biology.geodesicPhotosyntheticFounderCount, InitialSpawnMin, InitialSpawnMax);
         config.minimumOceanComponentAreaFraction = GeodesicOceanConnectivity.NormalizeThreshold(config.minimumOceanComponentAreaFraction);
         config.minimumLakeBasinAreaFraction = GeodesicLakeBasins.NormalizeArea(config.minimumLakeBasinAreaFraction);
         config.minimumLakeDepth = GeodesicLakeBasins.NormalizeDepth(config.minimumLakeDepth);
@@ -1128,6 +1129,7 @@ public partial class SimulationStartupController : MonoBehaviour
         // JSON overwrite preserves explicit empty masks.
         saved.geodesicMetabolismMask = GeodesicBiologyAvailability.CoreMetabolisms;
         saved.geodesicLocomotionMask = GeodesicBiologyAvailability.AllLocomotions;
+        saved.geodesicPhotosyntheticFounderCount = 0;
         saved.geodesicFounderEmergenceMode = GeodesicFounderEmergenceMode.Batch;
         saved.geodesicFounderOngoingEmergence = false;
         // Older startup files omit this field. An explicitly saved zero still disables production.
@@ -1206,6 +1208,7 @@ public partial class SimulationStartupController : MonoBehaviour
         public int initialSpawnCount;
         public int geodesicMetabolismMask;
         public int geodesicLocomotionMask;
+        public int geodesicPhotosyntheticFounderCount;
         public bool startPaused;
         public float approximateThermalIntervalSeconds;
         public float geodesicResourceTransportIntervalSeconds;
@@ -1281,6 +1284,7 @@ public partial class SimulationStartupController : MonoBehaviour
                 initialSpawnCount = config.initialSpawnCount,
                 geodesicMetabolismMask = availability.metabolismMask,
                 geodesicLocomotionMask = availability.locomotionMask,
+                geodesicPhotosyntheticFounderCount = config.biology?.geodesicPhotosyntheticFounderCount ?? 0,
                 startPaused = config.startPaused,
                 approximateThermalIntervalSeconds = config.approximateThermalIntervalSeconds,
                 geodesicResourceTransportIntervalSeconds = config.geodesicResourceTransportIntervalSeconds,
@@ -1379,6 +1383,7 @@ public partial class SimulationStartupController : MonoBehaviour
                 metabolismMask = geodesicMetabolismMask,
                 locomotionMask = geodesicLocomotionMask
             };
+            config.biology.geodesicPhotosyntheticFounderCount = geodesicPhotosyntheticFounderCount;
             return config;
         }
     }
