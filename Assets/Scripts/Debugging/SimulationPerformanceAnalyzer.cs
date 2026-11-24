@@ -9,6 +9,9 @@ using UnityEngine;
 [DefaultExecutionOrder(-32000)]
 public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
 {
+    internal const float MinimumSummaryIntervalSeconds = 1f;
+    internal const float DefaultSummaryIntervalSeconds = 5f;
+
     // Parents and children remain separate detail columns. Aggregate only disjoint roots.
     private static readonly string[] MarkerNames =
     {
@@ -57,7 +60,7 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
     private static readonly ProfilerMarker SampleMarker = new ProfilerMarker("SimulationPerformanceAnalyzer.Sample");
 
     [Header("Sampling (real time)")]
-    [SerializeField, Min(1f)] private float summaryIntervalSeconds = 5f;
+    [SerializeField, Min(MinimumSummaryIntervalSeconds)] private float summaryIntervalSeconds = DefaultSummaryIntervalSeconds;
     [SerializeField, Min(128)] private int maximumFramesPerWindow = 32768;
     [SerializeField] private ReplicatorManager replicatorManager;
     [SerializeField] private GeodesicOceanResourceField resources;
@@ -90,12 +93,30 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
     private GeodesicBiologyRuntime.MovementWork previousMovement, movement;
     private int endFrame;
     private bool csvFailed;
+    private bool useNewCsvFile;
 
     public string CsvOutputPath => csvOutputPath;
     public string LatestSummary => latestSummary;
+    internal string ActiveCsvOutputPath => isActiveAndEnabled && !csvFailed ? csvOutputPath : null;
+
+    internal static float NormalizeSummaryInterval(float seconds) =>
+        float.IsFinite(seconds) ? Mathf.Max(MinimumSummaryIntervalSeconds, seconds) : DefaultSummaryIntervalSeconds;
+
+    internal void BeginCapture(bool writeCsv, bool logSummaryToConsole, float intervalSeconds, bool appendTimestamp)
+    {
+        enabled = false;
+        this.writeCsv = writeCsv;
+        this.logSummaryToConsole = logSummaryToConsole;
+        summaryIntervalSeconds = NormalizeSummaryInterval(intervalSeconds);
+        appendTimestampToCsvFileName = appendTimestamp;
+        useNewCsvFile = true;
+        enabled = true;
+    }
 
     private void OnEnable()
     {
+        latestSummary = null;
+        csvOutputPath = null;
 #if !ENABLE_PROFILER
         Debug.LogWarning("[SimulationPerformanceAnalyzer] CPU markers require the Unity Editor or a Development Build. Analyzer disabled.", this);
         enabled = false;
@@ -116,7 +137,6 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
         gcRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Memory, "GC Allocated In Frame", 1);
         previousBoundary = Time.realtimeSinceStartupAsDouble;
         hasPending = hasClock = csvFailed = false;
-        csvOutputPath = null;
         ClearWindow();
         if (writeCsv) InitializeCsv();
 #endif
@@ -151,7 +171,7 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
                 }
                 AccumulateAggregates(frameMarkers, aggregates);
                 frames++;
-                if (windowSeconds >= Math.Max(1d, summaryIntervalSeconds) || frames == renderedFrames.Length)
+                if (windowSeconds >= NormalizeSummaryInterval(summaryIntervalSeconds) || frames == renderedFrames.Length)
                 {
                     PublishWindow(frames == renderedFrames.Length);
                     ClearWindow();
@@ -210,7 +230,7 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
         if (resources == null) resources = FindFirstObjectByType<GeodesicOceanResourceField>();
         if (chemistry == null) chemistry = FindFirstObjectByType<GeodesicAbioticChemistry>();
         if (!ReferenceEquals(oldManager, replicatorManager) || !ReferenceEquals(oldChemistry, chemistry)) hasClock = false;
-        nextReferenceRefresh = Time.realtimeSinceStartupAsDouble + Math.Max(1d, summaryIntervalSeconds);
+        nextReferenceRefresh = Time.realtimeSinceStartupAsDouble + NormalizeSummaryInterval(summaryIntervalSeconds);
     }
 
     /// <summary>Input order is MarkerNames. Inclusive details never get blindly summed.</summary>
@@ -346,7 +366,7 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
             string prefix = string.IsNullOrWhiteSpace(csvFileNamePrefix) ? "simulation_performance" : Path.GetFileName(csvFileNamePrefix.Trim());
             foreach (char invalid in Path.GetInvalidFileNameChars()) prefix = prefix.Replace(invalid, '_');
             string suffix = appendTimestampToCsvFileName ? "_" + DateTime.Now.ToString("yyyyMMdd_HHmmss_fff", CultureInfo.InvariantCulture) : string.Empty;
-            csvOutputPath = Path.Combine(Application.persistentDataPath, prefix + suffix + ".csv");
+            string fileStem = prefix + suffix;
             csvBuffer ??= new StringBuilder(4096);
             csvBuffer.Clear(); csvSamplesPending = 0;
             csvBuffer.Append("end_frame,frames,real_seconds,rendered_fps,frame_avg_ms,frame_p95_ms,cpu_main_thread_avg_ms,cpu_main_thread_p95_ms,cpu_samples,gc_bytes_per_frame,gc_samples,population_avg,requested_speed_avg,steps_executed,steps_per_frame,simulated_seconds,simulated_seconds_per_real_second,active_chemistry_nodes_avg,chemistry_candidates_processed,chemistry_nodes_processed,chemistry_ticks,window_capacity_reached");
@@ -355,18 +375,44 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
             csvBuffer.Append(",passive_avg,amoeboid_avg,flagellar_avg,anchored_avg,active_us_per_organism_step,active_organism_steps,active_integration_steps,active_senses,active_habitat_observations,active_boundary_searches,active_neighbor_evaluations,active_cell_crossings,active_vertical_trials");
             csvBuffer.Append(",end_simulated_seconds");
             foreach (string name in MetabolismAverageColumns) csvBuffer.Append(',').Append(name);
-            bool existing = File.Exists(csvOutputPath) && new FileInfo(csvOutputPath).Length > 0;
-            if (existing)
+            if (useNewCsvFile)
             {
-                using var reader = new StreamReader(csvOutputPath);
-                if (reader.ReadLine() != csvBuffer.ToString()) throw new IOException("Existing CSV has a different schema. Choose a new file prefix or enable timestamps.");
+                csvBuffer.AppendLine();
+                csvOutputPath = WriteNewCsvFile(Application.persistentDataPath, fileStem, csvBuffer.ToString());
                 csvBuffer.Clear();
             }
-            else { csvBuffer.AppendLine(); FlushCsvBuffer(); }
-            Debug.Log($"[SimulationPerformanceAnalyzer] CSV: {csvOutputPath}", this);
+            else
+            {
+                csvOutputPath = Path.Combine(Application.persistentDataPath, fileStem + ".csv");
+                bool existing = File.Exists(csvOutputPath) && new FileInfo(csvOutputPath).Length > 0;
+                if (existing)
+                {
+                    using var reader = new StreamReader(csvOutputPath);
+                    if (reader.ReadLine() != csvBuffer.ToString()) throw new IOException("Existing CSV has a different schema. Choose a new file prefix or enable timestamps.");
+                    csvBuffer.Clear();
+                }
+                else { csvBuffer.AppendLine(); FlushCsvBuffer(); }
+            }
+            if (!csvFailed) Debug.Log($"[SimulationPerformanceAnalyzer] CSV: {csvOutputPath}", this);
         }
         catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is ArgumentException || ex is NotSupportedException)
         { FailCsv(ex); }
+    }
+
+    private static string WriteNewCsvFile(string directory, string fileStem, string header)
+    {
+        for (int captureNumber = 1; ; captureNumber++)
+        {
+            string stem = captureNumber == 1 ? fileStem : fileStem + "_" + captureNumber.ToString(CultureInfo.InvariantCulture);
+            string path = Path.Combine(directory, stem + ".csv");
+            FileStream file;
+            try { file = new FileStream(path, FileMode.CreateNew, FileAccess.Write); }
+            catch (IOException) when (File.Exists(path)) { continue; }
+            using (file)
+            using (var writer = new StreamWriter(file))
+                writer.Write(header);
+            return path;
+        }
     }
 
     private void FlushCsvBuffer()

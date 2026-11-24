@@ -60,6 +60,7 @@ public partial class SimulationStartupController : MonoBehaviour
     [SerializeField] private ReplicatorManager replicatorManager;
     [SerializeField] private SunSkyRotator sunSkyRotator;
     [SerializeField] private ReplicatorSimulationPipeline simulationPipeline;
+    [SerializeField] private SimulationPerformanceAnalyzer performanceAnalyzer;
     [SerializeField] private SimulationSaveLoadService saveLoadService;
     [Tooltip("Overlay used as the persistent setup curtain. If empty, the loading overlay is reused when possible.")]
     [SerializeField] private StartupFadeOverlay setupCurtainOrOverlay;
@@ -143,6 +144,7 @@ public partial class SimulationStartupController : MonoBehaviour
 
     private void OnDisable()
     {
+        StopPerformanceCapture();
         CancelStartupLoading();
         RestoreWorldRoots();
         RestoreRuntimeHud();
@@ -161,6 +163,8 @@ public partial class SimulationStartupController : MonoBehaviour
         replicatorManager ??= FindFirstObjectByType<ReplicatorManager>();
         sunSkyRotator ??= FindFirstObjectByType<SunSkyRotator>();
         simulationPipeline ??= FindFirstObjectByType<ReplicatorSimulationPipeline>();
+        if (performanceAnalyzer == null)
+            performanceAnalyzer = FindFirstObjectByType<SimulationPerformanceAnalyzer>();
         saveLoadService ??= FindFirstObjectByType<SimulationSaveLoadService>();
         loadingOverlay ??= FindFirstObjectByType<StartupFadeOverlay>();
         if (loadingOverlay == null && setupCurtainOrOverlay == null)
@@ -256,6 +260,7 @@ public partial class SimulationStartupController : MonoBehaviour
 
     private void ClearRuntimePlanetState(string reason)
     {
+        StopPerformanceCapture();
         replicatorManager?.DeinitializeForStartupMenu();
         ventVisualizer?.ClearRuntimeVisuals(reason);
         planetResourceMap?.DeinitializeForStartupMenu(reason);
@@ -393,6 +398,7 @@ public partial class SimulationStartupController : MonoBehaviour
         RestoreRuntimeHud();
         IsSetupActive = false;
         loadingOverlay?.FadeOut(0.25f);
+        BeginPerformanceCapture();
         Debug.Log("[StartupLifecycle] Simulation started.", this);
         replicatorManager?.SetSimulationTiming(1);
         simulationPipeline?.SetSimulationStepsPerFrame(1);
@@ -520,6 +526,11 @@ public partial class SimulationStartupController : MonoBehaviour
         destination.geodesicResourceTransportIntervalSeconds = source.geodesicResourceTransportIntervalSeconds;
         destination.chemistryTelemetryIntervalSimSeconds = source.chemistryTelemetryIntervalSimSeconds;
         destination.ventVisuals = source.ventVisuals;
+        destination.enablePerformanceRecording = source.enablePerformanceRecording;
+        destination.performanceWriteCsv = source.performanceWriteCsv;
+        destination.performanceLogSummaryToConsole = source.performanceLogSummaryToConsole;
+        destination.performanceSummaryIntervalSeconds = SimulationPerformanceAnalyzer.NormalizeSummaryInterval(source.performanceSummaryIntervalSeconds);
+        destination.performanceAppendTimestampToCsvFileName = source.performanceAppendTimestampToCsvFileName;
     }
 
     public void StartSimulation()
@@ -543,6 +554,7 @@ public partial class SimulationStartupController : MonoBehaviour
         applyingConfig = true;
         generationFailed = false;
         startupComplete = false;
+        StopPerformanceCapture();
         replicatorManager?.SetSimulationTiming(0);
         simulationPipeline?.SetSimulationStepsPerFrame(0);
         if (sunSkyRotator != null)
@@ -606,7 +618,21 @@ public partial class SimulationStartupController : MonoBehaviour
         IsSetupActive = false;
         setupCurtainOrOverlay?.HideImmediate();
         loadingOverlay.HideImmediate();
+        BeginPerformanceCapture();
         Debug.Log("[StartupLifecycle] Simulation started.", this);
+    }
+
+    private void BeginPerformanceCapture()
+    {
+        if (!currentConfig.enablePerformanceRecording || performanceAnalyzer == null) return;
+        replicatorManager?.SetPerformanceAnalyzer(performanceAnalyzer);
+        performanceAnalyzer.BeginCapture(currentConfig.performanceWriteCsv, currentConfig.performanceLogSummaryToConsole,
+            currentConfig.performanceSummaryIntervalSeconds, currentConfig.performanceAppendTimestampToCsvFileName);
+    }
+
+    private void StopPerformanceCapture()
+    {
+        if (performanceAnalyzer != null) performanceAnalyzer.enabled = false;
     }
 
     private IEnumerable<PlanetGenerationProgress> ApplyStartupStages(bool keepPaused)
@@ -1223,6 +1249,11 @@ public partial class SimulationStartupController : MonoBehaviour
         public float approximateThermalIntervalSeconds;
         public float geodesicResourceTransportIntervalSeconds;
         public float chemistryTelemetryIntervalSimSeconds;
+        public bool enablePerformanceRecording;
+        public bool performanceWriteCsv;
+        public bool performanceLogSummaryToConsole;
+        public float performanceSummaryIntervalSeconds;
+        public bool performanceAppendTimestampToCsvFileName;
 
         public static SavedStartupConfig FromDefaults(SimulationStartupConfig defaults)
         {
@@ -1303,7 +1334,12 @@ public partial class SimulationStartupController : MonoBehaviour
                 startPaused = config.startPaused,
                 approximateThermalIntervalSeconds = config.approximateThermalIntervalSeconds,
                 geodesicResourceTransportIntervalSeconds = config.geodesicResourceTransportIntervalSeconds,
-                chemistryTelemetryIntervalSimSeconds = config.chemistryTelemetryIntervalSimSeconds
+                chemistryTelemetryIntervalSimSeconds = config.chemistryTelemetryIntervalSimSeconds,
+                enablePerformanceRecording = config.enablePerformanceRecording,
+                performanceWriteCsv = config.performanceWriteCsv,
+                performanceLogSummaryToConsole = config.performanceLogSummaryToConsole,
+                performanceSummaryIntervalSeconds = SimulationPerformanceAnalyzer.NormalizeSummaryInterval(config.performanceSummaryIntervalSeconds),
+                performanceAppendTimestampToCsvFileName = config.performanceAppendTimestampToCsvFileName
             };
             saved.CaptureV23(config);
             saved.CaptureV24(config);
@@ -1390,6 +1426,11 @@ public partial class SimulationStartupController : MonoBehaviour
             config.approximateThermalIntervalSeconds = approximateThermalIntervalSeconds;
             config.geodesicResourceTransportIntervalSeconds = geodesicResourceTransportIntervalSeconds;
             config.chemistryTelemetryIntervalSimSeconds = version >= 5 ? chemistryTelemetryIntervalSimSeconds : config.chemistryTelemetryIntervalSimSeconds;
+            config.enablePerformanceRecording = enablePerformanceRecording;
+            config.performanceWriteCsv = performanceWriteCsv;
+            config.performanceLogSummaryToConsole = performanceLogSummaryToConsole;
+            config.performanceSummaryIntervalSeconds = performanceSummaryIntervalSeconds;
+            config.performanceAppendTimestampToCsvFileName = performanceAppendTimestampToCsvFileName;
             RestoreV23(config);
             RestoreV24(config);
             RestoreV25(config);

@@ -50,6 +50,7 @@ public partial class SimulationStartupController
     {
         fallback ??= new SimulationStartupConfig();
         config.ventVisuals = config.ventVisuals.Normalized();
+        config.performanceSummaryIntervalSeconds = SimulationPerformanceAnalyzer.NormalizeSummaryInterval(config.performanceSummaryIntervalSeconds);
         if (!Enum.IsDefined(typeof(GeodesicSeaLevelControlMode), config.geodesicSeaLevelControlMode))
             config.geodesicSeaLevelControlMode = fallback.geodesicSeaLevelControlMode;
         config.geodesicTargetOceanCoveragePercent = float.IsFinite(config.geodesicTargetOceanCoveragePercent)

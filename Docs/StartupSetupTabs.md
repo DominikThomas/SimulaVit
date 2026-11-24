@@ -13,10 +13,24 @@ The built-in setup remains Unity IMGUI. Its common header contains the title, ra
 | Ocean | Initial dissolved CO2, O2, CH4, Fe2+; base temperature and insolation gain; geological vent production. Geodesic has clustering, terrestrial fraction, multiplier and four physical inventory rates. Legacy has four separate per-tick rates. |
 | Atmosphere | Geodesic pressure, dense-atmosphere opt-in, five trace-gas fractions, derived N2/partials and air–sea L0 exchange half-life. |
 | Biology | Population, founder delay, reproduction/division, maintenance/movement costs, evolution, eight temperature templates, thermal settings and a metabolism parameter selector. Controls reflect the selected mode's actual consumers. |
-| Advanced | Geodesic subdivision; manual/target/Ocean World sea-level modes and their parameters; inland uplift, hydrology input, valley carving, basin infill limits; environment/transport/telemetry intervals; atmosphere inventory scaling; Reset Advanced. |
+| Advanced | Performance recording, Geodesic geometry and sea level, terrain and hydrology, basin infill, environment and telemetry intervals, atmosphere inventory scaling, and Reset Advanced. |
 | Debug | River destination colours, rejected/uphill reaches, visible-terrain grade, termination reasons, carving gizmos and the existing geodesic chemotaxis steering/A/B diagnostic switches. |
 
 Unsupported geodesic planet/environment controls are hidden with explanations in legacy mode. All previously editable built-in startup fields remain represented. No runtime searches occur while drawing the tabs; static labels/styles and float input formatting are cached. Numeric inputs accept a decimal point or comma without interpreting thousands separators. Partial input stays visible while focused; only finite, validated values enter configuration.
+
+### Performance recording
+
+In **New Game → Advanced → Performance recording**, configure the existing scene analyzer for either grid.
+
+| Control | Default |
+| --- | --- |
+| Enable performance recording | Off |
+| Write CSV | On |
+| Log periodic summaries to Console | Off |
+| Summary interval (real seconds) | 5 seconds, minimum 1 |
+| Append timestamp to CSV filename | On |
+
+Startup saves these options with the other settings. Older settings files use the defaults for missing values. **Reset Advanced to Defaults** restores these options. **Start** and **Start Paused** begin a fresh capture once the world is ready. The runtime **Esc** menu displays the active CSV path and can copy it to the clipboard. Returning to the main menu stops recording and flushes the completed samples. [Performance recording and CSV details](GeodesicPerformanceBaseline.md)
 
 ## Newly connected configuration
 

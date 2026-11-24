@@ -190,6 +190,28 @@ public class SimulationStartupConfigTests
     }
 
     [Test]
+    public void PerformanceRecordingDefaultsAndSavedOptionsRoundTrip()
+    {
+        var defaults = new SimulationStartupConfig();
+        var legacy = SimulationStartupController.DeserializeSavedConfig("{\"version\":24}", defaults);
+        Assert.That(legacy.enablePerformanceRecording, Is.False);
+        Assert.That(legacy.performanceWriteCsv, Is.True);
+        Assert.That(legacy.performanceLogSummaryToConsole, Is.False);
+        Assert.That(legacy.performanceSummaryIntervalSeconds, Is.EqualTo(5f));
+        Assert.That(legacy.performanceAppendTimestampToCsvFileName, Is.True);
+
+        var custom = CreateCustomizedConfig();
+        var type = typeof(SimulationStartupController).GetNestedType("SavedStartupConfig", System.Reflection.BindingFlags.NonPublic);
+        var saved = type.GetMethod("FromConfig").Invoke(null, new object[] { custom });
+        var loaded = SimulationStartupController.DeserializeSavedConfig(UnityEngine.JsonUtility.ToJson(saved), defaults);
+        Assert.That(loaded.enablePerformanceRecording, Is.True);
+        Assert.That(loaded.performanceWriteCsv, Is.False);
+        Assert.That(loaded.performanceLogSummaryToConsole, Is.True);
+        Assert.That(loaded.performanceSummaryIntervalSeconds, Is.EqualTo(12.5f));
+        Assert.That(loaded.performanceAppendTimestampToCsvFileName, Is.False);
+    }
+
+    [Test]
     public void SavedConfigFallbackUsesDefaultButExplicitZeroRemainsDisabled()
     {
         var defaults = new SimulationStartupConfig();
@@ -278,7 +300,9 @@ public class SimulationStartupConfigTests
             allowDenseAtmosphere = true, atmosphereInventoryPerBar = 4321f,
             airSeaExchangeHalfLifeSeconds = 17f, approximateThermalIntervalSeconds = 5f,
             geodesicResourceTransportIntervalSeconds = 10f, chemistryTelemetryIntervalSimSeconds = 19f,
-            geodesicBiologySpawnDelaySeconds = 300f
+            geodesicBiologySpawnDelaySeconds = 300f,
+            enablePerformanceRecording = true, performanceWriteCsv = false, performanceLogSummaryToConsole = true,
+            performanceSummaryIntervalSeconds = 12.5f, performanceAppendTimestampToCsvFileName = false
         };
     }
 
@@ -312,5 +336,10 @@ public class SimulationStartupConfigTests
             Assert.That(actual.approximateThermalIntervalSeconds, Is.EqualTo(expected.approximateThermalIntervalSeconds)); Assert.That(actual.geodesicResourceTransportIntervalSeconds, Is.EqualTo(expected.geodesicResourceTransportIntervalSeconds));
             Assert.That(actual.chemistryTelemetryIntervalSimSeconds, Is.EqualTo(expected.chemistryTelemetryIntervalSimSeconds));
             Assert.That(actual.geodesicBiologySpawnDelaySeconds, Is.EqualTo(expected.geodesicBiologySpawnDelaySeconds));
+            Assert.That(actual.enablePerformanceRecording, Is.EqualTo(expected.enablePerformanceRecording));
+            Assert.That(actual.performanceWriteCsv, Is.EqualTo(expected.performanceWriteCsv));
+            Assert.That(actual.performanceLogSummaryToConsole, Is.EqualTo(expected.performanceLogSummaryToConsole));
+            Assert.That(actual.performanceSummaryIntervalSeconds, Is.EqualTo(expected.performanceSummaryIntervalSeconds));
+            Assert.That(actual.performanceAppendTimestampToCsvFileName, Is.EqualTo(expected.performanceAppendTimestampToCsvFileName));
     }
 }

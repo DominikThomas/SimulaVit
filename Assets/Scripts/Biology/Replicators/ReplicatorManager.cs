@@ -520,6 +520,7 @@ public class ReplicatorManager : MonoBehaviour
     public int TotalPopulation => agents.Count;
     public int PredatorCount => predatorAgentCount;
     internal MetabolismPopulationCounts MetabolismCounts => metabolismCounts;
+    internal void SetPerformanceAnalyzer(SimulationPerformanceAnalyzer analyzer) => hudPresenter.PerformanceAnalyzer = analyzer;
     public double SimulationTimeSeconds => simulationPipeline != null ? simulationPipeline.SimulationTimeSeconds : simulationTimeSeconds;
     public bool IsInitializedForSimulation => isInitialized;
 

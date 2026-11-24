@@ -38,6 +38,9 @@ public class ReplicatorHudPresenter
     private float masterVolume = 1f;
     private string menuStatusMessage;
     private int lastEscapeToggleFrame = -1;
+    private readonly GUIContent performanceCsvPath = new GUIContent();
+
+    internal SimulationPerformanceAnalyzer PerformanceAnalyzer { get; set; }
 
     private const float ReferenceHeight = 1080f;
     private const float MinGuiScale = 1f;
@@ -472,8 +475,13 @@ public class ReplicatorHudPresenter
             return;
         }
 
-        float width = 360f;
-        float height = 398f;
+        const float width = 360f;
+        const float baseHeight = 398f;
+        const float contentWidth = width - 32f;
+        performanceCsvPath.text = PerformanceAnalyzer != null ? PerformanceAnalyzer.ActiveCsvOutputPath : null;
+        bool showCsvPath = !string.IsNullOrEmpty(performanceCsvPath.text);
+        float csvPathHeight = showCsvPath ? hudStyle.CalcHeight(performanceCsvPath, contentWidth) : 0f;
+        float height = baseHeight + (showCsvPath ? csvPathHeight + 36f : 0f);
 
         Rect rect = new Rect(
             (scaledScreenWidth - width) * 0.5f,
@@ -485,7 +493,6 @@ public class ReplicatorHudPresenter
 
         float x = rect.x + 16f;
         float y = rect.y + 40f;
-        float contentWidth = rect.width - 32f;
 
         GUI.Label(
             new Rect(x, y, contentWidth, 28f),
@@ -576,6 +583,14 @@ public class ReplicatorHudPresenter
         {
             y += 42f;
             GUI.Label(new Rect(x, y, contentWidth, 40f), menuStatusMessage, hudStyle);
+        }
+
+        if (showCsvPath)
+        {
+            float pathY = rect.y + baseHeight - 8f;
+            GUI.Label(new Rect(x, pathY, contentWidth, csvPathHeight), performanceCsvPath, hudStyle);
+            if (GUI.Button(new Rect(x, pathY + csvPathHeight + 6f, contentWidth, 28f), "Copy performance CSV path", buttonStyle))
+                GUIUtility.systemCopyBuffer = performanceCsvPath.text;
         }
     }
 

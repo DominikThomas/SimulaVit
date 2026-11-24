@@ -79,6 +79,14 @@ public class SimulationStartupConfig
     [Header("Advanced Vent Visual Effects")]
     public VentVisualSettings ventVisuals = VentVisualSettings.Defaults;
 
+    [Header("Performance Recording")]
+    public bool enablePerformanceRecording;
+    public bool performanceWriteCsv = true;
+    public bool performanceLogSummaryToConsole;
+    [Min(SimulationPerformanceAnalyzer.MinimumSummaryIntervalSeconds)]
+    public float performanceSummaryIntervalSeconds = SimulationPerformanceAnalyzer.DefaultSummaryIntervalSeconds;
+    public bool performanceAppendTimestampToCsvFileName = true;
+
     [Header("Debug Settings / River Debug")]
     [Tooltip("Displays river reaches omitted because they rise uphill. Diagnostic only; these do not become valid drainage routes.")]
     public bool showRejectedUphillRiverSegments;

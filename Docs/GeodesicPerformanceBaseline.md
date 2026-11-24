@@ -4,21 +4,21 @@ This pass adds observation only. No chemistry, biological rules, movement, RNG, 
 
 ## Current diagnostic defaults
 
-The diagnostics cleanup made the performance analyzer opt-in in `PlanetScene`. Enable the existing **Simulation Performance Analyzer** component when recording. The scene still has **Write Csv** configured for captures. Periodic Console output is off by default. Unity Profiler markers remain available independently of the analyzer. The audit and manual review checklist cover the other scene and startup switches. [Runtime diagnostic inventory](GeodesicBiologyGrowthDiagnostics.md#runtime-diagnostic-inventory)
+In `PlanetScene`, opt in through **New Game → Advanced → Performance recording**. The startup controller configures the existing analyzer before enabling it. CSV writing and filename timestamps default to on. Periodic Console summaries default to off. The summary interval defaults to five real seconds. Unity Profiler markers remain available independently of the analyzer. [Startup controls and defaults](StartupSetupTabs.md#performance-recording) · [Runtime diagnostic inventory](GeodesicBiologyGrowthDiagnostics.md#runtime-diagnostic-inventory)
 
 ## Running a reproducible benchmark
 
 1. Use Unity **6000.3.29f1**, matching [ProjectVersion.txt](../ProjectSettings/ProjectVersion.txt), with packages from [manifest.json](../Packages/manifest.json). Start from the same saved world/configuration and seed for every comparison; retain a copy of the existing configuration instead of resetting defaults. Record the exact Editor/package versions, Git revision and local diff, hardware, build target, resolution, camera position, population, geodesic subdivision/layers, thermal model, speed, rendering state, and enabled diagnostic observers. Keep pre-upgrade captures separate; collect a new baseline before comparing performance on the upgraded Editor.
 2. Prefer a Development Build for performance comparisons. In the Editor keep the Game view size, Profiler connection, VSync/frame cap, focused window, and Inspector selections constant. Leave Deep Profile and allocation call stacks off during baseline collection. Main-thread elapsed time can contain waits and Editor overhead; it is not a GPU timing or hardware CPU utilization measurement.
-3. Enable the existing analyzer in `PlanetScene`, or add `SimulationPerformanceAnalyzer` to a separate active GameObject in another scene. References resolve automatically and can also be assigned explicitly. If startup creates resource or chemistry components later, missing references are retried at the summary interval.
-4. Warm up for at least **30 real seconds** after world initialization or restore, then disable/re-enable the analyzer to begin a fresh capture. Set **Summary Interval Seconds = 5** (or 10), **Write Csv = true**, **Append Timestamp = true**, and preferably **Log Summary To Console = false**. The Inspector's Latest Summary updates regardless of Console logging. This only changes analyzer output settings.
+3. Enable **Performance recording** in startup, keep CSV and timestamps on, and select a summary interval of **5** or **10** real seconds. Leave periodic Console summaries off for baseline comparisons. The Inspector's **Latest Summary** updates regardless of Console logging.
+4. Let the world warm up for at least **30 real seconds** after initialization or restore. The capture begins as soon as the world is ready. Exclude warmup windows from performance comparisons.
 5. Capture at least **60 real seconds** at one requested speed. Use separate captures for, for example, 1x, 10x and your usual high speed, restoring the same saved state before each run. Do not change settings, camera, selected organism, rendering, or speed inside a measurement window. Repeat each run three times. Compare windows from similar population and simulated ages because the population evolves while measured.
-6. Stop/disable the analyzer to flush buffered CSV rows and the final partial window. The current unfinished frame is deliberately omitted. Use `simulated_seconds_per_real_second` and `steps_executed`, not the requested multiplier, to judge actual throughput under the authoritative step clamp. Resource chemistry has its own tick schedule, so also compare `chemistry_ticks`.
+6. Return to the main menu or disable the analyzer to flush buffered CSV rows and the final partial window. The current unfinished frame is deliberately omitted. Use `simulated_seconds_per_real_second` and `steps_executed` to judge actual throughput under the authoritative step clamp. Resource chemistry has its own tick schedule, so also compare `chemistry_ticks`.
 7. For observer overhead, repeat the same scenario with the analyzer disabled and compare Unity Profiler's frame measurements. This pass does not claim an experimentally established overhead budget. Do not use the existing legacy predator performance benchmark as a geodesic baseline: it constructs a different scenario and disables rendering.
 
 ### CSV output location
 
-The exact full filename appears once in the Console and in **Csv Output Path** / `CsvOutputPath` on the component. No measured benchmark CSV is included with this implementation.
+The full path appears in the runtime **Esc** menu, where it can be copied. It also appears once in the Console and in **Csv Output Path** on the component.
 
 On this Windows checkout, the current project identity resolves the default location to:
 
@@ -26,7 +26,7 @@ On this Windows checkout, the current project identity resolves the default loca
 C:\Users\domin\AppData\LocalLow\DominikThomas\SimulaVit\simulation_performance_yyyyMMdd_HHmmss_fff.csv
 ```
 
-The general rule is `Path.Combine(Application.persistentDataPath, prefix + timestamp + ".csv")`. The timestamp uses local time. A custom prefix changes the filename, not the directory. With timestamps disabled, compatible CSV files append; a different header stops export with one warning instead of mixing schemas. I/O failures stop CSV export without stopping simulation. Flush defaults to once per summary, not once per rendered frame.
+Startup creates a separate CSV for each recorded world in `Application.persistentDataPath`. Timestamps use local time. With timestamps off, the first unused name is selected from `simulation_performance.csv`, `simulation_performance_2.csv`, and so on. The analyzer's Inspector prefix also applies. A standalone analyzer enabled directly in a scene retains the existing compatible-header append behavior. I/O failures stop CSV export while the simulation continues. Buffered rows flush once per summary by default.
 
 ## Measurement semantics
 

@@ -314,6 +314,11 @@ MonoBehaviour:
     approximateThermalIntervalSeconds: 2
     geodesicResourceTransportIntervalSeconds: 5
     chemistryTelemetryIntervalSimSeconds: 0
+    enablePerformanceRecording: 0
+    performanceWriteCsv: 1
+    performanceLogSummaryToConsole: 0
+    performanceSummaryIntervalSeconds: 5
+    performanceAppendTimestampToCsvFileName: 1
     atmosphereInventoryPerBar: 1000
     airSeaExchangeHalfLifeSeconds: 300
     geodesicBiologySpawnDelaySeconds: 0
@@ -487,6 +492,11 @@ MonoBehaviour:
     approximateThermalIntervalSeconds: 2
     geodesicResourceTransportIntervalSeconds: 5
     chemistryTelemetryIntervalSimSeconds: 0
+    enablePerformanceRecording: 0
+    performanceWriteCsv: 1
+    performanceLogSummaryToConsole: 0
+    performanceSummaryIntervalSeconds: 5
+    performanceAppendTimestampToCsvFileName: 1
     atmosphereInventoryPerBar: 1000
     airSeaExchangeHalfLifeSeconds: 300
     geodesicBiologySpawnDelaySeconds: 0
@@ -504,6 +514,7 @@ MonoBehaviour:
   replicatorManager: {fileID: 1064713443}
   sunSkyRotator: {fileID: 313342988}
   simulationPipeline: {fileID: 1064713445}
+  performanceAnalyzer: {fileID: 584430244}
   saveLoadService: {fileID: 0}
   setupCurtainOrOverlay: {fileID: 209742446}
   loadingOverlay: {fileID: 209742446}

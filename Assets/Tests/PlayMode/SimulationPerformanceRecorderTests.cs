@@ -7,6 +7,44 @@ using UnityEngine;
 
 public sealed class SimulationPerformanceRecorderTests
 {
+    [Test]
+    public void StartupCapturesWithoutTimestampsUseSeparateFiles()
+    {
+        var go = new GameObject("Startup performance capture test");
+        go.SetActive(false);
+        var analyzer = go.AddComponent<SimulationPerformanceAnalyzer>();
+        string prefix = "performance_startup_test_" + System.Guid.NewGuid().ToString("N");
+        var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        typeof(SimulationPerformanceAnalyzer).GetField("csvFileNamePrefix", flags).SetValue(analyzer, prefix);
+        analyzer.enabled = false;
+        go.SetActive(true);
+        string first = null, second = null;
+        try
+        {
+            analyzer.BeginCapture(true, false, 5f, false);
+            first = analyzer.CsvOutputPath;
+            Assert.That(System.IO.Path.GetFileName(first), Is.EqualTo(prefix + ".csv"));
+            string header = System.IO.File.ReadAllText(first);
+            Assert.That(header, Does.Contain("end_simulated_seconds"));
+            Assert.That(header, Does.Contain("methanotrophy_avg"));
+
+            analyzer.BeginCapture(true, false, 5f, false);
+            second = analyzer.CsvOutputPath;
+            Assert.That(System.IO.Path.GetFileName(second), Is.EqualTo(prefix + "_2.csv"));
+            Assert.That(System.IO.File.ReadAllText(second), Is.EqualTo(header));
+            Assert.That(System.IO.File.ReadAllText(first), Is.EqualTo(header));
+
+            analyzer.BeginCapture(false, false, 5f, false);
+            Assert.That(analyzer.CsvOutputPath, Is.Null);
+        }
+        finally
+        {
+            Object.DestroyImmediate(go);
+            if (!string.IsNullOrEmpty(first)) System.IO.File.Delete(first);
+            if (!string.IsNullOrEmpty(second)) System.IO.File.Delete(second);
+        }
+    }
+
     [UnityTest]
     public IEnumerator CsvFinalWindowMatchesHeaderAndUsesInvariantNumbers()
     {

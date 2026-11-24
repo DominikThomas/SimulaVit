@@ -524,6 +524,15 @@ public partial class SimulationStartupController
 
     private void DrawAdvancedTab()
     {
+        SetupSection("Performance recording");
+        SetupBool("Enable performance recording", ref currentConfig.enablePerformanceRecording);
+        SetupBool("Write CSV", ref currentConfig.performanceWriteCsv);
+        SetupBool("Log periodic summaries to Console", ref currentConfig.performanceLogSummaryToConsole);
+        SetupFloat("Summary interval (real seconds)", ref currentConfig.performanceSummaryIntervalSeconds,
+            SimulationPerformanceAnalyzer.MinimumSummaryIntervalSeconds);
+        SetupBool("Append timestamp to CSV filename", ref currentConfig.performanceAppendTimestampToCsvFileName);
+        SetupHelp("Recording starts when the simulation is ready. Profiling is available in the Unity Editor and Development Builds.");
+
         DrawVentVisualEffects();
         if (IsGeodesicSetup)
         {
@@ -576,7 +585,7 @@ public partial class SimulationStartupController
         else SetupHelp("Geodesic subdivision, hydrology, lake/terrain reconstruction, finite atmosphere and environment timing controls apply only to Geodesic Icosphere. Existing Inspector terrain settings remain available.");
         GUILayout.Space(8f);
         if (GUILayout.Button("Reset Advanced to Defaults", buttonStyle, GUILayout.Height(32f))) ResetAdvancedToDefaults();
-        SetupHelp("Reset Advanced includes vent visuals, base temperature, terrestrial vent fraction, air–sea exchange, prebiotic delay, and the advanced planet settings, even where their controls live in other tabs.");
+        SetupHelp("Reset Advanced includes performance recording, vent visuals, base temperature, terrestrial vent fraction, air–sea exchange, prebiotic delay, and the advanced planet settings, even where their controls live in other tabs.");
     }
 
     private void DrawDebugTab()
