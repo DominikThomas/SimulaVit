@@ -1039,40 +1039,44 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
         return true;
     }
 
-    internal struct SaprotrophyTransfer
+    internal struct AerobicCarbonTransfer
     {
-        public double organicCConsumed, oxygenConsumed, co2Produced;
+        public double substrateConsumed, oxygenConsumed, co2Produced;
         public float storeAfter, energyAfter;
     }
 
-    internal bool TryCommitSaprotrophy(int node, double extent, double carbonPerExtent, double oxidizedPerExtent,
-        float oxygenPerC, float energyPerC, float maximumStore, float storeBefore, float energyBefore,
-        out SaprotrophyTransfer transfer)
+    internal bool TryCommitAerobicCarbon(GeodesicOceanResource substrate, int node, double extent,
+        double carbonPerExtent, double oxidizedPerExtent, double oxygenPerC, double oxygenPerStoredC,
+        double energyPerC, float maximumStore, float storeBefore, float energyBefore, out AerobicCarbonTransfer transfer)
     {
         transfer = default;
         if (!double.IsFinite(extent) || !(extent > 0d) || !double.IsFinite(carbonPerExtent)
             || !double.IsFinite(oxidizedPerExtent) || !(oxidizedPerExtent > 0d) || carbonPerExtent < oxidizedPerExtent
-            || !float.IsFinite(oxygenPerC) || !(oxygenPerC > 0f) || !float.IsFinite(energyPerC) || !(energyPerC > 0f)
+            || !double.IsFinite(oxygenPerC) || !(oxygenPerC > 0d)
+            || !double.IsFinite(oxygenPerStoredC) || oxygenPerStoredC < 0d
+            || !double.IsFinite(energyPerC) || !(energyPerC > 0d)
             || !float.IsFinite(maximumStore) || maximumStore < 0f || !float.IsFinite(storeBefore) || storeBefore < 0f
             || !float.IsFinite(energyBefore) || energyBefore < 0f) return false;
 
-        int organicOffset = (int)GeodesicOceanResource.OrganicC * nodeCapacity + node;
+        int substrateOffset = (int)substrate * nodeCapacity + node;
         int oxygenOffset = (int)GeodesicOceanResource.O2 * nodeCapacity + node;
         int co2Offset = (int)GeodesicOceanResource.CO2 * nodeCapacity + node;
-        double organicBefore = concentrationsByResourceThenNode[organicOffset];
+        double substrateBefore = concentrationsByResourceThenNode[substrateOffset];
         double oxygenBefore = concentrationsByResourceThenNode[oxygenOffset];
         double co2Before = concentrationsByResourceThenNode[co2Offset];
         double volume = sourceGrid.PhysicalLayerVolumeKm3[node];
-        if (!double.IsFinite(volume) || !(volume > 0d) || !double.IsFinite(organicBefore) || !(organicBefore > 0d)
+        if (!double.IsFinite(volume) || !(volume > 0d) || !double.IsFinite(substrateBefore) || !(substrateBefore > 0d)
             || !double.IsFinite(oxygenBefore) || !(oxygenBefore > 0d) || !double.IsFinite(co2Before) || co2Before < 0d)
             return false;
 
         // Other commits may have changed this node since the competition snapshot.
-        extent = Math.Min(extent, organicBefore * volume / carbonPerExtent);
-        extent = Math.Min(extent, oxygenBefore * volume / (oxidizedPerExtent * oxygenPerC));
+        double assimilatedPerExtent = carbonPerExtent - oxidizedPerExtent;
+        extent = Math.Min(extent, substrateBefore * volume / carbonPerExtent);
+        extent = Math.Min(extent, oxygenBefore * volume
+            / (oxidizedPerExtent * oxygenPerC + assimilatedPerExtent * oxygenPerStoredC));
         if (!(extent > 0d) || !double.IsFinite(extent)) return false;
 
-        double storeBudget = Math.Min((carbonPerExtent - oxidizedPerExtent) * extent,
+        double storeBudget = Math.Min(assimilatedPerExtent * extent,
             Math.Max(0d, (double)maximumStore - storeBefore));
         float storeAfter = (float)(storeBefore + storeBudget);
         if ((double)storeAfter - storeBefore > storeBudget)
@@ -1081,12 +1085,16 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
 
         // Debit only the oxidizable share and the carbon that fits in the float store.
         double carbonBudget = oxidizedPerExtent * extent + stored;
-        if (!TryPlanBoundedDebit(organicBefore, volume, carbonBudget, out double organicAfter,
-            out double organicConsumed)) return false;
+        if (!TryPlanBoundedDebit(substrateBefore, volume, carbonBudget, out double substrateAfter,
+            out double substrateConsumed)) return false;
 
-        double oxidized = organicConsumed - stored;
-        if (!(oxidized > 0d) || !TryPlanBoundedDebit(oxygenBefore, volume, oxidized * oxygenPerC,
+        double oxidized = substrateConsumed - stored;
+        double assimilationOxygen = stored * oxygenPerStoredC;
+        if (!(oxidized > 0d) || !TryPlanBoundedDebit(oxygenBefore, volume,
+            oxidized * oxygenPerC + assimilationOxygen,
             out double oxygenAfter, out double oxygenConsumed)) return false;
+        double measuredCatabolicOxygen = oxygenConsumed - assimilationOxygen;
+        if (!(measuredCatabolicOxygen > 0d)) return false;
 
         double co2After = co2Before + oxidized / volume;
         if (!double.IsFinite(co2After) || co2After > float.MaxValue) return false;
@@ -1096,21 +1104,21 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
         if (!MatchesBoundedTransfer(oxidized, co2Produced)) return false;
 
         // Credit only oxidation supported by both measured transfers, rounded down in organism energy.
-        double energyBudget = Math.Min(co2Produced, oxygenConsumed / oxygenPerC) * energyPerC;
+        double energyBudget = Math.Min(co2Produced, measuredCatabolicOxygen / oxygenPerC) * energyPerC;
         float energyAfter = (float)(energyBefore + energyBudget);
         if (!float.IsFinite(energyAfter)) return false;
         if ((double)energyAfter - energyBefore > energyBudget)
             energyAfter = BitConverter.Int32BitsToSingle(BitConverter.SingleToInt32Bits(energyAfter) - 1);
 
-        concentrationsByResourceThenNode[organicOffset] = organicAfter;
+        concentrationsByResourceThenNode[substrateOffset] = substrateAfter;
         concentrationsByResourceThenNode[oxygenOffset] = oxygenAfter;
         concentrationsByResourceThenNode[co2Offset] = co2After;
-        resourceMayHaveSpatialVariation[(int)GeodesicOceanResource.OrganicC] = true;
+        resourceMayHaveSpatialVariation[(int)substrate] = true;
         resourceMayHaveSpatialVariation[(int)GeodesicOceanResource.O2] = true;
         resourceMayHaveSpatialVariation[(int)GeodesicOceanResource.CO2] = true;
-        transfer = new SaprotrophyTransfer
+        transfer = new AerobicCarbonTransfer
         {
-            organicCConsumed = organicConsumed, oxygenConsumed = oxygenConsumed, co2Produced = co2Produced,
+            substrateConsumed = substrateConsumed, oxygenConsumed = oxygenConsumed, co2Produced = co2Produced,
             storeAfter = storeAfter, energyAfter = energyAfter
         };
         return true;

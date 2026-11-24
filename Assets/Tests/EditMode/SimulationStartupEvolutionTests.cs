@@ -21,7 +21,7 @@ public sealed class SimulationStartupEvolutionTests
         ("Hydrogen → saprotrophy probability", "hydrogenToSaprotrophyMutationChance", true),
         ("Fermentation → methanogenesis probability", "fermentationToMethanogenesisMutationChance", true),
         ("Saprotrophy mutation chance", "saprotrophyMutationChance", true),
-        ("Hydrogen → methanotrophy probability", "hydrogenToMethanotrophyMutationChance", false),
+        ("Hydrogen → methanotrophy probability", "hydrogenToMethanotrophyMutationChance", true),
         ("Predator mutation chance", "predatorMutationChance", false),
         ("Biomass mutation chance", "biomassMutationChance", false),
         ("Biomass mutation scale", "biomassMutationScale", false) };
@@ -61,12 +61,16 @@ public sealed class SimulationStartupEvolutionTests
                 yield return Edit(window,General,"0.2"); yield return Edit(window,Sulfur,"0.4");
                 yield return Edit(window,"Hydrogen → fermentation probability","0.27");
                 yield return Edit(window,"Fermentation → methanogenesis probability","0.31");
+                yield return Edit(window,"Hydrogen → methanotrophy probability","0.25");
                 Assert.That(f.Controller.CurrentConfig.biology.hydrogenToFermentationMutationChance,Is.EqualTo(.27f));
                 Assert.That(f.Controller.CurrentConfig.biology.metabolismMutationChance,Is.EqualTo(.2f));
                 Assert.That(f.Controller.CurrentConfig.biology.hydrogenToSulfurMutationChance,Is.EqualTo(.4f));
                 Assert.That(f.Controller.CurrentConfig.biology.hydrogenToPhotosynthesisMutationChance,Is.EqualTo(photosynthesisBefore));
                 Assert.That(f.Controller.CurrentConfig.biology.fermentationToMethanogenesisMutationChance,Is.EqualTo(.31f));
                 f.Controller.CurrentConfig.biology.geodesicMethanogenFounderCount = 3;
+                f.Controller.CurrentConfig.biology.geodesicMethanotrophFounderCount = 4;
+                f.Controller.CurrentConfig.biology.mutationGateMinCH4 = .004f;
+                f.Controller.CurrentConfig.biology.mutationGateMinO2ForAerobes = 0f;
                 f.Controller.SaveCurrentStartupConfig();
                 Assert.That(File.Exists(f.Path),Is.True,"The real startup writer must write only the isolated test path.");
                 using(var restarted = new Fixture()) {
@@ -77,6 +81,10 @@ public sealed class SimulationStartupEvolutionTests
                     Assert.That(restarted.Controller.CurrentConfig.biology.hydrogenToFermentationMutationChance,Is.EqualTo(.27f));
                     Assert.That(restarted.Controller.CurrentConfig.biology.fermentationToMethanogenesisMutationChance,Is.EqualTo(.31f));
                     Assert.That(restarted.Controller.CurrentConfig.biology.geodesicMethanogenFounderCount,Is.EqualTo(3));
+                    Assert.That(restarted.Controller.CurrentConfig.biology.hydrogenToMethanotrophyMutationChance,Is.EqualTo(.25f));
+                    Assert.That(restarted.Controller.CurrentConfig.biology.geodesicMethanotrophFounderCount,Is.EqualTo(4));
+                    Assert.That(restarted.Controller.CurrentConfig.biology.mutationGateMinCH4,Is.EqualTo(.004f));
+                    Assert.That(restarted.Controller.CurrentConfig.biology.mutationGateMinO2ForAerobes,Is.Zero);
                 }
                 Assert.That(File.ReadAllText(f.Path),Does.Contain("\"version\": 25"));
             } finally { window.Close(); }

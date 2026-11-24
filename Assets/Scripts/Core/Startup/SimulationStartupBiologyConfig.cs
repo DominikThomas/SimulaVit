@@ -12,6 +12,7 @@ public sealed class SimulationStartupBiologyConfig
     public int geodesicPhotosyntheticFounderCount;
     public int geodesicSaprotrophFounderCount;
     public int geodesicMethanogenFounderCount;
+    public int geodesicMethanotrophFounderCount;
     public int maxPopulation = 50000;
     public float reproductionRate = 0.1f;
     public float moveEnergyCostPerSecond = 0.05f;
@@ -28,9 +29,11 @@ public sealed class SimulationStartupBiologyConfig
     public float hydrogenToPhotosynthesisMutationChance = 0.003f;
     public float hydrogenToSaprotrophyMutationChance = 0.003f;
     public float hydrogenToSulfurMutationChance = 0.003f;
-    public float hydrogenToFermentationMutationChance = 0.002f;
+    public float hydrogenToFermentationMutationChance = 0.02f;
     public float fermentationToMethanogenesisMutationChance = 0.002f;
     public float hydrogenToMethanotrophyMutationChance = 0.0015f;
+    public float mutationGateMinCH4 = 0.001f;
+    public float mutationGateMinO2ForAerobes = 0.01f;
     public float saprotrophyMutationChance = 0.005f;
     public float predatorMutationChance = 0.002f;
     public float locomotionMutationChance = 0.01f;
@@ -105,6 +108,7 @@ public sealed class SimulationStartupBiologyConfig
         geodesicPhotosyntheticFounderCount = manager.geodesicPhotosyntheticFounderCount;
         geodesicSaprotrophFounderCount = manager.geodesicSaprotrophFounderCount;
         geodesicMethanogenFounderCount = manager.geodesicMethanogenFounderCount;
+        geodesicMethanotrophFounderCount = manager.geodesicMethanotrophFounderCount;
         maxPopulation = manager.maxPopulation;
         reproductionRate = manager.reproductionRate;
         moveEnergyCostPerSecond = manager.moveEnergyCostPerSecond;
@@ -124,6 +128,8 @@ public sealed class SimulationStartupBiologyConfig
         hydrogenToFermentationMutationChance = manager.hydrogenToFermentationMutationChance;
         fermentationToMethanogenesisMutationChance = manager.fermentationToMethanogenesisMutationChance;
         hydrogenToMethanotrophyMutationChance = manager.hydrogenToMethanotrophyMutationChance;
+        mutationGateMinCH4 = manager.mutationGateMinCH4;
+        mutationGateMinO2ForAerobes = manager.mutationGateMinO2ForAerobes;
         saprotrophyMutationChance = manager.saprotrophyMutationChance;
         predatorMutationChance = manager.predatorMutationChance;
         locomotionMutationChance = manager.locomotionMutationChance;
@@ -197,6 +203,7 @@ public sealed class SimulationStartupBiologyConfig
         manager.geodesicPhotosyntheticFounderCount = geodesicPhotosyntheticFounderCount;
         manager.geodesicSaprotrophFounderCount = geodesicSaprotrophFounderCount;
         manager.geodesicMethanogenFounderCount = geodesicMethanogenFounderCount;
+        manager.geodesicMethanotrophFounderCount = geodesicMethanotrophFounderCount;
         manager.maxPopulation = maxPopulation;
         manager.reproductionRate = reproductionRate;
         manager.moveEnergyCostPerSecond = moveEnergyCostPerSecond;
@@ -216,6 +223,8 @@ public sealed class SimulationStartupBiologyConfig
         manager.hydrogenToFermentationMutationChance = hydrogenToFermentationMutationChance;
         manager.fermentationToMethanogenesisMutationChance = fermentationToMethanogenesisMutationChance;
         manager.hydrogenToMethanotrophyMutationChance = hydrogenToMethanotrophyMutationChance;
+        manager.mutationGateMinCH4 = mutationGateMinCH4;
+        manager.mutationGateMinO2ForAerobes = mutationGateMinO2ForAerobes;
         manager.saprotrophyMutationChance = saprotrophyMutationChance;
         manager.predatorMutationChance = predatorMutationChance;
         manager.locomotionMutationChance = locomotionMutationChance;
@@ -292,6 +301,7 @@ public sealed class SimulationStartupBiologyConfig
         geodesicPhotosyntheticFounderCount = Mathf.Max(0, geodesicPhotosyntheticFounderCount);
         geodesicSaprotrophFounderCount = Mathf.Max(0, geodesicSaprotrophFounderCount);
         geodesicMethanogenFounderCount = Mathf.Max(0, geodesicMethanogenFounderCount);
+        geodesicMethanotrophFounderCount = Mathf.Max(0, geodesicMethanotrophFounderCount);
         maxPopulation = Mathf.Max(0, maxPopulation);
         reproductionRate = FiniteClamp(reproductionRate, fallback.reproductionRate, 0f, float.MaxValue);
         moveEnergyCostPerSecond = FiniteClamp(moveEnergyCostPerSecond, fallback.moveEnergyCostPerSecond, 0f, float.MaxValue);
@@ -310,6 +320,8 @@ public sealed class SimulationStartupBiologyConfig
         hydrogenToFermentationMutationChance = FiniteClamp(hydrogenToFermentationMutationChance, fallback.hydrogenToFermentationMutationChance, 0f, 1f);
         fermentationToMethanogenesisMutationChance = FiniteClamp(fermentationToMethanogenesisMutationChance, fallback.fermentationToMethanogenesisMutationChance, 0f, 1f);
         hydrogenToMethanotrophyMutationChance = FiniteClamp(hydrogenToMethanotrophyMutationChance, fallback.hydrogenToMethanotrophyMutationChance, 0f, 1f);
+        mutationGateMinCH4 = FiniteClamp(mutationGateMinCH4, fallback.mutationGateMinCH4, 0f, float.MaxValue);
+        mutationGateMinO2ForAerobes = FiniteClamp(mutationGateMinO2ForAerobes, fallback.mutationGateMinO2ForAerobes, 0f, float.MaxValue);
         saprotrophyMutationChance = FiniteClamp(saprotrophyMutationChance, fallback.saprotrophyMutationChance, 0f, 1f);
         predatorMutationChance = FiniteClamp(predatorMutationChance, fallback.predatorMutationChance, 0f, 1f);
         locomotionMutationChance = FiniteClamp(locomotionMutationChance, fallback.locomotionMutationChance, 0f, 1f);

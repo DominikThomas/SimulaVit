@@ -132,14 +132,15 @@ public sealed partial class GeodesicBiologyRuntime
         request.NeedB = saprotrophyOxidizedPerTick * saprotrophyOxygenYield;
     }
 
-    private void CommitSaprotrophy(int index, ReplicatorPopulationState state, float maximumStore, bool observeAccounting)
+    private void CommitAerobicCarbon(int index, ReplicatorPopulationState state, float maximumStore,
+        double oxygenPerC, double oxygenPerStoredC, double energyPerC, bool observeAccounting)
     {
         ref Request request = ref requests[index];
         double competedExtent = request.Actual;
         request.Actual = 0d;
         float storeBefore = state.OrganicCStore[index], energyBefore = state.Energy[index];
-        if (!resources.TryCommitSaprotrophy(request.Node, competedExtent, request.NeedA, request.ProductCoefficient,
-            saprotrophyOxygenYield, saprotrophyEnergyYield, maximumStore, storeBefore, energyBefore,
+        if (!resources.TryCommitAerobicCarbon(request.A, request.Node, competedExtent, request.NeedA,
+            request.ProductCoefficient, oxygenPerC, oxygenPerStoredC, energyPerC, maximumStore, storeBefore, energyBefore,
             out var transfer)) return;
 
         request.Actual = transfer.co2Produced / request.ProductCoefficient;
@@ -147,26 +148,26 @@ public sealed partial class GeodesicBiologyRuntime
         state.Energy[index] = transfer.energyAfter;
         double gained = (double)transfer.energyAfter - energyBefore;
         if (chemotaxisABDiagnosticsEnabled) RecordABMetabolicEnergy(state.Locomotion[index], (float)gained);
-        extentByMetabolism[(int)MetabolismType.Saprotrophy] += request.Actual;
-        energyByMetabolism[(int)MetabolismType.Saprotrophy] += gained;
+        extentByMetabolism[(int)request.Metabolism] += request.Actual;
+        energyByMetabolism[(int)request.Metabolism] += gained;
         if (!observeAccounting) return;
 
-        request.SaprotrophyOrganicC = transfer.organicCConsumed;
-        request.SaprotrophyO2 = transfer.oxygenConsumed;
-        request.SaprotrophyCO2 = transfer.co2Produced;
+        request.AerobicSubstrate = transfer.substrateConsumed;
+        request.AerobicO2 = transfer.oxygenConsumed;
+        request.AerobicCO2 = transfer.co2Produced;
         request.DiagnosticStoreBefore = storeBefore;
         request.DiagnosticStoreAfter = transfer.storeAfter;
         request.DiagnosticEnergyDelta = gained;
-        accountingDiagnostics.RecordNodeExchange(request.A, -transfer.organicCConsumed, -transfer.organicCConsumed, false);
+        accountingDiagnostics.RecordNodeExchange(request.A, -transfer.substrateConsumed, -transfer.substrateConsumed, false);
         accountingDiagnostics.RecordNodeExchange(request.B, -transfer.oxygenConsumed, -transfer.oxygenConsumed, false);
         accountingDiagnostics.RecordNodeExchange(request.Product, transfer.co2Produced, transfer.co2Produced, false);
     }
 
-    private void RecordSaprotrophyAccounting(in Request request)
+    private void RecordAerobicCarbonAccounting(in Request request)
     {
         accountingDiagnostics.RecordReaction(request.Metabolism, request.A, request.B, request.Product,
-            request.NeedA * request.Desired, request.NeedB * request.Desired, request.SaprotrophyOrganicC,
-            request.SaprotrophyO2, request.SaprotrophyCO2, 1d, 1d, 1d,
+            request.NeedA * request.Desired, request.NeedB * request.Desired, request.AerobicSubstrate,
+            request.AerobicO2, request.AerobicCO2, 1d, 1d, 1d,
             request.DiagnosticStoreAfter - request.DiagnosticStoreBefore, request.DiagnosticStoreBefore,
             request.DiagnosticStoreAfter, (float)request.DiagnosticEnergyDelta, request.DiagnosticEnergyDelta,
             request.Actual > 0d, request.NeedA * request.CompetedActual, request.NeedB * request.CompetedActual);

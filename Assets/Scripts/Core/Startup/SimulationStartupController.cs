@@ -1134,6 +1134,7 @@ public partial class SimulationStartupController : MonoBehaviour
         saved.geodesicPhotosyntheticFounderCount = 0;
         saved.geodesicSaprotrophFounderCount = 0;
         saved.geodesicMethanogenFounderCount = 0;
+        saved.geodesicMethanotrophFounderCount = 0;
         saved.geodesicFounderEmergenceMode = GeodesicFounderEmergenceMode.Batch;
         saved.geodesicFounderOngoingEmergence = false;
         // Older startup files omit this field. An explicitly saved zero still disables production.
@@ -1215,6 +1216,9 @@ public partial class SimulationStartupController : MonoBehaviour
         public int geodesicPhotosyntheticFounderCount;
         public int geodesicSaprotrophFounderCount;
         public int geodesicMethanogenFounderCount;
+        public int geodesicMethanotrophFounderCount;
+        public float mutationGateMinCH4;
+        public float mutationGateMinO2ForAerobes;
         public bool startPaused;
         public float approximateThermalIntervalSeconds;
         public float geodesicResourceTransportIntervalSeconds;
@@ -1293,6 +1297,9 @@ public partial class SimulationStartupController : MonoBehaviour
                 geodesicPhotosyntheticFounderCount = config.biology?.geodesicPhotosyntheticFounderCount ?? 0,
                 geodesicSaprotrophFounderCount = config.biology?.geodesicSaprotrophFounderCount ?? 0,
                 geodesicMethanogenFounderCount = config.biology?.geodesicMethanogenFounderCount ?? 0,
+                geodesicMethanotrophFounderCount = config.biology?.geodesicMethanotrophFounderCount ?? 0,
+                mutationGateMinCH4 = config.biology?.mutationGateMinCH4 ?? 0.001f,
+                mutationGateMinO2ForAerobes = config.biology?.mutationGateMinO2ForAerobes ?? 0.01f,
                 startPaused = config.startPaused,
                 approximateThermalIntervalSeconds = config.approximateThermalIntervalSeconds,
                 geodesicResourceTransportIntervalSeconds = config.geodesicResourceTransportIntervalSeconds,
@@ -1394,6 +1401,9 @@ public partial class SimulationStartupController : MonoBehaviour
             config.biology.geodesicPhotosyntheticFounderCount = geodesicPhotosyntheticFounderCount;
             config.biology.geodesicSaprotrophFounderCount = geodesicSaprotrophFounderCount;
             config.biology.geodesicMethanogenFounderCount = geodesicMethanogenFounderCount;
+            config.biology.geodesicMethanotrophFounderCount = geodesicMethanotrophFounderCount;
+            config.biology.mutationGateMinCH4 = mutationGateMinCH4;
+            config.biology.mutationGateMinO2ForAerobes = mutationGateMinO2ForAerobes;
             return config;
         }
     }

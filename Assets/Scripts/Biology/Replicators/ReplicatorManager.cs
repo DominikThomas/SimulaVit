@@ -108,6 +108,7 @@ public class ReplicatorManager : MonoBehaviour
     [HideInInspector] public int geodesicPhotosyntheticFounderCount;
     [HideInInspector] public int geodesicSaprotrophFounderCount;
     [HideInInspector] public int geodesicMethanogenFounderCount;
+    [HideInInspector] public int geodesicMethanotrophFounderCount;
     public int maxPopulation = 50000;
     [Tooltip("When disabled, the manager initializes references but waits for an external startup controller to spawn the initial population.")]
     public bool autoStartOnSceneLoad = true;
@@ -225,7 +226,7 @@ public class ReplicatorManager : MonoBehaviour
     [Range(0f, 1f)] public float hydrogenToSulfurMutationChance = 0.003f;
 
     [Header("Anaerobic Transition Mutation")]
-    [Range(0f, 1f)] public float hydrogenToFermentationMutationChance = 0.002f;
+    [Range(0f, 1f)] public float hydrogenToFermentationMutationChance = 0.02f;
     [Range(0f, 1f)] public float fermentationToMethanogenesisMutationChance = 0.002f;
     [Range(0f, 1f)] public float hydrogenToMethanotrophyMutationChance = 0.0015f;
 
@@ -518,6 +519,7 @@ public class ReplicatorManager : MonoBehaviour
     public bool PauseDetected => simulationPipeline != null && simulationPipeline.PauseDetected;
     public int TotalPopulation => agents.Count;
     public int PredatorCount => predatorAgentCount;
+    internal MetabolismPopulationCounts MetabolismCounts => metabolismCounts;
     public double SimulationTimeSeconds => simulationPipeline != null ? simulationPipeline.SimulationTimeSeconds : simulationTimeSeconds;
     public bool IsInitializedForSimulation => isInitialized;
 
@@ -713,6 +715,7 @@ public class ReplicatorManager : MonoBehaviour
     [SerializeField] private int fermenterAgentCount;
     [SerializeField] private int methanogenAgentCount;
     [SerializeField] private int methanotrophAgentCount;
+    private MetabolismPopulationCounts metabolismCounts;
     [SerializeField] private float averageOrganicCStore;
     [SerializeField] private int divisionEligibleAgentCount;
     [Header("Metabolism Mutation Gate Telemetry")]
@@ -920,12 +923,15 @@ public class ReplicatorManager : MonoBehaviour
                 return false;
             }
             ApplyGeodesicRuntimeControls();
+            // The runtime's initial vent batch contains only hydrogenotrophs.
+            metabolismCounts.Hydrogenotrophy = agents.Count;
             string founderSummary = string.Empty;
             if (spawnInitialPopulation && geodesicPhotosyntheticFounderCount > 0)
             {
                 int spawned = geodesicBiology.SpawnPhotosyntheticFounders(geodesicPhotosyntheticFounderCount,
                     maxPopulation, photosynthesisCo2PerTickAtFullInsolation, photosynthesisEnergyPerCo2,
                     maxOrganicCStore, agents, populationState);
+                metabolismCounts.Photosynthesis = spawned;
                 founderSummary = $" | Photosynthetic founders: {spawned}/{geodesicPhotosyntheticFounderCount} placed";
                 if (!availability.AllowsPhotosyntheticFounders)
                     founderSummary += " (requires Oxygenic photosynthesis and Passive drift)";
@@ -943,6 +949,14 @@ public class ReplicatorManager : MonoBehaviour
                 founderSummary += availability.AllowsMethanogenFounders
                     ? $" | Methanogen founders: up to {geodesicMethanogenFounderCount} at the first suitable anoxic submarine outlet"
                     : " | Methanogen founders: require Methanogenesis and Passive drift";
+            }
+            if (spawnInitialPopulation && geodesicMethanotrophFounderCount > 0)
+            {
+                geodesicBiology.ConfigureMethanotrophFounders(geodesicMethanotrophFounderCount);
+                founderSummary += $" | Methanotroph founders: 0/{geodesicMethanotrophFounderCount} placed"
+                    + (availability.AllowsMethanotrophFounders
+                        ? " (pending suitable local CH4/O2 and temperature)"
+                        : " (requires Methanotrophy and Passive drift)");
             }
             Debug.Log(availability.Describe() + founderSummary, this);
             if (geodesicLocomotion.logDiagnostics)
@@ -990,12 +1004,15 @@ public class ReplicatorManager : MonoBehaviour
         {
             SpawnAgentAtRandomLocation();
         }
+        // Legacy initial spawning also creates only hydrogenotrophs.
+        metabolismCounts.Hydrogenotrophy = agents.Count;
     }
 
     public void ClearPopulation()
     {
         agents.Clear();
         populationState.Reset();
+        metabolismCounts = default;
         movementDiagnostics.Reset();
         biologyDiagnostics.Reset();
         ResetVisualGrowthReadouts();
@@ -1116,6 +1133,8 @@ public class ReplicatorManager : MonoBehaviour
             anaerobeO2InhibitionEnabled && anaerobeO2InhibitionAffectsMethanogenesis, anaerobeO2MinEfficiencyMethanogenesis,
             fermentationToMethanogenesisMutationChance, mutationGateMinH2, mutationGateMinCO2,
             mutationGateMaxO2ForAnaerobes, methanogenesisTempRange, defaultLethalMargin);
+        geodesicBiology.SetMethanotrophyControls(methanotrophyAssimilationFraction, hydrogenToMethanotrophyMutationChance,
+            mutationGateMinCH4, mutationGateMinO2ForAerobes, methanotrophyTempRange, defaultLethalMargin);
         geodesicBiology.SetLocomotionSettings(geodesicLocomotion, CreateSteeringSettings(), moveSpeed,
             amoeboidMoveSpeedMultiplier, flagellumMoveSpeedMultiplier, amoeboidTurnRate, flagellumTurnRate,
             locomotionMutationChance, locomotionUpgradeChance, locomotionAnchoredMutationChance,
@@ -1307,8 +1326,41 @@ public class ReplicatorManager : MonoBehaviour
         fermenterAgentCount = ferment;
         methanogenAgentCount = methanogen;
         methanotrophAgentCount = methanotroph;
+        // Reuse the HUD tally without changing the counts used by legacy spawning.
+        metabolismCounts = new MetabolismPopulationCounts
+        {
+            Hydrogenotrophy = hydrogen,
+            SulfurChemosynthesis = chemo,
+            Fermentation = ferment,
+            Photosynthesis = photo,
+            Saprotrophy = sapro,
+            Methanogenesis = methanogen,
+            Methanotrophy = methanotroph,
+            Predation = predator
+        };
     }
 
+    internal struct MetabolismPopulationCounts
+    {
+        // Long fields also hold sums across many rendered frames.
+        public long Hydrogenotrophy, SulfurChemosynthesis, Fermentation, Photosynthesis;
+        public long Saprotrophy, Methanogenesis, Methanotrophy, Predation;
+
+        public long Total => Hydrogenotrophy + SulfurChemosynthesis + Fermentation + Photosynthesis
+            + Saprotrophy + Methanogenesis + Methanotrophy + Predation;
+
+        public void Add(in MetabolismPopulationCounts counts)
+        {
+            Hydrogenotrophy += counts.Hydrogenotrophy;
+            SulfurChemosynthesis += counts.SulfurChemosynthesis;
+            Fermentation += counts.Fermentation;
+            Photosynthesis += counts.Photosynthesis;
+            Saprotrophy += counts.Saprotrophy;
+            Methanogenesis += counts.Methanogenesis;
+            Methanotrophy += counts.Methanotrophy;
+            Predation += counts.Predation;
+        }
+    }
 
 
     internal void LogMetabolismDebugThrottled()

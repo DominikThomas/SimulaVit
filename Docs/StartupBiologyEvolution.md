@@ -2,9 +2,9 @@
 
 ## B2.1 Geodesic biology availability
 
-In **New Game → Biology → Biology availability**, each of the eight metabolisms and four locomotion types has its own checkbox. Availability applies at world startup and gates acquisition by founders and offspring mutations. Living organisms continue to use their traits and can pass the same traits to offspring. Legacy Cube Sphere uses its existing biology rules.
+In **New Game → Biology → Biology availability**, each of the eight metabolisms and four locomotion types has its own checkbox. Availability applies at world startup and gates acquisition by founders and offspring mutations. Living organisms retain their traits and can pass the same traits to offspring. Geodesic methanotrophy also checks availability before feeding. Legacy Cube Sphere uses its existing biology rules.
 
-Geodesic vent founders require **Hydrogenotrophy** and **Passive drift**, including delayed batches and ongoing gradual emergence. **Initial photosynthetic founders** require **Oxygenic photosynthesis** and **Passive drift**. **Experimental saprotroph founders** require **Aerobic saprotrophy** and **Passive drift** and wait for a suitable death-recycling site. **Experimental methanogen founders** require **Methanogenesis** and **Passive drift** and wait for a suitable anoxic submarine outlet. All three optional counts default to zero. An empty metabolism or locomotion selection blocks founding. Setup shows the availability requirements, and the Console logs one `[GeodesicBiologyAvailability]` summary per world startup. [Photosynthetic founders](GeodesicOxygenicPhotosynthesis.md) · [Saprotroph founders](GeodesicAerobicSaprotrophy.md) · [Methanogen founders](GeodesicMethanogenesis.md)
+Geodesic vent founders require **Hydrogenotrophy** and **Passive drift**, including delayed batches and ongoing gradual emergence. Optional founders require their respective metabolism and Passive drift. Photosynthetic founders use suitable lit water, saprotroph founders wait for a suitable death-recycling site, methanogen founders wait for a suitable anoxic submarine outlet, and methanotroph founders wait for local CH4 and O2 overlap at a viable temperature. All four optional counts default to zero. An empty metabolism or locomotion selection blocks founding. Setup shows the availability requirements, and the Console logs one `[GeodesicBiologyAvailability]` summary per world startup. [Photosynthetic founders](GeodesicOxygenicPhotosynthesis.md) · [Saprotroph founders](GeodesicAerobicSaprotrophy.md) · [Methanogen founders](GeodesicMethanogenesis.md) · [Methanotroph founders](GeodesicAerobicMethanotrophy.md)
 
 Availability leaves the current division, habitat, resource, and temperature requirements in effect. If sulfur is enabled and its roll selects it, it retains priority over fermentation even when its habitat check fails. Disabling sulfur uses the existing fermentation-only draw sequence, as when the sulfur probability is zero. Disabling fermentation excludes its roll. A locomotion roll for a disabled destination yields ordinary inheritance with the original draws and no retry. For example, enabling flagellar movement alone cannot skip the amoeboid step.
 
@@ -12,12 +12,12 @@ Fresh configurations use the scene's startup defaults, which in the supplied sce
 
 | Preset | Availability selected |
 |---|---|
-| All implemented pathways | Hydrogenotrophy, Sulfur chemosynthesis, Fermentation, Oxygenic photosynthesis, Aerobic saprotrophy and Methanogenesis. Enables all four locomotion types. |
+| All implemented pathways | Hydrogenotrophy, Sulfur chemosynthesis, Fermentation, Oxygenic photosynthesis, Aerobic saprotrophy, Methanogenesis and Methanotrophy. Enables all four locomotion types. |
 | Existing core biology only | Hydrogenotrophy, Sulfur chemosynthesis, Fermentation and all four locomotion types. |
 | Passive-only movement | Passive drift only. Keeps the selected metabolisms. |
 | Photosynthesis-focused | Hydrogenotrophy and Oxygenic photosynthesis only. Keeps the selected locomotion types. |
 
-The Photosynthesis-focused preset keeps Hydrogenotrophy enabled for vent founders and leaves the optional founder counts as configured. B2.3 activates the Saprotrophy temperature template, both saprotrophy mutation probabilities, dissolved OrganicC intake and assimilation, and the shared aerobic yields. B2.4 activates the Methanogenesis template, Fermentation → Methanogenesis probability, CO2 and H2 limits, energy and assimilation. [B2.3 controls and manual validation](GeodesicAerobicSaprotrophy.md) · [B2.4 controls and manual validation](GeodesicMethanogenesis.md)
+The Photosynthesis-focused preset keeps Hydrogenotrophy enabled for vent founders and leaves the optional founder counts as configured. B2.3 activates the Saprotrophy temperature template, both saprotrophy mutation probabilities, dissolved OrganicC intake and assimilation, and the shared aerobic yields. B2.4 activates the Methanogenesis template, Fermentation → Methanogenesis probability, CO2 and H2 limits, energy and assimilation. B2.5 activates the Methanotrophy template, Hydrogen → Methanotrophy probability, the CH4 and shared aerobic O2 acquisition thresholds, CH4 and O2 limits, energy and assimilation. [B2.3 controls](GeodesicAerobicSaprotrophy.md) · [B2.4 controls](GeodesicMethanogenesis.md) · [B2.5 controls](GeodesicAerobicMethanotrophy.md)
 
 ### User-run manual validation checklist
 
@@ -30,7 +30,7 @@ The Photosynthesis-focused preset keeps Hydrogenotrophy enabled for vent founder
 
 ## Historical evolution controls checkpoint
 
-> **UI checkpoint with later extensions.** B2.2–B2.4 enabled the photosynthesis, saprotrophy and methanogenesis controls described below. Preserve saved Hydrogen → Fermentation **0.02**. [B2.2 photosynthesis](GeodesicOxygenicPhotosynthesis.md) · [B2.3 saprotrophy](GeodesicAerobicSaprotrophy.md) · [B2.4 methanogenesis](GeodesicMethanogenesis.md) · [Gradual founder controls](GeodesicFounderEmergence.md) · [Vent visual controls](HydrothermalVentVfx.md) · [Roadmap](GEODESIC_MIGRATION_ROADMAP.md)
+> **Historical UI checkpoint.** B2.2–B2.5 extended the original controls below. Preserve saved Hydrogen → Fermentation **0.02**. [B2.2 photosynthesis](GeodesicOxygenicPhotosynthesis.md) · [B2.3 saprotrophy](GeodesicAerobicSaprotrophy.md) · [B2.4 methanogenesis](GeodesicMethanogenesis.md) · [B2.5 methanotrophy](GeodesicAerobicMethanotrophy.md) · [Gradual founder controls](GeodesicFounderEmergence.md) · [Vent visual controls](HydrothermalVentVfx.md) · [Roadmap](GEODESIC_MIGRATION_ROADMAP.md)
 
 
 Later milestone: [Fermentation restoration](GeodesicFermentationParity.md) activates Hydrogen → Fermentation, its reaction parameters and its thermal template in geodesic mode. The earlier unsupported-fermentation entries below describe the prior UI.

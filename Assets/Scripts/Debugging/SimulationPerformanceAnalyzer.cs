@@ -49,6 +49,11 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
         "passive_movement_including_visual_targets", "active_movement_including_sensing", "abiotic_chemistry",
         "ocean_transport_and_environment", "rendering_visual_sync", "telemetry_debugging", "measured_total"
     };
+    private static readonly string[] MetabolismAverageColumns =
+    {
+        "hydrogenotrophy_avg", "sulfur_chemosynthesis_avg", "fermentation_avg", "photosynthesis_avg",
+        "saprotrophy_avg", "methanogenesis_avg", "methanotrophy_avg", "predation_avg"
+    };
     private static readonly ProfilerMarker SampleMarker = new ProfilerMarker("SimulationPerformanceAnalyzer.Sample");
 
     [Header("Sampling (real time)")]
@@ -79,7 +84,8 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
     private double previousSimulationTime, previousBoundary, windowSeconds, simulatedSeconds;
     private double nextReferenceRefresh;
     private long previousCandidates, previousProcessed, previousChemistryTicks;
-    private double populationSum, speedSum, gcBytes;
+    private ReplicatorManager.MetabolismPopulationCounts populationSum;
+    private double speedSum, gcBytes, endSimulatedSeconds;
     private long steps, candidates, processed, chemistryTicks, activeNodesSum;
     private GeodesicBiologyRuntime.MovementWork previousMovement, movement;
     private int endFrame;
@@ -128,7 +134,9 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
                 renderedFrames[frames] = elapsed * 1000d;
                 windowSeconds += elapsed;
                 endFrame = pending.Frame;
-                populationSum += pending.Population; speedSum += pending.Speed;
+                endSimulatedSeconds = pending.AbsoluteSimulatedSeconds;
+                populationSum.Add(pending.Population);
+                speedSum += pending.Speed;
                 steps += pending.Steps; simulatedSeconds += pending.SimulatedSeconds;
                 activeNodesSum += pending.ActiveNodes;
                 candidates += pending.Candidates; processed += pending.Processed; chemistryTicks += pending.ChemistryTicks;
@@ -175,10 +183,11 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
             pending = new FrameContext
             {
                 Frame = Time.frameCount,
-                Population = replicatorManager != null ? replicatorManager.TotalPopulation : 0,
+                Population = replicatorManager != null ? replicatorManager.MetabolismCounts : default,
                 Speed = replicatorManager != null ? replicatorManager.SimulationSpeedMultiplier : 0f,
                 Steps = hasClock ? Math.Max(0, currentSteps - previousSteps) : 0,
                 SimulatedSeconds = hasClock ? Math.Max(0d, currentTime - previousSimulationTime) : 0d,
+                AbsoluteSimulatedSeconds = currentTime,
                 ActiveNodes = resources != null && resources.IsInitialized ? resources.ActiveNodeCount : 0,
                 Candidates = hasClock ? Math.Max(0L, currentCandidates - previousCandidates) : 0L,
                 Processed = hasClock ? Math.Max(0L, currentProcessed - previousProcessed) : 0L,
@@ -226,6 +235,7 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
     private void PublishWindow(bool capacityReached)
     {
         double averageFrame = windowSeconds * 1000d / frames;
+        double averagePopulation = (double)populationSum.Total / frames;
         double p95 = Percentile95(renderedFrames, frames);
         double cpuTotal = 0d;
         for (int i = 0; i < cpuSamples; i++) cpuTotal += cpuFrames[i];
@@ -235,7 +245,9 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
         summary.Append(" FPS="); AppendNumber(summary, frames / windowSeconds);
         summary.Append(" frame_avg/p95_ms="); AppendNumber(summary, averageFrame); summary.Append('/'); AppendNumber(summary, p95);
         summary.Append(" CPU_MainThread_avg/p95_ms="); AppendOptional(summary, cpuTotal, cpuSamples); summary.Append('/'); AppendOptional(summary, cpuP95, cpuSamples > 0 ? 1 : 0);
-        summary.Append(" population_avg="); AppendNumber(summary, populationSum / frames);
+        summary.Append(" end_simulated_seconds="); AppendNumber(summary, endSimulatedSeconds, "R");
+        summary.Append(" population_avg="); AppendNumber(summary, averagePopulation, "R");
+        AppendMetabolismAverages(summary, includeNames: true);
         summary.Append(" requested_speed_avg="); AppendNumber(summary, speedSum / frames);
         summary.Append(" steps=").Append(steps).Append(" simulated_s_per_real_s="); AppendNumber(summary, simulatedSeconds / windowSeconds);
         summary.Append(" GC_B_per_frame="); AppendOptional(summary, gcBytes, gcSamples);
@@ -262,7 +274,8 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
             AppendCsvNumber(averageFrame); AppendCsvNumber(p95);
             AppendCsvOptional(cpuTotal, cpuSamples); AppendCsvOptional(cpuP95, cpuSamples > 0 ? 1 : 0);
             csvBuffer.Append(cpuSamples).Append(','); AppendCsvOptional(gcBytes, gcSamples); csvBuffer.Append(gcSamples).Append(',');
-            AppendCsvNumber(populationSum / frames); AppendCsvNumber(speedSum / frames);
+            AppendCsvNumber(averagePopulation, "R");
+            AppendCsvNumber(speedSum / frames);
             csvBuffer.Append(steps).Append(','); AppendCsvNumber((double)steps / frames);
             AppendCsvNumber(simulatedSeconds); AppendCsvNumber(simulatedSeconds / windowSeconds);
             AppendCsvNumber((double)activeNodesSum / frames);
@@ -283,8 +296,29 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
                 .Append(movement.Senses).Append(',').Append(movement.HabitatObservations).Append(',')
                 .Append(movement.BoundarySearches).Append(',').Append(movement.NeighborEvaluations).Append(',')
                 .Append(movement.CellCrossings).Append(',').Append(movement.VerticalTrials);
+            csvBuffer.Append(',');
+            AppendNumber(csvBuffer, endSimulatedSeconds, "R");
+            AppendMetabolismAverages(csvBuffer, includeNames: false);
             csvBuffer.AppendLine();
             if (++csvSamplesPending >= Math.Max(1, flushCsvEveryNSamples)) FlushCsvBuffer();
+        }
+    }
+
+    private void AppendMetabolismAverages(StringBuilder builder, bool includeNames)
+    {
+        ReadOnlySpan<long> counts = stackalloc long[]
+        {
+            populationSum.Hydrogenotrophy, populationSum.SulfurChemosynthesis, populationSum.Fermentation,
+            populationSum.Photosynthesis, populationSum.Saprotrophy, populationSum.Methanogenesis,
+            populationSum.Methanotrophy, populationSum.Predation
+        };
+        for (int i = 0; i < counts.Length; i++)
+        {
+            if (includeNames)
+                builder.Append(' ').Append(MetabolismAverageColumns[i]).Append('=');
+            else
+                builder.Append(',');
+            AppendNumber(builder, (double)counts[i] / frames, "R");
         }
     }
 
@@ -298,7 +332,8 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
     private void ClearWindow()
     {
         frames = cpuSamples = gcSamples = 0;
-        windowSeconds = simulatedSeconds = populationSum = speedSum = gcBytes = 0d;
+        windowSeconds = simulatedSeconds = speedSum = gcBytes = 0d;
+        populationSum = default;
         steps = candidates = processed = chemistryTicks = activeNodesSum = 0;
         movement = default;
         Array.Clear(markerTotals, 0, markerTotals.Length); Array.Clear(aggregates, 0, aggregates.Length);
@@ -318,6 +353,8 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
             foreach (string name in AggregateNames) csvBuffer.Append(',').Append(name).Append("_avg_ms");
             foreach (string name in MarkerNames) csvBuffer.Append(',').Append(name).Append("_avg_ms");
             csvBuffer.Append(",passive_avg,amoeboid_avg,flagellar_avg,anchored_avg,active_us_per_organism_step,active_organism_steps,active_integration_steps,active_senses,active_habitat_observations,active_boundary_searches,active_neighbor_evaluations,active_cell_crossings,active_vertical_trials");
+            csvBuffer.Append(",end_simulated_seconds");
+            foreach (string name in MetabolismAverageColumns) csvBuffer.Append(',').Append(name);
             bool existing = File.Exists(csvOutputPath) && new FileInfo(csvOutputPath).Length > 0;
             if (existing)
             {
@@ -352,24 +389,25 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
         cpuFrameRecorder.Dispose(); gcRecorder.Dispose();
         hasPending = false;
     }
-    private static void AppendNumber(StringBuilder builder, double value)
+    private static void AppendNumber(StringBuilder builder, double value, string format = "F4")
     {
         Span<char> characters = stackalloc char[64];
-        if (value.TryFormat(characters, out int written, "F4", CultureInfo.InvariantCulture))
+        if (value.TryFormat(characters, out int written, format, CultureInfo.InvariantCulture))
             builder.Append(characters.Slice(0, written));
         else
-            builder.Append(value.ToString("F4", CultureInfo.InvariantCulture));
+            builder.Append(value.ToString(format, CultureInfo.InvariantCulture));
     }
     private static void AppendOptional(StringBuilder builder, double total, long count)
     { if (count > 0) AppendNumber(builder, total / count); else builder.Append("n/a"); }
-    private void AppendCsvNumber(double value) { AppendNumber(csvBuffer, value); csvBuffer.Append(','); }
+    private void AppendCsvNumber(double value, string format = "F4") { AppendNumber(csvBuffer, value, format); csvBuffer.Append(','); }
     private void AppendCsvOptional(double total, long count) { AppendOptional(csvBuffer, total, count); csvBuffer.Append(','); }
 
     private struct FrameContext
     {
-        public int Frame, Population, Steps, ActiveNodes;
+        public int Frame, Steps, ActiveNodes;
+        public ReplicatorManager.MetabolismPopulationCounts Population;
         public float Speed;
-        public double SimulatedSeconds;
+        public double SimulatedSeconds, AbsoluteSimulatedSeconds;
         public long Candidates, Processed, ChemistryTicks;
         public GeodesicBiologyRuntime.MovementWork Movement;
     }

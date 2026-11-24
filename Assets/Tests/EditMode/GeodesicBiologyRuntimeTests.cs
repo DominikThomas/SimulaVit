@@ -250,6 +250,127 @@ public sealed class GeodesicBiologyRuntimeTests
         }
     }
 
+    [TestCase(0f, 1d, 1d, 2, true, 0.017d)]
+    [TestCase(10f, 1d, 1d, 1, true, 0.0085d)]
+    [TestCase(0f, 0.004d, 1d, 2, true, 0.0034d)]
+    [TestCase(0f, 1d, 0.0037d, 2, true, 0.0017d)]
+    [TestCase(0f, 1d, 0d, 1, true, 0d)]
+    [TestCase(0f, 0d, 1d, 1, true, 0d)]
+    [TestCase(0f, 1e20d, 1d, 1, true, 0d)]
+    [TestCase(0f, 1d, 1d, 1, false, 0d)]
+    public void MethanotrophyCommitsMeasuredCarbonOxygenAndEnergy(float store, double methane, double oxygen,
+        int count, bool enabled, double expectedCO2)
+    {
+        using (var f = new GeodesicSulfurRuntimeTests.Fixture())
+        {
+            ConfigureMethanotrophy(f, enabled);
+            f.Write(GeodesicOceanResource.CH4, methane);
+            f.Write(GeodesicOceanResource.O2, oxygen);
+            for (int i = 0; i < count; i++)
+            {
+                f.AddAgent(store, MetabolismType.Methanotrophy);
+                f.State.Energy[i] = 1f;
+            }
+            double initialCO2 = f.Inventory(GeodesicOceanResource.CO2);
+
+            StepMethanotrophy(f);
+
+            double co2 = f.Inventory(GeodesicOceanResource.CO2) - initialCO2;
+            double expectedStoreGain = store == f.MaxStore ? 0d : expectedCO2 * .15d / .85d;
+            Assert.That(co2, Is.EqualTo(expectedCO2).Within(1e-8d));
+            for (int i = 0; i < count; i++)
+            {
+                Assert.That((double)f.State.OrganicCStore[i] - store, Is.EqualTo(expectedStoreGain / count).Within(1e-8d));
+                Assert.That((double)f.State.Energy[i] - 1d, Is.EqualTo(4d * co2 / count).Within(2e-7d));
+            }
+            Assert.That(methane - f.Inventory(GeodesicOceanResource.CH4), Is.EqualTo(co2 + expectedStoreGain).Within(1e-8d));
+            Assert.That(oxygen - f.Inventory(GeodesicOceanResource.O2), Is.EqualTo(2d * co2 + expectedStoreGain).Within(1e-8d));
+        }
+    }
+
+    [TestCase(true, MetabolismType.Hydrogenotrophy, 1f, 1d, 1d, true, true, true)]
+    [TestCase(false, MetabolismType.Hydrogenotrophy, 1f, 1d, 1d, true, true, false)]
+    [TestCase(true, MetabolismType.Fermentation, 1f, 1d, 1d, true, true, false)]
+    [TestCase(true, MetabolismType.Hydrogenotrophy, 0f, 1d, 1d, true, true, false)]
+    [TestCase(true, MetabolismType.Hydrogenotrophy, 1f, .0005d, 1d, true, true, false)]
+    [TestCase(true, MetabolismType.Hydrogenotrophy, 1f, 1d, .005d, true, true, false)]
+    [TestCase(true, MetabolismType.Hydrogenotrophy, 1f, 1d, 1d, false, true, false)]
+    [TestCase(true, MetabolismType.Hydrogenotrophy, 1f, 1d, 1d, true, false, false)]
+    public void MethanotrophyMutationRequiresAnEnabledHydrogenParentEdgeAndViableDaughterHabitat(
+        bool enabled, MetabolismType parent, float chance, double methane, double oxygen,
+        bool suitableTemperature, bool local, bool mutates)
+    {
+        using (var f = new GeodesicSulfurRuntimeTests.Fixture())
+        {
+            var range = suitableTemperature ? new Vector2(345f, 355f) : new Vector2(280f, 300f);
+            ConfigureMethanotrophy(f, enabled, chance, range);
+            f.Write(GeodesicOceanResource.CH4, methane, cell: local ? 0 : 1);
+            f.Write(GeodesicOceanResource.O2, oxygen);
+            f.AddAgent(1f, parent);
+            f.State.Energy[0] = 5f;
+
+            StepMethanotrophy(f, reproductionRate: 2f);
+
+            Assert.That(f.State.Count, Is.EqualTo(2));
+            Assert.That(f.State.Metabolism[0], Is.EqualTo(parent));
+            Assert.That(f.State.Metabolism[1], Is.EqualTo(mutates ? MetabolismType.Methanotrophy : parent));
+            Assert.That(f.State.BiomassTarget[1], Is.EqualTo(f.State.BiomassTarget[0]));
+            Assert.That(f.State.Locomotion[1], Is.EqualTo(f.State.Locomotion[0]));
+            if (mutates)
+            {
+                Assert.That(f.State.OptimalTempMin[1], Is.EqualTo(range.x));
+                Assert.That(f.State.OptimalTempMax[1], Is.EqualTo(range.y));
+                Assert.That(f.agents[1].color, Is.EqualTo(Color.pink));
+            }
+            if (!enabled)
+                Assert.That(SimulationStartupEvolutionTests.Get(f.runtime, "methanotrophyMutationRandom"), Is.Null);
+        }
+    }
+
+    [Test]
+    public void MethanotrophFounderRequestResumesWhenPopulationCapacityOpens()
+    {
+        using (var f = new GeodesicSulfurRuntimeTests.Fixture())
+        {
+            ConfigureMethanotrophy(f, true);
+            SimulationStartupEvolutionTests.Set(f.runtime, "founderMinLife", 100f);
+            SimulationStartupEvolutionTests.Set(f.runtime, "founderMaxLife", 100f);
+            f.Write(GeodesicOceanResource.CH4, 1d);
+            f.Write(GeodesicOceanResource.O2, 1d);
+            f.runtime.ConfigureMethanotrophFounders(3);
+
+            StepMethanotrophy(f, maxPopulation: 0);
+            Assert.That(f.State.Count, Is.Zero);
+            StepMethanotrophy(f, maxPopulation: 1);
+            Assert.That(f.State.Count, Is.EqualTo(1));
+            StepMethanotrophy(f, maxPopulation: 3);
+            Assert.That(f.State.Count, Is.EqualTo(1), "Scan at most once per transport tick after a placement.");
+            var resources = SimulationStartupEvolutionTests.Get(f.runtime, "resources");
+            SimulationStartupEvolutionTests.Set(resources, "completedTransportTicks", 1L);
+            StepMethanotrophy(f, maxPopulation: 3);
+            Assert.That(f.State.Count, Is.EqualTo(3));
+            Assert.That(f.State.Metabolism[2], Is.EqualTo(MetabolismType.Methanotrophy));
+            Assert.That(f.State.Locomotion[2], Is.EqualTo(LocomotionType.PassiveDrift));
+        }
+    }
+
+    private static void ConfigureMethanotrophy(GeodesicSulfurRuntimeTests.Fixture f, bool enabled,
+        float chance = 0f, Vector2? range = null)
+    {
+        var availability = GeodesicBiologyAvailability.Default;
+        if (enabled) availability.metabolismMask |= 1 << (int)MetabolismType.Methanotrophy;
+        SimulationStartupEvolutionTests.Set(f.runtime, "availability", availability);
+        f.runtime.SetMethanotrophyControls(.15f, chance, .001f, .01f, range ?? new Vector2(330f, 390f), 20f);
+    }
+
+    private static void StepMethanotrophy(GeodesicSulfurRuntimeTests.Fixture f, float reproductionRate = 0f,
+        int maxPopulation = 100) =>
+        f.runtime.Step(.5f, f.agents, f.State, 0f,
+            .01f, .02f, 8f, .8f, false, .02f, .12f, .25f, .02f, .001f, .3f,
+            0f, 0f, 0f, .01f, .02f, .04f, 0f, 0f,
+            f.MaxStore, reproductionRate, true, .2f, .5f, 2f, .5f, maxPopulation, null,
+            new GeodesicBiologyTemperatureSettings { ReplicationMinEfficiency = .15f, StressMaintenanceMultiplier = 1f });
+
     [Test]
     public void HydrogenotrophyUsesLegacyReactionBalance()
     {

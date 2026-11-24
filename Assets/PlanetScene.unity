@@ -223,7 +223,7 @@ MonoBehaviour:
       hydrogenToPhotosynthesisMutationChance: 0.003
       hydrogenToSaprotrophyMutationChance: 0.003
       hydrogenToSulfurMutationChance: 0.003
-      hydrogenToFermentationMutationChance: 0.002
+      hydrogenToFermentationMutationChance: 0.02
       fermentationToMethanogenesisMutationChance: 0.002
       hydrogenToMethanotrophyMutationChance: 0.0015
       saprotrophyMutationChance: 0.005
@@ -396,7 +396,7 @@ MonoBehaviour:
       hydrogenToPhotosynthesisMutationChance: 0.003
       hydrogenToSaprotrophyMutationChance: 0.003
       hydrogenToSulfurMutationChance: 0.003
-      hydrogenToFermentationMutationChance: 0.002
+      hydrogenToFermentationMutationChance: 0.02
       fermentationToMethanogenesisMutationChance: 0.002
       hydrogenToMethanotrophyMutationChance: 0.0015
       saprotrophyMutationChance: 0.005
@@ -2369,7 +2369,7 @@ MonoBehaviour:
   hydrogenToPhotosynthesisMutationChance: 0.5
   hydrogenToSaprotrophyMutationChance: 0.2
   hydrogenToSulfurMutationChance: 0.4
-  hydrogenToFermentationMutationChance: 0.3
+  hydrogenToFermentationMutationChance: 0.02
   fermentationToMethanogenesisMutationChance: 0.2
   hydrogenToMethanotrophyMutationChance: 0.15
   locomotionMutationChance: 0.333
