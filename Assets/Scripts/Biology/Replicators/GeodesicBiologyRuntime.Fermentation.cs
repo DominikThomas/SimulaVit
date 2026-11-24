@@ -8,7 +8,6 @@ public sealed partial class GeodesicBiologyRuntime
     private float fermentationO2Floor = .65f, fermentationMargin = 20f;
     private Vector2 fermentationRange = new Vector2(285.15f,330.15f);
     private System.Random fermentationMutationRandom;
-    private float[] fermentationOrganicByNode = Array.Empty<float>();
     private long fermentationAttempts, fermentationAllowed, fermentationBlocked, fermentationBirths, fermentationDeaths;
     private long fermentationLocalGate, fermentationInheritedGate, fermentationPrecisionRejected, fermentationInvalid;
     private readonly long[] fermentationBlocks = new long[3], fermentationParentBirths = new long[4];
@@ -65,8 +64,8 @@ public sealed partial class GeodesicBiologyRuntime
     {
         fermentationSamples++; if(efficiency < 1f) fermentationInhibited++;
         fermentationPerformanceSum += r.TemperaturePerformance; fermentationO2Sum += oxygenByNode[r.Node];
-        fermentationEfficiencySum += efficiency; fermentationLocalCSum += fermentationOrganicByNode[r.Node];
-        fermentationLocalInventorySum += fermentationOrganicByNode[r.Node] * grid.PhysicalLayerVolumeKm3[r.Node];
+        fermentationEfficiencySum += efficiency; fermentationLocalCSum += organicCarbonByNode[r.Node];
+        fermentationLocalInventorySum += organicCarbonByNode[r.Node] * grid.PhysicalLayerVolumeKm3[r.Node];
     }
 
     private void CommitFermentation(int index, ReplicatorPopulationState state, float maximumStore, bool observe)
@@ -114,7 +113,7 @@ public sealed partial class GeodesicBiologyRuntime
 
     private void ClearFermentation()
     {
-        fermentationMutationRandom=null; fermentationOrganicByNode=Array.Empty<float>();
+        fermentationMutationRandom=null;
         fermentationAttempts=fermentationAllowed=fermentationBlocked=fermentationBirths=fermentationDeaths=0;
         fermentationLocalGate=fermentationInheritedGate=fermentationPrecisionRejected=fermentationInvalid=fermentationSamples=fermentationInhibited=0;
         fermentationConsumed=fermentationStored=fermentationCO2=fermentationH2=0d;

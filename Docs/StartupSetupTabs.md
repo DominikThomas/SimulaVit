@@ -1,6 +1,6 @@
 # New Simulation setup tabs
 
-> **UI implementation checkpoint.** Later [metabolic controls](StartupBiologyEvolution.md), [fermentation](GeodesicFermentationParity.md), [gradual founders](GeodesicFounderEmergence.md) and [vent VFX persistence](HydrothermalVentVfx.md) extend the control/support tables below. Disabled controls and defaults here describe that checkpoint; saved values remain authoritative. Current feature scope: [roadmap](GEODESIC_MIGRATION_ROADMAP.md).
+> **UI implementation checkpoint.** The tables below describe the original setup release. Later milestones extend the Biology controls with metabolic availability, fermentation, photosynthesis, saprotrophy and gradual founders. [Current Biology controls](StartupBiologyEvolution.md) · [Saprotrophy controls](GeodesicAerobicSaprotrophy.md) · [Vent VFX persistence](HydrothermalVentVfx.md) · [Roadmap](GEODESIC_MIGRATION_ROADMAP.md)
 
 
 The built-in setup remains Unity IMGUI. Its common header contains the title, random-seed toggle, editable seed, Randomize button and grid selector. Six tabs share a fixed bottom action row (Start, Start Paused, Reset Defaults, Back). Each tab retains its own scroll position and uses automatic GUILayout sizing. Setup uses a responsive panel, at least 900 logical pixels wide when space permits, with uniform scaling below a 760 × 520 logical viewport. The main menu, save picker and loading presentation are unchanged.

@@ -106,6 +106,7 @@ public class ReplicatorManager : MonoBehaviour
     [Min(.01f)] public float geodesicFounderOngoingMeanIntervalSeconds = GeodesicFounderEmergenceSchedule.DefaultOngoingMeanInterval;
     [HideInInspector] public GeodesicBiologyAvailability geodesicBiologyAvailability = GeodesicBiologyAvailability.Default;
     [HideInInspector] public int geodesicPhotosyntheticFounderCount;
+    [HideInInspector] public int geodesicSaprotrophFounderCount;
     public int maxPopulation = 50000;
     [Tooltip("When disabled, the manager initializes references but waits for an external startup controller to spawn the initial population.")]
     public bool autoStartOnSceneLoad = true;
@@ -928,6 +929,13 @@ public class ReplicatorManager : MonoBehaviour
                 if (!availability.AllowsPhotosyntheticFounders)
                     founderSummary += " (requires Oxygenic photosynthesis and Passive drift)";
             }
+            if (spawnInitialPopulation && geodesicSaprotrophFounderCount > 0)
+            {
+                geodesicBiology.ConfigureSaprotrophFounders(geodesicSaprotrophFounderCount);
+                founderSummary += availability.AllowsSaprotrophFounders
+                    ? $" | Saprotroph founders: up to {geodesicSaprotrophFounderCount} at the first suitable death-recycling site"
+                    : " | Saprotroph founders: require Aerobic saprotrophy and Passive drift";
+            }
             Debug.Log(availability.Describe() + founderSummary, this);
             if (geodesicLocomotion.logDiagnostics)
                 Debug.Log(geodesicBiology.DescribeResolvedLocomotionControls(), this);
@@ -1093,6 +1101,9 @@ public class ReplicatorManager : MonoBehaviour
             hydrogenToFermentationMutationChance,mutationGateMinOrganicC,fermentationTempRange,defaultLethalMargin);
         geodesicBiology.SetPhotosynthesisControls(hydrogenToPhotosynthesisMutationChance,
             mutationGateMinLight, mutationGateMinCO2, photoTempRange, defaultLethalMargin);
+        geodesicBiology.SetSaprotrophyControls(saproCPerTick, saproAssimilationFraction, aerobicO2PerC, aerobicEnergyPerC,
+            hydrogenToSaprotrophyMutationChance, saprotrophyMutationChance, mutationGateMinO2ForAerobes,
+            mutationGateMinOrganicC, saproTempRange, defaultLethalMargin);
         geodesicBiology.SetLocomotionSettings(geodesicLocomotion, CreateSteeringSettings(), moveSpeed,
             amoeboidMoveSpeedMultiplier, flagellumMoveSpeedMultiplier, amoeboidTurnRate, flagellumTurnRate,
             locomotionMutationChance, locomotionUpgradeChance, locomotionAnchoredMutationChance,
@@ -1270,7 +1281,7 @@ public class ReplicatorManager : MonoBehaviour
             {
                 methanotroph++;
             }
-            else
+            else if (metabolism == MetabolismType.Saprotrophy)
             {
                 sapro++;
             }

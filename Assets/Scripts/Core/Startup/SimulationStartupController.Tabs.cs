@@ -259,6 +259,10 @@ public partial class SimulationStartupController
             SetupHelp("Zero disables photosynthetic founding. A positive count requests an immediate batch in suitable sunlit ocean habitats, independent of vent emergence and subject to the population cap.");
             if (!b.geodesicAvailability.AllowsPhotosyntheticFounders)
                 SetupHelp("Photosynthetic founders require Oxygenic photosynthesis and Passive drift.");
+            SetupInt("Experimental saprotroph founders", ref b.geodesicSaprotrophFounderCount, InitialSpawnMin, InitialSpawnMax);
+            SetupHelp("A positive count requests one batch at the first suitable ocean site that receives carbon from a death. Zero disables the batch.");
+            if (!b.geodesicAvailability.AllowsSaprotrophFounders)
+                SetupHelp("Saprotroph founders require Aerobic saprotrophy and Passive drift.");
         }
         SetupInt("Maximum population", ref b.maxPopulation, 0, int.MaxValue);
         SetupFloat("Reproduction rate (/sim s)", ref b.reproductionRate);
@@ -297,11 +301,11 @@ public partial class SimulationStartupController
 
         SetupSection("Initial / inherited temperature preferences");
         SetupHelp("Editable in °C; stored in Kelvin. These ranges seed temperature traits, not absolute species-wide survival limits. Offspring retain the current inheritance and adaptation behavior. Reversed endpoints are ordered when editing finishes.");
-        if (IsGeodesicSetup) SetupHelp("Vent founders use the Hydrogenotrophy template. Photosynthetic founders use the Photosynthesis template. New sulfur, fermentation and photosynthesis mutants start from their destination template before individual thermal mutation.");
+        if (IsGeodesicSetup) SetupHelp("Vent founders use the Hydrogenotrophy template. Photosynthetic and saprotroph founders use their own templates. New metabolism mutants start from their destination template before individual thermal mutation.");
         SetupTemperatureRange("Hydrogenotrophy", ref b.hydrogenTempRange, true);
         SetupTemperatureRange("Sulfur chemosynthesis", ref b.sulfurChemoTempRange, true);
         SetupTemperatureRange("Photosynthesis", ref b.photoTempRange, true);
-        SetupTemperatureRange("Saprotrophy", ref b.saproTempRange, !IsGeodesicSetup);
+        SetupTemperatureRange("Saprotrophy", ref b.saproTempRange, true);
         SetupTemperatureRange("Predation", ref b.predatorTempRange, !IsGeodesicSetup);
         SetupTemperatureRange("Fermentation", ref b.fermentationTempRange, true);
         SetupTemperatureRange("Methanogenesis", ref b.methanogenesisTempRange, !IsGeodesicSetup);
@@ -367,7 +371,7 @@ public partial class SimulationStartupController
         GUILayout.EndVertical();
         GUILayout.EndHorizontal();
 
-        SetupHelp("Hydrogenotrophy, sulfur chemosynthesis, fermentation and oxygenic photosynthesis can arise in Geodesic mode. The other toggles save availability for future transitions.");
+        SetupHelp("Hydrogenotrophy, sulfur chemosynthesis, fermentation, oxygenic photosynthesis and aerobic saprotrophy can arise in Geodesic mode.");
         SetupHelp(availability.FounderStatus);
     }
 
@@ -390,15 +394,21 @@ public partial class SimulationStartupController
             ? "After the general roll, photosynthesis can arise in a lit, CO2-bearing habitat within its thermal tolerance once the evolution unlock is reached. If photosynthesis is not acquired, a selected sulfur attempt retains priority over fermentation even if the sulfur habitat gate fails. Inherited carbon can satisfy fermentation eligibility."
             : "For Hydrogen → Sulfur or Fermentation, general metabolism mutation chance is checked first, followed by the ordered conditional rolls. Earlier transition checks, unlocks and local resource requirements still apply; other legacy transitions retain their existing ordering and gates.");
 
+        if (IsGeodesicSetup)
+        {
+            SetupFloat("Hydrogen → saprotrophy probability", ref b.hydrogenToSaprotrophyMutationChance, 0f, 1f);
+            SetupFloat("Saprotrophy mutation chance", ref b.saprotrophyMutationChance, 0f, 1f);
+            SetupHelp("Saprotrophy rolls independently after the earlier metabolism choices. The second probability applies to sulfur, fermentation and photosynthesis parents. Acquisition requires the evolution unlock, local oxygen and organic carbon, and a suitable temperature.");
+        }
         SetupSection("Other metabolic transitions");
         if (IsGeodesicSetup) SetupHelp("Not yet implemented in geodesic evolution. These settings are inactive here and retained for Legacy Cube Sphere.");
         bool enabled = GUI.enabled;
         GUI.enabled = enabled && !IsGeodesicSetup;
         if (!IsGeodesicSetup) SetupFloat("Hydrogen → photosynthesis probability", ref b.hydrogenToPhotosynthesisMutationChance, 0f, 1f);
-        SetupFloat("Hydrogen → saprotrophy probability", ref b.hydrogenToSaprotrophyMutationChance, 0f, 1f);
+        if (!IsGeodesicSetup) SetupFloat("Hydrogen → saprotrophy probability", ref b.hydrogenToSaprotrophyMutationChance, 0f, 1f);
         SetupFloat("Fermentation → methanogenesis probability", ref b.fermentationToMethanogenesisMutationChance, 0f, 1f);
         SetupFloat("Hydrogen → methanotrophy probability", ref b.hydrogenToMethanotrophyMutationChance, 0f, 1f);
-        SetupFloat("Saprotrophy mutation chance", ref b.saprotrophyMutationChance, 0f, 1f);
+        if (!IsGeodesicSetup) SetupFloat("Saprotrophy mutation chance", ref b.saprotrophyMutationChance, 0f, 1f);
         SetupFloat("Predator mutation chance", ref b.predatorMutationChance, 0f, 1f);
         GUI.enabled = enabled;
 
@@ -414,8 +424,7 @@ public partial class SimulationStartupController
     private void DrawMetabolismParameters(SimulationStartupBiologyConfig b)
     {
         selectedMetabolism = GUILayout.SelectionGrid(selectedMetabolism, MetabolismNames, 2, buttonStyle, GUILayout.MinHeight(112f));
-        bool supported = selectedMetabolism != 6 && selectedMetabolism != 7;
-        if (IsGeodesicSetup && !supported)
+        if (IsGeodesicSetup && selectedMetabolism == 7)
         {
             SetupHelp("This reaction is not implemented by geodesic biology. Its parameters remain available in Legacy Cube Sphere. No new reaction or mutation path is added by setup.");
             return;
@@ -476,7 +485,9 @@ public partial class SimulationStartupController
             case 6:
                 SetupFloat("Organic carbon intake / tick", ref b.saproCPerTick);
                 SetupFloat("Carbon assimilation fraction", ref b.saproAssimilationFraction, 0f, 1f);
-                SetupFloat("Fallback store respiration carbon / tick", ref b.saproRespireStoreCPerTick);
+                if (IsGeodesicSetup)
+                    SetupHelp("Saprotrophs use dissolved organic carbon and oxygen. Oxidized carbon returns as CO2 and earns energy. Assimilation uses the available store capacity.");
+                else SetupFloat("Fallback store respiration carbon / tick", ref b.saproRespireStoreCPerTick);
                 break;
             case 7:
                 SetupFloat("Organic carbon / bite", ref b.predatorBiteOrganicC);
@@ -489,6 +500,9 @@ public partial class SimulationStartupController
         if (!IsGeodesicSetup)
         {
             SetupHelp("Shared aerobic yields below drive saprotrophy and stored-carbon respiration, including photosynthetic nights. The separate saprotrophy and night energy/O2 Inspector fields are not consumed by the current implementation.");
+        }
+        if (!IsGeodesicSetup || selectedMetabolism == 6)
+        {
             SetupFloat("Aerobic respiration O2 / carbon", ref b.aerobicO2PerC);
             SetupFloat("Aerobic respiration energy / carbon", ref b.aerobicEnergyPerC);
         }

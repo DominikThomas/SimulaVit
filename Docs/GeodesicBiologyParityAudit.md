@@ -6,11 +6,12 @@
 | --- | --- |
 | Hydrogen carbon loss/cap behavior | [Measured conservative hydrogen transactions](GeodesicHydrogenotrophyConservation.md); the original defect description is historical. |
 | No sulfur or fermentation evolution/feeding | [Sulfur](GeodesicSulfurParity.md) and [fermentation](GeodesicFermentationParity.md) are normally reachable with local gates, conservative transactions, physiology, sensing and recorded native evidence. |
+| Missing photosynthesis evolution and saprotrophy feeding/evolution | [Photosynthesis](GeodesicOxygenicPhotosynthesis.md) and [saprotrophy](GeodesicAerobicSaprotrophy.md) have Geodesic evolution, measured reactions and optional founders. User-run Unity validation is pending. |
 | No active motion, locomotion evolution or taxis | [Active locomotion](GeodesicActiveLocomotion.md), [evolution audit](GeodesicLocomotionEvolutionAudit.md) and [food sensing](GeodesicFoodTaxisAudit.md) supersede those entries; long-term ecological balance remains unproven. |
 | No growth/division presentation | [Visual growth/division](GeodesicVisualGrowthAndDivision.md) is implemented and [extended to amoeboid/flagellar bodies](GeodesicActiveLocomotion.md); anchored presentation is unchanged, appearance/performance acceptance is pending and structural biomass remains absent. |
 | Coarse/founder thermal assumptions and batch-only seeding | [Position-dependent temperature](GeodesicPositionDependentVentTemperature.md) and [gradual founder coverage](GeodesicFounderEmergence.md) supersede those assumptions. The latest revisions have source-review evidence only. |
 
-The remaining five metabolisms are still incomplete/unreachable or absent, and biomass-target mutation, reverse metabolic mutation and resolved substrate attachment remain gaps. Inherited lifespan differs intentionally/currently from legacy resampling; its final acceptance decision is tracked in B6. Historical statements about settings and branch state below apply only to the original checkpoint.
+At the original checkpoint, five metabolisms were incomplete, unreachable or absent. Biomass-target mutation, reverse metabolic mutation and resolved substrate attachment remain gaps. Inherited lifespan differs from legacy resampling. Its final acceptance decision is tracked in B6. Historical statements about settings and branch state below apply only to the original checkpoint.
 
 ## Original checkpoint report
 

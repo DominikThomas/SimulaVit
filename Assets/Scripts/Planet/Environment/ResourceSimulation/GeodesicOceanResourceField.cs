@@ -1039,6 +1039,96 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
         return true;
     }
 
+    internal struct SaprotrophyTransfer
+    {
+        public double organicCConsumed, oxygenConsumed, co2Produced;
+        public float storeAfter, energyAfter;
+    }
+
+    internal bool TryCommitSaprotrophy(int node, double extent, double carbonPerExtent, double oxidizedPerExtent,
+        float oxygenPerC, float energyPerC, float maximumStore, float storeBefore, float energyBefore,
+        out SaprotrophyTransfer transfer)
+    {
+        transfer = default;
+        if (!double.IsFinite(extent) || !(extent > 0d) || !double.IsFinite(carbonPerExtent)
+            || !double.IsFinite(oxidizedPerExtent) || !(oxidizedPerExtent > 0d) || carbonPerExtent < oxidizedPerExtent
+            || !float.IsFinite(oxygenPerC) || !(oxygenPerC > 0f) || !float.IsFinite(energyPerC) || !(energyPerC > 0f)
+            || !float.IsFinite(maximumStore) || maximumStore < 0f || !float.IsFinite(storeBefore) || storeBefore < 0f
+            || !float.IsFinite(energyBefore) || energyBefore < 0f) return false;
+
+        int organicOffset = (int)GeodesicOceanResource.OrganicC * nodeCapacity + node;
+        int oxygenOffset = (int)GeodesicOceanResource.O2 * nodeCapacity + node;
+        int co2Offset = (int)GeodesicOceanResource.CO2 * nodeCapacity + node;
+        double organicBefore = concentrationsByResourceThenNode[organicOffset];
+        double oxygenBefore = concentrationsByResourceThenNode[oxygenOffset];
+        double co2Before = concentrationsByResourceThenNode[co2Offset];
+        double volume = sourceGrid.PhysicalLayerVolumeKm3[node];
+        if (!double.IsFinite(volume) || !(volume > 0d) || !double.IsFinite(organicBefore) || !(organicBefore > 0d)
+            || !double.IsFinite(oxygenBefore) || !(oxygenBefore > 0d) || !double.IsFinite(co2Before) || co2Before < 0d)
+            return false;
+
+        // Other commits may have changed this node since the competition snapshot.
+        extent = Math.Min(extent, organicBefore * volume / carbonPerExtent);
+        extent = Math.Min(extent, oxygenBefore * volume / (oxidizedPerExtent * oxygenPerC));
+        if (!(extent > 0d) || !double.IsFinite(extent)) return false;
+
+        double storeBudget = Math.Min((carbonPerExtent - oxidizedPerExtent) * extent,
+            Math.Max(0d, (double)maximumStore - storeBefore));
+        float storeAfter = (float)(storeBefore + storeBudget);
+        if ((double)storeAfter - storeBefore > storeBudget)
+            storeAfter = BitConverter.Int32BitsToSingle(BitConverter.SingleToInt32Bits(storeAfter) - 1);
+        double stored = (double)storeAfter - storeBefore;
+
+        // Debit only the oxidizable share and the carbon that fits in the float store.
+        double carbonBudget = oxidizedPerExtent * extent + stored;
+        if (!TryPlanSaprotrophyDebit(organicBefore, volume, carbonBudget, out double organicAfter,
+            out double organicConsumed)) return false;
+
+        double oxidized = organicConsumed - stored;
+        if (!(oxidized > 0d) || !TryPlanSaprotrophyDebit(oxygenBefore, volume, oxidized * oxygenPerC,
+            out double oxygenAfter, out double oxygenConsumed)) return false;
+
+        double co2After = co2Before + oxidized / volume;
+        if (!double.IsFinite(co2After) || co2After > float.MaxValue) return false;
+        if ((co2After - co2Before) * volume > oxidized)
+            co2After = BitConverter.Int64BitsToDouble(BitConverter.DoubleToInt64Bits(co2After) - 1);
+        double co2Produced = (co2After - co2Before) * volume;
+        if (!MatchesSaprotrophyTransfer(oxidized, co2Produced)) return false;
+
+        // Credit only oxidation supported by both measured transfers, rounded down in organism energy.
+        double energyBudget = Math.Min(co2Produced, oxygenConsumed / oxygenPerC) * energyPerC;
+        float energyAfter = (float)(energyBefore + energyBudget);
+        if (!float.IsFinite(energyAfter)) return false;
+        if ((double)energyAfter - energyBefore > energyBudget)
+            energyAfter = BitConverter.Int32BitsToSingle(BitConverter.SingleToInt32Bits(energyAfter) - 1);
+
+        concentrationsByResourceThenNode[organicOffset] = organicAfter;
+        concentrationsByResourceThenNode[oxygenOffset] = oxygenAfter;
+        concentrationsByResourceThenNode[co2Offset] = co2After;
+        resourceMayHaveSpatialVariation[(int)GeodesicOceanResource.OrganicC] = true;
+        resourceMayHaveSpatialVariation[(int)GeodesicOceanResource.O2] = true;
+        resourceMayHaveSpatialVariation[(int)GeodesicOceanResource.CO2] = true;
+        transfer = new SaprotrophyTransfer
+        {
+            organicCConsumed = organicConsumed, oxygenConsumed = oxygenConsumed, co2Produced = co2Produced,
+            storeAfter = storeAfter, energyAfter = energyAfter
+        };
+        return true;
+    }
+
+    private static bool TryPlanSaprotrophyDebit(double before, double volume, double budget,
+        out double after, out double withdrawn)
+    {
+        after = Math.Max(0d, before - budget / volume);
+        if ((before - after) * volume > budget)
+            after = BitConverter.Int64BitsToDouble(BitConverter.DoubleToInt64Bits(after) + 1);
+        withdrawn = (before - after) * volume;
+        return MatchesSaprotrophyTransfer(budget, withdrawn);
+    }
+
+    private static bool MatchesSaprotrophyTransfer(double budget, double actual) => double.IsFinite(budget) && double.IsFinite(actual)
+        && actual > 0d && actual <= budget && budget - actual <= GeodesicHydrogenotrophyBalance.RelativeTolerance * budget;
+
     internal double VentH2Rate => physicalVentH2InventoryRatePerSecond;
     internal GeodesicFermentationBalance.Transfer CommitFermentation(int node, double extent, double need,
         float energy, float assimilation, float store, float maximumStore)

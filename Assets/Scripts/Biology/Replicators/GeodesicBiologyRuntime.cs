@@ -61,6 +61,7 @@ public sealed partial class GeodesicBiologyRuntime
     private double cachedOceanTemperatureTick = double.NaN;
     private float[] lightByNode = Array.Empty<float>();
     private float[] oxygenByNode = Array.Empty<float>();
+    private float[] organicCarbonByNode = Array.Empty<float>();
     private int generation = 1;
     private int touchedCount;
     private System.Random reproductionRandom;
@@ -166,6 +167,7 @@ public sealed partial class GeodesicBiologyRuntime
         public float HydrogenEnergyAwarded;
         public double FermentationInput, FermentationCO2, FermentationH2;
         public double PhotosyntheticCO2, PhotosyntheticO2;
+        public double SaprotrophyOrganicC, SaprotrophyO2, SaprotrophyCO2;
     }
 
     public void SetAccountingDiagnostics(GeodesicBiologyDiagnostics diagnostics) => accountingDiagnostics = diagnostics;
@@ -556,6 +558,7 @@ public sealed partial class GeodesicBiologyRuntime
         }
         using (Lifecycle.Auto())
         using (MaintenanceAndLifecycle.Auto()) RunLifecycle(dt, agents, state, maintenance, reproductionRate, carbonDivision, divisionCost, replicationCost, divisionMultiple, childSplit, maxPopulation, registerDeathCause, observeAccounting && reactionDt > 0f, observeAccounting);
+        if (pendingSaprotrophFounders > 0) SpawnSaprotrophFounders(agents, state, maxPopulation);
         MaybeLogDiagnostics(dt, state, agents, carbonDivision, divisionCost, replicationCost,
             divisionMultiple, maxPopulation, reproductionRate, observeAccounting);
     }
@@ -575,6 +578,11 @@ public sealed partial class GeodesicBiologyRuntime
             case MetabolismType.Hydrogenotrophy: r.A=GeodesicOceanResource.CO2; r.B=GeodesicOceanResource.H2; r.NeedA=hCo2; r.NeedB=hH2; r.EnergyPerExtent=hEnergy; r.StorePerExtent=hCo2; break;
             case MetabolismType.SulfurChemosynthesis: r.A=GeodesicOceanResource.CO2; r.B=GeodesicOceanResource.H2S; r.NeedA=sCo2; r.NeedB=sH2s; r.EnergyPerExtent=sEnergy; r.StorePerExtent=sCo2; r.SulfurProduct=true; break;
             case MetabolismType.Fermentation: r.A=GeodesicOceanResource.OrganicC; r.B=r.A; r.NeedA=fermentationNeed; r.Product=GeodesicOceanResource.CO2; r.StorePerExtent=fermentationNeed*fermentationAssimilation; break;
+            case MetabolismType.Saprotrophy:
+                r.A = GeodesicOceanResource.OrganicC;
+                r.B = GeodesicOceanResource.O2;
+                r.Product = GeodesicOceanResource.CO2;
+                break;
             case MetabolismType.Methanogenesis: r.A=GeodesicOceanResource.CO2; r.B=GeodesicOceanResource.H2; r.Product=GeodesicOceanResource.CH4; r.NeedA=mCo2; r.NeedB=mH2; r.ProductCoefficient=mCo2*0.85; r.EnergyPerExtent=mEnergy*0.85f; r.StorePerExtent=(float)(mCo2*0.15); break;
             case MetabolismType.Methanotrophy: r.A=GeodesicOceanResource.CH4; r.B=GeodesicOceanResource.O2; r.Product=GeodesicOceanResource.CO2; r.NeedA=mtCh4; r.NeedB=mtO2; r.ProductCoefficient=mtCh4; r.EnergyPerExtent=mtEnergy; r.StorePerExtent=(float)(mtCh4*0.15); break;
             case MetabolismType.Photosynthesis:
@@ -618,6 +626,8 @@ public sealed partial class GeodesicBiologyRuntime
                 r.NeedA, r.NeedB, state.OrganicCStore[i], maximumStore);
         else if (r.Metabolism == MetabolismType.Photosynthesis)
             r.Desired = LimitPhotosyntheticExtent(r.Desired, r.NeedA, state.OrganicCStore[i], maximumStore, state.Energy[i]);
+        else if (r.Metabolism == MetabolismType.Saprotrophy)
+            BuildSaprotrophyDemand(ref r, state.OrganicCStore[i], maximumStore, state.Energy[i]);
         requests[i]=r;
     }
 
@@ -712,6 +722,11 @@ public sealed partial class GeodesicBiologyRuntime
                 continue;
             }
             if (r.Metabolism == MetabolismType.Fermentation) { CommitFermentation(i,state,maxStore,observeAccounting); continue; }
+            if (r.Metabolism == MetabolismType.Saprotrophy)
+            {
+                CommitSaprotrophy(i, state, maxStore, observeAccounting);
+                continue;
+            }
             if (r.Metabolism == MetabolismType.Photosynthesis)
             {
                 CommitPhotosynthesis(i, state, maxStore, photoEnergy, observeAccounting);
@@ -877,6 +892,8 @@ public sealed partial class GeodesicBiologyRuntime
             child.lethalTempMargin = state.LethalTempMargin[i];
             PlaceDaughter(i, child, state);
             MutateChildMetabolism(child, state.Metabolism[i], carbon ? state.OrganicCStore[i]*Mathf.Clamp01(split) : child.organicCStore);
+            // Legacy saprotrophy rolls independently and can supersede an earlier child metabolism.
+            TryMutateSaprotrophicChild(child, state.Metabolism[i]);
             GeodesicBiologyTemperaturePolicy.MutateInheritedTraits(child, temperatureMutationRandom, temperatureSettings);
             SplitDivisionEnergy(state.Energy[i], energyCost, out float parentEnergy, out float childEnergy);
             state.Energy[i] = parentEnergy;
@@ -1006,6 +1023,7 @@ public sealed partial class GeodesicBiologyRuntime
         if (!r.Supported) return;
         if (r.Metabolism == MetabolismType.Fermentation) { RecordFermentationAccounting(r); return; }
         if (r.Metabolism == MetabolismType.Photosynthesis) { RecordPhotosynthesisAccounting(r); return; }
+        if (r.Metabolism == MetabolismType.Saprotrophy) { RecordSaprotrophyAccounting(r); return; }
         double product = r.ProductCoefficient > 0d ? r.ProductCoefficient * r.Actual : 0d;
         bool hydrogen = r.Metabolism == MetabolismType.Hydrogenotrophy || r.Metabolism == MetabolismType.SulfurChemosynthesis;
         accountingDiagnostics.RecordReaction(r.Metabolism, r.A, r.B, r.Product,
@@ -1051,6 +1069,7 @@ public sealed partial class GeodesicBiologyRuntime
         deathDissolvedCarbonByLayer[layer] += actual;
         // Report measured dissolved-storage rounding separately from the transfer.
         deathTransferRoundingResidual += carbon - actual;
+        if (actual > 0d && pendingSaprotrophFounders > 0) ConsiderSaprotrophFounderSite(cell, layer, node);
     }
 
     private void LogDeathRecycling()
@@ -1365,8 +1384,8 @@ public sealed partial class GeodesicBiologyRuntime
         touched[touchedCount++] = node;
         GetHabitatTemperature(cell, layer);
         resources.TryGetConcentration(cell, layer, GeodesicOceanResource.O2, out oxygenByNode[node]);
-        if(fermentationOrganicByNode.Length != grid.NodeCapacity) fermentationOrganicByNode=new float[grid.NodeCapacity];
-        resources.TryGetConcentration(cell,layer,GeodesicOceanResource.OrganicC,out fermentationOrganicByNode[node]);
+        if (organicCarbonByNode.Length != grid.NodeCapacity) organicCarbonByNode = new float[grid.NodeCapacity];
+        resources.TryGetConcentration(cell, layer, GeodesicOceanResource.OrganicC, out organicCarbonByNode[node]);
         habitatSamples++;
         for (int resource = 0; resource < ResourceCount; resource++)
         {
@@ -1577,6 +1596,7 @@ public sealed partial class GeodesicBiologyRuntime
         temperatureTelemetry.Log(state, oceanTemperature, temperatureSettings, carbonDivision,
             divisionCost, replicationCost, divisionMultiple, maxPopulation, GetAgentTemperatureSample);
         int hydrogen=0,sulfur=0,methanogenesis=0,photosynthesis=0,methanotrophy=0,passive=0,amoeboid=0,flagellum=0,anchored=0;
+        int saprotrophy = 0;
         reportOccupiedNodes ??= new HashSet<int>();
         reportOccupiedNodes.Clear();
         float organicMin=float.PositiveInfinity,organicMax=float.NegativeInfinity,thresholdMin=float.PositiveInfinity,thresholdMax=float.NegativeInfinity,maxDivisionCarbonFraction=0f;double organicSum=0d,thresholdSum=0d;int divisionEligible=0;
@@ -1589,6 +1609,7 @@ public sealed partial class GeodesicBiologyRuntime
                 case MetabolismType.Methanogenesis: methanogenesis++; break;
                 case MetabolismType.Photosynthesis: photosynthesis++; break;
                 case MetabolismType.Methanotrophy: methanotrophy++; break;
+                case MetabolismType.Saprotrophy: saprotrophy++; break;
             }
             switch (state.Locomotion[i])
             {
@@ -1627,7 +1648,7 @@ public sealed partial class GeodesicBiologyRuntime
         int h=(int)MetabolismType.Hydrogenotrophy,s=(int)MetabolismType.SulfurChemosynthesis,m=(int)MetabolismType.Methanogenesis,p=(int)MetabolismType.Photosynthesis,mt=(int)MetabolismType.Methanotrophy;
         double evaluationsPerHabitat=agentEvaluations/(double)Math.Max(1L,habitatSamples);
         double evaluationsPerTemperatureRead=agentEvaluations/(double)Math.Max(1L,oceanTemperatureReads);
-        Debug.Log($"[GeodesicBiologyTelemetry] population={state.Count} biologySteps={biologySteps} lastStepSeconds={lastBiologyStepSeconds:G6} agentEvaluations={agentEvaluations} habitatSamples={habitatSamples} occupiedHabitatH2(min/avg/max)={occupiedH2Min:G6}/{occupiedH2Sum/Math.Max(1,occupiedSamples):G6}/{occupiedH2Max:G6} occupiedHabitatCO2(min/avg/max)={occupiedCo2Min:G6}/{occupiedCo2Sum/Math.Max(1,occupiedSamples):G6}/{occupiedCo2Max:G6} organicCStore(min/avg/max)={organicMin:G6}/{organicSum/Math.Max(1,state.Count):G6}/{organicMax:G6} divisionThreshold(min/avg/max)={thresholdMin:G6}/{thresholdSum/Math.Max(1,state.Count):G6}/{thresholdMax:G6} maxDivisionCarbonFraction={maxDivisionCarbonFraction:G6} divisionEligible={divisionEligible} oceanTemperatureReads={oceanTemperatureReads} photosyntheticLightReads={photosyntheticLightReads} resourceInventoryReads={resourceInventoryReads} competitionPairs={competitionPairs} evaluationsPerHabitat={evaluationsPerHabitat:G6} evaluationsPerTemperatureRead={evaluationsPerTemperatureRead:G6} metabolismOrder=h/s/m/p/mt populationByMetabolism={hydrogen}/{sulfur}/{methanogenesis}/{photosynthesis}/{methanotrophy} locomotionOrder=passive/amoeboid/flagellum/anchored populationByLocomotion={passive}/{amoeboid}/{flagellum}/{anchored} movementUpdates={movementUpdates} wanderStateRefreshes={wanderStateRefreshes} continuousKinematicUpdates={continuousKinematicUpdates} horizontalBoundaryCrossings={horizontalBoundaryCrossings} verticalTransitions={verticalTransitions} landBoundaryRejections={landBoundaryRejections} invalidLayerCorrections={invalidLayerCorrections} births={births} deaths={deaths} starvation={starvationDeaths} lifespan={lifespanDeaths} requests={requestedByMetabolism[h]}/{requestedByMetabolism[s]}/{requestedByMetabolism[m]}/{requestedByMetabolism[p]}/{requestedByMetabolism[mt]} achieved={achievedByMetabolism[h]}/{achievedByMetabolism[s]}/{achievedByMetabolism[m]}/{achievedByMetabolism[p]}/{achievedByMetabolism[mt]} zeroAchieved={zeroAchieved} hydrogenPrecisionRejected={hydrogenPrecisionRejected} resourceLimited={resourceLimited} extent={extentByMetabolism[h]:G6}/{extentByMetabolism[s]:G6}/{extentByMetabolism[m]:G6}/{extentByMetabolism[p]:G6}/{extentByMetabolism[mt]:G6} energy={energyByMetabolism[h]:G6}/{energyByMetabolism[s]:G6}/{energyByMetabolism[m]:G6}/{energyByMetabolism[p]:G6}/{energyByMetabolism[mt]:G6} maintenance={maintenancePaid:G6} biologyTemperatureAuthority=coarseOceanLayer temperatureK(min/avg/max)={temperatureMin:G6}/{temperatureSum/samples:G6}/{temperatureMax:G6} performance(min/avg/max)={performanceMin:G6}/{performanceSum/samples:G6}/{performanceMax:G6} zeroPerformance={zeroTemperaturePerformance} invalidHabitat={invalidHabitats} invalidState={invalidBiologicalStates}");
+        Debug.Log($"[GeodesicBiologyTelemetry] population={state.Count} biologySteps={biologySteps} lastStepSeconds={lastBiologyStepSeconds:G6} agentEvaluations={agentEvaluations} habitatSamples={habitatSamples} occupiedHabitatH2(min/avg/max)={occupiedH2Min:G6}/{occupiedH2Sum/Math.Max(1,occupiedSamples):G6}/{occupiedH2Max:G6} occupiedHabitatCO2(min/avg/max)={occupiedCo2Min:G6}/{occupiedCo2Sum/Math.Max(1,occupiedSamples):G6}/{occupiedCo2Max:G6} organicCStore(min/avg/max)={organicMin:G6}/{organicSum/Math.Max(1,state.Count):G6}/{organicMax:G6} divisionThreshold(min/avg/max)={thresholdMin:G6}/{thresholdSum/Math.Max(1,state.Count):G6}/{thresholdMax:G6} maxDivisionCarbonFraction={maxDivisionCarbonFraction:G6} divisionEligible={divisionEligible} oceanTemperatureReads={oceanTemperatureReads} photosyntheticLightReads={photosyntheticLightReads} resourceInventoryReads={resourceInventoryReads} competitionPairs={competitionPairs} evaluationsPerHabitat={evaluationsPerHabitat:G6} evaluationsPerTemperatureRead={evaluationsPerTemperatureRead:G6} metabolismOrder=h/s/m/p/mt populationByMetabolism={hydrogen}/{sulfur}/{methanogenesis}/{photosynthesis}/{methanotrophy} saprotrophyPopulation={saprotrophy} locomotionOrder=passive/amoeboid/flagellum/anchored populationByLocomotion={passive}/{amoeboid}/{flagellum}/{anchored} movementUpdates={movementUpdates} wanderStateRefreshes={wanderStateRefreshes} continuousKinematicUpdates={continuousKinematicUpdates} horizontalBoundaryCrossings={horizontalBoundaryCrossings} verticalTransitions={verticalTransitions} landBoundaryRejections={landBoundaryRejections} invalidLayerCorrections={invalidLayerCorrections} births={births} deaths={deaths} starvation={starvationDeaths} lifespan={lifespanDeaths} requests={requestedByMetabolism[h]}/{requestedByMetabolism[s]}/{requestedByMetabolism[m]}/{requestedByMetabolism[p]}/{requestedByMetabolism[mt]} achieved={achievedByMetabolism[h]}/{achievedByMetabolism[s]}/{achievedByMetabolism[m]}/{achievedByMetabolism[p]}/{achievedByMetabolism[mt]} zeroAchieved={zeroAchieved} hydrogenPrecisionRejected={hydrogenPrecisionRejected} resourceLimited={resourceLimited} extent={extentByMetabolism[h]:G6}/{extentByMetabolism[s]:G6}/{extentByMetabolism[m]:G6}/{extentByMetabolism[p]:G6}/{extentByMetabolism[mt]:G6} energy={energyByMetabolism[h]:G6}/{energyByMetabolism[s]:G6}/{energyByMetabolism[m]:G6}/{energyByMetabolism[p]:G6}/{energyByMetabolism[mt]:G6} maintenance={maintenancePaid:G6} biologyTemperatureAuthority=coarseOceanLayer temperatureK(min/avg/max)={temperatureMin:G6}/{temperatureSum/samples:G6}/{temperatureMax:G6} performance(min/avg/max)={performanceMin:G6}/{performanceSum/samples:G6}/{performanceMax:G6} zeroPerformance={zeroTemperaturePerformance} invalidHabitat={invalidHabitats} invalidState={invalidBiologicalStates}");
     }
     public static float ResolvePhotosyntheticLight(float daylight, int layer) => float.IsFinite(daylight)
         ? Mathf.Clamp01(daylight) * (layer == 0 ? 1f : layer == 1 ? 0.55f : 0f) : 0f;
@@ -1643,6 +1664,7 @@ public sealed partial class GeodesicBiologyRuntime
         ClearFermentation();
         hydrogenPhotosynthesisChance = 0f;
         photosynthesisMutationRandom = null;
+        ClearSaprotrophy();
         ClearFounderEmergence();
         ClearBiologicalThermalCache();
         ClearFounderThermalPlacement();
@@ -1652,6 +1674,7 @@ public sealed partial class GeodesicBiologyRuntime
         requests = Array.Empty<Request>(); demand = availabilityFactor = delta = Array.Empty<double>();
         touched = stamps = lightStamps = Array.Empty<int>();
         temperatureByNode = lightByNode = oxygenByNode = Array.Empty<float>(); touchedCount = 0;
+        organicCarbonByNode = Array.Empty<float>();
         temperatureStamps = Array.Empty<int>(); temperatureGeneration = 1; cachedOceanTemperatureTick = double.NaN;
         temperatureSettings = GeodesicBiologyTemperatureSettings.Default;
         temperatureMutationRandom = null;
