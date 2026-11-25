@@ -1,0 +1,98 @@
+{
+  "source_baseline": "555d1bd",
+  "branch": "codex/geodesic-biology-parity",
+  "native_final_focused": {
+    "total": 36,
+    "passed": 36,
+    "failed": 0,
+    "start_utc": "2026-11-18 12:16:28Z",
+    "end_utc": "2026-11-18 12:16:30Z"
+  },
+  "native_initial_pair": {
+    "total": 1,
+    "passed": 1,
+    "failed": 0,
+    "start_utc": "2026-11-18 12:03:24Z",
+    "end_utc": "2026-11-18 12:15:22Z"
+  },
+  "native_final_gradual_replay": {
+    "total": 1,
+    "passed": 1,
+    "failed": 0,
+    "start_utc": "2026-11-18 12:17:40Z",
+    "end_utc": "2026-11-18 12:24:01Z"
+  },
+  "comparison_notes": "Batch result is unaffected by the gradual-only movement-clock correction. Gradual measurements were replaced by the final corrected replay. Initial pair contained an earlier gradual trial; its measurements are not used.",
+  "executed_final_focused_cases": [
+    "GeodesicBiologyRuntimeTests.DelayedFounderScheduleWaitsForSimulatedTimeAndSpawnsExactlyOnce",
+    "GeodesicBiologyRuntimeTests.DelayedFounderStartsAtZeroAgeAndSchedulesMovementFromSpawnTime",
+    "GeodesicBiologyRuntimeTests.PausedClockDoesNotAdvanceDelayAndClearCancelsOldWorld",
+    "GeodesicBiologyRuntimeTests.ZeroDelayKeepsImmediateFounderSchedule",
+    "GeodesicFounderEmergenceTests.CurrentStartupFieldsRoundTripAndOldProfilesStayBatch",
+    "GeodesicFounderEmergenceTests.DifferentBiologySeedsProduceDifferentEventTimes",
+    "GeodesicFounderEmergenceTests.EmptyLocalInventoryRejectsWithoutInventingFoodAndCacheCanRecover(H2)",
+    "GeodesicFounderEmergenceTests.EmptyLocalInventoryRejectsWithoutInventingFoodAndCacheCanRecover(CO2)",
+    "GeodesicFounderEmergenceTests.EventSequenceIsIndependentOfPollingAndSpeedGrouping",
+    "GeodesicFounderEmergenceTests.EventTimesRespectDelayAndInitialAttemptCap",
+    "GeodesicFounderEmergenceTests.FounderUsesInjectionBottomLayerAndOccupancyIncludesLayerAbove",
+    "GeodesicFounderEmergenceTests.InvalidIntervalsCannotStallOrCreateSimultaneousInfiniteEvents(float.NaN)",
+    "GeodesicFounderEmergenceTests.InvalidIntervalsCannotStallOrCreateSimultaneousInfiniteEvents(0.0f)",
+    "GeodesicFounderEmergenceTests.InvalidIntervalsCannotStallOrCreateSimultaneousInfiniteEvents(-1.0f)",
+    "GeodesicFounderEmergenceTests.LaterEmergenceDoesNotResetTheMovementClockOrExistingSchedules",
+    "GeodesicFounderEmergenceTests.NativeEmergenceIsIndependentOfOneOrHundredStepsPerRenderedFrame",
+    "GeodesicFounderEmergenceTests.NativePlacementInitializesNormalPackedFounderAndPassiveSchedules",
+    "GeodesicFounderEmergenceTests.OccupancyCountsNeighborsAndBottomTwoLayersWithoutDirectPlacement",
+    "GeodesicFounderEmergenceTests.OngoingEmergenceIsOptInAndStartsAfterInitialPhase",
+    "GeodesicFounderEmergenceTests.OriginBirthAndDeathAccountingSurvivesSwapBack",
+    "GeodesicFounderEmergenceTests.PopulationCapRejectsEventsRatherThanQueueingGuaranteedFounders",
+    "GeodesicFounderEmergenceTests.SameSeedReproducesHabitatsTraitsAndPositionsWithoutDrawingOtherStreams",
+    "GeodesicFounderEmergenceTests.SelectionUsesOnlyAuthenticViableInjectionNodesAndAllowsReplacement",
+    "GeodesicFounderEmergenceTests.ThermalUnsuitabilityAndEmptyVentCatalogRejectWithBoundedWork",
+    "GeodesicFounderEmergenceTests.ViabilityUsesTheSameOrderedTemperatureTemplateAsFounderInitialization",
+    "SimulationStartupEvolutionTests.EditedProbabilitiesSurviveActualFileSaveAndFreshControllerLoad(0.2f,0.4f)",
+    "SimulationStartupEvolutionTests.EditedProbabilitiesSurviveActualFileSaveAndFreshControllerLoad(0.0f,0.4f)",
+    "SimulationStartupEvolutionTests.EditedProbabilitiesSurviveActualFileSaveAndFreshControllerLoad(0.2f,0.0f)",
+    "SimulationStartupEvolutionTests.GeodesicFermentationParametersAreEditableAndPersistThroughTheExistingWriter",
+    "SimulationStartupEvolutionTests.GeodesicFieldsAcceptInputAndActualSaveLoadRestoresThem",
+    "SimulationStartupEvolutionTests.LegacyEvolutionKeepsEveryExistingTransitionAndBiomassControlEditable",
+    "SimulationStartupEvolutionTests.ResetUsesConfiguredDefaultsAndExistingNormalizationHandlesInvalidInputs",
+    "SimulationStartupEvolutionTests.StartupSelectionReachesEffectiveManagerControlsBeforeActualGeodesicBirths(0.2f,0.4f,True)",
+    "SimulationStartupEvolutionTests.StartupSelectionReachesEffectiveManagerControlsBeforeActualGeodesicBirths(0.0f,1.0f,False)",
+    "SimulationStartupEvolutionTests.StartupSelectionReachesEffectiveManagerControlsBeforeActualGeodesicBirths(1.0f,0.0f,False)",
+    "SimulationStartupEvolutionTests.UnsupportedGeodesicControlsIgnoreInputAndPreserveExistingValues"
+  ],
+  "native_fixture_totals": [
+    {
+      "name": "GeodesicBiologyRuntimeTests",
+      "total": "4",
+      "passed": "4",
+      "failed": "0"
+    },
+    {
+      "name": "GeodesicFounderEmergenceTests",
+      "total": "21",
+      "passed": "21",
+      "failed": "0"
+    },
+    {
+      "name": "SimulationStartupEvolutionTests",
+      "total": "11",
+      "passed": "11",
+      "failed": "0"
+    }
+  ],
+  "paired_configuration_differences": [
+    "geodesicFounderEmergenceMode"
+  ],
+  "saved_startup_bytes_preserved": true,
+  "saved_startup_sha256": "1FB367D83097FFCBE4B764D788E38545316E7F6E2F503F55F87B87BD30E21532",
+  "saved_hydrogen_to_fermentation_probability": 0.020000001415610313,
+  "broader_regression_suite_run": false,
+  "performance_benchmarks_run": false,
+  "raw_results": "Temp/FounderEmergenceAudit/final-focused-results.xml; initial-world-results.xml; final-gradual-results.xml",
+  "world_violation_maxima": {
+    "transferViolations": 0,
+    "inputTransferViolations": 0,
+    "zeroMeasuredInputWithEnergy": 0
+  }
+}

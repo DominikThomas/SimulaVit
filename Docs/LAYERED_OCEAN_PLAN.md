@@ -1,7 +1,4 @@
-Status: Implemented
-Last reviewed: 2026-06-28
-Current summary: Layered ocean is the authoritative ocean resource path for core simulation, movement/radius placement, steering, predation, metabolism reads/writes, light/heating, organic-carbon transport, and persistence. Compatibility bridges remain intentional migration/diagnostic safeguards.
-See also: Docs/PROJECT_STATUS_AND_NEXT_STEPS.md
+> **Legacy layered-ocean reference, scope reviewed 2026-11-20.** The implemented `PlanetResourceMap` layered arrays, legacy movement/steering/predation and save support below describe LegacyCubeSphere. Geodesic uses separate layer-domain/resource/temperature authorities and bypasses those biology loops; complete geodesic simulation persistence is unavailable. Keep the bridge rationale, not this old target list, as a current migration sequence. See the [current roadmap](GEODESIC_MIGRATION_ROADMAP.md) and [June checkpoint](Archive/PROJECT_STATUS_AND_NEXT_STEPS_2026-06-28.md).
 
 # Layered Ocean Plan
 

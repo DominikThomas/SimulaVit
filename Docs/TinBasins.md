@@ -1,5 +1,8 @@
 # TIN basin topology
 
+> **Original read-only basin-audit stage.** “No water rendering” below describes this audit entry point, not the whole current river runtime. Later [TIN lakes](TinLakes.md) and [lake routing](TinLakeRouting.md) consume basin information during generation; [live inspector](TinBasinsLive.md) remains a diagnostic overlay. Current migration status: [roadmap](GEODESIC_MIGRATION_ROADMAP.md).
+
+
 `GeodesicTinBasins.Build(activeTin)` is an optional, read-only topology audit. It does not execute during startup or river generation. The river component offers **Audit TIN Basin Topology** (summary) and **Log Selected TIN Basin And Termination Matches** (selected floor-vertex ID plus detailed closed/noise matches). There is no water rendering, outlet creation, river clipping, receiver rewriting, or debug mesh in this step.
 
 ## Terrain audit and method
@@ -27,10 +30,10 @@ Construction costs sorting plus incidence unions and materializing footprints. D
 
 ## Validation and seed 123456
 
-Run:
+Historical managed run: **Unity 6000.3.19f1**. For command reuse, set `$env:UNITY_EDITOR_DATA` to the selected Editor's `Editor/Data` directory; use the [current project Editor](../README.md) for future work. Results below were not rerun after the upgrade.
 
 ```powershell
-python Tools/ValidateTinHydrology.py --unity-data 'C:/Program Files/Unity/Hub/Editor/6000.3.19f1/Editor/Data' --output Artifacts/TinBasins/managed --benchmark 7
+python Tools/ValidateTinHydrology.py --unity-data "$env:UNITY_EDITOR_DATA" --output Artifacts/TinBasins/managed --benchmark 7
 ```
 
 The existing benchmark reconstructs seed 123456 with Earthlike sampling, simulation-threshold subdivision 6, render subdivision 7, Visible heights, no filtering and the unchanged threshold 8 (area threshold 0.157071963). It is **not** the completed live scene with all serialized settings and terrain edits. Lakes remain visually disabled. Generated logs/compilation products are ignored under `Artifacts/TinBasins/`.

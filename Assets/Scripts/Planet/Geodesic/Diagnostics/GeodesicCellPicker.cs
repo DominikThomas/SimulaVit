@@ -75,6 +75,7 @@ public class GeodesicCellPicker : MonoBehaviour
     private GeodesicAtmosphereField atmosphereField;
     private GeodesicAirSeaGasExchange airSeaGasExchange;
     private Vector3 selectedWorldPosition;
+    private Vector3 selectedLocalPosition;
     private ReplicatorManager temperatureDisplayAuthority;
     private string selectedLayeredOceanLog = ", layeredOcean=unavailable";
     private string selectedLayeredOceanPopup = "unavailable";
@@ -173,6 +174,7 @@ public class GeodesicCellPicker : MonoBehaviour
     public void ClearSelection()
     {
         selectedCellIndex = -1;
+        selectedLocalPosition = default;
         selectedNeighborCount = 0;
         selectedIsPentagon = false;
         selectedUnitArea = 0f;
@@ -263,6 +265,7 @@ public class GeodesicCellPicker : MonoBehaviour
         }
 
         selectedWorldPosition = worldHitPoint;
+        selectedLocalPosition = transform.InverseTransformPoint(worldHitPoint);
         Vector3 localDirection = transform.InverseTransformPoint(worldHitPoint).normalized;
         int selected = SelectNearest(localDirection);
         return selected >= 0;
@@ -643,24 +646,27 @@ public class GeodesicCellPicker : MonoBehaviour
         float localKelvin = kelvin;
         if (hasActiveOceanLayer && oceanTemperatureField != null && oceanTemperatureField.IsInitialized)
             localKelvin = oceanTemperatureField.GetLayerTemperatureKelvin(selectedCellIndex, localLayer);
-        float experiencedKelvin = float.NaN;
-        bool hasExperiencedTemperature = experiencedTemperatureField != null
-            && experiencedTemperatureField.IsInitialized
-            && experiencedTemperatureField.TryGetLocalTemperatureKelvin(selectedCellIndex, localLayer, selectedWorldPosition, out experiencedKelvin)
-            && float.IsFinite(experiencedKelvin);
-        if (hasExperiencedTemperature)
-            localKelvin = experiencedKelvin;
-        if (!float.IsFinite(localKelvin))
-            localKelvin = kelvin;
-        string localTemperatureText = ReplicatorManager.FormatTemperature(localKelvin, displayUnit);
+        Vector3 selectedProbeWorld=selectedLocalPosition.sqrMagnitude>0f ? transform.TransformPoint(selectedLocalPosition) : selectedWorldPosition;
+        Vector3 probeWorld=selectedProbeWorld;
+        var thermalProbe=GeodesicVentTemperatureSample.Background(localKelvin);
+        bool hasExperiencedTemperature=false;
+        if(experiencedTemperatureField!=null && experiencedTemperatureField.IsInitialized) {
+            if(hasActiveOceanLayer)
+                hasExperiencedTemperature=experiencedTemperatureField.TryGetLayerProbe(selectedCellIndex,localLayer,selectedProbeWorld,out probeWorld,out thermalProbe);
+            else hasExperiencedTemperature=experiencedTemperatureField.TrySampleTemperature(selectedCellIndex,0,selectedProbeWorld,kelvin,out thermalProbe);
+        }
+        string localTemperatureText=ReplicatorManager.FormatTemperature(localKelvin,displayUnit);
         string illumination = insolation > 0f ? "Day" : "Night";
         string compactLayers = BuildDynamicLayerEnvironmentText(false);
         string detailedLayers = BuildDynamicLayerEnvironmentText(true);
-        string compactDynamic = $"\nLocal temperature: {localTemperatureText}\nIllumination / insolation: {illumination} / {insolation:F4}";
+        string compactDynamic = $"\nSelected surface temperature: {temperatureText}\nIllumination / insolation: {illumination} / {insolation:F4}";
+        if(hasActiveOceanLayer) compactDynamic+=$"\nBottom L{localLayer} coarse: {localTemperatureText}";
+        if(hasExperiencedTemperature) compactDynamic+=$"\nExperienced ({(hasActiveOceanLayer ? "bottom-center probe" : "clicked land point")}): {ReplicatorManager.FormatTemperature(thermalProbe.TemperatureKelvin,displayUnit)}";
         string detailedDynamic = $"\n\nSurface Temperature\nTemperature: {temperatureText}\nInsolation cosine: {insolation:F4}\nIllumination: {illumination}\nTarget equilibrium: {ReplicatorManager.FormatTemperature(temperatureField.GetCellTargetTemperatureKelvin(selectedCellIndex), displayUnit)}\nResponse multiplier: {temperatureField.GetCellEffectiveThermalResponseMultiplier(selectedCellIndex):F3}\nThermal category: {temperatureField.GetCellThermalCategory(selectedCellIndex)}\nNeighbor min/mean/max: {ReplicatorManager.FormatTemperature(neighborMin, displayUnit)} / {ReplicatorManager.FormatTemperature(neighborMean, displayUnit)} / {ReplicatorManager.FormatTemperature(neighborMax, displayUnit)}";
         selectedCompactPopup = selectedCompactStaticHeader + compactDynamic + selectedCompactStaticOcean + compactLayers + BuildCompactAtmosphereText();
-        if (hasExperiencedTemperature)
-            detailedDynamic += $"\n\nExperienced Temperature\nClicked position: {ReplicatorManager.FormatTemperature(experiencedKelvin, displayUnit)}\nSample layer: {localLayer}\nOutlets / radius: {experiencedTemperatureField.OutletCount} / {experiencedTemperatureField.VentMicrothermalRadius:F4}\nLookup cells / bytes: {experiencedTemperatureField.IndexedCellCount} / {experiencedTemperatureField.LookupMemoryBytes}";
+        if(hasExperiencedTemperature)
+            detailedDynamic+=$"\n\nExperienced Temperature — one position\nProbe: {(hasActiveOceanLayer ? "selected direction projected to bottom-layer center" : "clicked land surface")}, L{localLayer}\nWorld position: {probeWorld}\n{GeodesicExperiencedTemperatureField.DescribeTemperatureSample(thermalProbe,displayUnit)}\nMaximum thermal support: {experiencedTemperatureField.MaximumSupportRadius:G5} local U; falloff: {experiencedTemperatureField.VentMicrothermalRadius:G5} local U ({GeodesicPhysicalScale.LengthKilometres(experiencedTemperatureField.VentMicrothermalRadius):G5} horizontal km)";
+
         selectedDetailedPopup = selectedDetailedStaticPopup + detailedDynamic + detailedLayers + BuildAtmosphereDebugText();
         }
     }
@@ -751,7 +757,7 @@ public class GeodesicCellPicker : MonoBehaviour
                 .Append(" | H2S ").Append(resourcesAvailable ? GetResourceText(selectedCellIndex, layer, GeodesicOceanResource.H2S) : "--")
                 .Append(" | Fe2 ").Append(resourcesAvailable ? GetResourceText(selectedCellIndex, layer, GeodesicOceanResource.Fe2) : "--")
                 .Append(" | OrganicC ").Append(resourcesAvailable ? GetResourceText(selectedCellIndex, layer, GeodesicOceanResource.OrganicC) : "--");
-            if (detailed) text.Append(" | depth ").Append(depth.ToString("F3")).Append(" | authority ").Append(layer == 0 ? "SurfaceField" : "SubsurfaceField");
+            if (detailed) text.Append(" | depth ").Append(depth.ToString("F3")).Append(" | authority ").Append("GeodesicOceanTemperatureField");
         }
         if (detailed)
         {

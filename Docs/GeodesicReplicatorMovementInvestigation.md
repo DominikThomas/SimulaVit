@@ -1,5 +1,8 @@
 # Geodesic replicator movement and flicker investigation
 
+> **Historical passive-movement/newborn/flicker investigation.** Later [active locomotion](GeodesicActiveLocomotion.md), [visual growth/division](GeodesicVisualGrowthAndDivision.md) and [individual temperature sampling](GeodesicPositionDependentVentTemperature.md) extend this baseline. The geodesic pipeline isolation remains relevant; original movement limitations are not a current parity table. See the [roadmap](GEODESIC_MIGRATION_ROADMAP.md).
+
+
 Source inspection only, 2026-11-13. Unity, tests, builds, simulations and benchmarks were not run. The described recording was not reviewed frame by frame. The defects below follow from the source paths; their contribution to the reported recording still needs manual confirmation.
 
 ## Current movement and legacy comparison

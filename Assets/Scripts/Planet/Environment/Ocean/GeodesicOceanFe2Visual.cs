@@ -9,6 +9,7 @@ using UnityEngine.Serialization;
 [DisallowMultipleComponent]
 public sealed class GeodesicOceanFe2Visual : MonoBehaviour
 {
+    private static readonly Unity.Profiling.ProfilerMarker UpdateMarker = new Unity.Profiling.ProfilerMarker("GeodesicOceanFe2Visual.Update");
     [Header("Geodesic Dissolved Fe2+ Ocean Tint")]
     [SerializeField, Min(0f), Tooltip("Concentrations at or below this level have no Fe2+ tint.")]
     private float minimumVisualizedFe2 = 0f;
@@ -74,6 +75,7 @@ public sealed class GeodesicOceanFe2Visual : MonoBehaviour
 
     private void Update()
     {
+        using var performanceScope = UpdateMarker.Auto();
         if (Time.unscaledTime < nextRefreshTime) return;
         nextRefreshTime = Time.unscaledTime + Mathf.Max(0.1f, refreshIntervalSeconds);
         if (generator == null || generator.CurrentGridType != PlanetGridType.GeodesicIcosphere || resourceField == null || !resourceField.IsInitialized) return;

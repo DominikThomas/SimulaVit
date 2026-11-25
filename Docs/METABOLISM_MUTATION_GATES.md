@@ -1,5 +1,7 @@
 # Metabolism Mutation Habitat Gates
 
+The area-normalized gate helpers below describe the preserved legacy pathway. Current geodesic sulfur and [fermentation gates](GeodesicFermentationParity.md) use the actual child habitat; fermentation may qualify through its actual inherited C allocation without gaining stored-carbon metabolism.
+
 This note documents the centralized viability gates used when reproduction mutates a child into a different `MetabolismType`.
 
 ## Implementation location

@@ -87,11 +87,17 @@ public class PlanetResourceMap : MonoBehaviour
         public float LightFactor;
         public float TemperatureOffset;
         public float TemperatureKelvinEstimate;
+        public float CoarseTemperatureKelvin;
     }
 
     public struct CellInspectionSnapshot
     {
         public bool IsValid;
+        public bool IsGeodesic,HasExperiencedProbe;
+        public float SurfaceTemperatureKelvin;
+        public int ExperiencedProbeLayer;
+        public Vector3 ExperiencedProbeWorldPosition;
+        public GeodesicVentTemperatureSample ThermalProbe;
         public int CellIndex;
         public bool IsOcean;
         public int ActiveLayerCount;
@@ -122,6 +128,7 @@ public class PlanetResourceMap : MonoBehaviour
     }
 
     [SerializeField] private PlanetGenerator planetGenerator;
+    private GeodesicExperiencedTemperatureField geodesicInspectionTemperature;
     [SerializeField] private ReplicatorManager replicatorManager;
     [Header("Grid Resolution")]
     [Tooltip("Simulation/resource grid resolution. 0 keeps backward-compatible behavior and follows PlanetGenerator visual resolution.")]
@@ -1580,6 +1587,11 @@ public class PlanetResourceMap : MonoBehaviour
     public bool TryGetCellInspectionSnapshot(int cell, Vector3 worldPosOrDir, out CellInspectionSnapshot snapshot)
     {
         snapshot = default;
+        // Geodesic callers supply an actual world position. Direction callers use the separate API below.
+        if(planetGenerator!=null && planetGenerator.CurrentGridType==PlanetGridType.GeodesicIcosphere) {
+            if(geodesicInspectionTemperature==null) geodesicInspectionTemperature=GetComponent<GeodesicExperiencedTemperatureField>();
+            return geodesicInspectionTemperature!=null && geodesicInspectionTemperature.TryGetCellInspectionSnapshot(cell,worldPosOrDir,out snapshot);
+        }
         if (!isInitialized || !IsCellValid(cell))
         {
             return false;
@@ -1640,6 +1652,12 @@ public class PlanetResourceMap : MonoBehaviour
     public bool TryGetCellInspectionSnapshotByDirection(Vector3 worldPosOrDir, out CellInspectionSnapshot snapshot)
     {
         snapshot = default;
+        if(planetGenerator!=null && planetGenerator.CurrentGridType==PlanetGridType.GeodesicIcosphere) {
+            if(planetGenerator.GeodesicTopology==null) return false;
+            Vector3 local=transform.InverseTransformDirection(worldPosOrDir).normalized;
+            int geodesicCell=GeodesicOceanConnectivity.FindNearestCell(planetGenerator.GeodesicTopology,local,0);
+            return TryGetCellInspectionSnapshot(geodesicCell,transform.TransformPoint(local*planetGenerator.GeodesicSeaLevelRadius),out snapshot);
+        }
         if (!isInitialized || resolution <= 0)
         {
             return false;

@@ -1,5 +1,8 @@
 # Geodesic hydrogenotroph temperature constraints
 
+> **Historical physiology checkpoint.** The thermal policy remains useful, but coarse cell/layer sampling and vent-placement assumptions below predate [position-dependent organism temperature](GeodesicPositionDependentVentTemperature.md) and the latest [founder placement/coverage](GeodesicFounderEmergence.md). Scene values and “uncommitted” statements describe the original checkpoint; they do not authorize changing saved settings. Current gates: [roadmap A1](GEODESIC_MIGRATION_ROADMAP.md#phase-a--stabilize-the-existing-simulation).
+
+
 Source review and focused changes, 2026-11-13. Unity, builds, automated tests, simulations and benchmarks were not run. Exact live temperature distributions and the resulting population balance remain for manual measurement. All changes are uncommitted.
 
 ## Settings actually present

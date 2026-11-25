@@ -1,5 +1,8 @@
 # Current Model Evolution Web Audit
 
+> **Historical legacy-runtime audit and future design reference; scope clarified 2026-11-20.** “Current” in the title/body refers to the audited `ReplicatorManager`/legacy metabolism pathway, not current geodesic gameplay. Its eight-type mutation graph, biomass-target drift, lifespan resampling and prey feeding must not be read as geodesic parity. Current geodesic reachability is hydrogenotrophy → sulfur or fermentation, plus locomotion/thermal mutation; remaining strategies are partial/unreachable or absent. Old global resource/unlock statements also require comparison with later local gates. Use the [current roadmap](GEODESIC_MIGRATION_ROADMAP.md) and [geodesic parity baseline](GeodesicBiologyParityAudit.md). Scientific links and future ecological proposals below were retained, not revalidated in this documentation audit.
+
+
 ## 1. Executive summary
 
 The current model has an implemented mutation web, but it is narrow and strongly centered on **Hydrogenotrophy** as the default/spawned ancestor. Initial and spontaneous spawns create Hydrogenotrophy + PassiveDrift organisms, usually biased toward H2-rich bottom ocean habitat. Metabolism can mutate on reproduction into SulfurChemosynthesis, Photosynthesis, Fermentation, Methanotrophy, Saprotrophy, Methanogenesis, and Predation through specific gates. This is more than a static enum list, but it is not a fully closed or explicitly environment-driven phylogeny.

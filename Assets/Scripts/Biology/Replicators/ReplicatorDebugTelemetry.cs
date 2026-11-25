@@ -109,7 +109,7 @@ public class ReplicatorDebugTelemetry
 
     public bool IsMetabolismDebugLogDue()
     {
-        metabolismDebugLogTimer += Time.deltaTime;
+        metabolismDebugLogTimer += Time.unscaledDeltaTime;
         if (metabolismDebugLogTimer < 3f)
         {
             return false;

@@ -1,7 +1,4 @@
-Status: Partially implemented
-Last reviewed: 2026-06-28
-Current summary: Save/load now has a versioned compressed JSON snapshot service that captures clock, sun, population hot state, companion-only traits, mutable resource arrays, surface temperature, timers, and layered ocean arrays. Remaining gaps are deterministic planet/scenario config completeness, RNG/exact one-step continuation, and formal validation coverage.
-See also: Docs/PROJECT_STATUS_AND_NEXT_STEPS.md
+> **Scope reviewed 2026-11-20: legacy persistence and historical design.** Current save schema is **4**, but `SimulationSaveLoadService` explicitly rejects full geodesic saving and loading. Population DTO/capture support, startup JSON and generated-planet snapshots are not a running-world restore. Legacy compressed capture/apply exists; exact/fresh-process continuation is not established by this analysis. The original feasibility discussion below is preserved. Current scope and completion gates: [roadmap C2](GEODESIC_MIGRATION_ROADMAP.md#phase-c--stable-geodesic-v1-and-merge); [current status](PROJECT_STATUS_AND_NEXT_STEPS.md).
 
 # Save/Reload Simulation State Analysis
 

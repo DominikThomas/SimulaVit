@@ -1,5 +1,8 @@
 # Metabolism-Aware Temporal Taxis
 
+> **Legacy temporal-steering reference.** Geodesic has separate [active locomotion](GeodesicActiveLocomotion.md), [food-readiness sensing](GeodesicFoodTaxisAudit.md) and [position-dependent thermal sampling](GeodesicPositionDependentVentTemperature.md). Legacy scoring, available strategies and costs below are not automatically geodesic behavior. Current scope: [roadmap](GEODESIC_MIGRATION_ROADMAP.md).
+
+
 Active replicator movement remains a temporal run-and-tumble behavior. Motile organisms do **not** scan neighboring cells, enumerate candidate destinations, or choose the best local cell. They continue moving in their current persistent direction, periodically sample the habitat they are currently experiencing, and compare that current suitability against their remembered previous suitability.
 
 ## Decision model

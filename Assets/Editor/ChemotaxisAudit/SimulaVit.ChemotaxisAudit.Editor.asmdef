@@ -1,0 +1,6 @@
+{
+    "name": "SimulaVit.ChemotaxisAudit.Editor",
+    "references": ["SimulaVit", "UnityEngine.TestRunner", "UnityEditor.TestRunner"],
+    "includePlatforms": ["Editor"],
+    "autoReferenced": true
+}

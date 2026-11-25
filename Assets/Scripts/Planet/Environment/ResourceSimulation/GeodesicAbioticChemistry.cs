@@ -17,6 +17,7 @@ public struct GeodesicAbioticReactionResult
 public sealed class GeodesicAbioticChemistry : MonoBehaviour
 {
     private static readonly ProfilerMarker ChemistryMarker = new ProfilerMarker("GeodesicOceanResource.AbioticChemistry");
+    private static readonly ProfilerMarker TotalMarker = new ProfilerMarker("GeodesicOceanResource.Chemistry.Total");
     private static readonly ProfilerMarker ChemistryScanMarker = new ProfilerMarker("GeodesicOceanResource.Chemistry.Scan");
     private static readonly ProfilerMarker VisualMemoryMarker = new ProfilerMarker("GeodesicOceanResource.Chemistry.VisualMemoryDecay");
     private static ProfilerCounterValue<int> ActiveNodesCounter = new ProfilerCounterValue<int>(ProfilerCategory.Scripts, "Geodesic Chemistry Active Nodes Total", ProfilerMarkerDataUnit.Count, ProfilerCounterOptions.FlushOnEndOfFrame);
@@ -87,15 +88,20 @@ public sealed class GeodesicAbioticChemistry : MonoBehaviour
     public int ReactionsApplied => reactionsApplied;
     public int SkippedNoReactants => skippedNoReactants;
     public long ChemistryTicks => chemistryTicks;
+    // Monotonic observation counters: unlike the last-tick readouts, these retain
+    // every chemistry invocation when several transport ticks occur in one frame.
+    public long TotalPerformanceCandidates { get; private set; }
+    public long TotalPerformanceNodesProcessed { get; private set; }
     public long DenseFallbackTicks => denseFallbackTicks;
     public float GetRecentOxidizedIronSignal(int cell) => recentOxidizedIronByCell != null && cell >= 0 && cell < recentOxidizedIronByCell.Length ? recentOxidizedIronByCell[cell] : 0f;
 
     public void ResetCounters()
-    { reactedH2 = reactedH2S = reactedFe2 = consumedO2 = precipitatedS0 = precipitatedFe3 = precipitatedFeS = 0d; activeNodesTotal = chemistryCandidateNodes = nodesProcessed = oxidationCandidateNodes = feSCandidateNodes = sedimentProducingNodes = reactiveNodes = reactionsApplied = skippedNoReactants = 0; chemistryTicks = denseFallbackTicks = 0; recentOxidizedIronByCell = null; }
+    { reactedH2 = reactedH2S = reactedFe2 = consumedO2 = precipitatedS0 = precipitatedFe3 = precipitatedFeS = 0d; activeNodesTotal = chemistryCandidateNodes = nodesProcessed = oxidationCandidateNodes = feSCandidateNodes = sedimentProducingNodes = reactiveNodes = reactionsApplied = skippedNoReactants = 0; chemistryTicks = denseFallbackTicks = 0; TotalPerformanceCandidates = TotalPerformanceNodesProcessed = 0; recentOxidizedIronByCell = null; }
 
     internal void Step(GeodesicOceanResourceField resources, GeodesicOceanSedimentField sediments, float simulatedDeltaTime)
     {
         if (resources == null || sediments == null || !resources.IsInitialized || !sediments.IsInitialized || simulatedDeltaTime <= 0f) return;
+        using var performanceScope = TotalMarker.Auto();
         double h2Fraction = ReactionFraction(simulatedDeltaTime, h2OxidationHalfLifeSeconds);
         double h2sFraction = ReactionFraction(simulatedDeltaTime, h2sOxidationHalfLifeSeconds);
         double fe2Fraction = ReactionFraction(simulatedDeltaTime, fe2OxidationHalfLifeSeconds);
@@ -115,7 +121,7 @@ public sealed class GeodesicAbioticChemistry : MonoBehaviour
         {
             int[] nodes = resources.ChemistryCandidateNodes;
             int candidateCount = resources.ChemistryCandidateCount;
-            float[] concentrations = resources.ConcentrationsForChemistry;
+            double[] concentrations = resources.ConcentrationsForChemistry;
             int capacity = resources.NodeCapacityForChemistry;
             int o2Offset = (int)GeodesicOceanResource.O2 * capacity;
             int h2Offset = (int)GeodesicOceanResource.H2 * capacity;
@@ -127,9 +133,9 @@ public sealed class GeodesicAbioticChemistry : MonoBehaviour
             {
                 int node = nodes[i];
                 int cell = node / layersPerCell;
-                float h2Concentration = concentrations[h2Offset + node];
-                float h2sConcentration = concentrations[h2sOffset + node];
-                float fe2Concentration = concentrations[fe2Offset + node];
+                double h2Concentration = concentrations[h2Offset + node];
+                double h2sConcentration = concentrations[h2sOffset + node];
+                double fe2Concentration = concentrations[fe2Offset + node];
                 double volume = resources.SourceGrid.PhysicalLayerVolumeKm3[node];
                 double o2 = concentrations[o2Offset + node] * volume;
                 double h2 = h2Concentration * volume;
@@ -149,10 +155,10 @@ public sealed class GeodesicAbioticChemistry : MonoBehaviour
                 if (result.reactedH2S > 0d || result.precipitatedFeS > 0d) resources.MarkSpatialVariation(GeodesicOceanResource.H2S);
                 if (result.reactedFe2 > 0d || result.precipitatedFeS > 0d) resources.MarkSpatialVariation(GeodesicOceanResource.Fe2);
                 if (result.reactedH2S > 0d || result.reactedFe2 > 0d || result.precipitatedFeS > 0d) sedimentNodes++;
-                concentrations[o2Offset + node] = (float)(Math.Max(0d, o2) / volume);
-                concentrations[h2Offset + node] = (float)(Math.Max(0d, h2) / volume);
-                concentrations[h2sOffset + node] = (float)(Math.Max(0d, h2s) / volume);
-                concentrations[fe2Offset + node] = (float)(Math.Max(0d, fe2) / volume);
+                concentrations[o2Offset + node] = (Math.Max(0d, o2) / volume);
+                concentrations[h2Offset + node] = (Math.Max(0d, h2) / volume);
+                concentrations[h2sOffset + node] = (Math.Max(0d, h2s) / volume);
+                concentrations[fe2Offset + node] = (Math.Max(0d, fe2) / volume);
                 resources.SuspendedMinerals.AddPrecipitate(cell, node % layersPerCell, result.reactedH2S, result.reactedFe2, result.precipitatedFeS);
                 recentOxidizedIronByCell[cell] += (float)(result.reactedFe2 / Math.Max(1e-12d, volume));
                 reactedH2 += result.reactedH2; reactedH2S += result.reactedH2S; reactedFe2 += result.reactedFe2;
@@ -161,6 +167,8 @@ public sealed class GeodesicAbioticChemistry : MonoBehaviour
             }
             nodesProcessed = candidateCount; oxidationCandidateNodes = oxidationCandidates; feSCandidateNodes = feSCandidates; sedimentProducingNodes = sedimentNodes;
             chemistryTicks++;
+            TotalPerformanceCandidates += chemistryCandidateNodes;
+            TotalPerformanceNodesProcessed += nodesProcessed;
             if (chemistryCandidateNodes == activeNodesTotal) denseFallbackTicks++;
             ActiveNodesCounter.Value = activeNodesTotal; CandidateCounter.Value = chemistryCandidateNodes; ProcessedCounter.Value = nodesProcessed; OxidationCandidateCounter.Value = oxidationCandidateNodes; FeSCandidateCounter.Value = feSCandidateNodes; SedimentCounter.Value = sedimentProducingNodes;
             TickCounter.Value = chemistryTicks >= int.MaxValue ? int.MaxValue : (int)chemistryTicks; ReactiveCounter.Value = reactiveNodes; ReactionsCounter.Value = reactionsApplied; SkippedCounter.Value = skippedNoReactants; DenseTicksCounter.Value = denseFallbackTicks >= int.MaxValue ? int.MaxValue : (int)denseFallbackTicks;
@@ -182,11 +190,11 @@ public sealed class GeodesicAbioticChemistry : MonoBehaviour
         return 1d - Math.Exp(-Math.Log(2d) * simulatedDeltaTime / halfLifeSeconds);
     }
 
-    public static bool HasReducedReactants(float h2, float h2s, float fe2)
+    public static bool HasReducedReactants(double h2, double h2s, double fe2)
     { return h2 > 0f || h2s > 0f || fe2 > 0f; }
 
     /// <summary>Exact concentration predicate for any enabled-by-default reaction to have nonzero extent.</summary>
-    public static bool CanReact(float o2, float h2, float h2s, float fe2)
+    public static bool CanReact(double o2, double h2, double h2s, double fe2)
     { return (o2 > 0f && HasReducedReactants(h2, h2s, fe2)) || (h2s > 0f && fe2 > 0f); }
 
     public static GeodesicAbioticReactionResult ReactNode(ref double o2, ref double h2, ref double h2s, ref double fe2, double h2Fraction, double h2sFraction, double fe2Fraction)

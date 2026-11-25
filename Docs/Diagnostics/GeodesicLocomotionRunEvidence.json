@@ -1,0 +1,452 @@
+{
+  "source": "local Unity Editor.log",
+  "runs": [
+    {
+      "run": 39,
+      "initializationLine": 122196,
+      "initialization": "[GeodesicBiology] mode=Geodesic biologySeed=2042016952 requested=0 spawned=0 hydrogenotrophy=0 passiveDrift=0 occupiedCells=0 occupiedLayers=0 ventFounders=0 founders=hydrogenotrophy-passive-drift-compact-submarine-vent-bottom",
+      "startup": {
+        "line": 122156,
+        "settings": [
+          "Planet Seed: 283",
+          "Use Random Seed: False",
+          "Planet Grid: GeodesicIcosphere",
+          "Cube Sphere Resolution: 100",
+          "Geodesic Subdivision Level: 6",
+          "Approx Thermal Interval: 2 s simulated time",
+          "Resource Transport Interval: 5 s simulated time",
+          "Chemistry Telemetry Interval: 60 s simulated time (<=0 disabled)",
+          "Axis Tilt Degrees: 49,4",
+          "Day Length Seconds: 480",
+          "Year Length In Days: 30",
+          "Base Temp Kelvin: 273,15",
+          "Insolation Temp Gain: 45",
+          "Initial CO2: 1",
+          "Initial O2: 0",
+          "Initial CH4: 0",
+          "Atmosphere Authoring Mode: Normal (0-5 bar)",
+          "Initial Atmosphere: 0,85 bar total; composition N2/CO2/O2/CH4/H2/H2S=100,00 %/0,00 %/0,00 %/0,00 %/0,00 %/0,00 %",
+          "Atmosphere Partials (bar) N2/CO2/O2/CH4/H2/H2S=0,85/0/0/0/0/0",
+          "Atmosphere Inventory / bar (authoring, pre-physical-scale): 1000",
+          "Air-Sea Exchange Half-Life: 300 simulated s (0 disabled)",
+          "Geodesic Prebiotic Biology Delay: 300 simulated s",
+          "Initial Dissolved Fe2+: 8",
+          "Vent Clustering: 0,65",
+          "Geodesic Physical Vent Rates H2/H2S/CO2/Fe2: 5/0/2/0 concentration*km3/s (conversion: none; already physical)",
+          "Terrestrial Vent Fraction: 0,25",
+          "Exclude small inland seas: True; minimum ocean basin area: 1% of planet surface",
+          "Hydrology terrain mode: Visible",
+          "Infill excluded inland basins: True",
+          "Inland elevation magnitude: 0,300000012",
+          "Termination valley carving: True; passes: 3; maximum cut per pass: 0,1; minimum runoff: 2; width: 0,01; Scene debug: False",
+          "Hydrological lakes: True; minimum basin area: 5% of planet; minimum depth: 0 planet units",
+          "Sea-level mode: TargetAreaCoverage; target ocean coverage: 70%; manual offset: 0,180999994; Ocean World minimum depth: 0,0599999987",
+          "Generate geodesic rivers: True",
+          "Initial Spawn Count: 20",
+          "Start Paused: False"
+        ],
+        "biology": {
+          "maxPopulation": 30000,
+          "reproductionRate": 0.5,
+          "moveEnergyCostPerSecond": 0.05000000074505806,
+          "replicationEnergyCost": 0.5,
+          "basalEnergyCostPerSecond": 0.009999999776482582,
+          "enableCarbonLimitedDivision": true,
+          "defaultBiomassTarget": 0.15000000596046448,
+          "divisionBiomassMultiple": 2.0,
+          "divisionEnergyCost": 0.20000000298023224,
+          "divisionCarbonSplitToChild": 0.5,
+          "biomassMutationChance": 0.019999999552965164,
+          "biomassMutationScale": 0.10000000149011612,
+          "metabolismMutationChance": 0.20000000298023224,
+          "hydrogenToPhotosynthesisMutationChance": 0.5,
+          "hydrogenToSaprotrophyMutationChance": 0.20000000298023224,
+          "hydrogenToSulfurMutationChance": 0.4000000059604645,
+          "hydrogenToFermentationMutationChance": 0.30000001192092896,
+          "fermentationToMethanogenesisMutationChance": 0.20000000298023224,
+          "hydrogenToMethanotrophyMutationChance": 0.15000000596046448,
+          "saprotrophyMutationChance": 0.19099999964237213,
+          "predatorMutationChance": 0.019999999552965164,
+          "locomotionMutationChance": 0.06000000238418579,
+          "locomotionUpgradeChance": 0.05000000074505806,
+          "locomotionAnchoredMutationChance": 0.015000000596046448,
+          "allowAnchoredToAmoeboidMutation": true,
+          "anchoredToAmoeboidMutationChance": 0.009999999776482582,
+          "hydrogenotrophyH2PerTick": 0.019999999552965164,
+          "hydrogenotrophyCO2PerTick": 0.009999999776482582,
+          "hydrogenotrophyEnergyPerTick": 8.0,
+          "hydrogenotrophyStoreFraction": 0.800000011920929,
+          "chemosynthesisCo2NeedPerTick": 0.019999999552965164,
+          "chemosynthesisH2sNeedPerTick": 0.009999999776482582,
+          "chemosynthesisEnergyPerTick": 0.10000000149011612,
+          "chemosynthStoreFraction": 1.0,
+          "chemoRespirationCPerTick": 0.009999999776482582,
+          "fermentationOrganicCPerTick": 0.019999999552965164,
+          "fermentationEnergyPerTick": 0.699999988079071,
+          "fermentationAssimilationFraction": 0.4000000059604645,
+          "methanogenesisH2PerTick": 0.07999999821186066,
+          "methanogenesisCO2PerTick": 0.03999999910593033,
+          "methanogenesisEnergyPerTick": 3.0,
+          "methanogenesisAssimilationFraction": 0.699999988079071,
+          "methanotrophyCH4PerTick": 0.05999999865889549,
+          "methanotrophyO2PerTick": 0.05999999865889549,
+          "methanotrophyEnergyPerTick": 8.0,
+          "methanotrophyAssimilationFraction": 0.699999988079071,
+          "photosynthesisCo2PerTickAtFullInsolation": 0.019999999552965164,
+          "photosynthesisEnergyPerCo2": 4.0,
+          "photosynthStoreFraction": 0.4000000059604645,
+          "maxOrganicCStore": 6.0,
+          "aerobicO2PerC": 0.019999999552965164,
+          "aerobicEnergyPerC": 0.05000000074505806,
+          "nightRespirationCPerTick": 0.009999999776482582,
+          "saproCPerTick": 0.019999999552965164,
+          "saproAssimilationFraction": 0.800000011920929,
+          "saproRespireStoreCPerTick": 0.009999999776482582,
+          "predatorBiteOrganicC": 0.4000000059604645,
+          "predatorBiteEnergy": 0.5,
+          "predatorAssimilationFraction": 0.6000000238418579,
+          "hydrogenTempRange": {
+            "x": 323.1499938964844,
+            "y": 353.1499938964844
+          },
+          "sulfurChemoTempRange": {
+            "x": 323.1499938964844,
+            "y": 393.1499938964844
+          },
+          "photoTempRange": {
+            "x": 283.1499938964844,
+            "y": 313.1499938964844
+          },
+          "saproTempRange": {
+            "x": 278.1499938964844,
+            "y": 308.1499938964844
+          },
+          "predatorTempRange": {
+            "x": 283.1499938964844,
+            "y": 313.1499938964844
+          },
+          "fermentationTempRange": {
+            "x": 285.1499938964844,
+            "y": 330.1499938964844
+          },
+          "methanogenesisTempRange": {
+            "x": 273.1499938964844,
+            "y": 293.1499938964844
+          },
+          "methanotrophyTempRange": {
+            "x": 280.1499938964844,
+            "y": 320.1499938964844
+          },
+          "defaultLethalMargin": 20.0,
+          "temperatureDormancyFloor": 0.019999999552965164,
+          "temperatureReplicationMinEfficiency": 0.15000000596046448,
+          "tempMutationChance": 0.019999999552965164,
+          "tempMutationScale": 2.0,
+          "temperatureDirectDamageEnabled": true,
+          "extremeColdDeathTempKelvin": 233.14999389648438,
+          "extremeHeatDeathTempKelvin": 423.1499938964844,
+          "geodesicTemperatureStressMaintenanceMultiplier": 1.0,
+          "geodesicColdExposureDeathSeconds": 120.0,
+          "geodesicHeatExposureDeathSeconds": 60.0,
+          "geodesicTemperatureExposureRecoveryPerSecond": 1.0,
+          "enableGeodesicChemotacticSteering": false,
+          "enableGeodesicChemotaxisABDiagnostics": true,
+          "geodesicAmoeboidEnergyPerSecond": 0.019999999552965164,
+          "geodesicFlagellumEnergyPerSecond": 0.03999999910593033
+        }
+      },
+      "groups": {
+        "passive": {
+          "parentBirths": 3759,
+          "deaths": 363,
+          "organismSeconds": 1370305.2048807007,
+          "finalN": 3402,
+          "parentBirthsPerOrganismSecond": 0.0027431845012420137
+        },
+        "amoeboid": {
+          "parentBirths": 0,
+          "deaths": 0,
+          "organismSeconds": 3267.9668341699985,
+          "finalN": 10,
+          "parentBirthsPerOrganismSecond": 0.0
+        },
+        "flagellum": {
+          "parentBirths": 0,
+          "deaths": 0,
+          "organismSeconds": 0.0,
+          "finalN": 0,
+          "parentBirthsPerOrganismSecond": null
+        },
+        "anchored": {
+          "parentBirths": 9282,
+          "deaths": 7,
+          "organismSeconds": 2039744.2731595752,
+          "finalN": 9279,
+          "parentBirthsPerOrganismSecond": 0.004550570442647759
+        }
+      },
+      "firstPositiveSnapshot": {
+        "passive": 300.034918,
+        "anchored": 410.034924,
+        "amoeboid": 550.034931
+      },
+      "reportWindows": 104,
+      "modes": [
+        "B"
+      ],
+      "modeSwitches": 0,
+      "mixedWindows": 0,
+      "finalReport": {
+        "line": 123925,
+        "time": 1040.03496,
+        "population": "[GeodesicChemotaxisAB] simTime=1040,03496 mode=B mixedWindow=False runModeSwitches=0 kind=population seed=283 biologySeed=2042016952 windowStart=1030,03496 windowSeconds=10 coverageStart=0 population=12691 locomotion(P/A/F/X)=3402/10/0/9279 births/deaths=311/40 starvation=0 deathCauses=OldAge:13,TemperatureTooLow:27 meanEnergy/C=168,326/0,215021 organismSeconds=125530,473 activeOrganismSeconds=100,000005 resourceLimited(interval/cumulative/perOrgSecond)=369805/8181599/2,94594 activeKm(interval/cumulative/perActiveOrgSecond)=2961,82/94759,3/29,6182 activeCrossings(interval/cumulative/perActiveOrgSecond)=25/800/0,25 activeLayers(interval/cumulative/perActiveOrgSecond)=0/22/0 movementEnergy(interval/cumulative/perActiveOrgSecond)=2/65,3527/0,02 tumbles(interval/cumulative/perActiveOrgSecond)=43/1306/0,43 trend(N/I/W)=181/0/0 invalidComparisons=0 unsupportedComparisons=0 zeroReadinessExperiencedPairs=181 subFloorExperiencedPairs=181 initialSenses=0 unpairedVertical=0 invalidStates=0 invalidLocomotionSnapshot=0 neutralReferenceTumble=0,2 metabolismAwareSensing=True ringOrder=0/1/2/3-4/5+/unreachable/invalid ringN=9422/779/915/1083/492/0/0 ringPct=74,2416/6,13821/7,20983/8,53361/3,87676/0/0 residencePct=73,8247/6,25349/7,29592/8,67877/3,94717/0/0",
+        "phenotypes": {
+          "passive": "[GeodesicChemotaxisAB] simTime=1040,03496 mode=B mixedWindow=False runModeSwitches=0 kind=locomotion type=passive snapshotN=3402 validHydrogenHabitatN=3402 meanH2/performance/suitability=0,000805098/0,0352372/0,00291029 meanEnergy/C=172,368/0,224145 organismSeconds=34188,2018 achievedMetabolicEnergy=869,8 metabolicEnergyPerOrgSecond=0,0254415 parentBirths/deaths=6/36 birth/deathRatePerOrgSecond=0,000175499/0,00105299 ringN=143/779/915/1081/484/0/0 ringPct=4,20341/22,8983/26,8959/31,7754/14,2269/0/0 residencePct=4,18322/22,9612/26,7888/31,8356/14,2311/0/0",
+          "amoeboid": "[GeodesicChemotaxisAB] simTime=1040,03496 mode=B mixedWindow=False runModeSwitches=0 kind=locomotion type=amoeboid snapshotN=10 validHydrogenHabitatN=10 meanH2/performance/suitability=2,02469E-05/0/0 meanEnergy/C=124,971/0,173432 organismSeconds=100,000005 achievedMetabolicEnergy=0 metabolicEnergyPerOrgSecond=0 parentBirths/deaths=0/0 birth/deathRatePerOrgSecond=0/0 ringN=0/0/0/2/8/0/0 ringPct=0/0/0/20/80/0/0 residencePct=0/0/0/10,4667/89,5333/0/0",
+          "flagellum": "[GeodesicChemotaxisAB] simTime=1040,03496 mode=B mixedWindow=False runModeSwitches=0 kind=locomotion type=flagellum snapshotN=0 validHydrogenHabitatN=0 meanH2/performance/suitability=// meanEnergy/C=/ organismSeconds=0 achievedMetabolicEnergy=0 metabolicEnergyPerOrgSecond= parentBirths/deaths=0/0 birth/deathRatePerOrgSecond=/ ringN=0/0/0/0/0/0/0 ringPct=////// residencePct=//////",
+          "anchored": "[GeodesicChemotaxisAB] simTime=1040,03496 mode=B mixedWindow=False runModeSwitches=0 kind=locomotion type=anchored snapshotN=9279 validHydrogenHabitatN=9279 meanH2/performance/suitability=4,14624E-09/0,959906/0,00206847 meanEnergy/C=166,891/0,211721 organismSeconds=91242,2714 achievedMetabolicEnergy=40114,5 metabolicEnergyPerOrgSecond=0,439648 parentBirths/deaths=305/4 birth/deathRatePerOrgSecond=0,00334275/4,38393E-05 ringN=9279/0/0/0/0/0/0 ringPct=100/0/0/0/0/0/0 residencePct=100/0/0/0/0/0/0"
+        }
+      },
+      "nearest990Report": {
+        "line": 123833,
+        "time": 990.034954,
+        "population": "[GeodesicChemotaxisAB] simTime=990,034954 mode=B mixedWindow=False runModeSwitches=0 kind=population seed=283 biologySeed=2042016952 windowStart=980,034953 windowSeconds=10 coverageStart=0 population=11241 locomotion(P/A/F/X)=3505/10/0/7726 births/deaths=128/28 starvation=0 deathCauses=OldAge:10,TemperatureTooLow:18 meanEnergy/C=174,701/0,222829 organismSeconds=111761,039 activeOrganismSeconds=100,000005 resourceLimited(interval/cumulative/perOrgSecond)=305134/6493848/2,73024 activeKm(interval/cumulative/perActiveOrgSecond)=2793,04/80523,9/27,9304 activeCrossings(interval/cumulative/perActiveOrgSecond)=24/687/0,24 activeLayers(interval/cumulative/perActiveOrgSecond)=0/20/0 movementEnergy(interval/cumulative/perActiveOrgSecond)=2/55,3527/0,02 tumbles(interval/cumulative/perActiveOrgSecond)=37/1102/0,37 trend(N/I/W)=181/0/0 invalidComparisons=0 unsupportedComparisons=0 zeroReadinessExperiencedPairs=181 subFloorExperiencedPairs=181 initialSenses=0 unpairedVertical=0 invalidStates=0 invalidLocomotionSnapshot=0 neutralReferenceTumble=0,2 metabolismAwareSensing=True ringOrder=0/1/2/3-4/5+/unreachable/invalid ringN=7886/883/939/1089/444/0/0 ringPct=70,1539/7,85517/8,35335/9,68775/3,94983/0/0 residencePct=69,9924/7,81444/8,49828/9,83274/3,86217/0/0",
+        "phenotypes": {
+          "passive": "[GeodesicChemotaxisAB] simTime=990,034954 mode=B mixedWindow=False runModeSwitches=0 kind=locomotion type=passive snapshotN=3505 validHydrogenHabitatN=3505 meanH2/performance/suitability=0,000889072/0,0399293/0,0033577 meanEnergy/C=173,496/0,224546 organismSeconds=35161,5018 achievedMetabolicEnergy=1384,7 metabolicEnergyPerOrgSecond=0,0393811 parentBirths/deaths=6/28 birth/deathRatePerOrgSecond=0,000170641/0,000796325 ringN=160/882/939/1089/435/0/0 ringPct=4,56491/25,1641/26,7903/31,0699/12,4108/0/0 residencePct=4,90499/24,8116/27,01/31,2534/12,02/0/0",
+          "amoeboid": "[GeodesicChemotaxisAB] simTime=990,034954 mode=B mixedWindow=False runModeSwitches=0 kind=locomotion type=amoeboid snapshotN=10 validHydrogenHabitatN=10 meanH2/performance/suitability=8,9883E-05/0/0 meanEnergy/C=126,969/0,173432 organismSeconds=100,000005 achievedMetabolicEnergy=0 metabolicEnergyPerOrgSecond=0 parentBirths/deaths=0/0 birth/deathRatePerOrgSecond=0/0 ringN=0/1/0/0/9/0/0 ringPct=0/10/0/0/90/0/0 residencePct=0/9,36667/0,633333/0/90/0/0",
+          "flagellum": "[GeodesicChemotaxisAB] simTime=990,034954 mode=B mixedWindow=False runModeSwitches=0 kind=locomotion type=flagellum snapshotN=0 validHydrogenHabitatN=0 meanH2/performance/suitability=// meanEnergy/C=/ organismSeconds=0 achievedMetabolicEnergy=0 metabolicEnergyPerOrgSecond= parentBirths/deaths=0/0 birth/deathRatePerOrgSecond=/ ringN=0/0/0/0/0/0/0 ringPct=////// residencePct=//////",
+          "anchored": "[GeodesicChemotaxisAB] simTime=990,034954 mode=B mixedWindow=False runModeSwitches=0 kind=locomotion type=anchored snapshotN=7726 validHydrogenHabitatN=7726 meanH2/performance/suitability=7,13427E-09/0,958396/0,00462734 meanEnergy/C=175,31/0,222114 organismSeconds=76499,5373 achievedMetabolicEnergy=39772,1 metabolicEnergyPerOrgSecond=0,5199 parentBirths/deaths=122/0 birth/deathRatePerOrgSecond=0,00159478/0 ringN=7726/0/0/0/0/0/0 ringPct=100/0/0/0/0/0/0 residencePct=100/0/0/0/0/0/0"
+        }
+      }
+    },
+    {
+      "run": 41,
+      "initializationLine": 126338,
+      "initialization": "[GeodesicBiology] mode=Geodesic biologySeed=2042016952 requested=0 spawned=0 hydrogenotrophy=0 passiveDrift=0 occupiedCells=0 occupiedLayers=0 ventFounders=0 founders=hydrogenotrophy-passive-drift-compact-submarine-vent-bottom",
+      "startup": {
+        "line": 126298,
+        "settings": [
+          "Planet Seed: 283",
+          "Use Random Seed: False",
+          "Planet Grid: GeodesicIcosphere",
+          "Cube Sphere Resolution: 100",
+          "Geodesic Subdivision Level: 6",
+          "Approx Thermal Interval: 2 s simulated time",
+          "Resource Transport Interval: 5 s simulated time",
+          "Chemistry Telemetry Interval: 60 s simulated time (<=0 disabled)",
+          "Axis Tilt Degrees: 49,4",
+          "Day Length Seconds: 480",
+          "Year Length In Days: 30",
+          "Base Temp Kelvin: 273,15",
+          "Insolation Temp Gain: 45",
+          "Initial CO2: 1",
+          "Initial O2: 0",
+          "Initial CH4: 0",
+          "Atmosphere Authoring Mode: Normal (0-5 bar)",
+          "Initial Atmosphere: 0,85 bar total; composition N2/CO2/O2/CH4/H2/H2S=100,00 %/0,00 %/0,00 %/0,00 %/0,00 %/0,00 %",
+          "Atmosphere Partials (bar) N2/CO2/O2/CH4/H2/H2S=0,85/0/0/0/0/0",
+          "Atmosphere Inventory / bar (authoring, pre-physical-scale): 1000",
+          "Air-Sea Exchange Half-Life: 300 simulated s (0 disabled)",
+          "Geodesic Prebiotic Biology Delay: 300 simulated s",
+          "Initial Dissolved Fe2+: 8",
+          "Vent Clustering: 0,65",
+          "Geodesic Physical Vent Rates H2/H2S/CO2/Fe2: 5/0/2/0 concentration*km3/s (conversion: none; already physical)",
+          "Terrestrial Vent Fraction: 0,25",
+          "Exclude small inland seas: True; minimum ocean basin area: 1% of planet surface",
+          "Hydrology terrain mode: Visible",
+          "Infill excluded inland basins: True",
+          "Inland elevation magnitude: 0,300000012",
+          "Termination valley carving: True; passes: 3; maximum cut per pass: 0,1; minimum runoff: 2; width: 0,01; Scene debug: False",
+          "Hydrological lakes: True; minimum basin area: 5% of planet; minimum depth: 0 planet units",
+          "Sea-level mode: TargetAreaCoverage; target ocean coverage: 70%; manual offset: 0,180999994; Ocean World minimum depth: 0,0599999987",
+          "Generate geodesic rivers: True",
+          "Initial Spawn Count: 20",
+          "Start Paused: False"
+        ],
+        "biology": {
+          "maxPopulation": 30000,
+          "reproductionRate": 0.5,
+          "moveEnergyCostPerSecond": 0.05000000074505806,
+          "replicationEnergyCost": 0.5,
+          "basalEnergyCostPerSecond": 0.009999999776482582,
+          "enableCarbonLimitedDivision": true,
+          "defaultBiomassTarget": 0.15000000596046448,
+          "divisionBiomassMultiple": 2.0,
+          "divisionEnergyCost": 0.20000000298023224,
+          "divisionCarbonSplitToChild": 0.5,
+          "biomassMutationChance": 0.019999999552965164,
+          "biomassMutationScale": 0.10000000149011612,
+          "metabolismMutationChance": 0.20000000298023224,
+          "hydrogenToPhotosynthesisMutationChance": 0.5,
+          "hydrogenToSaprotrophyMutationChance": 0.20000000298023224,
+          "hydrogenToSulfurMutationChance": 0.4000000059604645,
+          "hydrogenToFermentationMutationChance": 0.30000001192092896,
+          "fermentationToMethanogenesisMutationChance": 0.20000000298023224,
+          "hydrogenToMethanotrophyMutationChance": 0.15000000596046448,
+          "saprotrophyMutationChance": 0.19099999964237213,
+          "predatorMutationChance": 0.019999999552965164,
+          "locomotionMutationChance": 0.20000000298023224,
+          "locomotionUpgradeChance": 0.05000000074505806,
+          "locomotionAnchoredMutationChance": 0.0010000000474974513,
+          "allowAnchoredToAmoeboidMutation": true,
+          "anchoredToAmoeboidMutationChance": 0.009999999776482582,
+          "hydrogenotrophyH2PerTick": 0.019999999552965164,
+          "hydrogenotrophyCO2PerTick": 0.009999999776482582,
+          "hydrogenotrophyEnergyPerTick": 8.0,
+          "hydrogenotrophyStoreFraction": 0.800000011920929,
+          "chemosynthesisCo2NeedPerTick": 0.019999999552965164,
+          "chemosynthesisH2sNeedPerTick": 0.009999999776482582,
+          "chemosynthesisEnergyPerTick": 0.10000000149011612,
+          "chemosynthStoreFraction": 1.0,
+          "chemoRespirationCPerTick": 0.009999999776482582,
+          "fermentationOrganicCPerTick": 0.019999999552965164,
+          "fermentationEnergyPerTick": 0.699999988079071,
+          "fermentationAssimilationFraction": 0.4000000059604645,
+          "methanogenesisH2PerTick": 0.07999999821186066,
+          "methanogenesisCO2PerTick": 0.03999999910593033,
+          "methanogenesisEnergyPerTick": 3.0,
+          "methanogenesisAssimilationFraction": 0.699999988079071,
+          "methanotrophyCH4PerTick": 0.05999999865889549,
+          "methanotrophyO2PerTick": 0.05999999865889549,
+          "methanotrophyEnergyPerTick": 8.0,
+          "methanotrophyAssimilationFraction": 0.699999988079071,
+          "photosynthesisCo2PerTickAtFullInsolation": 0.019999999552965164,
+          "photosynthesisEnergyPerCo2": 4.0,
+          "photosynthStoreFraction": 0.4000000059604645,
+          "maxOrganicCStore": 6.0,
+          "aerobicO2PerC": 0.019999999552965164,
+          "aerobicEnergyPerC": 0.05000000074505806,
+          "nightRespirationCPerTick": 0.009999999776482582,
+          "saproCPerTick": 0.019999999552965164,
+          "saproAssimilationFraction": 0.800000011920929,
+          "saproRespireStoreCPerTick": 0.009999999776482582,
+          "predatorBiteOrganicC": 0.4000000059604645,
+          "predatorBiteEnergy": 0.5,
+          "predatorAssimilationFraction": 0.6000000238418579,
+          "hydrogenTempRange": {
+            "x": 323.1499938964844,
+            "y": 353.1499938964844
+          },
+          "sulfurChemoTempRange": {
+            "x": 323.1499938964844,
+            "y": 393.1499938964844
+          },
+          "photoTempRange": {
+            "x": 283.1499938964844,
+            "y": 313.1499938964844
+          },
+          "saproTempRange": {
+            "x": 278.1499938964844,
+            "y": 308.1499938964844
+          },
+          "predatorTempRange": {
+            "x": 283.1499938964844,
+            "y": 313.1499938964844
+          },
+          "fermentationTempRange": {
+            "x": 285.1499938964844,
+            "y": 330.1499938964844
+          },
+          "methanogenesisTempRange": {
+            "x": 273.1499938964844,
+            "y": 293.1499938964844
+          },
+          "methanotrophyTempRange": {
+            "x": 280.1499938964844,
+            "y": 320.1499938964844
+          },
+          "defaultLethalMargin": 20.0,
+          "temperatureDormancyFloor": 0.019999999552965164,
+          "temperatureReplicationMinEfficiency": 0.15000000596046448,
+          "tempMutationChance": 0.019999999552965164,
+          "tempMutationScale": 2.0,
+          "temperatureDirectDamageEnabled": true,
+          "extremeColdDeathTempKelvin": 233.14999389648438,
+          "extremeHeatDeathTempKelvin": 423.1499938964844,
+          "geodesicTemperatureStressMaintenanceMultiplier": 1.0,
+          "geodesicColdExposureDeathSeconds": 120.0,
+          "geodesicHeatExposureDeathSeconds": 60.0,
+          "geodesicTemperatureExposureRecoveryPerSecond": 1.0,
+          "enableGeodesicChemotacticSteering": false,
+          "enableGeodesicChemotaxisABDiagnostics": true,
+          "geodesicAmoeboidEnergyPerSecond": 0.019999999552965164,
+          "geodesicFlagellumEnergyPerSecond": 0.03999999910593033
+        }
+      },
+      "groups": {
+        "passive": {
+          "parentBirths": 9199,
+          "deaths": 347,
+          "organismSeconds": 2348428.9225624003,
+          "finalN": 8780,
+          "parentBirthsPerOrganismSecond": 0.003917086828398815
+        },
+        "amoeboid": {
+          "parentBirths": 0,
+          "deaths": 1,
+          "organismSeconds": 21180.134438230005,
+          "finalN": 89,
+          "parentBirthsPerOrganismSecond": 0.0
+        },
+        "flagellum": {
+          "parentBirths": 0,
+          "deaths": 0,
+          "organismSeconds": 0.0,
+          "finalN": 0,
+          "parentBirthsPerOrganismSecond": null
+        },
+        "anchored": {
+          "parentBirths": 1534,
+          "deaths": 0,
+          "organismSeconds": 142429.64089862,
+          "finalN": 1536,
+          "parentBirthsPerOrganismSecond": 0.010770230061114076
+        }
+      },
+      "firstPositiveSnapshot": {
+        "passive": 300.098054,
+        "amoeboid": 480.098064,
+        "anchored": 670.098074
+      },
+      "reportWindows": 100,
+      "modes": [
+        "B"
+      ],
+      "modeSwitches": 0,
+      "mixedWindows": 0,
+      "finalReport": {
+        "line": 128109,
+        "time": 1000.09809,
+        "population": "[GeodesicChemotaxisAB] simTime=1000,09809 mode=B mixedWindow=False runModeSwitches=0 kind=population seed=283 biologySeed=2042016952 windowStart=990,09809 windowSeconds=10 coverageStart=0 population=10405 locomotion(P/A/F/X)=8780/89/0/1536 births/deaths=148/56 starvation=0 deathCauses=OldAge:10,TemperatureTooLow:46 meanEnergy/C=177,318/0,227169 organismSeconds=103736,539 activeOrganismSeconds=885,23338 resourceLimited(interval/cumulative/perOrgSecond)=71757/1029900/0,691723 activeKm(interval/cumulative/perActiveOrgSecond)=25225,4/619130/28,4958 activeCrossings(interval/cumulative/perActiveOrgSecond)=204/5204/0,230448 activeLayers(interval/cumulative/perActiveOrgSecond)=7/151/0,00790752 movementEnergy(interval/cumulative/perActiveOrgSecond)=17,7033/423,484/0,0199985 tumbles(interval/cumulative/perActiveOrgSecond)=345/8392/0,389728 trend(N/I/W)=1564/0/60 invalidComparisons=0 unsupportedComparisons=0 zeroReadinessExperiencedPairs=1620 subFloorExperiencedPairs=1620 initialSenses=2 unpairedVertical=0 invalidStates=0 invalidLocomotionSnapshot=0 neutralReferenceTumble=0,2 metabolismAwareSensing=True ringOrder=0/1/2/3-4/5+/unreachable/invalid ringN=2151/2437/2494/2374/949/0/0 ringPct=20,6728/23,4214/23,9692/22,816/9,12062/0/0 residencePct=20,6336/23,6859/23,9303/22,8476/8,90255/0/0",
+        "phenotypes": {
+          "passive": "[GeodesicChemotaxisAB] simTime=1000,09809 mode=B mixedWindow=False runModeSwitches=0 kind=locomotion type=passive snapshotN=8780 validHydrogenHabitatN=8780 meanH2/performance/suitability=0,000857622/0,0625884/0,00382351 meanEnergy/C=175,734/0,225833 organismSeconds=87554,9712 achievedMetabolicEnergy=19078,6 metabolicEnergyPerOrgSecond=0,217904 parentBirths/deaths=112/55 birth/deathRatePerOrgSecond=0,0012792/0,000628177 ringN=615/2434/2487/2370/874/0/0 ringPct=7,00456/27,7221/28,3257/26,9932/9,95444/0/0 residencePct=6,97455/28,0378/28,3051/26,976/9,70655/0/0",
+          "amoeboid": "[GeodesicChemotaxisAB] simTime=1000,09809 mode=B mixedWindow=False runModeSwitches=0 kind=locomotion type=amoeboid snapshotN=89 validHydrogenHabitatN=89 meanH2/performance/suitability=0,000136511/0/0 meanEnergy/C=131,265/0,176746 organismSeconds=885,23338 achievedMetabolicEnergy=4,56187 metabolicEnergyPerOrgSecond=0,00515329 parentBirths/deaths=0/1 birth/deathRatePerOrgSecond=0/0,00112965 ringN=0/3/7/4/75/0/0 ringPct=0/3,37079/7,86517/4,49438/84,2697/0/0 residencePct=0,19204/2,5417/4,74451/9,30828/83,2135/0/0",
+          "flagellum": "[GeodesicChemotaxisAB] simTime=1000,09809 mode=B mixedWindow=False runModeSwitches=0 kind=locomotion type=flagellum snapshotN=0 validHydrogenHabitatN=0 meanH2/performance/suitability=// meanEnergy/C=/ organismSeconds=0 achievedMetabolicEnergy=0 metabolicEnergyPerOrgSecond= parentBirths/deaths=0/0 birth/deathRatePerOrgSecond=/ ringN=0/0/0/0/0/0/0 ringPct=////// residencePct=//////",
+          "anchored": "[GeodesicChemotaxisAB] simTime=1000,09809 mode=B mixedWindow=False runModeSwitches=0 kind=locomotion type=anchored snapshotN=1536 validHydrogenHabitatN=1536 meanH2/performance/suitability=1,9369E-09/0,998297/0,00118784 meanEnergy/C=189,045/0,237725 organismSeconds=15296,3341 achievedMetabolicEnergy=22424,3 metabolicEnergyPerOrgSecond=1,46599 parentBirths/deaths=36/0 birth/deathRatePerOrgSecond=0,00235351/0 ringN=1536/0/0/0/0/0/0 ringPct=100/0/0/0/0/0/0 residencePct=100/0/0/0/0/0/0"
+        }
+      },
+      "nearest990Report": {
+        "line": 128085,
+        "time": 990.09809,
+        "population": "[GeodesicChemotaxisAB] simTime=990,09809 mode=B mixedWindow=False runModeSwitches=0 kind=population seed=283 biologySeed=2042016952 windowStart=980,09809 windowSeconds=10 coverageStart=0 population=10313 locomotion(P/A/F/X)=8725/88/0/1500 births/deaths=254/38 starvation=0 deathCauses=OldAge:13,TemperatureTooLow:25 meanEnergy/C=176,041/0,225451 organismSeconds=102283,205 activeOrganismSeconds=880,000046 resourceLimited(interval/cumulative/perOrgSecond)=68464/958143/0,669357 activeKm(interval/cumulative/perActiveOrgSecond)=24814,4/593905/28,1982 activeCrossings(interval/cumulative/perActiveOrgSecond)=220/5000/0,25 activeLayers(interval/cumulative/perActiveOrgSecond)=2/144/0,00227273 movementEnergy(interval/cumulative/perActiveOrgSecond)=17,6/405,781/0,02 tumbles(interval/cumulative/perActiveOrgSecond)=360/8047/0,409091 trend(N/I/W)=1527/8/65 invalidComparisons=0 unsupportedComparisons=0 zeroReadinessExperiencedPairs=1585 subFloorExperiencedPairs=1585 initialSenses=0 unpairedVertical=0 invalidStates=0 invalidLocomotionSnapshot=0 neutralReferenceTumble=0,2 metabolismAwareSensing=True ringOrder=0/1/2/3-4/5+/unreachable/invalid ringN=2118/2479/2448/2378/890/0/0 ringPct=20,5372/24,0376/23,737/23,0583/8,62988/0/0 residencePct=20,2142/24,4008/23,7216/22,9119/8,75152/0/0",
+        "phenotypes": {
+          "passive": "[GeodesicChemotaxisAB] simTime=990,09809 mode=B mixedWindow=False runModeSwitches=0 kind=locomotion type=passive snapshotN=8725 validHydrogenHabitatN=8725 meanH2/performance/suitability=0,000868576/0,0643814/0,00292867 meanEnergy/C=176,024/0,22606 organismSeconds=86893,3045 achievedMetabolicEnergy=19798,4 metabolicEnergyPerOrgSecond=0,227848 parentBirths/deaths=125/38 birth/deathRatePerOrgSecond=0,00143855/0,000437318 ringN=618/2475/2447/2369/816/0/0 ringPct=7,08309/28,3668/28,0458/27,1519/9,35244/0/0 residencePct=7,08352/28,7003/27,8979/26,8796/9,43874/0/0",
+          "amoeboid": "[GeodesicChemotaxisAB] simTime=990,09809 mode=B mixedWindow=False runModeSwitches=0 kind=locomotion type=amoeboid snapshotN=88 validHydrogenHabitatN=88 meanH2/performance/suitability=9,22497E-05/0/0 meanEnergy/C=131,648/0,177126 organismSeconds=880,000046 achievedMetabolicEnergy=14,858 metabolicEnergyPerOrgSecond=0,016884 parentBirths/deaths=0/0 birth/deathRatePerOrgSecond=0/0 ringN=0/4/1/9/74/0/0 ringPct=0/4,54545/1,13636/10,2273/84,0909/0/0 residencePct=1,21591/2,19318/2,47727/8,92045/85,1932/0/0",
+          "flagellum": "[GeodesicChemotaxisAB] simTime=990,09809 mode=B mixedWindow=False runModeSwitches=0 kind=locomotion type=flagellum snapshotN=0 validHydrogenHabitatN=0 meanH2/performance/suitability=// meanEnergy/C=/ organismSeconds=0 achievedMetabolicEnergy=0 metabolicEnergyPerOrgSecond= parentBirths/deaths=0/0 birth/deathRatePerOrgSecond=/ ringN=0/0/0/0/0/0/0 ringPct=////// residencePct=//////",
+          "anchored": "[GeodesicChemotaxisAB] simTime=990,09809 mode=B mixedWindow=False runModeSwitches=0 kind=locomotion type=anchored snapshotN=1500 validHydrogenHabitatN=1500 meanH2/performance/suitability=1,87686E-09/0,998265/0,00125324 meanEnergy/C=178,74/0,224744 organismSeconds=14509,9008 achievedMetabolicEnergy=21648,5 metabolicEnergyPerOrgSecond=1,49198 parentBirths/deaths=129/0 birth/deathRatePerOrgSecond=0,00889048/0 ringN=1500/0/0/0/0/0/0 ringPct=100/0/0/0/0/0/0 residencePct=100/0/0/0/0/0/0"
+        }
+      }
+    }
+  ],
+  "loggedEnvironmentIdentical": true,
+  "biologyDifferences": {
+    "locomotionAnchoredMutationChance": [
+      0.015000000596046448,
+      0.0010000000474974513
+    ],
+    "locomotionMutationChance": [
+      0.06000000238418579,
+      0.20000000298023224
+    ]
+  }
+}

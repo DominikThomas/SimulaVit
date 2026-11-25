@@ -1,5 +1,8 @@
 # Environmental Pressure Model
 
+> **Design principles with legacy implementation examples.** Geodesic uses separate reaction, thermal and locomotion policies. Only the three normally reachable metabolisms have the restoration evidence listed in the [current roadmap](GEODESIC_MIGRATION_ROADMAP.md); future UV and generalized reaction effects below remain proposals. Latest temperature authority: [position-dependent vent sampling](GeodesicPositionDependentVentTemperature.md).
+
+
 ## 1. Core principle
 
 Environmental factors should usually change metabolism efficiency first. Lower efficiency then reduces useful energy gain and carbon gain, which suppresses replication, increases starvation pressure, and creates competitive selection. Direct death is reserved for extreme cases where an environment is beyond plausible physiological tolerance.

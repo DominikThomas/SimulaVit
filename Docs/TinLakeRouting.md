@@ -1,5 +1,8 @@
 # Static TIN river/lake integration
 
+> **Original static visible-lake sidecar contract.** Later all-lakes routing, sediment-filled crossings, verified delivery and staged snapshots extend participation beyond only visibly emitted lakes. Consult [sediment channels](SedimentRiverMeanders.md), the [cache investigation/design history](GeodesicHydrologyCachingInvestigation.md), [presentation cache](GeodesicRiverPresentationCache.md) and current `GeodesicTinLakeRouting` source. Original captured results below remain checkpoint evidence; current priorities are in the [roadmap](GEODESIC_MIGRATION_ROADMAP.md).
+
+
 `GeodesicTinLakeRouting` inserts lake nodes between continuous TIN reaches. It owns a sidecar of adjusted paths; it does not rewrite `TriangleReceiver`, extracted sources, raw `TinRiverNetwork` samples, terrain, gradients, runoff, ocean authority, or lake geometry. `GeodesicRiverSystem.integrateTinLakeRivers` is an A/B inspection switch. Lakes OFF bypasses the sidecar entirely. Only bodies actually emitted by `GeodesicTinLakeGeometry` participate, including its hierarchy suppression and ocean exclusions.
 
 ## Entry and continuation

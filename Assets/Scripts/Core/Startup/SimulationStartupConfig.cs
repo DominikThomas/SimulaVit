@@ -13,6 +13,11 @@ public class SimulationStartupConfig
     public PlanetGridType gridType = PlanetGridType.LegacyCubeSphere;
     [Range(3, 240)] public int cubeSphereResolution = 10;
     [Range(0, GeodesicGridTopology.MaxSupportedSubdivision)] public int geodesicSubdivisionLevel = 3;
+    public GeodesicSeaLevelControlMode geodesicSeaLevelControlMode = GeodesicSeaLevelControlMode.ManualOffset;
+    [Range(0f, 100f)] public float geodesicTargetOceanCoveragePercent = 45f;
+    public float geodesicSeaLevelOffset;
+    public float geodesicOceanWorldMinimumDepth = 0.06f;
+    public bool enableGeodesicRivers = true;
 
     [Header("Sun / Seasons")]
     [Range(0f, 90f)] public float axisTiltDegrees = 23.5f;
@@ -71,6 +76,17 @@ public class SimulationStartupConfig
     public float geodesicVentFe2PhysicalPerSecond = 0f;
     [Range(0f, 1f)] public float terrestrialVentFraction = 0.25f;
 
+    [Header("Advanced Vent Visual Effects")]
+    public VentVisualSettings ventVisuals = VentVisualSettings.Defaults;
+
+    [Header("Performance Recording")]
+    public bool enablePerformanceRecording;
+    public bool performanceWriteCsv = true;
+    public bool performanceLogSummaryToConsole;
+    [Min(SimulationPerformanceAnalyzer.MinimumSummaryIntervalSeconds)]
+    public float performanceSummaryIntervalSeconds = SimulationPerformanceAnalyzer.DefaultSummaryIntervalSeconds;
+    public bool performanceAppendTimestampToCsvFileName = true;
+
     [Header("Debug Settings / River Debug")]
     [Tooltip("Displays river reaches omitted because they rise uphill. Diagnostic only; these do not become valid drainage routes.")]
     public bool showRejectedUphillRiverSegments;
@@ -82,6 +98,7 @@ public class SimulationStartupConfig
     [Header("Population")]
     [Min(0)] public int initialSpawnCount = 100;
     public bool startPaused;
+    public SimulationStartupBiologyConfig biology = new SimulationStartupBiologyConfig();
 
     [Header("Advanced Geodesic Ocean")]
     [Tooltip("Prevents small enclosed terrain depressions below global sea level from automatically becoming ocean. These basins can later support proper lakes.")]
@@ -127,19 +144,25 @@ public class SimulationStartupConfig
     [Tooltip("Fixed simulated-time interval used by Geodesic dissolved-ocean resource transport.")]
     public float geodesicResourceTransportIntervalSeconds = 5f;
     [Tooltip("Authoritative simulated seconds between Geodesic chemistry diagnostics. Zero or less disables them.")]
-    public float chemistryTelemetryIntervalSimSeconds = 60f;
+    public float chemistryTelemetryIntervalSimSeconds;
     [Tooltip("Simulation inventory units represented by one atmospheric bar; not a physical Earth constant.")]
     public float atmosphereInventoryPerBar = 1000f;
     [Tooltip("Common v1 air-sea exchange half-life. Zero disables exchange; per-gas coefficients remain available on GeodesicAirSeaGasExchange.")]
     public float airSeaExchangeHalfLifeSeconds = DefaultAirSeaExchangeHalfLifeSeconds;
     [Tooltip("Simulated-time environmental warmup before normal Geodesic founders appear. Zero preserves immediate spawning.")]
     public float geodesicBiologySpawnDelaySeconds = 0f;
+    public GeodesicFounderEmergenceMode geodesicFounderEmergenceMode = GeodesicFounderEmergenceMode.Batch;
+    public float geodesicFounderMeanIntervalSeconds = GeodesicFounderEmergenceSchedule.DefaultMeanInterval;
+    public bool geodesicFounderOngoingEmergence = false;
+    public float geodesicFounderOngoingMeanIntervalSeconds = GeodesicFounderEmergenceSchedule.DefaultOngoingMeanInterval;
 
     internal static float NormalizeVentProductionMultiplier(float value) =>
         float.IsFinite(value) ? Mathf.Clamp(value, 0f, MaximumVentProductionMultiplier) : DefaultVentProductionMultiplier;
 
     public SimulationStartupConfig Clone()
     {
-        return (SimulationStartupConfig)MemberwiseClone();
+        var clone = (SimulationStartupConfig)MemberwiseClone();
+        clone.biology = (biology ?? new SimulationStartupBiologyConfig()).Clone();
+        return clone;
     }
 }

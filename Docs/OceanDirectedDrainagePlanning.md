@@ -80,10 +80,10 @@ Deep/long/unsupported cuts, missing spill witnesses, unknown or cyclic downstrea
 
 Production assembly compilation used the existing Unity `SimulaVit.rsp` references and source list, with outputs redirected to `Artifacts/DrainageDelivery/ocean-plan/` and the new helper added. Compilation succeeded with 12 unused-field warnings in unrelated existing planet/environment classes. Unity was not launched by this validation.
 
-Focused command:
+Historical run: **Unity 6000.3.19f1**. For command reuse, set `$env:UNITY_EDITOR_DATA` to the selected Editor's `Editor/Data` directory; use the [current project Editor](../README.md) for future work. Results below were not rerun after the upgrade.
 
 ```powershell
-python Tools/ValidateTinHydrology.py --unity-data 'C:/Program Files/Unity/Hub/Editor/6000.3.19f1/Editor/Data' --ocean-plan-only --output Artifacts/DrainageDelivery/ocean-plan
+python Tools/ValidateTinHydrology.py --unity-data "$env:UNITY_EDITOR_DATA" --ocean-plan-only --output Artifacts/DrainageDelivery/ocean-plan
 ```
 
 Result: **11 focused tests passed, 0 failed**. The new runner option selects only `GeodesicOceanDrainagePlanTests`; it does not execute the full existing suite. The focused fixture also calls three existing lake-delivery regressions and checks cycle rejection through the existing managed logging callback.

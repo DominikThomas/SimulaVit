@@ -1,5 +1,8 @@
 # Basin overflow investigation
 
+> **Historical 2026-11-05 diagnosis and recommendation.** Subsequent all-lakes/sediment delivery and snapshot work supersede treating the recommendation below as the next task. See [cache development history](GeodesicHydrologyCachingInvestigation.md), [sediment meanders](SedimentRiverMeanders.md), [final presentation cache](GeodesicRiverPresentationCache.md) and current source. Archived run measurements are retained; current acceptance is governed by the [roadmap](GEODESIC_MIGRATION_ROADMAP.md).
+
+
 Investigation date: 2026-11-05. **Investigation only.** No production code, terrain, tracing, lake routing, thresholds, chemistry or visuals were changed. No generation, benchmark or tests were run. Evidence comes from the current source, existing capture files and the already-recorded final planner-v3 Unity run in `C:/Users/domin/AppData/Local/Unity/Editor/Editor.log`.
 
 ## Recommendation and confidence

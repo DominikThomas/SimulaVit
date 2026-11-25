@@ -1,5 +1,8 @@
 # Geodesic static lakes: implementation and validation
 
+> **Historical graph-based lake milestone.** The active path uses [TIN lake surfaces](TinLakes.md) and [TIN lake routing](TinLakeRouting.md), followed by later all-lakes/sediment delivery and [presentation-cache work](GeodesicRiverPresentationCache.md). Original standalone results and pending acceptance refer to this earlier implementation, not a complete current-world claim. See the [roadmap](GEODESIC_MIGRATION_ROADMAP.md).
+
+
 Branch: `codex/implement-geodesic-static-lakes`, based on `7858b1f` (the drainage branch with inland-sea filtering merged). Changes are local and uncommitted.
 
 The first-stage lake data, meshes, settings, river integration and diagnostics are implemented. Standalone tests pass, but native Unity integration and runtime visual acceptance remain pending. This is not a claim that all river gaps or visible spillways are solved.

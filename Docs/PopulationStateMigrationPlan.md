@@ -1,7 +1,4 @@
-Status: Partially superseded
-Last reviewed: 2026-06-28
-Current summary: The initial “List<Replicator> authoritative” migration premise is no longer current. ReplicatorPopulationState is now authoritative for hot per-agent fields; the companion Replicator list remains a compatibility/lifecycle/debug bridge and still owns a few slower trait fields until they are migrated or consistently snapshotted.
-See also: Docs/PROJECT_STATUS_AND_NEXT_STEPS.md
+> **Historical migration design, scope reviewed 2026-11-20.** `ReplicatorPopulationState` is now authoritative for geodesic hot fields including **cell, maximum lifespan and biomass target**; those are no longer companion-only migration gaps. Companion objects remain for cold traits, construction and bridges. Read the [hot-state audit](GEODESIC_BIOLOGY_HOT_STATE_AUDIT.md) for ownership and the [roadmap](GEODESIC_MIGRATION_ROADMAP.md) for priorities. The staged premises below are preserved history.
 
 # ReplicatorPopulationState migration (performance-oriented pre-DOTS step)
 

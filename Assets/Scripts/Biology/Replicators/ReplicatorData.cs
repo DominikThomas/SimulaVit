@@ -88,6 +88,7 @@ public class Replicator
     public Traits traits;
     public float energy;
     public float size;
+    public ReplicatorVisualState visualGrowth;
     public float organicCStore;
     public float biomassTarget;
     public float speedFactor;
@@ -125,6 +126,7 @@ public class Replicator
     public float tumbleProbability;
     public float nextSenseTime;
     public float movementSeed;
+    public GeodesicMovementSnapshot geodesicMovement;
     [Tooltip("Current logical ocean layer index used for layered chemistry queries. World-space movement remains surface-constrained for now.")]
     public int currentOceanLayerIndex;
     [Tooltip("Temporary exploratory ocean-layer intent/bias used for local up/down probing. Not a global target depth.")]
@@ -245,6 +247,9 @@ public class Replicator
         agent.tumbleProbability = snapshot.tumbleProbability;
         agent.nextSenseTime = snapshot.nextSenseTime;
         agent.size = snapshot.size;
+        agent.visualGrowth = snapshot.visualGrowth;
+        agent.geodesicMovement = snapshot.geodesicMovement;
+        agent.geodesicCellIndex = snapshot.hasGeodesicHabitat ? snapshot.geodesicCellIndex : -1;
         agent.currentOceanLayerIndex = snapshot.currentOceanLayerIndex;
         agent.preferredOceanLayerIndex = snapshot.preferredOceanLayerIndex;
         agent.biomassTarget = snapshot.biomassTarget;

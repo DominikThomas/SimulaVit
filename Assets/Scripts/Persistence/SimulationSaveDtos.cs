@@ -5,7 +5,7 @@ using UnityEngine;
 [Serializable]
 public class SimulationSaveFile
 {
-    public const int CurrentSchemaVersion = 3;
+    public const int CurrentSchemaVersion = 4;
 
     public int schemaVersion = CurrentSchemaVersion;
     public string applicationVersion;
@@ -229,6 +229,10 @@ public class ReplicatorSnapshot
     public float nextSenseTime;
     public float movementSeed;
     public float size;
+    public ReplicatorVisualState visualGrowth;
+    public GeodesicMovementSnapshot geodesicMovement;
+    public bool hasGeodesicHabitat;
+    public int geodesicCellIndex;
     public SerializableColor color;
     public int currentOceanLayerIndex;
     public int preferredOceanLayerIndex;

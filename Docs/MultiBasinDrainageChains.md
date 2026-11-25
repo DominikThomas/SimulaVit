@@ -1,5 +1,8 @@
 # Complete multi-basin drainage chains
 
+> **Historical planner-v3 checkpoint.** The source/results below concern that selection revision. Later [basin-overflow analysis](BasinOverflowInvestigation.md), [all-lakes/cache design record](GeodesicHydrologyCachingInvestigation.md) and [sediment/presentation work](GeodesicRiverPresentationCache.md) extend the active runtime. Its validation limits must not be promoted to current whole-world acceptance. Current sequencing: [roadmap](GEODESIC_MIGRATION_ROADMAP.md).
+
+
 2026-11-05. Final planner revision: `GeodesicOceanDrainagePlan.Version = 3`.
 
 The planner now admits complete compatible downstream packages, reserves candidate capacity for their connectors, and retains the immediate basin-to-basin target in diagnostics. Final seed-123456 improvement is **not established**. No full Unity generation or benchmark was launched by this work. Production compilation and 20 focused managed tests passed; manual validation of the finished revision remains necessary.
@@ -83,10 +86,10 @@ Final lake routing is unchanged. A focused regression builds an actual two-lake 
 
 Production assembly compilation succeeded using the project's existing Unity response-file references and sources, with outputs redirected under `Artifacts/DrainageDelivery/`. It reported 12 existing unused-field warnings outside these hydrology changes.
 
-Focused command:
+Historical run: **Unity 6000.3.19f1**. For command reuse, set `$env:UNITY_EDITOR_DATA` to the selected Editor's `Editor/Data` directory; use the [current project Editor](../README.md) for future work. Results below were not rerun after the upgrade.
 
 ```powershell
-python Tools/ValidateTinHydrology.py --unity-data 'C:/Program Files/Unity/Hub/Editor/6000.3.19f1/Editor/Data' --ocean-plan-only --output Artifacts/DrainageDelivery/multi-basin
+python Tools/ValidateTinHydrology.py --unity-data "$env:UNITY_EDITOR_DATA" --ocean-plan-only --output Artifacts/DrainageDelivery/multi-basin
 ```
 
 **20 focused tests passed; 0 failed.** No full suite, planet startup or benchmark was run. Coverage includes A→B→ocean, A→B→C→ocean, a terminal B, shared trunks, jointly eligible small tributaries, overlapping incompatible packages, removal of orphan cuts, dependency-aware capacity, deterministic selection, actual lake overflow, conservation, retained ocean evidence and no-uphill safeguards.

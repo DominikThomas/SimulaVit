@@ -324,7 +324,7 @@ public class SunSkyRotator : MonoBehaviour
         }
     }
 
-    void SynchronizePhysicalLight(bool initializationReport)
+    internal void SynchronizePhysicalLight(bool initializationReport)
     {
         Vector3 center = planetCenter != null ? planetCenter.position : Vector3.zero;
         if (generatedSunObject == null)

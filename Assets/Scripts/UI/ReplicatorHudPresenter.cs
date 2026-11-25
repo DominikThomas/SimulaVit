@@ -6,6 +6,9 @@ using UnityEngine.InputSystem;
 
 public class ReplicatorHudPresenter
 {
+    private static readonly string MethanogenHudColor = "#" + ColorUtility.ToHtmlStringRGB(ReplicatorManager.MethanogenBaseColor);
+    private static readonly string MethanotrophHudColor = "#" + ColorUtility.ToHtmlStringRGB(ReplicatorManager.MethanotrophBaseColor);
+
     private readonly int[] totalByLocomotion = new int[4];
     private readonly int[] chemosynthByLocomotion = new int[4];
     private readonly int[] hydrogenByLocomotion = new int[4];
@@ -38,6 +41,9 @@ public class ReplicatorHudPresenter
     private float masterVolume = 1f;
     private string menuStatusMessage;
     private int lastEscapeToggleFrame = -1;
+    private readonly GUIContent performanceCsvPath = new GUIContent();
+
+    internal SimulationPerformanceAnalyzer PerformanceAnalyzer { get; set; }
 
     private const float ReferenceHeight = 1080f;
     private const float MinGuiScale = 1f;
@@ -151,14 +157,14 @@ public class ReplicatorHudPresenter
               $"O2: {globalO2:0.000} ({o2Pct:0.0}%)\n" +
               $"CH4: {globalCH4:0.000} ({ch4Pct:0.0}%)\n" +
               dissolvedOceanText +
-              $"Temp Mean: {ReplicatorManager.FormatTemperature(hudMeanTempKelvin, temperatureDisplayUnit)}\n" +
-              $"Temp Min: {ReplicatorManager.FormatTemperature(hudMinTempKelvin, temperatureDisplayUnit)}\n" +
-              $"Temp Max: {ReplicatorManager.FormatTemperature(hudMaxTempKelvin, temperatureDisplayUnit)}";
+              $"{(geodesicTemperatureField != null && geodesicTemperatureField.IsInitialized ? "Surface mean" : "Temp Mean")}: {ReplicatorManager.FormatTemperature(hudMeanTempKelvin, temperatureDisplayUnit)}\n" +
+              $"{(geodesicTemperatureField != null && geodesicTemperatureField.IsInitialized ? "Surface min" : "Temp Min")}: {ReplicatorManager.FormatTemperature(hudMinTempKelvin, temperatureDisplayUnit)}\n" +
+              $"{(geodesicTemperatureField != null && geodesicTemperatureField.IsInitialized ? "Surface max" : "Temp Max")}: {ReplicatorManager.FormatTemperature(hudMaxTempKelvin, temperatureDisplayUnit)}";
 
         float safeTotal = Mathf.Max(1f, totalAgents);
         string replicatorsText =
             "Replicators (Passive/Amoeboid/Flagellum/Anchored)\n" +
-            $"Total: {FormatLocomotionCounts(totalByLocomotion)}";
+            $"Total: {FormatLocomotionCounts(totalByLocomotion)} ({FormatTotalCount(totalByLocomotion)})";
 
         // --- Build ALL metabolisms (including Hydrogen) ---
         var metabolisms = new List<(string label, string color, int count, string locomotion)>
@@ -169,8 +175,8 @@ public class ReplicatorHudPresenter
             ("Sapro", "#62B0FF", saprotrophAgentCount, FormatLocomotionCounts(saprotrophByLocomotion)),
             ("Predator", "#FF5A5A", predatorAgentCount, FormatLocomotionCounts(predatorByLocomotion)),
             ("Ferment", "#FF8C1A", fermenterAgentCount, FormatLocomotionCounts(fermentByLocomotion)),
-            ("Methanogen", "#9955E6", methanogenAgentCount, FormatLocomotionCounts(methanogenByLocomotion)),
-            ("Methanotroph", "#FF73BF", methanotrophAgentCount, FormatLocomotionCounts(methanotrophByLocomotion))
+            ("Methanogen", MethanogenHudColor, methanogenAgentCount, FormatLocomotionCounts(methanogenByLocomotion)),
+            ("Methanotroph", MethanotrophHudColor, methanotrophAgentCount, FormatLocomotionCounts(methanotrophByLocomotion))
         };
 
         // --- Keep Hydrogen always, filter others ---
@@ -453,6 +459,12 @@ public class ReplicatorHudPresenter
         return $"{counts[0]}/{counts[1]}/{counts[2]}/{counts[3]}";
     }
 
+    private static string FormatTotalCount(int[] counts)
+    {
+        return $"{counts[0] + counts[1] + counts[2] + counts[3]}";
+    }
+
+
     private void UpdateGuiScale()
     {
         float scaleFromHeight = Screen.height / ReferenceHeight;
@@ -466,8 +478,13 @@ public class ReplicatorHudPresenter
             return;
         }
 
-        float width = 360f;
-        float height = 398f;
+        const float width = 360f;
+        const float baseHeight = 398f;
+        const float contentWidth = width - 32f;
+        performanceCsvPath.text = PerformanceAnalyzer != null ? PerformanceAnalyzer.ActiveCsvOutputPath : null;
+        bool showCsvPath = !string.IsNullOrEmpty(performanceCsvPath.text);
+        float csvPathHeight = showCsvPath ? hudStyle.CalcHeight(performanceCsvPath, contentWidth) : 0f;
+        float height = baseHeight + (showCsvPath ? csvPathHeight + 36f : 0f);
 
         Rect rect = new Rect(
             (scaledScreenWidth - width) * 0.5f,
@@ -479,7 +496,6 @@ public class ReplicatorHudPresenter
 
         float x = rect.x + 16f;
         float y = rect.y + 40f;
-        float contentWidth = rect.width - 32f;
 
         GUI.Label(
             new Rect(x, y, contentWidth, 28f),
@@ -570,6 +586,14 @@ public class ReplicatorHudPresenter
         {
             y += 42f;
             GUI.Label(new Rect(x, y, contentWidth, 40f), menuStatusMessage, hudStyle);
+        }
+
+        if (showCsvPath)
+        {
+            float pathY = rect.y + baseHeight - 8f;
+            GUI.Label(new Rect(x, pathY, contentWidth, csvPathHeight), performanceCsvPath, hudStyle);
+            if (GUI.Button(new Rect(x, pathY + csvPathHeight + 6f, contentWidth, 28f), "Copy performance CSV path", buttonStyle))
+                GUIUtility.systemCopyBuffer = performanceCsvPath.text;
         }
     }
 

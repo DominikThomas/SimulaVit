@@ -1,7 +1,4 @@
-Status: Partially implemented / Future
-Last reviewed: 2026-06-28
-Current summary: Reaction-backed metabolism has scaffold/registry/runtime-binding support, and the metabolism hot loop consumes those bindings for resource identities, but execution is still branch-driven and stoichiometry/effects are not yet authoritative. Full reaction execution remains future work.
-See also: Docs/PROJECT_STATUS_AND_NEXT_STEPS.md
+> **Future executor design / existing legacy bindings, reviewed 2026-11-20.** The registry supplies resource identities to legacy `ReplicatorMetabolismSystem`; its stoichiometries remain provisional. Geodesic executes a separate switch/transaction path and normally reaches only hydrogenotrophy, sulfur and fermentation. This plan is not proof of an operational generic executor or eight-type geodesic evolution. See [roadmap C3/E4](GEODESIC_MIGRATION_ROADMAP.md) and the [legacy evolution reference](CURRENT_MODEL_EVOLUTION_WEB_AUDIT.md); their roles are distinct from this detailed design.
 
 # Reaction-Backed Metabolism Migration Plan
 
@@ -60,7 +57,7 @@ Each branch in `ReplicatorMetabolismSystem` directly performs:
 
 - O2 pressure is currently represented by runtime inhibition plus legacy optional direct-damage fields (`DeathCause.O2_Toxicity`, `o2ToxicSeconds` / `O2ToxicSeconds[]`), but those effects are still metabolism-branch specific and not generalized as reaction effects.
 - Photosynthesis has dedicated helper flow (`ProcessPhotosynthesisMetabolism`, dark aerobic respiration, dark anoxic fallback) and debug counters, showing the current pattern of “feature = special branch code”.
-- Anoxygenic-like behavior currently exists as a photosynth dark fallback path, but it is encoded procedurally, not as explicit reactions.
+- The existing photosynth dark fallback is anoxic stored-carbon metabolism, not anoxygenic photosynthesis. Light-driven sulfur/hydrogen phototrophy remains a placeholder/future pathway, not an operational consequence of that fallback.
 
 ---
 

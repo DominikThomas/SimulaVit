@@ -1,0 +1,258 @@
+{
+    "mode": "fermentation-on",
+    "protocol": "fixed 1/30s: biology; sun; surface-temperature (ocean event); resource transport/chemistry",
+    "seed": 283,
+    "subdivision": 6,
+    "peakAmoeboid": 6234,
+    "finalPopulation": 30000,
+    "peakSulfur": 11998,
+    "firstFermentationMutationTime": 580.9000302962959,
+    "deathCarbon": 6140.7717987024225,
+    "deathDissolvedCarbon": 6140.7717987024225,
+    "finalOrganicC": 4502.199411522967,
+    "organicRecyclingResidual": -1.255102688446641e-10,
+    "fermentationConsumed": 1638.57238717933,
+    "fermentationStored": 655.4257473498583,
+    "fermentationCO2": 983.1466397747993,
+    "fermentationH2": 983.146639829272,
+    "fermentationEnergy": 34410.132649933206,
+    "hydrogenModelH2Consumption": 9537.661516285627,
+    "hydrogenModelCarbonFixation": 4768.8307581428135,
+    "fermentationMeanTemperaturePerformance": 0.9812052693673775,
+    "fermentationMeanO2Efficiency": 1.0,
+    "fermentationMeanLocalOrganicC": 0.00010421922159632476,
+    "fermentationAttempts": 4,
+    "fermentationAllowed": 4,
+    "fermentationBlocked": 0,
+    "fermentationBirths": 2728,
+    "fermentationDeaths": 1,
+    "fermentationPrecisionRejected": 760842,
+    "peakFermentation": 2727,
+    "fermentationLocomotion": [
+        465,
+        2006,
+        74,
+        182
+    ],
+    "fermentationParentBirths": [
+        468,
+        2016,
+        60,
+        180
+    ],
+    "organicStocks": [
+        {
+            "time": 100.00000521540642,
+            "inventory": 0.0,
+            "meanConcentration": 0.0,
+            "maxConcentration": 0.0,
+            "deathInput": 0.0,
+            "fermentationUptake": 0.0
+        },
+        {
+            "time": 200.00001043081284,
+            "inventory": 0.0,
+            "meanConcentration": 0.0,
+            "maxConcentration": 0.0,
+            "deathInput": 0.0,
+            "fermentationUptake": 0.0
+        },
+        {
+            "time": 300.00001564621928,
+            "inventory": 0.0,
+            "meanConcentration": 0.0,
+            "maxConcentration": 0.0,
+            "deathInput": 0.0,
+            "fermentationUptake": 0.0
+        },
+        {
+            "time": 400.00002086162569,
+            "inventory": 0.0,
+            "meanConcentration": 0.0,
+            "maxConcentration": 0.0,
+            "deathInput": 0.0,
+            "fermentationUptake": 0.0
+        },
+        {
+            "time": 500.0000260770321,
+            "inventory": 0.003615781664848328,
+            "meanConcentration": 1.922593898933568e-12,
+            "maxConcentration": 1.322820574487638e-7,
+            "deathInput": 0.0036157816648483278,
+            "fermentationUptake": 0.0
+        },
+        {
+            "time": 600.0000312924385,
+            "inventory": 0.010015434119850384,
+            "meanConcentration": 5.325435637110891e-12,
+            "maxConcentration": 2.7142651001642466e-7,
+            "deathInput": 0.010015434119850397,
+            "fermentationUptake": 0.0
+        },
+        {
+            "time": 700.0000365078449,
+            "inventory": 0.5019324370659878,
+            "meanConcentration": 2.6688896914366228e-10,
+            "maxConcentration": 0.000008733374916038843,
+            "deathInput": 0.5019324370659888,
+            "fermentationUptake": 0.0
+        },
+        {
+            "time": 800.0000417232513,
+            "inventory": 469.9085483052725,
+            "meanConcentration": 2.4986113426357669e-7,
+            "maxConcentration": 0.09079590707574505,
+            "deathInput": 469.9085483052768,
+            "fermentationUptake": 0.0
+        },
+        {
+            "time": 900.0000469386578,
+            "inventory": 1689.7028624475893,
+            "meanConcentration": 8.984536997724367e-7,
+            "maxConcentration": 0.08820680230861541,
+            "deathInput": 1690.0221825563349,
+            "fermentationUptake": 0.31932010872697749
+        },
+        {
+            "time": 1000.0000521540642,
+            "inventory": 3662.0966470737803,
+            "meanConcentration": 0.0000019472206354208796,
+            "maxConcentration": 0.06410719592594795,
+            "deathInput": 3723.8942652964033,
+            "fermentationUptake": 61.797618222554429
+        },
+        {
+            "time": 1100.0000573694706,
+            "inventory": 4188.835682989127,
+            "meanConcentration": 0.000002227299841150099,
+            "maxConcentration": 0.020171924329082905,
+            "deathInput": 5488.177870663349,
+            "fermentationUptake": 1299.3421876738207
+        },
+        {
+            "time": 1200.000062584877,
+            "inventory": 4502.199411522967,
+            "meanConcentration": 0.000002393922510456518,
+            "maxConcentration": 0.010143244525734549,
+            "deathInput": 6140.7717987024225,
+            "fermentationUptake": 1638.57238717933
+        }
+    ],
+    "finalMetabolisms": [
+        11998,
+        15275,
+        0,
+        0,
+        0,
+        2727,
+        0,
+        0
+    ],
+    "sulfurLocomotion": [
+        6,
+        3,
+        0,
+        11989
+    ],
+    "sulfurParentBirths": [
+        8881,
+        13735,
+        30,
+        13814
+    ],
+    "sulfurSampleSeconds": 2979921.0,
+    "sulfurViableSampleSeconds": 2572184.0,
+    "sulfurZeroPerformanceSamples": 407737.0,
+    "sulfurH2SConcentrationSum": 3530.4346863387445,
+    "sulfurO2Samples": 11899940,
+    "sulfurInhibitedSamples": 0,
+    "sulfurPrecisionRejected": 8743049,
+    "sulfurMeanO2Efficiency": 1.0,
+    "mutationAttempts": 11,
+    "mutationsAllowed": 5,
+    "mutationsBlocked": 6,
+    "sulfurBirths": 36465,
+    "sulfurDeaths": 24467,
+    "sulfurExtent": 525700.2040944586,
+    "sulfurCO2": 10514.003846968633,
+    "sulfurH2S": 5257.001923449357,
+    "sulfurEnergy": 52570.019324215136,
+    "sulfurCarbon": 10514.003846898675,
+    "sulfurS0": 5257.001923449357,
+    "h2sInventory": 4368.612678631591,
+    "suspendedS0": 5256.41047205544,
+    "sedimentS0": 0.5914513938531133,
+    "abioticS0": 0.0,
+    "abioticFeS": 46206.418837249774,
+    "seconds": 1200.0,
+    "stepSeconds": 0.03333333507180214,
+    "firstHalfAnchored": 1162.0000606030226,
+    "parentBirths": [
+        19811,
+        20043,
+        97,
+        17617
+    ],
+    "deaths": [
+        11714,
+        13892,
+        149,
+        1833
+    ],
+    "birthTransitions": [
+        19617,
+        190,
+        0,
+        4,
+        0,
+        19852,
+        184,
+        7,
+        0,
+        0,
+        97,
+        0,
+        0,
+        0,
+        0,
+        17617
+    ],
+    "finalPhenotypes": [
+        7923,
+        6150,
+        132,
+        15795
+    ],
+    "organismSeconds": [
+        4345350.359961003,
+        2280951.7856275665,
+        32019.235003266484,
+        2761024.0439986179
+    ],
+    "viableSeconds": [
+        565752.0,
+        1119709.0,
+        13047.0,
+        2769327.0
+    ],
+    "unsuitableSeconds": [
+        3783682.0,
+        1164346.0,
+        19046.0,
+        0.0
+    ],
+    "h2ConcentrationSeconds": [
+        8245.710921604086,
+        2438.6146457867058,
+        25.563689103724419,
+        4537.586664455897
+    ],
+    "sampledOrganismSeconds": [
+        4349434.0,
+        2284055.0,
+        32093.0,
+        2769327.0
+    ],
+    "resourceTransportTicks": 240,
+    "oceanSeconds": 1200.0
+}

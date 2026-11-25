@@ -50,6 +50,10 @@ public class ReplicatorManager : MonoBehaviour
     private static readonly ProfilerMarker PredatorScentUpdateMarker = new ProfilerMarker("ReplicatorManager.UpdateScentFields");
     private static readonly ProfilerMarker PredatorScentSkipNoPredatorsMarker = new ProfilerMarker("ReplicatorManager.SkipScentFields.NoPredators");
     private static readonly ProfilerMarker PopulationStatePrepareForLocomotionMarker = new ProfilerMarker("ReplicatorManager.PopulationStatePrepareForLocomotion");
+    private static readonly ProfilerMarker GeodesicDiagnosticsMarker = new ProfilerMarker("ReplicatorManager.GeodesicDiagnostics");
+    private static readonly ProfilerMarker FounderLifecycleMarker = new ProfilerMarker("GeodesicBiology.FounderLifecycle");
+    private static readonly ProfilerMarker HudMarker = new ProfilerMarker("ReplicatorManager.Hud");
+    private static readonly ProfilerMarker GeodesicControlSyncMarker = new ProfilerMarker("ReplicatorManager.GeodesicControlSync");
     private static readonly ProfilerMarker SteeringThrottleSkipMarker = new ProfilerMarker("ReplicatorManager.SteeringThrottleSkip");
 
     private struct MetabolismMutationGateRequirements
@@ -96,6 +100,16 @@ public class ReplicatorManager : MonoBehaviour
     [Header("Population")]
     public int initialSpawnCount = 100;
     [Min(0f)] public float geodesicBiologySpawnDelaySeconds;
+    public GeodesicFounderEmergenceMode geodesicFounderEmergenceMode;
+    [Min(.01f)] public float geodesicFounderMeanIntervalSeconds = GeodesicFounderEmergenceSchedule.DefaultMeanInterval;
+    public bool geodesicFounderOngoingEmergence;
+    [Min(.01f)] public float geodesicFounderOngoingMeanIntervalSeconds = GeodesicFounderEmergenceSchedule.DefaultOngoingMeanInterval;
+    [HideInInspector] public GeodesicBiologyAvailability geodesicBiologyAvailability = GeodesicBiologyAvailability.Default;
+    [HideInInspector] public int geodesicPhotosyntheticFounderCount;
+    [HideInInspector] public int geodesicSaprotrophFounderCount;
+    [HideInInspector] public int geodesicMethanogenFounderCount;
+    [HideInInspector] public int geodesicMethanotrophFounderCount;
+    [HideInInspector] public GeodesicPredationSettings geodesicPredation = GeodesicPredationSettings.Default;
     public int maxPopulation = 50000;
     [Tooltip("When disabled, the manager initializes references but waits for an external startup controller to spawn the initial population.")]
     public bool autoStartOnSceneLoad = true;
@@ -193,6 +207,7 @@ public class ReplicatorManager : MonoBehaviour
     public float hydrogenotrophyH2PerTick = 0.02f;
     public float hydrogenotrophyCO2PerTick = 0.01f;
     public float hydrogenotrophyEnergyPerTick = 8f;
+    [Tooltip("Geodesic: scales the whole reaction (uptake, energy and carbon fixation); all withdrawn CO2 is stored. Legacy: fraction of consumed CO2 stored as organic carbon.")]
     [Range(0f, 1f)] public float hydrogenotrophyStoreFraction = 0.8f;
     public float fermentationOrganicCPerTick = 0.02f;
     public float fermentationEnergyPerTick = 0.04f;
@@ -212,7 +227,7 @@ public class ReplicatorManager : MonoBehaviour
     [Range(0f, 1f)] public float hydrogenToSulfurMutationChance = 0.003f;
 
     [Header("Anaerobic Transition Mutation")]
-    [Range(0f, 1f)] public float hydrogenToFermentationMutationChance = 0.002f;
+    [Range(0f, 1f)] public float hydrogenToFermentationMutationChance = 0.02f;
     [Range(0f, 1f)] public float fermentationToMethanogenesisMutationChance = 0.002f;
     [Range(0f, 1f)] public float hydrogenToMethanotrophyMutationChance = 0.0015f;
 
@@ -374,11 +389,25 @@ public class ReplicatorManager : MonoBehaviour
     [Tooltip("Use metabolism/resource/temperature/O2-efficiency suitability for temporal run-and-tumble comparisons without scanning neighboring cells.")]
     public bool activeMovementMetabolismSuitabilityEnabled = true;
     [Range(0f, 1f)] public float movementSuitabilityMemoryBlend = 0.35f;
+    [Tooltip("Geodesic: fractional improvement in experienced reaction readiness (0.05 = 5%). Legacy: absolute suitability delta.")]
     public float movementSuitabilityImprovementThreshold = 0.05f;
+    [Tooltip("Geodesic: fractional deterioration in experienced reaction readiness (0.05 = 5%). Legacy: absolute suitability delta.")]
     public float movementSuitabilityWorseningThreshold = 0.05f;
     [Range(0f, 1f)] public float movementTumbleChanceWhenWorse = 0.65f;
     [Range(0f, 1f)] public float movementTumbleChanceWhenBetter = 0.05f;
     [Range(0f, 1f)] public float movementTumbleChanceNeutral = 0.2f;
+
+    [Header("Geodesic Active Locomotion")]
+    [Tooltip("Disables environmental feedback on horizontal tumbles and vertical persistence when off. Active swimming, neutral exploration, costs and evolution remain enabled.")]
+    public bool enableGeodesicChemotacticSteering = true;
+    [HideInInspector] public bool enableGeodesicChemotaxisABDiagnostics; // Historical startup/save field.
+    public GeodesicLocomotionSettings geodesicLocomotion = GeodesicLocomotionSettings.Default;
+
+    [Header("Console Diagnostics (Opt-in)")]
+    [SerializeField, Tooltip("Prints geodesic biology, thermal, metabolic and founder reports. Population summaries are limited to once per five real seconds.")]
+    private bool logGeodesicBiologyReports;
+    [SerializeField, Tooltip("Prints the general metabolism and death summary every three real seconds.")]
+    private bool logMetabolismReports;
 
     [Header("Scent-Based Predation")]
     public bool useScentPredation = true;
@@ -468,6 +497,18 @@ public class ReplicatorManager : MonoBehaviour
     [Range(0.00001f, 0.1f)] public float debugSessileMovementEpsilon = 0.001f;
     [Header("Geodesic Movement Diagnostics")]
     [SerializeField] private ReplicatorMovementDiagnostics movementDiagnostics = new ReplicatorMovementDiagnostics();
+    [Header("Geodesic Growth and Accounting Diagnostics")]
+    [SerializeField] private GeodesicBiologyDiagnostics biologyDiagnostics = new GeodesicBiologyDiagnostics(false);
+
+    [Header("Geodesic Visual Growth and Division")]
+    public ReplicatorVisualGrowthSettings visualGrowthSettings = ReplicatorVisualGrowthSettings.Default;
+    [SerializeField, Tooltip("Diameter multipliers relative to mature Size, from the latest rendered population.")]
+    private float minimumVisualDiameter, averageVisualDiameter, maximumVisualDiameter;
+    [SerializeField] private int currentlyDividing;
+    [SerializeField] private long invalidVisualStateCorrections;
+    [SerializeField] private long replacedDivisionTransitions, constrainedDaughterSeparations, failedDaughterSeparations;
+    [SerializeField] private bool divisionParentFound, divisionDaughterFound;
+    [SerializeField] private GeodesicGrowthSnapshot divisionParentVisual, divisionDaughterVisual;
 
     public int RuntimeSimulationStepsPerFrame => runtimeSimulationStepsPerFrame;
     public int ConfiguredSimulationStepsPerFrame => runtimeSimulationStepsPerFrame;
@@ -479,6 +520,8 @@ public class ReplicatorManager : MonoBehaviour
     public bool PauseDetected => simulationPipeline != null && simulationPipeline.PauseDetected;
     public int TotalPopulation => agents.Count;
     public int PredatorCount => predatorAgentCount;
+    internal MetabolismPopulationCounts MetabolismCounts => metabolismCounts;
+    internal void SetPerformanceAnalyzer(SimulationPerformanceAnalyzer analyzer) => hudPresenter.PerformanceAnalyzer = analyzer;
     public double SimulationTimeSeconds => simulationPipeline != null ? simulationPipeline.SimulationTimeSeconds : simulationTimeSeconds;
     public bool IsInitializedForSimulation => isInitialized;
 
@@ -553,6 +596,16 @@ public class ReplicatorManager : MonoBehaviour
                 nextSenseTime = populationState.NextSenseTime[i],
                 movementSeed = populationState.MovementSeed[i],
                 size = populationState.Size[i],
+                visualGrowth = populationState.VisualGrowth[i],
+                geodesicMovement = new GeodesicMovementSnapshot
+                {
+                    directionLocal = populationState.PassiveDriftDirection[i],
+                    tangentLocal = populationState.PassiveDriftTangent[i],
+                    radius = populationState.PassiveVisualRadius[i],
+                    active = populationState.ActiveMovement[i]
+                },
+                hasGeodesicHabitat = populationState.GeodesicCellIndex[i] >= 0,
+                geodesicCellIndex = populationState.GeodesicCellIndex[i],
                 color = new SerializableColor(populationState.Color[i]),
                 currentOceanLayerIndex = populationState.CurrentOceanLayerIndex[i],
                 preferredOceanLayerIndex = populationState.PreferredOceanLayerIndex[i],
@@ -565,7 +618,7 @@ public class ReplicatorManager : MonoBehaviour
                     moveOnlyInSea = traits.moveOnlyInSea,
                     surfaceMoveSpeedMultiplier = traits.surfaceMoveSpeedMultiplier
                 },
-                biomassTarget = companion != null ? companion.biomassTarget : 0f,
+                biomassTarget = populationState.BiomassTarget[i],
                 locomotionSkill = companion != null ? companion.locomotionSkill : 0f
             });
         }
@@ -609,12 +662,16 @@ public class ReplicatorManager : MonoBehaviour
                 return false;
             }
 
+            if (loaded.metabolism == MetabolismType.Methanogenesis || loaded.metabolism == MetabolismType.Methanotrophy)
+                loaded.color = CalculateAgentColor(loaded.age, loaded.maxLifespan - loaded.age, loaded.energy, loaded.metabolism);
+
             loadedAgents.Add(loaded);
         }
 
         agents.Clear();
         populationState.Reset();
         movementDiagnostics.Reset();
+        ResetVisualGrowthReadouts();
 
         for (int i = 0; i < loadedAgents.Count; i++)
         {
@@ -663,6 +720,7 @@ public class ReplicatorManager : MonoBehaviour
     [SerializeField] private int fermenterAgentCount;
     [SerializeField] private int methanogenAgentCount;
     [SerializeField] private int methanotrophAgentCount;
+    private MetabolismPopulationCounts metabolismCounts;
     [SerializeField] private float averageOrganicCStore;
     [SerializeField] private int divisionEligibleAgentCount;
     [Header("Metabolism Mutation Gate Telemetry")]
@@ -680,6 +738,8 @@ public class ReplicatorManager : MonoBehaviour
     private GeodesicFounderSpawnSchedule geodesicFounderSpawnSchedule;
     private bool isInitialized;
     private GeodesicBiologyRuntime geodesicBiology;
+    private Func<float, float, float, MetabolismType, Color> geodesicColorResolver;
+    private Action<MetabolismType, DeathCause> geodesicDeathRecorder;
     private readonly ReplicatorSpawnSystem spawnSystem = new ReplicatorSpawnSystem();
     private readonly ReplicatorLifecycleSystem lifecycleSystem = new ReplicatorLifecycleSystem();
     private readonly ReplicatorMetabolismSystem metabolismSystem = new ReplicatorMetabolismSystem();
@@ -851,19 +911,77 @@ public class ReplicatorManager : MonoBehaviour
             enabled = true;
             ClearPopulation();
             geodesicBiology = new GeodesicBiologyRuntime();
-            float spawnDelay = spawnInitialPopulation ? Mathf.Max(0f, geodesicBiologySpawnDelaySeconds) : 0f;
-            int immediateFounderCount = spawnInitialPopulation && spawnDelay <= 0f ? initialSpawnCount : 0;
+            geodesicBiology.SetAccountingDiagnostics(biologyDiagnostics);
+            var availability = geodesicBiologyAvailability.Normalized();
+            bool scheduleFounders = spawnInitialPopulation && availability.AllowsFounders;
+            float spawnDelay = scheduleFounders ? Mathf.Max(0f, geodesicBiologySpawnDelaySeconds) : 0f;
+            bool gradual = geodesicFounderEmergenceMode == GeodesicFounderEmergenceMode.Gradual;
+            int immediateFounderCount = scheduleFounders && !gradual && spawnDelay <= 0f
+                ? Mathf.Clamp(initialSpawnCount, 0, Mathf.Max(0,maxPopulation)) : 0;
             if (!geodesicBiology.Initialize(planetGenerator, agents, populationState, immediateFounderCount,
                 minLifespan, maxLifespan, baseAgentColor, defaultBiomassTarget,
-                hydrogenTempRange, defaultLethalMargin))
+                hydrogenTempRange, defaultLethalMargin,hydrogenotrophyCO2PerTick,hydrogenotrophyH2PerTick,
+                temperatureReplicationMinEfficiency,temperatureDormancyFloor,logGeodesicBiologyReports,availability))
             {
                 geodesicBiology = null;
                 isInitialized = false;
                 return false;
             }
+            ApplyGeodesicRuntimeControls();
+            // The runtime's initial vent batch contains only hydrogenotrophs.
+            metabolismCounts.Hydrogenotrophy = agents.Count;
+            string founderSummary = string.Empty;
+            if (spawnInitialPopulation && geodesicPhotosyntheticFounderCount > 0)
+            {
+                int spawned = geodesicBiology.SpawnPhotosyntheticFounders(geodesicPhotosyntheticFounderCount,
+                    maxPopulation, photosynthesisCo2PerTickAtFullInsolation, photosynthesisEnergyPerCo2,
+                    maxOrganicCStore, agents, populationState);
+                metabolismCounts.Photosynthesis = spawned;
+                founderSummary = $" | Photosynthetic founders: {spawned}/{geodesicPhotosyntheticFounderCount} placed";
+                if (!availability.AllowsPhotosyntheticFounders)
+                    founderSummary += " (requires Oxygenic photosynthesis and Passive drift)";
+            }
+            if (spawnInitialPopulation && geodesicSaprotrophFounderCount > 0)
+            {
+                geodesicBiology.ConfigureSaprotrophFounders(geodesicSaprotrophFounderCount);
+                founderSummary += availability.AllowsSaprotrophFounders
+                    ? $" | Saprotroph founders: up to {geodesicSaprotrophFounderCount} at the first suitable death-recycling site"
+                    : " | Saprotroph founders: require Aerobic saprotrophy and Passive drift";
+            }
+            if (spawnInitialPopulation && geodesicMethanogenFounderCount > 0)
+            {
+                geodesicBiology.ConfigureMethanogenFounders(geodesicMethanogenFounderCount);
+                founderSummary += availability.AllowsMethanogenFounders
+                    ? $" | Methanogen founders: up to {geodesicMethanogenFounderCount} at the first suitable anoxic submarine outlet"
+                    : " | Methanogen founders: require Methanogenesis and Passive drift";
+            }
+            if (spawnInitialPopulation && geodesicMethanotrophFounderCount > 0)
+            {
+                geodesicBiology.ConfigureMethanotrophFounders(geodesicMethanotrophFounderCount);
+                founderSummary += $" | Methanotroph founders: 0/{geodesicMethanotrophFounderCount} placed"
+                    + (availability.AllowsMethanotrophFounders
+                        ? " (pending suitable local CH4/O2 and temperature)"
+                        : " (requires Methanotrophy and Passive drift)");
+            }
+            if (spawnInitialPopulation && geodesicPredation.founderCount > 0)
+            {
+                geodesicBiology.ConfigurePredatorFounders(geodesicPredation.founderCount);
+                founderSummary += $" | Predator founders: 0/{geodesicPredation.founderCount} placed"
+                    + (enablePredators && availability.AllowsPredatorFounders
+                        ? " (pending suitable live prey, habitat and capacity)"
+                        : " (requires Predation, Passive drift and Enable Predators)");
+            }
+            Debug.Log(availability.Describe() + founderSummary, this);
+            if (geodesicLocomotion.logDiagnostics)
+                Debug.Log(geodesicBiology.DescribeResolvedLocomotionControls(), this);
             geodesicFounderSpawnSchedule.Configure(0d, spawnDelay,
-                spawnInitialPopulation ? initialSpawnCount : 0);
-            if (geodesicFounderSpawnSchedule.IsPending)
+                scheduleFounders && !gradual ? initialSpawnCount : 0);
+            if (scheduleFounders && gradual)
+                geodesicBiology.ConfigureGradualEmergence(initialSpawnCount,spawnDelay,geodesicFounderMeanIntervalSeconds,
+                    geodesicFounderOngoingEmergence,geodesicFounderOngoingMeanIntervalSeconds);
+            if (scheduleFounders && !gradual && spawnDelay <= 0f)
+                geodesicBiology.RecordCappedFounderEvents(Mathf.Max(0,initialSpawnCount-immediateFounderCount));
+            if (logGeodesicBiologyReports && geodesicFounderSpawnSchedule.IsPending)
                 Debug.Log($"[GeodesicBiology] founder spawn deferred until simTime={geodesicFounderSpawnSchedule.SpawnAtSimulationTime:G6}", this);
             isInitialized = true;
             EnsureDeathCauseCounters();
@@ -891,19 +1009,26 @@ public class ReplicatorManager : MonoBehaviour
 
     public void SpawnInitialPopulation()
     {
+        // Geodesic founders are created through the runtime's batch or gradual startup path.
+        if (planetGenerator != null && planetGenerator.CurrentGridType == PlanetGridType.GeodesicIcosphere) return;
         ClearPopulation();
 
         for (int i = 0; i < initialSpawnCount; i++)
         {
             SpawnAgentAtRandomLocation();
         }
+        // Legacy initial spawning also creates only hydrogenotrophs.
+        metabolismCounts.Hydrogenotrophy = agents.Count;
     }
 
     public void ClearPopulation()
     {
         agents.Clear();
         populationState.Reset();
+        metabolismCounts = default;
         movementDiagnostics.Reset();
+        biologyDiagnostics.Reset();
+        ResetVisualGrowthReadouts();
         preyAgentsBySpatialBin.Clear();
         spontaneousHydrogenSpawnCandidateCells.Clear();
         spontaneousSpawnCandidateCacheLastRefreshStep = -1;
@@ -947,9 +1072,112 @@ public class ReplicatorManager : MonoBehaviour
         simulationStepCount++;
     }
 
+    /// <summary>On-demand packed-state read. Indices can change on swap-back; use the ID overload to pin an organism.</summary>
+    public bool TryGetGeodesicGrowthSnapshot(int packedIndex, out GeodesicGrowthSnapshot snapshot)
+    {
+        snapshot = default;
+        geodesicBiology?.SetVisualGrowthSettings(visualGrowthSettings);
+        return geodesicBiology != null && geodesicBiology.TryGetGrowthSnapshot(packedIndex, agents, populationState,
+            enableCarbonLimitedDivision, divisionEnergyCost, replicationEnergyCost, divisionBiomassMultiple,
+            maxPopulation, reproductionRate, currentStepDeltaTime, out snapshot);
+    }
+
+    /// <summary>Explicit inspection only; the ID lookup is not run per frame or by rendering.</summary>
+    public bool TryGetGeodesicGrowthSnapshotById(long organismId, out GeodesicGrowthSnapshot snapshot)
+    {
+        snapshot = default;
+        if (geodesicBiology == null) return false;
+        for (int i = 0; i < agents.Count; i++)
+            if (agents[i].DiagnosticId == organismId) return TryGetGeodesicGrowthSnapshot(i, out snapshot);
+        return false;
+    }
+
+    [ContextMenu("Biology Diagnostics/Refresh Selected Growth")]
+    private void RefreshSelectedGeodesicGrowth()
+    {
+        GeodesicGrowthSnapshot snapshot;
+        bool found = biologyDiagnostics.SelectedOrganismId == 0
+            ? TryGetGeodesicGrowthSnapshot(0, out snapshot)
+            : TryGetGeodesicGrowthSnapshotById(biologyDiagnostics.SelectedOrganismId, out snapshot);
+        biologyDiagnostics.SetSelectedGrowth(found, snapshot);
+        if(found) {
+            float displayMargin=temperatureDisplayUnit==TemperatureDisplayUnit.Fahrenheit ? snapshot.lethalTempMargin*1.8f : snapshot.lethalTempMargin;
+            string marginUnit=temperatureDisplayUnit==TemperatureDisplayUnit.Fahrenheit ? "F" : temperatureDisplayUnit==TemperatureDisplayUnit.Celsius ? "C" : "K";
+            Debug.Log($"[SelectedGeodesicThermal] organism={snapshot.organismId} cell/layer={snapshot.cell}/{snapshot.layer} worldPosition={snapshot.worldPosition}\n{GeodesicExperiencedTemperatureField.DescribeTemperatureSample(snapshot.thermal,temperatureDisplayUnit,"organism position")}\nIndividual preferred range: {FormatTemperature(snapshot.optimalTempMin,temperatureDisplayUnit)} to {FormatTemperature(snapshot.optimalTempMax,temperatureDisplayUnit)}; tolerance margin={displayMargin:G5} {marginUnit}\nPerformance={snapshot.temperaturePerformance:G5}; temperature reproduction permitted={snapshot.temperatureReady}; accumulating cold/heat exposure={snapshot.accumulatingColdExposure}/{snapshot.accumulatingHeatExposure}; exposure seconds={snapshot.coldExposureSeconds:G5}/{snapshot.heatExposureSeconds:G5}",this);
+        }
+    }
+
+    [ContextMenu("Biology Diagnostics/Reset Accounting Readouts")]
+    private void ResetGeodesicAccountingReadouts() => biologyDiagnostics.Reset();
+
+    [ContextMenu("Biology Diagnostics/Report Geodesic Predation")]
+    private void ReportGeodesicPredation()
+    {
+        if (geodesicBiology == null) return;
+        var stats = geodesicBiology.PredationDiagnostics;
+        double carbonResidual = stats.preyCarbon - stats.assimilatedCarbon - stats.co2Produced - stats.organicCarbonReleased;
+        Debug.Log($"[GeodesicPredation] founders={geodesicBiology.PredatorFoundersPlaced}/{geodesicBiology.PredatorFoundersRequested}"
+            + $" collecting={geodesicPredation.collectDiagnostics} indexBuilds={stats.indexBuilds} searches={stats.searches}"
+            + $" candidates={stats.candidatesExamined} noPrey={stats.searchesWithoutPrey} failed={stats.failedAttempts} captures={stats.captures}"
+            + $" preyC={stats.preyCarbon:G9} assimilatedC={stats.assimilatedCarbon:G9} CO2={stats.co2Produced:G9}"
+            + $" OrganicC={stats.organicCarbonReleased:G9} carbonResidual={carbonResidual:G9}"
+            + $" O2={stats.oxygenConsumed:G9} energy={stats.energyCredited:G9}", this);
+    }
+
+    [ContextMenu("Biology Diagnostics/Refresh Latest Division Visuals")]
+    private void RefreshLatestDivisionVisuals()
+    {
+        // Explicit inspection only. IDs follow companions through swap-back; no pair-index cache.
+        divisionParentVisual = divisionDaughterVisual = default;
+        GeodesicBiologyDiagnostics.DivisionSample latest = biologyDiagnostics.LatestDivision;
+        divisionParentFound = biologyDiagnostics.HasLatestDivision
+            && TryGetGeodesicGrowthSnapshotById(latest.before.organismId, out divisionParentVisual);
+        divisionDaughterFound = biologyDiagnostics.HasLatestDivision
+            && TryGetGeodesicGrowthSnapshotById(latest.childId, out divisionDaughterVisual);
+    }
+
+    private void ApplyGeodesicRuntimeControls()
+    {
+        using var performanceScope = GeodesicControlSyncMarker.Auto();
+        geodesicBiology.SetLocomotionContext(enableGeodesicChemotacticSteering, simulationTimeSeconds);
+        geodesicBiology.SetBiologyReportsEnabled(logGeodesicBiologyReports);
+        geodesicBiology.SetVisualGrowthSettings(visualGrowthSettings);
+        geodesicColorResolver ??= CalculateAgentColor;
+        geodesicBiology.SetMetabolicColorResolver(geodesicColorResolver);
+        geodesicBiology.SetSulfurControls(chemosynthStoreFraction,
+            anaerobeO2InhibitionEnabled && anaerobeO2InhibitionAffectsSulfurChemosynthesis,
+            anaerobeO2MinEfficiencySulfurChemosynthesis, metabolismMutationChance, hydrogenToSulfurMutationChance,
+            mutationGateMinH2S, mutationGateMinCO2, sulfurChemoTempRange, defaultLethalMargin);
+        geodesicBiology.SetFermentationControls(fermentationOrganicCPerTick,fermentationEnergyPerTick,fermentationAssimilationFraction,
+            anaerobeO2InhibitionEnabled && anaerobeO2InhibitionAffectsFermentation,anaerobeO2MinEfficiencyFermentation,
+            hydrogenToFermentationMutationChance,mutationGateMinOrganicC,fermentationTempRange,defaultLethalMargin);
+        geodesicBiology.SetPhotosynthesisControls(hydrogenToPhotosynthesisMutationChance,
+            mutationGateMinLight, mutationGateMinCO2, photoTempRange, defaultLethalMargin);
+        geodesicBiology.SetSaprotrophyControls(saproCPerTick, saproAssimilationFraction, aerobicO2PerC, aerobicEnergyPerC,
+            hydrogenToSaprotrophyMutationChance, saprotrophyMutationChance, mutationGateMinO2ForAerobes,
+            mutationGateMinOrganicC, saproTempRange, defaultLethalMargin);
+        geodesicBiology.SetPredationControls(geodesicPredation, enablePredators, predatorAssimilationFraction,
+            aerobicO2PerC, predatorMutationChance, mutationGateMinO2ForAerobes, predatorTempRange, defaultLethalMargin);
+        geodesicBiology.SetMethanogenesisControls(methanogenesisAssimilationFraction,
+            anaerobeO2InhibitionEnabled && anaerobeO2InhibitionAffectsMethanogenesis, anaerobeO2MinEfficiencyMethanogenesis,
+            fermentationToMethanogenesisMutationChance, mutationGateMinH2, mutationGateMinCO2,
+            mutationGateMaxO2ForAnaerobes, methanogenesisTempRange, defaultLethalMargin);
+        geodesicBiology.SetMethanotrophyControls(methanotrophyAssimilationFraction, hydrogenToMethanotrophyMutationChance,
+            mutationGateMinCH4, mutationGateMinO2ForAerobes, methanotrophyTempRange, defaultLethalMargin);
+        geodesicBiology.SetLocomotionSettings(geodesicLocomotion, CreateSteeringSettings(), moveSpeed,
+            amoeboidMoveSpeedMultiplier, flagellumMoveSpeedMultiplier, amoeboidTurnRate, flagellumTurnRate,
+            locomotionMutationChance, locomotionUpgradeChance, locomotionAnchoredMutationChance,
+            allowAnchoredToAmoeboidMutation, anchoredToAmoeboidMutationChance);
+    }
+
+    internal GeodesicBiologyRuntime.MovementWork GeodesicMovementPerformance =>
+        geodesicBiology?.MovementPerformance ?? default;
+
     internal bool RunGeodesicBiologyStep(float stepDeltaTime)
     {
         if (geodesicBiology == null) return false;
+        ApplyGeodesicRuntimeControls();
+        geodesicDeathRecorder ??= RegisterDeathCause;
         geodesicBiology.Step(stepDeltaTime, agents, populationState, basalEnergyCostPerSecond,
             hydrogenotrophyCO2PerTick, hydrogenotrophyH2PerTick, hydrogenotrophyEnergyPerTick, hydrogenotrophyStoreFraction,
             anaerobeO2InhibitionEnabled && anaerobeO2InhibitionAffectsHydrogenotrophy,
@@ -959,7 +1187,7 @@ public class ReplicatorManager : MonoBehaviour
             methanotrophyCH4PerTick, methanotrophyO2PerTick, methanotrophyEnergyPerTick,
             photosynthesisCo2PerTickAtFullInsolation, photosynthesisEnergyPerCo2, maxOrganicCStore,
             reproductionRate, enableCarbonLimitedDivision, divisionEnergyCost, replicationEnergyCost,
-            divisionBiomassMultiple, divisionCarbonSplitToChild, maxPopulation, RegisterDeathCause,
+            divisionBiomassMultiple, divisionCarbonSplitToChild, maxPopulation, geodesicDeathRecorder,
             new GeodesicBiologyTemperatureSettings
             {
                 DormancyFloor = temperatureDormancyFloor,
@@ -972,17 +1200,51 @@ public class ReplicatorManager : MonoBehaviour
                 ExposureRecoveryPerSecond = geodesicTemperatureExposureRecoveryPerSecond,
                 MutationChance = tempMutationChance, MutationScale = tempMutationScale
             });
-        if (geodesicFounderSpawnSchedule.TryConsume(simulationTimeSeconds, out int requestedFounders))
+        using (FounderLifecycleMarker.Auto())
         {
-            int spawned = geodesicBiology.SpawnDeferredFounders(requestedFounders, agents, populationState,
-                simulationTimeSeconds);
-            Debug.Log($"[GeodesicBiology] deferred founder spawn simTime={simulationTimeSeconds:G6} requested={requestedFounders} spawned={spawned}", this);
+            if (geodesicFounderSpawnSchedule.TryConsume(simulationTimeSeconds, out int requestedFounders))
+            {
+                int spawned = geodesicBiology.SpawnDeferredFounders(requestedFounders, agents, populationState,
+                    simulationTimeSeconds, maxPopulation);
+                if (logGeodesicBiologyReports)
+                    Debug.Log($"[GeodesicBiology] deferred founder spawn simTime={simulationTimeSeconds:G6} requested={requestedFounders} spawned={spawned}", this);
+            }
+            geodesicBiology.AdvanceFounderEmergence(simulationTimeSeconds,maxPopulation,hydrogenotrophyCO2PerTick,hydrogenotrophyH2PerTick,
+                anaerobeO2InhibitionEnabled && anaerobeO2InhibitionAffectsHydrogenotrophy,
+                anaerobeO2ComfortMax,anaerobeO2StressMax,anaerobeO2MinEfficiencyHydrogenotrophy,agents,populationState);
         }
-        movementDiagnostics.ObserveSimulationStep(agents, populationState, planetGenerator.transform,
-            geodesicBiology.MovementGrid, simulationStepCount, simulationTimeSeconds, stepDeltaTime,
-            geodesicBiology.LastMovementKinematicsSeconds);
-        if (!enableRendering) movementDiagnostics.LogIfDue(this);
+        using (GeodesicDiagnosticsMarker.Auto())
+        {
+            movementDiagnostics.ObserveSimulationStep(agents, populationState, planetGenerator.transform,
+                geodesicBiology.MovementGrid, simulationStepCount, simulationTimeSeconds, stepDeltaTime,
+                geodesicBiology.LastMovementKinematicsSeconds);
+            if (!enableRendering) movementDiagnostics.LogIfDue(this);
+        }
         return true;
+    }
+
+    [ContextMenu("Diagnostics/Geodesic Locomotion/Selected to Amoeboid")]
+    private void DiagnosticSelectedToAmoeboid() => SetDiagnosticSelectedLocomotion(LocomotionType.Amoeboid);
+
+    [ContextMenu("Diagnostics/Geodesic Locomotion/Selected to Flagellum")]
+    private void DiagnosticSelectedToFlagellum() => SetDiagnosticSelectedLocomotion(LocomotionType.Flagellum);
+
+    [ContextMenu("Diagnostics/Geodesic Locomotion/Selected to Passive Drift")]
+    private void DiagnosticSelectedToPassive() => SetDiagnosticSelectedLocomotion(LocomotionType.PassiveDrift);
+
+    private void SetDiagnosticSelectedLocomotion(LocomotionType type)
+    {
+        if (geodesicBiology == null || populationState.Count == 0) return;
+        long selected = biologyDiagnostics.SelectedOrganismId;
+        int index = 0;
+        if (selected != 0)
+        {
+            index = agents.FindIndex(agent => agent.DiagnosticId == selected);
+            if (index < 0) { Debug.LogWarning($"[GeodesicLocomotion] Diagnostic organism {selected} is no longer alive.", this); return; }
+        }
+        geodesicBiology.SetDiagnosticLocomotion(index, type, populationState);
+        agents[index].locomotion = type;
+        Debug.Log($"[GeodesicLocomotion] DIAGNOSTIC override organism={agents[index].DiagnosticId} locomotion={type}; normal founders remain passive.", this);
     }
 
     internal bool ShouldProcessPredatorScent()
@@ -1002,6 +1264,7 @@ public class ReplicatorManager : MonoBehaviour
 
     void OnGUI()
     {
+        using var performanceScope = HudMarker.Auto();
         // The runtime menu and Escape handling are world UI, not biology lifecycle work.
         if (!showSimulationHud || SimulationStartupController.IsStartupBlockingHud)
         {
@@ -1078,7 +1341,7 @@ public class ReplicatorManager : MonoBehaviour
             {
                 methanotroph++;
             }
-            else
+            else if (metabolism == MetabolismType.Saprotrophy)
             {
                 sapro++;
             }
@@ -1092,15 +1355,48 @@ public class ReplicatorManager : MonoBehaviour
         fermenterAgentCount = ferment;
         methanogenAgentCount = methanogen;
         methanotrophAgentCount = methanotroph;
+        // Reuse the HUD tally without changing the counts used by legacy spawning.
+        metabolismCounts = new MetabolismPopulationCounts
+        {
+            Hydrogenotrophy = hydrogen,
+            SulfurChemosynthesis = chemo,
+            Fermentation = ferment,
+            Photosynthesis = photo,
+            Saprotrophy = sapro,
+            Methanogenesis = methanogen,
+            Methanotrophy = methanotroph,
+            Predation = predator
+        };
     }
 
+    internal struct MetabolismPopulationCounts
+    {
+        // Long fields also hold sums across many rendered frames.
+        public long Hydrogenotrophy, SulfurChemosynthesis, Fermentation, Photosynthesis;
+        public long Saprotrophy, Methanogenesis, Methanotrophy, Predation;
+
+        public long Total => Hydrogenotrophy + SulfurChemosynthesis + Fermentation + Photosynthesis
+            + Saprotrophy + Methanogenesis + Methanotrophy + Predation;
+
+        public void Add(in MetabolismPopulationCounts counts)
+        {
+            Hydrogenotrophy += counts.Hydrogenotrophy;
+            SulfurChemosynthesis += counts.SulfurChemosynthesis;
+            Fermentation += counts.Fermentation;
+            Photosynthesis += counts.Photosynthesis;
+            Saprotrophy += counts.Saprotrophy;
+            Methanogenesis += counts.Methanogenesis;
+            Methanotrophy += counts.Methanotrophy;
+            Predation += counts.Predation;
+        }
+    }
 
 
     internal void LogMetabolismDebugThrottled()
     {
         // Building this snapshot scans the legacy resource arrays and used to happen every
         // rendered frame even though the result is emitted only once every three seconds.
-        if (!debugTelemetry.IsMetabolismDebugLogDue())
+        if (!logMetabolismReports || !debugTelemetry.IsMetabolismDebugLogDue())
         {
             return;
         }
@@ -3463,7 +3759,14 @@ public class ReplicatorManager : MonoBehaviour
     }
 
 
-    Color GetMetabolismBaseColor(MetabolismType metabolism)
+    internal static readonly Color32 MethanogenBaseColor = new Color32(0x78, 0x38, 0xDE, 0xFF);
+    internal static readonly Color32 MethanotrophBaseColor = new Color32(0xFF, 0x9C, 0xD6, 0xFF);
+
+    // The instanced shader consumes raw vectors in the project's linear colour space.
+    internal static readonly Color MethanogenRenderColor = ((Color)MethanogenBaseColor).linear;
+    internal static readonly Color MethanotrophRenderColor = ((Color)MethanotrophBaseColor).linear;
+
+    static Color GetMetabolismBaseColor(MetabolismType metabolism)
     {
         switch (metabolism)
         {
@@ -3472,8 +3775,8 @@ public class ReplicatorManager : MonoBehaviour
             case MetabolismType.Predation: return Color.red;
             case MetabolismType.Hydrogenotrophy: return new Color(0.86f, 1f, 0.98f);
             case MetabolismType.Fermentation: return Color.orangeRed;
-            case MetabolismType.Methanogenesis: return Color.purple;
-            case MetabolismType.Methanotrophy: return Color.pink;
+            case MetabolismType.Methanogenesis: return MethanogenRenderColor;
+            case MetabolismType.Methanotrophy: return MethanotrophRenderColor;
             default: return Color.yellow;
         }
     }
@@ -3500,6 +3803,10 @@ public class ReplicatorManager : MonoBehaviour
             intensity *= Mathf.Lerp(0.2f, 1.5f, energyScale);
         }
 
+        // Keep these two colours below HDR overdrive during the newborn and energy boosts.
+        if (intensity > 1f && (metabolism == MetabolismType.Methanogenesis || metabolism == MetabolismType.Methanotrophy))
+            intensity = 1f;
+
         Color finalColor = GetMetabolismBaseColor(metabolism) * intensity;
         finalColor.a = alpha;
         return finalColor;
@@ -3512,8 +3819,29 @@ public class ReplicatorManager : MonoBehaviour
             populationState,
             replicatorMesh,
             replicatorMaterial,
-            geodesicBiology != null && movementDiagnostics.Enabled ? movementDiagnostics : null);
+            geodesicBiology != null && movementDiagnostics.Enabled ? movementDiagnostics : null,
+            geodesicBiology != null, visualGrowthSettings, divisionBiomassMultiple, planetGenerator != null ? planetGenerator.transform : null);
+        minimumVisualDiameter = renderSystem.MinimumVisualDiameter;
+        averageVisualDiameter = renderSystem.AverageVisualDiameter;
+        maximumVisualDiameter = renderSystem.MaximumVisualDiameter;
+        currentlyDividing = renderSystem.CurrentlyDividing;
+        invalidVisualStateCorrections = renderSystem.InvalidVisualStateCorrections + (geodesicBiology?.VisualStateCorrections ?? 0);
+        replacedDivisionTransitions = geodesicBiology?.ReplacedDivisionTransitions ?? 0;
+        constrainedDaughterSeparations = geodesicBiology?.ConstrainedDaughterSeparations ?? 0;
+        failedDaughterSeparations = geodesicBiology?.FailedDaughterSeparations ?? 0;
         movementDiagnostics.LogIfDue(this);
+    }
+
+    private void ResetVisualGrowthReadouts()
+    {
+        renderSystem.ResetVisualDiagnostics();
+        geodesicBiology?.ResetVisualDiagnostics();
+        minimumVisualDiameter = averageVisualDiameter = maximumVisualDiameter = 0f;
+        currentlyDividing = 0;
+        invalidVisualStateCorrections = 0;
+        replacedDivisionTransitions = constrainedDaughterSeparations = failedDaughterSeparations = 0;
+        divisionParentFound = divisionDaughterFound = false;
+        divisionParentVisual = divisionDaughterVisual = default;
     }
 
     private void OnDrawGizmos() => movementDiagnostics?.DrawSelectedTrail();

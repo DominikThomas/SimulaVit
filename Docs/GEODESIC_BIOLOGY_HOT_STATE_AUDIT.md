@@ -1,5 +1,8 @@
 # Geodesic biology hot-state audit
 
+> **Ownership reference with historical locomotion proposal.** Packed cell/lifespan/target authority remains relevant. The section labeled “future Geodesic” active locomotion predates the now-wired [active movement/evolution](GeodesicActiveLocomotion.md), [food sensing](GeodesicFoodTaxisAudit.md) and [position-aware temperature](GeodesicPositionDependentVentTemperature.md). Its proposed port is not a current missing-feature list. Current milestones: [roadmap](GEODESIC_MIGRATION_ROADMAP.md).
+
+
 ## Ownership before and after
 
 Before this change, `ReplicatorPopulationState` already owned nearly all biology and passive-movement hot state as parallel arrays. Geodesic habitat cell, maximum lifespan, and division biomass target were exceptions owned by companion `Replicator` objects, so reaction sampling, lifecycle, and passive movement dereferenced `agents[i]`.

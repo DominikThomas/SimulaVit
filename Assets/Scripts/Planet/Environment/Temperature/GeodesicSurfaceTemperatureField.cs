@@ -37,7 +37,10 @@ public static class GeodesicAtmosphereClimateModel
 public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
 {
     private static readonly ProfilerMarker TickMarker = new ProfilerMarker("GeodesicTemperature.SurfaceTick");
+    private static readonly ProfilerMarker UpdateMarker = new ProfilerMarker("GeodesicTemperature.Update");
+    private static readonly ProfilerMarker DiagnosticsMarker = new ProfilerMarker("GeodesicTemperature.Diagnostics");
     private static readonly ProfilerMarker TargetAndResponseMarker = new ProfilerMarker("GeodesicTemperature.TargetAndSurfaceResponse");
+    private static readonly ProfilerMarker ResponseCoefficientsMarker = new ProfilerMarker("GeodesicTemperature.ResponseCoefficients");
     private static readonly ProfilerMarker DiffusionMarker = new ProfilerMarker("GeodesicTemperature.HorizontalDiffusion");
     private static readonly ProfilerMarker CommitMarker = new ProfilerMarker("GeodesicTemperature.CommittedEvent");
     private static ProfilerCounterValue<int> TicksPerFrameCounter = new ProfilerCounterValue<int>(ProfilerCategory.Scripts, "Geodesic Thermal Ticks / Frame", ProfilerMarkerDataUnit.Count, ProfilerCounterOptions.FlushOnEndOfFrame);
@@ -208,6 +211,7 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
     private void Update()
     {
         if (!initialized || !enableGeodesicSurfaceTemperature || planetGenerator.CurrentGridType != PlanetGridType.GeodesicIcosphere) return;
+        using var performanceScope = UpdateMarker.Auto();
         ResolveClockOnly();
         if (simulationClock == null) return;
         double target = Math.Max(0d, simulationClock.SimulationTimeSeconds);
@@ -241,6 +245,7 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
         }
         if (thermalTicksCurrentRenderedFrame > 0 && Time.unscaledTimeAsDouble >= nextDiagnosticSnapshotUnscaledTime)
         {
+            using var diagnosticScope = DiagnosticsMarker.Auto();
             UpdateDiagnostics();
             UpdateSampledCycleDiagnostics(thermalIntegrationCursorTime - interval * 0.5d);
             nextDiagnosticSnapshotUnscaledTime = Time.unscaledTimeAsDouble + Mathf.Max(0.05f, diagnosticSnapshotIntervalSeconds);
@@ -372,6 +377,8 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
     public float GetTemperatureKelvinAtLocalDirection(Vector3 localDirection) { int cell = FindCellForLocalDirection(localDirection); return GetCellTemperatureKelvin(cell); }
     public float GetTemperatureKelvinAtWorldDirection(Vector3 worldDirection) => GetTemperatureKelvinAtLocalDirection(transform.InverseTransformDirection(worldDirection));
 
+    internal void SynchronizeSunDirection() => sunDirectionProvider?.SynchronizePhysicalLight(false);
+
     public float GetCellInsolationCosine(int cellIndex)
     {
         if (topology == null || cellIndex < 0 || cellIndex >= topology.CellCount || !TryGetSunDirection(out Vector3 sun)) return 0f;
@@ -452,6 +459,19 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
         bool linearInsolation = Mathf.Approximately(insolationExponent, 1f);
         bool squareInsolation = Mathf.Approximately(insolationExponent, 2f);
         float sourceKelvin = terrestrialVentSourceTemperatureC + 273.15f;
+        // Inertia is global for this tick; surface capacity has only two categories.
+        // Evaluate the original float expression once for each warming/cooling pair.
+        // Recompute every tick so live atmosphere and Inspector changes remain effective.
+        float landHeating, landCooling, oceanHeating, oceanCooling;
+        using (ResponseCoefficientsMarker.Auto())
+        {
+            float land = Mathf.Max(0.01f, landHeatCapacityMultiplier);
+            float ocean = Mathf.Max(0.01f, oceanSurfaceHeatCapacityMultiplier);
+            landHeating = CalculateSurfaceResponse(heatingTimescaleSeconds, land, pressureInertiaMultiplier, dt);
+            landCooling = CalculateSurfaceResponse(coolingTimescaleSeconds, land, pressureInertiaMultiplier, dt);
+            oceanHeating = CalculateSurfaceResponse(heatingTimescaleSeconds, ocean, pressureInertiaMultiplier, dt);
+            oceanCooling = CalculateSurfaceResponse(coolingTimescaleSeconds, ocean, pressureInertiaMultiplier, dt);
+        }
         for (int i = 0; i < runtimeCellCount; i++)
         {
             float insolation = Mathf.Max(0f, Vector3.Dot(topology.CellDirections[i], localSunDirection));
@@ -462,10 +482,16 @@ public sealed class GeodesicSurfaceTemperatureField : MonoBehaviour
             targetTemperatureKelvinByCell[i] = target;
 
             float current = surfaceTemperatureKelvinByCell[i];
-            float timescale = (target >= current ? heatingTimescaleSeconds : coolingTimescaleSeconds) * GetSurfaceMultiplier(i) * pressureInertiaMultiplier;
-            float response = 1f - Mathf.Exp(-dt / Mathf.Max(MinimumTimescale, timescale));
+            bool heating = target >= current;
+            float response = IsOcean(i) ? (heating ? oceanHeating : oceanCooling) : (heating ? landHeating : landCooling);
             workingTemperatureKelvinByCell[i] = current + (target - current) * response;
         }
+    }
+
+    private static float CalculateSurfaceResponse(float baseTimescale, float surfaceMultiplier, float pressureInertia, float dt)
+    {
+        float timescale = baseTimescale * surfaceMultiplier * pressureInertia;
+        return 1f - Mathf.Exp(-dt / Mathf.Max(MinimumTimescale, timescale));
     }
 
     private void RefreshAtmosphereClimateForcing()
