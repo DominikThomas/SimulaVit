@@ -521,7 +521,11 @@ public class ReplicatorManager : MonoBehaviour
     public int TotalPopulation => agents.Count;
     public int PredatorCount => predatorAgentCount;
     internal MetabolismPopulationCounts MetabolismCounts => metabolismCounts;
-    internal void SetPerformanceAnalyzer(SimulationPerformanceAnalyzer analyzer) => hudPresenter.PerformanceAnalyzer = analyzer;
+    internal void SetPerformanceAnalyzer(SimulationPerformanceAnalyzer analyzer)
+    {
+        performanceAnalyzer = analyzer;
+        hudPresenter.PerformanceAnalyzer = analyzer;
+    }
     public double SimulationTimeSeconds => simulationPipeline != null ? simulationPipeline.SimulationTimeSeconds : simulationTimeSeconds;
     public bool IsInitializedForSimulation => isInitialized;
 
@@ -738,6 +742,7 @@ public class ReplicatorManager : MonoBehaviour
     private GeodesicFounderSpawnSchedule geodesicFounderSpawnSchedule;
     private bool isInitialized;
     private GeodesicBiologyRuntime geodesicBiology;
+    private SimulationPerformanceAnalyzer performanceAnalyzer;
     private Func<float, float, float, MetabolismType, Color> geodesicColorResolver;
     private Action<MetabolismType, DeathCause> geodesicDeathRecorder;
     private readonly ReplicatorSpawnSystem spawnSystem = new ReplicatorSpawnSystem();
@@ -1173,9 +1178,13 @@ public class ReplicatorManager : MonoBehaviour
     internal GeodesicBiologyRuntime.MovementWork GeodesicMovementPerformance =>
         geodesicBiology?.MovementPerformance ?? default;
 
+    internal GeodesicBiologyRuntime.PerformanceWork GeodesicPerformanceWork =>
+        geodesicBiology?.PerformanceWorkTotals ?? default;
+
     internal bool RunGeodesicBiologyStep(float stepDeltaTime)
     {
         if (geodesicBiology == null) return false;
+        geodesicBiology.DetailedPerformanceEnabled = performanceAnalyzer != null && performanceAnalyzer.DetailedGeodesicProfilingActive;
         ApplyGeodesicRuntimeControls();
         geodesicDeathRecorder ??= RegisterDeathCause;
         geodesicBiology.Step(stepDeltaTime, agents, populationState, basalEnergyCostPerSecond,

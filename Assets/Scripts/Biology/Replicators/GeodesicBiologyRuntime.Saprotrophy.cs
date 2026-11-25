@@ -133,15 +133,17 @@ public sealed partial class GeodesicBiologyRuntime
     }
 
     private void CommitAerobicCarbon(int index, ReplicatorPopulationState state, float maximumStore,
-        double oxygenPerC, double oxygenPerStoredC, double energyPerC, bool observeAccounting)
+        double oxygenPerC, double oxygenPerStoredC, double energyPerC, bool observeAccounting, bool sample)
     {
         ref Request request = ref requests[index];
         double competedExtent = request.Actual;
         request.Actual = 0d;
         float storeBefore = state.OrganicCStore[index], energyBefore = state.Energy[index];
-        if (!resources.TryCommitAerobicCarbon(request.A, request.Node, competedExtent, request.NeedA,
-            request.ProductCoefficient, oxygenPerC, oxygenPerStoredC, energyPerC, maximumStore, storeBefore, energyBefore,
-            out var transfer)) return;
+        GeodesicOceanResourceField.AerobicCarbonTransfer transfer;
+        using (GeodesicPerformanceMarkers.DissolvedTransaction.Measure(sample))
+            if (!resources.TryCommitAerobicCarbon(request.A, request.Node, competedExtent, request.NeedA,
+                request.ProductCoefficient, oxygenPerC, oxygenPerStoredC, energyPerC, maximumStore, storeBefore, energyBefore,
+                out transfer)) return;
 
         request.Actual = transfer.co2Produced / request.ProductCoefficient;
         state.OrganicCStore[index] = transfer.storeAfter;

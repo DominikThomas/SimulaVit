@@ -426,6 +426,7 @@ public partial class SimulationStartupController : MonoBehaviour
     {
         if (currentConfig == null) currentConfig = new SimulationStartupConfig();
         CopyAdvancedSettings(defaults ?? new SimulationStartupConfig(), currentConfig);
+        detailedGeodesicProfiling = false;
         ApplyVentVisualSettings();
         numericFieldEdits.Clear();
         integerFieldEdits.Clear();
@@ -627,7 +628,8 @@ public partial class SimulationStartupController : MonoBehaviour
         if (!currentConfig.enablePerformanceRecording || performanceAnalyzer == null) return;
         replicatorManager?.SetPerformanceAnalyzer(performanceAnalyzer);
         performanceAnalyzer.BeginCapture(currentConfig.performanceWriteCsv, currentConfig.performanceLogSummaryToConsole,
-            currentConfig.performanceSummaryIntervalSeconds, currentConfig.performanceAppendTimestampToCsvFileName);
+            currentConfig.performanceSummaryIntervalSeconds, currentConfig.performanceAppendTimestampToCsvFileName,
+            detailedGeodesicProfiling && planetGenerator != null && planetGenerator.CurrentGridType == PlanetGridType.GeodesicIcosphere);
     }
 
     private void StopPerformanceCapture()

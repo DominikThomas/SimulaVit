@@ -1,6 +1,6 @@
 # Documentation index and audit
 
-The [Geodesic migration roadmap](GEODESIC_MIGRATION_ROADMAP.md) is the **only current migration status and next-step authority**. [Project status](PROJECT_STATUS_AND_NEXT_STEPS.md) is a short entry point, not another task sequence. Detailed subsystem reports own technical explanations and checkpoint-specific evidence. Runtime source and actual resolved settings take precedence over historical prose.
+The [Geodesic migration roadmap](GEODESIC_MIGRATION_ROADMAP.md) owns migration status and priorities. The [Geodesic performance roadmap](GEODESIC_PERFORMANCE_ROADMAP.md) owns P0–P6 on the performance branch. [Project status](PROJECT_STATUS_AND_NEXT_STEPS.md) is a short entry point. Detailed subsystem reports own technical explanations and checkpoint-specific evidence. Runtime source and actual resolved settings take precedence over historical prose.
 
 ## Audit snapshot — 2026-11-20
 
@@ -41,7 +41,7 @@ The former implementation plan is about 207 KB and mixes architectural contracts
 
 ## Inventory and ownership
 
-**Current authority:** roadmap only. **Subsystem reference:** implementation contracts with bounded/historical evidence; consult source and supersession notes. **Historical:** a dated audit, experiment or earlier implementation stage. **Legacy/design:** preserved old runtime behavior or future design; not proof of geodesic parity. Files remain in place unless explicitly listed as archived.
+**Current authority** lives in the migration and performance roadmaps for their respective work. **Subsystem references** record implementation contracts and evidence. **Historical** entries cover dated audits, experiments and implementation stages. **Legacy/design** entries cover earlier runtime behavior or future designs.
 
 ### Entry points and project rules
 
@@ -129,7 +129,11 @@ The former implementation plan is about 207 KB and mixes architectural contracts
 
 | Document | Role / disposition |
 | --- | --- |
-| [Geodesic scalability architecture assessment](GEODESIC_SCALABILITY_ARCHITECTURE_ASSESSMENT.md) | Static assessment for milestone A7. Covers execution dependencies, projections through 100,000 organisms, and a staged implementation roadmap. |
+| [Geodesic performance roadmap](GEODESIC_PERFORMANCE_ROADMAP.md) | Authoritative sequence, acceptance gates, and evidence for P0–P6 on the performance branch. |
+| [Geodesic P0 manual benchmarks](GEODESIC_PERFORMANCE_BENCHMARKS.md) | Fixed-seed A–D profiles, matched measurement windows, timing scope definitions, and observer overhead checks. |
+| [Geodesic scalability architecture assessment](GEODESIC_SCALABILITY_ARCHITECTURE_ASSESSMENT.md) | Starting architecture assessment for milestone A7. Covers execution dependencies and historical projections through 100,000 organisms. |
+| [Geodesic performance baseline](GeodesicPerformanceBaseline.md) | Original analyzer’s metrics, capture behavior, and historical timing and validation context. |
+| [Geodesic environmental CPU optimization](GeodesicEnvironmentalCpuOptimization.md) | Earlier transport and thermal optimization report, with historical measurements and attribution limits. |
 | [SimulationRefactorPlan](SimulationRefactorPlan.md) | Legacy/incremental design reference; extracted systems exist, geodesic runtime has separate ownership. No independent priority sequence. |
 | [PopulationStateMigrationPlan](PopulationStateMigrationPlan.md) | Historical migration steps; packed geodesic lifespan/target ownership now explicit. |
 | [LAYERED_OCEAN_PLAN](LAYERED_OCEAN_PLAN.md) | Legacy implemented layered-array model; not geodesic resource/persistence status. |

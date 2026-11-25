@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Unity.Profiling;
 using UnityEngine;
+using static GeodesicPerformanceMarkers;
 
 public sealed partial class GeodesicBiologyRuntime
 {
@@ -262,14 +263,17 @@ public sealed partial class GeodesicBiologyRuntime
     {
         bool samplesReady = false;
         bool observeMovement = ObserveActiveMovementDiagnostics();
+        int sampleOffset = PerformanceSampleOffset;
         BeginDetailedTaxisBatch();
         for (int i = 0; i < state.Count; i++)
         {
             LocomotionType type = state.Locomotion[i];
             if (!IsActive(type)) continue;
+            bool sample = IsPerformanceSample(i, sampleOffset);
             int trackedSlot = locomotionSettings.detailedTaxisDiagnostics ? TrackTaxisOrganism(agents[i].DiagnosticId, type) : -1;
             if (!samplesReady) { BeginMovementSamples(); samplesReady = true; }
-            if (!EnsureActiveHabitat(i, state)) continue;
+            using (ActiveMapping.Measure(sample))
+                if (!EnsureActiveHabitat(i, state)) continue;
             int cell = state.GeodesicCellIndex[i];
             EnsurePassiveKinematicState(i, state, worldToLocal);
             ref GeodesicActiveMovementState active = ref state.ActiveMovement[i];
@@ -303,43 +307,49 @@ public sealed partial class GeodesicBiologyRuntime
                 bool canReuseObservation;
                 using (ActiveSensingMarker.Auto()) canReuseObservation = SenseActiveHabitat(i, state, stepDt, trackedSlot, observeMovement);
                 using (ActiveVerticalMarker.Auto()) PrepareVerticalExploration(i, state, stepDt, canReuseObservation);
-                float rate = type == LocomotionType.Flagellum ? locomotionSettings.flagellumEnergyPerSecond : locomotionSettings.amoeboidEnergyPerSecond;
-                bool hasPropulsion = speed > 0f || (active.verticalMoving && locomotionSettings.verticalSpeedMetersPerSecond > 0f);
-                float energy = state.Energy[i];
-                if (!float.IsFinite(energy)) { movementCorrections++; energy = state.Energy[i] = 0f; }
-                float paid = hasPropulsion ? Mathf.Min(Mathf.Max(0f, energy), rate * stepDt) : 0f;
-                float effortDt = !hasPropulsion || energy <= 0f ? 0f : rate > 0f ? paid / rate : stepDt;
-                if (hasPropulsion && effortDt + 1e-6f < stepDt) energyLimitedSteps++;
-                state.Energy[i] -= paid;
-                if (observeMovement) locomotionEnergyPaid += paid;
-                active.runSeconds += effortDt;
-                float effortShare = active.verticalMoving ? 0.70710678f : 1f;
-                Vector3 direction = state.PassiveDriftDirection[i], tangent = state.PassiveDriftTangent[i];
-                Vector3 desired = Vector3.ProjectOnPlane(active.desiredTangentLocal, direction);
-                if (desired.sqrMagnitude < 1e-10f || !GeodesicBiologyDiagnostics.FinitePosition(desired))
+                float effortDt, effortShare;
+                Vector3 direction, tangent, before;
+                using (ActiveIntegration.Measure(sample))
                 {
-                    desired = tangent;
-                    active.desiredTangentLocal = tangent;
-                    movementCorrections++;
+                    float rate = type == LocomotionType.Flagellum ? locomotionSettings.flagellumEnergyPerSecond : locomotionSettings.amoeboidEnergyPerSecond;
+                    bool hasPropulsion = speed > 0f || (active.verticalMoving && locomotionSettings.verticalSpeedMetersPerSecond > 0f);
+                    float energy = state.Energy[i];
+                    if (!float.IsFinite(energy)) { movementCorrections++; energy = state.Energy[i] = 0f; }
+                    float paid = hasPropulsion ? Mathf.Min(Mathf.Max(0f, energy), rate * stepDt) : 0f;
+                    effortDt = !hasPropulsion || energy <= 0f ? 0f : rate > 0f ? paid / rate : stepDt;
+                    if (hasPropulsion && effortDt + 1e-6f < stepDt) energyLimitedSteps++;
+                    state.Energy[i] -= paid;
+                    if (observeMovement) locomotionEnergyPaid += paid;
+                    active.runSeconds += effortDt;
+                    effortShare = active.verticalMoving ? 0.70710678f : 1f;
+                    direction = state.PassiveDriftDirection[i];
+                    tangent = state.PassiveDriftTangent[i];
+                    Vector3 desired = Vector3.ProjectOnPlane(active.desiredTangentLocal, direction);
+                    if (desired.sqrMagnitude < 1e-10f || !GeodesicBiologyDiagnostics.FinitePosition(desired))
+                    {
+                        desired = tangent;
+                        active.desiredTangentLocal = tangent;
+                        movementCorrections++;
+                    }
+                    float turnRate = type == LocomotionType.Flagellum ? flagellarTurn : amoeboidTurn;
+                    Vector3 unitDesired = desired.normalized;
+                    float desiredAngle = Mathf.Atan2(Vector3.Dot(direction, Vector3.Cross(tangent, unitDesired)),
+                        Mathf.Clamp(Vector3.Dot(tangent, unitDesired), -1f, 1f));
+                    float turn = Mathf.Clamp(desiredAngle, -turnRate * effortDt, turnRate * effortDt);
+                    tangent = (tangent * Mathf.Cos(turn) + Vector3.Cross(direction, tangent) * Mathf.Sin(turn)).normalized;
+                    if (type == LocomotionType.Amoeboid)
+                    {
+                        float noise = Mathf.Sin((state.Age[i] + state.MovementSeed[i] * 100f + elapsed - remaining) * 2.7f);
+                        float angle = noise * SafeMovementValue(steeringSettings.AmoeboidRunNoiseStrength, 0.08f, 0f, 1f)
+                            * SafeMovementValue(steeringSettings.AmoeboidTurnAngleMax, 60f, 0f, 180f) * effortDt;
+                        tangent = Quaternion.AngleAxis(angle, direction) * tangent;
+                    }
+                    before = direction;
+                    float travel = speed * effortDt * effortShare;
+                    direction = (before * Mathf.Cos(travel) + tangent * Mathf.Sin(travel)).normalized;
+                    tangent = Vector3.ProjectOnPlane(tangent, direction).normalized;
                 }
-                float turnRate = type == LocomotionType.Flagellum ? flagellarTurn : amoeboidTurn;
-                Vector3 unitDesired = desired.normalized;
-                float desiredAngle = Mathf.Atan2(Vector3.Dot(direction, Vector3.Cross(tangent, unitDesired)),
-                    Mathf.Clamp(Vector3.Dot(tangent, unitDesired), -1f, 1f));
-                float turn = Mathf.Clamp(desiredAngle, -turnRate * effortDt, turnRate * effortDt);
-                tangent = (tangent * Mathf.Cos(turn) + Vector3.Cross(direction, tangent) * Mathf.Sin(turn)).normalized;
-                if (type == LocomotionType.Amoeboid)
-                {
-                    float noise = Mathf.Sin((state.Age[i] + state.MovementSeed[i] * 100f + elapsed - remaining) * 2.7f);
-                    float angle = noise * SafeMovementValue(steeringSettings.AmoeboidRunNoiseStrength, 0.08f, 0f, 1f)
-                        * SafeMovementValue(steeringSettings.AmoeboidTurnAngleMax, 60f, 0f, 180f) * effortDt;
-                    tangent = Quaternion.AngleAxis(angle, direction) * tangent;
-                }
-                Vector3 before = direction;
-                float travel = speed * effortDt * effortShare;
-                direction = (before * Mathf.Cos(travel) + tangent * Mathf.Sin(travel)).normalized;
-                tangent = Vector3.ProjectOnPlane(tangent, direction).normalized;
-                TraverseMovementBoundaries(i, state, ref direction, ref tangent, true);
+                TraverseMovementBoundaries(i, state, ref direction, ref tangent, true, sample);
                 double distance = 0d;
                 if (observeMovement)
                 {
@@ -641,8 +651,9 @@ public sealed partial class GeodesicBiologyRuntime
     }
 
     /// <summary>Shared neighbour/Voronoi/coast handling. Passive mapping is unchanged; swimmers retain physical depth.</summary>
-    private void TraverseMovementBoundaries(int i, ReplicatorPopulationState state, ref Vector3 direction, ref Vector3 tangent, bool active)
+    private void TraverseMovementBoundaries(int i, ReplicatorPopulationState state, ref Vector3 direction, ref Vector3 tangent, bool active, bool sample)
     {
+        using var mappingProfile = sample ? (active ? ActiveMapping : PassiveMapping).Measure(true) : default;
         GeodesicGridTopology topology = grid.SourceTopology;
         Vector3[] centers = topology.CellDirections;
         int cell = state.GeodesicCellIndex[i];
@@ -653,8 +664,7 @@ public sealed partial class GeodesicBiologyRuntime
                 movementPerformance.BoundarySearches++;
                 movementPerformance.NeighborEvaluations += topology.NeighborCounts[cell];
             }
-            int candidate;
-            using (MovementBoundaryCandidates.Auto()) candidate = FindCloserRealNeighbor(cell, direction, centers, topology.Neighbors6, topology.NeighborCounts);
+            int candidate = FindCloserRealNeighbor(cell, direction, centers, topology.Neighbors6, topology.NeighborCounts);
             if (candidate < 0) break;
             int layers = grid.ActiveLayerCountByCell[candidate];
             bool blocked = layers <= 0;
@@ -671,27 +681,24 @@ public sealed partial class GeodesicBiologyRuntime
             if (blocked)
             {
                 if (layers <= 0) landBoundaryRejections++;
-                using (MovementLandHandling.Auto()) ReflectFromLandBoundary(ref direction, ref tangent, centers[cell], centers[candidate]);
+                ReflectFromLandBoundary(ref direction, ref tangent, centers[cell], centers[candidate]);
                 if (active) state.ActiveMovement[i].desiredTangentLocal = tangent;
                 break;
             }
-            using (MovementBoundaryResolution.Auto())
+            if (!active)
             {
-                if (!active)
-                {
-                    int mappedLayer = ResolveHorizontalTargetLayer(state.CurrentOceanLayerIndex[i], layers);
-                    if (mappedLayer != state.CurrentOceanLayerIndex[i]) invalidLayerCorrections++;
-                    state.CurrentOceanLayerIndex[i] = mappedLayer;
-                }
-                cell = candidate;
-                state.GeodesicCellIndex[i] = cell;
-                horizontalBoundaryCrossings++;
-                if (active)
-                {
-                    activeCellCrossings++;
-                    if (state.ActiveMovement[i].cellCrossingsSinceSense < int.MaxValue)
-                        state.ActiveMovement[i].cellCrossingsSinceSense++;
-                }
+                int mappedLayer = ResolveHorizontalTargetLayer(state.CurrentOceanLayerIndex[i], layers);
+                if (mappedLayer != state.CurrentOceanLayerIndex[i]) invalidLayerCorrections++;
+                state.CurrentOceanLayerIndex[i] = mappedLayer;
+            }
+            cell = candidate;
+            state.GeodesicCellIndex[i] = cell;
+            horizontalBoundaryCrossings++;
+            if (active)
+            {
+                activeCellCrossings++;
+                if (state.ActiveMovement[i].cellCrossingsSinceSense < int.MaxValue)
+                    state.ActiveMovement[i].cellCrossingsSinceSense++;
             }
         }
     }

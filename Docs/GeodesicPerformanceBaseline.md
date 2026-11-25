@@ -1,5 +1,7 @@
 # Geodesic performance baseline
 
+The performance branch has a fixed-seed reference matrix and optional detailed attribution. The original recorder and historical validation are documented below. [Current P0 manual benchmarks](GEODESIC_PERFORMANCE_BENCHMARKS.md) · [Performance roadmap](GEODESIC_PERFORMANCE_ROADMAP.md)
+
 This pass adds observation only. No chemistry, biological rules, movement, RNG, speed settings, or integration code has been changed. Saved startup settings and the confirmed Hydrogen to Fermentation mutation probability of **0.02** are preserved. No optimization or gameplay benchmark was performed as part of this pass.
 
 ## Current diagnostic defaults

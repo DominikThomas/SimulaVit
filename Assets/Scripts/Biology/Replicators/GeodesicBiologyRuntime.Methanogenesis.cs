@@ -73,14 +73,16 @@ public sealed partial class GeodesicBiologyRuntime
         request.NeedB = methanePerTick * GeodesicOceanResourceField.MethanogenesisHydrogenPerMethane;
     }
 
-    private void CommitMethanogenesis(int index, ReplicatorPopulationState state, float maximumStore, bool observeAccounting)
+    private void CommitMethanogenesis(int index, ReplicatorPopulationState state, float maximumStore, bool observeAccounting, bool sample)
     {
         ref Request request = ref requests[index];
         double competedExtent = request.Actual;
         request.Actual = 0d;
         float storeBefore = state.OrganicCStore[index], energyBefore = state.Energy[index];
-        if (!resources.TryCommitMethanogenesis(request.Node, competedExtent, request.NeedA, request.ProductCoefficient,
-            methaneEnergyPerCH4, maximumStore, storeBefore, energyBefore, out var transfer)) return;
+        GeodesicOceanResourceField.MethanogenesisTransfer transfer;
+        using (GeodesicPerformanceMarkers.DissolvedTransaction.Measure(sample))
+            if (!resources.TryCommitMethanogenesis(request.Node, competedExtent, request.NeedA, request.ProductCoefficient,
+                methaneEnergyPerCH4, maximumStore, storeBefore, energyBefore, out transfer)) return;
 
         request.Actual = transfer.methaneProduced / request.ProductCoefficient;
         state.OrganicCStore[index] = transfer.storeAfter;

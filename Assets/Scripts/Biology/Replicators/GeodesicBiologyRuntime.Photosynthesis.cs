@@ -115,15 +115,17 @@ public sealed partial class GeodesicBiologyRuntime
     }
 
     private void CommitPhotosynthesis(int index, ReplicatorPopulationState state, float maximumStore,
-        float energyPerCO2, bool observeAccounting)
+        float energyPerCO2, bool observeAccounting, bool sample)
     {
         ref Request r = ref requests[index];
         double carbonBudget = r.NeedA * r.Actual;
         r.Actual = 0d;
         float storeBefore = state.OrganicCStore[index], energyBefore = state.Energy[index];
-        if (!resources.TryCommitPhotosynthesis(r.Node, carbonBudget, maximumStore, energyPerCO2,
-            storeBefore, energyBefore, out float storeAfter, out float energyAfter,
-            out double co2Withdrawn, out double oxygenProduced)) return;
+        float storeAfter, energyAfter;
+        double co2Withdrawn, oxygenProduced;
+        using (GeodesicPerformanceMarkers.DissolvedTransaction.Measure(sample))
+            if (!resources.TryCommitPhotosynthesis(r.Node, carbonBudget, maximumStore, energyPerCO2,
+                storeBefore, energyBefore, out storeAfter, out energyAfter, out co2Withdrawn, out oxygenProduced)) return;
 
         r.Actual = co2Withdrawn / r.NeedA;
         state.OrganicCStore[index] = storeAfter;

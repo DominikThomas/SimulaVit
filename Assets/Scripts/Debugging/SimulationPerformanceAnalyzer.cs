@@ -78,6 +78,7 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
     private MarkerRecorder[] markers;
     private ProfilerRecorder cpuFrameRecorder, gcRecorder;
     private double[] renderedFrames, cpuFrames, markerTotals, frameMarkers;
+    private long[] detailedMarkerSamples;
     private readonly double[] aggregates = new double[10];
     private StringBuilder csvBuffer;
     private readonly StringBuilder summary = new StringBuilder(2048);
@@ -91,24 +92,29 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
     private double speedSum, gcBytes, endSimulatedSeconds;
     private long steps, candidates, processed, chemistryTicks, activeNodesSum;
     private GeodesicBiologyRuntime.MovementWork previousMovement, movement;
+    private GeodesicBiologyRuntime.PerformanceWork previousBiologyWork, biologyWork;
     private int endFrame;
     private bool csvFailed;
     private bool useNewCsvFile;
+    private bool detailedGeodesicProfiling;
 
     public string CsvOutputPath => csvOutputPath;
     public string LatestSummary => latestSummary;
     internal string ActiveCsvOutputPath => isActiveAndEnabled && !csvFailed ? csvOutputPath : null;
+    internal bool DetailedGeodesicProfilingActive => detailedGeodesicProfiling && isActiveAndEnabled;
 
     internal static float NormalizeSummaryInterval(float seconds) =>
         float.IsFinite(seconds) ? Mathf.Max(MinimumSummaryIntervalSeconds, seconds) : DefaultSummaryIntervalSeconds;
 
-    internal void BeginCapture(bool writeCsv, bool logSummaryToConsole, float intervalSeconds, bool appendTimestamp)
+    internal void BeginCapture(bool writeCsv, bool logSummaryToConsole, float intervalSeconds, bool appendTimestamp,
+        bool detailedGeodesicProfiling = false)
     {
         enabled = false;
         this.writeCsv = writeCsv;
         this.logSummaryToConsole = logSummaryToConsole;
         summaryIntervalSeconds = NormalizeSummaryInterval(intervalSeconds);
         appendTimestampToCsvFileName = appendTimestamp;
+        this.detailedGeodesicProfiling = detailedGeodesicProfiling;
         useNewCsvFile = true;
         enabled = true;
     }
@@ -124,14 +130,18 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
         ResolveReferences();
         int capacity = Mathf.Max(128, maximumFramesPerWindow);
         renderedFrames = new double[capacity]; cpuFrames = new double[capacity];
-        markers = new MarkerRecorder[MarkerNames.Length];
-        markerTotals = new double[markers.Length]; frameMarkers = new double[markers.Length];
-        for (int i = 0; i < markers.Length; i++)
+        int detailCount = detailedGeodesicProfiling ? GeodesicPerformanceMarkers.RecordedStages.Length : 0;
+        markers = new MarkerRecorder[MarkerNames.Length + detailCount];
+        markerTotals = new double[markers.Length]; frameMarkers = new double[MarkerNames.Length];
+        detailedMarkerSamples = detailedGeodesicProfiling ? new long[detailCount] : null;
+        for (int i = 0; i < MarkerNames.Length; i++)
         {
             // Register custom markers even before their owning runtime initializes.
             if (MarkerNames[i] != "JobHandle.Complete") _ = new ProfilerMarker(MarkerNames[i]);
             markers[i] = new MarkerRecorder(MarkerNames[i]);
         }
+        for (int i = 0; i < detailCount; i++)
+            markers[MarkerNames.Length + i] = new MarkerRecorder(GeodesicPerformanceMarkers.RecordedStages[i].Name);
         cpuFrameRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Internal, "Main Thread", 1,
             ProfilerRecorderOptions.Default | ProfilerRecorderOptions.CollectOnlyOnCurrentThread);
         gcRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Memory, "GC Allocated In Frame", 1);
@@ -161,13 +171,19 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
                 activeNodesSum += pending.ActiveNodes;
                 candidates += pending.Candidates; processed += pending.Processed; chemistryTicks += pending.ChemistryTicks;
                 movement.AddSince(pending.Movement, default);
+                biologyWork.AddSince(pending.BiologyWork, default);
                 if (cpuFrameRecorder.Valid && cpuFrameRecorder.Count > 0)
                     cpuFrames[cpuSamples++] = cpuFrameRecorder.LastValue * 1e-6d;
                 if (gcRecorder.Valid && gcRecorder.Count > 0) { gcBytes += gcRecorder.LastValue; gcSamples++; }
-                for (int i = 0; i < markers.Length; i++)
+                for (int i = 0; i < MarkerNames.Length; i++)
                 {
                     frameMarkers[i] = markers[i].ReadMilliseconds();
                     markerTotals[i] += frameMarkers[i];
+                }
+                for (int i = MarkerNames.Length; i < markers.Length; i++)
+                {
+                    markerTotals[i] += markers[i].ReadMilliseconds(out long samples);
+                    detailedMarkerSamples[i - MarkerNames.Length] += samples;
                 }
                 AccumulateAggregates(frameMarkers, aggregates);
                 frames++;
@@ -198,8 +214,14 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
             long currentProcessed = chemistry != null ? chemistry.TotalPerformanceNodesProcessed : 0;
             long currentTicks = chemistry != null ? chemistry.ChemistryTicks : 0;
             var currentMovement = replicatorManager != null ? replicatorManager.GeodesicMovementPerformance : default;
+            var currentBiologyWork = replicatorManager != null ? replicatorManager.GeodesicPerformanceWork : default;
             var movementDelta = default(GeodesicBiologyRuntime.MovementWork);
-            if (hasClock && currentSteps >= previousSteps) movementDelta.AddSince(currentMovement, previousMovement);
+            var biologyDelta = default(GeodesicBiologyRuntime.PerformanceWork);
+            if (hasClock && currentSteps >= previousSteps)
+            {
+                movementDelta.AddSince(currentMovement, previousMovement);
+                biologyDelta.AddSince(currentBiologyWork, previousBiologyWork);
+            }
             pending = new FrameContext
             {
                 Frame = Time.frameCount,
@@ -212,11 +234,13 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
                 Candidates = hasClock ? Math.Max(0L, currentCandidates - previousCandidates) : 0L,
                 Processed = hasClock ? Math.Max(0L, currentProcessed - previousProcessed) : 0L,
                 ChemistryTicks = hasClock ? Math.Max(0L, currentTicks - previousChemistryTicks) : 0L,
-                Movement = movementDelta
+                Movement = movementDelta,
+                BiologyWork = biologyDelta
             };
             previousSteps = currentSteps; previousSimulationTime = currentTime;
             previousCandidates = currentCandidates; previousProcessed = currentProcessed; previousChemistryTicks = currentTicks;
             previousMovement = currentMovement;
+            previousBiologyWork = currentBiologyWork;
             hasPending = hasClock; // Discard the first partial frame after enabling.
             hasClock = true;
         }
@@ -282,6 +306,16 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
         summary.Append(" active_integrations/senses/crossings=").Append(movement.IntegrationSteps)
             .Append('/').Append(movement.Senses).Append('/').Append(movement.CellCrossings);
         for (int i = 0; i < aggregates.Length; i++) { summary.Append(' ').Append(AggregateNames[i]).Append("_ms="); AppendNumber(summary, aggregates[i] / frames); }
+        summary.Append(" simulation_cpu_ms_per_step="); AppendOptional(summary, aggregates[0], steps);
+        summary.Append(" lifecycle_births/deaths=").Append(biologyWork.Births).Append('/').Append(biologyWork.Deaths);
+        if (detailedGeodesicProfiling)
+        {
+            summary.Append(" detailed_slot_stride=").Append(GeodesicPerformanceMarkers.SlotSampleStride);
+            summary.Append(" prey_searches/candidates/attempts/captures=").Append(biologyWork.PreySearches)
+                .Append('/').Append(biologyWork.PreyCandidates).Append('/').Append(biologyWork.CaptureAttempts)
+                .Append('/').Append(biologyWork.PreyCaptures);
+            AppendDetailedTimings(summary, csv: false);
+        }
         if (capacityReached) summary.Append(" window_capacity_reached=true");
         latestSummary = summary.ToString();
         if (logSummaryToConsole) Debug.Log(latestSummary, this);
@@ -301,7 +335,7 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
             AppendCsvNumber((double)activeNodesSum / frames);
             csvBuffer.Append(candidates).Append(',').Append(processed).Append(',').Append(chemistryTicks).Append(',').Append(capacityReached ? 1 : 0);
             for (int i = 0; i < aggregates.Length; i++) { csvBuffer.Append(','); AppendNumber(csvBuffer, aggregates[i] / frames); }
-            for (int i = 0; i < markers.Length; i++)
+            for (int i = 0; i < MarkerNames.Length; i++)
             {
                 csvBuffer.Append(',');
                 if (markers[i].Valid) AppendNumber(csvBuffer, markerTotals[i] / frames); else csvBuffer.Append("n/a");
@@ -319,8 +353,45 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
             csvBuffer.Append(',');
             AppendNumber(csvBuffer, endSimulatedSeconds, "R");
             AppendMetabolismAverages(csvBuffer, includeNames: false);
+            csvBuffer.Append(','); AppendCsvOptional(aggregates[0], steps);
+            csvBuffer.Append(biologyWork.Births).Append(',').Append(biologyWork.Deaths).Append(',');
+            csvBuffer.Append(detailedGeodesicProfiling ? GeodesicPerformanceMarkers.SlotSampleStride : 0);
+            if (detailedGeodesicProfiling)
+                csvBuffer.Append(',').Append(biologyWork.PreySearches).Append(',').Append(biologyWork.PreyCandidates)
+                    .Append(',').Append(biologyWork.CaptureAttempts).Append(',').Append(biologyWork.PreyCaptures);
+            else
+                csvBuffer.Append(",n/a,n/a,n/a,n/a");
+            AppendDetailedTimings(csvBuffer, csv: true);
             csvBuffer.AppendLine();
             if (++csvSamplesPending >= Math.Max(1, flushCsvEveryNSamples)) FlushCsvBuffer();
+        }
+    }
+
+    private static string DetailTimingSuffix(GeodesicPerformanceMarkers.Stage stage) =>
+        stage.Sampled ? "_estimated_avg_ms" : "_avg_ms";
+
+    private void AppendDetailedTimings(StringBuilder output, bool csv)
+    {
+        var stages = GeodesicPerformanceMarkers.RecordedStages;
+        for (int i = 0; i < stages.Length; i++)
+        {
+            var stage = stages[i];
+            int recorderIndex = MarkerNames.Length + i;
+            bool available = detailedGeodesicProfiling && markers[recorderIndex].Valid;
+            long samples = available ? detailedMarkerSamples[i] : 0;
+            if (csv)
+                output.Append(',');
+            else
+                output.Append(' ').Append(stage.Name).Append(DetailTimingSuffix(stage)).Append('=');
+
+            if (available && (!stage.Sampled || samples > 0))
+            {
+                int scale = stage.Sampled ? GeodesicPerformanceMarkers.SlotSampleStride : 1;
+                AppendNumber(output, markerTotals[recorderIndex] * scale / frames);
+            }
+            else output.Append("n/a");
+            output.Append(csv ? ',' : '/');
+            if (available) output.Append(samples); else output.Append("n/a");
         }
     }
 
@@ -356,7 +427,9 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
         populationSum = default;
         steps = candidates = processed = chemistryTicks = activeNodesSum = 0;
         movement = default;
+        biologyWork = default;
         Array.Clear(markerTotals, 0, markerTotals.Length); Array.Clear(aggregates, 0, aggregates.Length);
+        if (detailedMarkerSamples != null) Array.Clear(detailedMarkerSamples, 0, detailedMarkerSamples.Length);
     }
 
     private void InitializeCsv()
@@ -375,6 +448,9 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
             csvBuffer.Append(",passive_avg,amoeboid_avg,flagellar_avg,anchored_avg,active_us_per_organism_step,active_organism_steps,active_integration_steps,active_senses,active_habitat_observations,active_boundary_searches,active_neighbor_evaluations,active_cell_crossings,active_vertical_trials");
             csvBuffer.Append(",end_simulated_seconds");
             foreach (string name in MetabolismAverageColumns) csvBuffer.Append(',').Append(name);
+            csvBuffer.Append(",simulation_cpu_ms_per_step,lifecycle_births,lifecycle_deaths,detailed_slot_stride,predation_searches,predation_candidates_examined,predation_capture_attempts,predation_captures");
+            foreach (var stage in GeodesicPerformanceMarkers.RecordedStages)
+                csvBuffer.Append(',').Append(stage.Name).Append(DetailTimingSuffix(stage)).Append(',').Append(stage.Name).Append("_samples");
             if (useNewCsvFile)
             {
                 csvBuffer.AppendLine();
@@ -387,8 +463,10 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
                 bool existing = File.Exists(csvOutputPath) && new FileInfo(csvOutputPath).Length > 0;
                 if (existing)
                 {
-                    using var reader = new StreamReader(csvOutputPath);
-                    if (reader.ReadLine() != csvBuffer.ToString()) throw new IOException("Existing CSV has a different schema. Choose a new file prefix or enable timestamps.");
+                    bool matchingHeader;
+                    using (var reader = new StreamReader(csvOutputPath)) matchingHeader = reader.ReadLine() == csvBuffer.ToString();
+                    if (!matchingHeader)
+                        csvOutputPath = WriteNewCsvFile(Application.persistentDataPath, fileStem, csvBuffer.AppendLine().ToString());
                     csvBuffer.Clear();
                 }
                 else { csvBuffer.AppendLine(); FlushCsvBuffer(); }
@@ -456,6 +534,7 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
         public double SimulatedSeconds, AbsoluteSimulatedSeconds;
         public long Candidates, Processed, ChemistryTicks;
         public GeodesicBiologyRuntime.MovementWork Movement;
+        public GeodesicBiologyRuntime.PerformanceWork BiologyWork;
     }
     private readonly struct MarkerRecorder : IDisposable
     {
@@ -468,6 +547,14 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
                 ProfilerRecorderOptions.CollectOnlyOnCurrentThread);
         }
         public double ReadMilliseconds() => Valid && recorder.Count > 0 ? recorder.LastValue * 1e-6d : 0d;
+        public double ReadMilliseconds(out long count)
+        {
+            count = 0;
+            if (!Valid || recorder.Count == 0) return 0d;
+            ProfilerRecorderSample sample = recorder.GetSample(0);
+            count = sample.Count;
+            return sample.Value * 1e-6d;
+        }
         public void Reset()
         {
             if (!Valid) return;

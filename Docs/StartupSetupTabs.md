@@ -25,12 +25,13 @@ In **New Game → Advanced → Performance recording**, configure the existing s
 | Control | Default |
 | --- | --- |
 | Enable performance recording | Off |
+| Detailed Geodesic profiling (this session) | Off |
 | Write CSV | On |
 | Log periodic summaries to Console | Off |
 | Summary interval (real seconds) | 5 seconds, minimum 1 |
 | Append timestamp to CSV filename | On |
 
-Startup saves these options with the other settings. Older settings files use the defaults for missing values. **Reset Advanced to Defaults** restores these options. **Start** and **Start Paused** begin a fresh capture once the world is ready. The runtime **Esc** menu displays the active CSV path and can copy it to the clipboard. Returning to the main menu stops recording and flushes the completed samples. [Performance recording and CSV details](GeodesicPerformanceBaseline.md)
+Startup saves the basic recording options with the other settings. The detailed toggle appears when recording is enabled for a Geodesic world and applies to this session. **Reset Advanced to Defaults** restores the recording options. **Start** and **Start Paused** begin a fresh capture once the world is ready. The runtime **Esc** menu displays the active CSV path and can copy it to the clipboard. Returning to the main menu stops recording and flushes the completed samples. [Performance recording and CSV details](GeodesicPerformanceBaseline.md) · [Detailed attribution and capture modes](GEODESIC_PERFORMANCE_BENCHMARKS.md#profiling-modes-and-overhead)
 
 ## Newly connected configuration
 

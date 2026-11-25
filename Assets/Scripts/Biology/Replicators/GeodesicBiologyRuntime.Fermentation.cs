@@ -68,11 +68,13 @@ public sealed partial class GeodesicBiologyRuntime
         fermentationLocalInventorySum += organicCarbonByNode[r.Node] * grid.PhysicalLayerVolumeKm3[r.Node];
     }
 
-    private void CommitFermentation(int index, ReplicatorPopulationState state, float maximumStore, bool observe)
+    private void CommitFermentation(int index, ReplicatorPopulationState state, float maximumStore, bool observe, bool sample)
     {
         ref Request r = ref requests[index];
         float before = state.OrganicCStore[index], energyBefore = state.Energy[index];
-        var t = resources.CommitFermentation(r.Node,r.Actual,r.NeedA,fermentationEnergy,fermentationAssimilation,before,maximumStore);
+        GeodesicFermentationBalance.Transfer t;
+        using (GeodesicPerformanceMarkers.DissolvedTransaction.Measure(sample))
+            t = resources.CommitFermentation(r.Node,r.Actual,r.NeedA,fermentationEnergy,fermentationAssimilation,before,maximumStore);
         r.Actual = t.extent;
         if(t.status == GeodesicHydrogenotrophyBalance.CommitStatus.PrecisionRejected) fermentationPrecisionRejected++;
         if(t.status == GeodesicHydrogenotrophyBalance.CommitStatus.Invalid) fermentationInvalid++;

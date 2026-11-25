@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
-using Unity.Profiling;
 using UnityEngine;
+using static GeodesicPerformanceMarkers;
 
 [Serializable]
 public struct GeodesicPredationSettings
@@ -50,8 +50,6 @@ public struct GeodesicPredationDiagnostics
 
 public sealed partial class GeodesicBiologyRuntime
 {
-    private static readonly ProfilerMarker PredationPass = new ProfilerMarker("GeodesicBiology.Predation.Capture");
-    private static readonly ProfilerMarker PredationIndexBuild = new ProfilerMarker("GeodesicBiology.Predation.IndexBuild");
     private const int PredatorFounderChecksPerTick = 32;
     private GeodesicPredationSettings predationSettings;
     private bool predationEnabled, preyIndexReady;
@@ -62,6 +60,7 @@ public sealed partial class GeodesicBiologyRuntime
     private List<int> predators;
     private System.Random predationCaptureRandom, predationMutationRandom, predationFounderRandom;
     private GeodesicPredationDiagnostics predationDiagnostics;
+    private long performancePreySearches, performancePreyCandidates, performanceCaptureAttempts, performancePreyCaptures;
     private int predatorFoundersRequested, predatorFoundersPlaced, predatorFounderCursor;
 
     public GeodesicPredationDiagnostics PredationDiagnostics => predationDiagnostics;
@@ -112,7 +111,7 @@ public sealed partial class GeodesicBiologyRuntime
     }
 
     private int FindPredationPrey(Vector3 position, int searcher, float movementSeed, List<Replicator> agents,
-        ReplicatorPopulationState state)
+        ReplicatorPopulationState state, bool sample)
     {
         if (!preyIndexReady)
         {
@@ -125,9 +124,16 @@ public sealed partial class GeodesicBiologyRuntime
             if (predationSettings.collectDiagnostics) predationDiagnostics.indexBuilds++;
         }
 
-        uint sample = Hash(MovementSeedBits(movementSeed) ^ unchecked((uint)biologySeed), unchecked((uint)biologySteps));
-        int prey = preyIndex.FindPrey(position, searcher, sample, predationSettings.candidateBudget,
-            agents, state, grid, out int examined);
+        uint sampleKey = Hash(MovementSeedBits(movementSeed) ^ unchecked((uint)biologySeed), unchecked((uint)biologySteps));
+        int prey, examined;
+        using (PredationSearch.Measure(sample))
+            prey = preyIndex.FindPrey(position, searcher, sampleKey, predationSettings.candidateBudget,
+                agents, state, grid, out examined);
+        if (DetailedPerformanceEnabled)
+        {
+            performancePreySearches++;
+            performancePreyCandidates += examined;
+        }
         if (predationSettings.collectDiagnostics)
         {
             predationDiagnostics.searches++;
@@ -141,6 +147,7 @@ public sealed partial class GeodesicBiologyRuntime
     {
         using var scope = PredationPass.Auto();
         bool observe = predationSettings.collectDiagnostics;
+        int sampleOffset = PerformanceSampleOffset;
         for (int j = 0; j < predators.Count; j++)
         {
             int predator = predators[j];
@@ -150,9 +157,12 @@ public sealed partial class GeodesicBiologyRuntime
             float performance = CalculateTemperaturePerformance(GetBiologicalTemperature(predator, state),
                 state.OptimalTempMin[predator], state.OptimalTempMax[predator], state.LethalTempMargin[predator], 0f);
             if (!(performance > 0f)) continue;
-            int prey = FindPredationPrey(state.Position[predator], predator, state.MovementSeed[predator], agents, state);
+            bool sample = IsPerformanceSample(predator, sampleOffset);
+            int prey = FindPredationPrey(state.Position[predator], predator, state.MovementSeed[predator], agents, state, sample);
             if (prey < 0) continue;
 
+            if (DetailedPerformanceEnabled) performanceCaptureAttempts++;
+            using var resolutionProfile = PredationResolution.Measure(sample);
             state.AttackCooldown[predator] = predationSettings.captureCooldownSeconds;
             predationCaptureRandom ??= new System.Random(unchecked(biologySeed ^ 0x50524341));
             float preyCarbon = state.OrganicCStore[prey];
@@ -173,6 +183,7 @@ public sealed partial class GeodesicBiologyRuntime
             state.Energy[predator] = transfer.energyAfter;
             double gained = (double)transfer.energyAfter - energy;
             if (chemotaxisABDiagnosticsEnabled) RecordABMetabolicEnergy(state.Locomotion[predator], (float)gained);
+            if (DetailedPerformanceEnabled) performancePreyCaptures++;
             if (!observe) continue;
             predationDiagnostics.captures++;
             predationDiagnostics.preyCarbon += preyCarbon;
@@ -266,6 +277,7 @@ public sealed partial class GeodesicBiologyRuntime
         predators = null;
         predationCaptureRandom = predationMutationRandom = null;
         predationDiagnostics = default;
+        performancePreySearches = performancePreyCandidates = performanceCaptureAttempts = performancePreyCaptures = 0;
         ConfigurePredatorFounders(0);
     }
 }

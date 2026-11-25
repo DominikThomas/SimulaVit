@@ -77,14 +77,16 @@ public sealed partial class GeodesicBiologyRuntime
         child.lethalTempMargin = Mathf.Max(1f, sulfurLethalMargin);
     }
 
-    private void CommitSulfur(int index, ReplicatorPopulationState state, float maximumStore, bool observeAccounting)
+    private void CommitSulfur(int index, ReplicatorPopulationState state, float maximumStore, bool observeAccounting, bool sample)
     {
         ref Request r = ref requests[index];
         // Fail closed before any debit if the existing mineral authority is unavailable.
         if (suspended == null || !suspended.IsInitialized) { r.Actual = 0d; invalidBiologicalStates++; return; }
         float before = state.OrganicCStore[index], energyBefore = state.Energy[index];
-        var transfer = resources.CommitCarbonFixation(r.Node, GeodesicOceanResource.H2S, r.Actual,
-            r.NeedA, r.NeedB, r.EnergyPerExtent, before, maximumStore);
+        GeodesicHydrogenotrophyBalance.Transfer transfer;
+        using (GeodesicPerformanceMarkers.DissolvedTransaction.Measure(sample))
+            transfer = resources.CommitCarbonFixation(r.Node, GeodesicOceanResource.H2S, r.Actual,
+                r.NeedA, r.NeedB, r.EnergyPerExtent, before, maximumStore);
         r.Actual = transfer.extent;
         if (transfer.status == GeodesicHydrogenotrophyBalance.CommitStatus.PrecisionRejected) sulfurPrecisionRejected++;
         if (transfer.status == GeodesicHydrogenotrophyBalance.CommitStatus.Invalid) invalidBiologicalStates++;

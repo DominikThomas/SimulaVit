@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Unity.Profiling;
 using UnityEngine;
+using static GeodesicPerformanceMarkers;
 
 /// <summary>Ocean-only geodesic biology, lifecycle, and continuous locomotion.</summary>
 public sealed partial class GeodesicBiologyRuntime
@@ -19,12 +20,6 @@ public sealed partial class GeodesicBiologyRuntime
     private static readonly ProfilerMarker Lifecycle = new ProfilerMarker("GeodesicBiology.LifecycleReproduction");
     private static readonly ProfilerMarker Movement = new ProfilerMarker("GeodesicBiology.Movement");
     private static readonly ProfilerMarker MovementKinematics = new ProfilerMarker("GeodesicBiology.PassiveMovement.KinematicsAndBoundary");
-    private static readonly ProfilerMarker MovementWanderIntegration = new ProfilerMarker("GeodesicBiology.PassiveMovement.KinematicsAndBoundary.WanderIntegration");
-    private static readonly ProfilerMarker MovementDirectionUpdate = new ProfilerMarker("GeodesicBiology.PassiveMovement.KinematicsAndBoundary.ContinuousDirectionUpdate");
-    private static readonly ProfilerMarker MovementBoundaryCandidates = new ProfilerMarker("GeodesicBiology.PassiveMovement.KinematicsAndBoundary.BoundaryCandidateEvaluation");
-    private static readonly ProfilerMarker MovementBoundaryResolution = new ProfilerMarker("GeodesicBiology.PassiveMovement.KinematicsAndBoundary.BoundaryCrossingResolution");
-    private static readonly ProfilerMarker MovementLandHandling = new ProfilerMarker("GeodesicBiology.PassiveMovement.KinematicsAndBoundary.LandBoundaryHandling");
-    private static readonly ProfilerMarker MovementStateWriteback = new ProfilerMarker("GeodesicBiology.PassiveMovement.KinematicsAndBoundary.StateWriteback");
     private static readonly ProfilerMarker MovementWanderRefresh = new ProfilerMarker("GeodesicBiology.PassiveMovement.WanderRefresh");
     private static readonly ProfilerMarker MovementVertical = new ProfilerMarker("GeodesicBiology.PassiveMovement.VerticalEvents");
     private static readonly ProfilerMarker MovementVisual = new ProfilerMarker("GeodesicBiology.PassiveMovement.VisualTarget");
@@ -143,6 +138,36 @@ public sealed partial class GeodesicBiologyRuntime
     public GeodesicOceanLayerGrid MovementGrid => grid;
     public static MetabolismType NormalFounderMetabolism => MetabolismType.Hydrogenotrophy;
     public static LocomotionType NormalFounderLocomotion => LocomotionType.PassiveDrift;
+
+    internal bool DetailedPerformanceEnabled { get; set; }
+
+    // Use the existing step ordinal to vary the sampled slots without touching any RNG stream.
+    private int PerformanceSampleOffset => DetailedPerformanceEnabled
+        ? (int)(Hash(0x65D200CEu, unchecked((uint)biologySteps)) & (SlotSampleStride - 1)) : -1;
+
+    private static bool IsPerformanceSample(int slot, int offset) => (slot & (SlotSampleStride - 1)) == offset;
+
+    internal struct PerformanceWork
+    {
+        internal long Births, Deaths, PreySearches, PreyCandidates, CaptureAttempts, PreyCaptures;
+
+        internal void AddSince(in PerformanceWork current, in PerformanceWork previous)
+        {
+            Births += Math.Max(0L, current.Births - previous.Births);
+            Deaths += Math.Max(0L, current.Deaths - previous.Deaths);
+            PreySearches += Math.Max(0L, current.PreySearches - previous.PreySearches);
+            PreyCandidates += Math.Max(0L, current.PreyCandidates - previous.PreyCandidates);
+            CaptureAttempts += Math.Max(0L, current.CaptureAttempts - previous.CaptureAttempts);
+            PreyCaptures += Math.Max(0L, current.PreyCaptures - previous.PreyCaptures);
+        }
+    }
+
+    internal PerformanceWork PerformanceWorkTotals => new PerformanceWork
+    {
+        Births = births, Deaths = deaths,
+        PreySearches = performancePreySearches, PreyCandidates = performancePreyCandidates,
+        CaptureAttempts = performanceCaptureAttempts, PreyCaptures = performancePreyCaptures
+    };
 
     private GeodesicBiologyAvailability availability = GeodesicBiologyAvailability.Default;
 
@@ -530,8 +555,12 @@ public sealed partial class GeodesicBiologyRuntime
         BeginPredationStep();
         lastBiologyStepSeconds = dt;
         LastMovementKinematicsSeconds = 0f;
-        if (pendingMethanogenFounders > 0) TrySpawnMethanogenFounders(agents, state, maxPopulation);
-        if (pendingMethanotrophFounders > 0) TrySpawnMethanotrophFounders(agents, state, maxPopulation);
+        if (pendingMethanogenFounders > 0 || pendingMethanotrophFounders > 0)
+        {
+            using var founderProfile = ExperimentalFounders.Measure(DetailedPerformanceEnabled);
+            if (pendingMethanogenFounders > 0) TrySpawnMethanogenFounders(agents, state, maxPopulation);
+            if (pendingMethanotrophFounders > 0) TrySpawnMethanotrophFounders(agents, state, maxPopulation);
+        }
         if (agents.Count == 0)
         {
             MaybeLogDiagnostics(dt, state, agents, carbonDivision, divisionCost, replicationCost,
@@ -566,9 +595,13 @@ public sealed partial class GeodesicBiologyRuntime
         }
         using (Lifecycle.Auto())
         using (MaintenanceAndLifecycle.Auto()) RunLifecycle(dt, agents, state, maintenance, reproductionRate, carbonDivision, divisionCost, replicationCost, divisionMultiple, childSplit, maxPopulation, registerDeathCause, observeAccounting && reactionDt > 0f, observeAccounting);
-        if (pendingSaprotrophFounders > 0) SpawnSaprotrophFounders(agents, state, maxPopulation);
-        if (reactionDt > 0f && predatorFoundersPlaced < predatorFoundersRequested)
-            TrySpawnPredatorFounders(agents, state, maxPopulation);
+        if (pendingSaprotrophFounders > 0 || (reactionDt > 0f && predatorFoundersPlaced < predatorFoundersRequested))
+        {
+            using var founderProfile = ExperimentalFounders.Measure(DetailedPerformanceEnabled);
+            if (pendingSaprotrophFounders > 0) SpawnSaprotrophFounders(agents, state, maxPopulation);
+            if (reactionDt > 0f && predatorFoundersPlaced < predatorFoundersRequested)
+                TrySpawnPredatorFounders(agents, state, maxPopulation);
+        }
         MaybeLogDiagnostics(dt, state, agents, carbonDivision, divisionCost, replicationCost,
             divisionMultiple, maxPopulation, reproductionRate, observeAccounting);
     }
@@ -734,40 +767,45 @@ public sealed partial class GeodesicBiologyRuntime
 
     private void CommitRequests(int count, ReplicatorPopulationState state, float maxStore, float photoEnergy, bool observeAccounting)
     {
+        int sampleOffset = PerformanceSampleOffset;
         using (AgentEnergyAndStores.Auto())
         for (int i = 0; i < count; i++)
         {
             ref Request r = ref requests[i]; if (r.Actual <= 0) continue;
+            bool sample = IsPerformanceSample(i, sampleOffset);
+            int metabolismIndex = (int)r.Metabolism;
+            using var metabolismProfile = sample && (uint)metabolismIndex < (uint)DissolvedCommits.Length
+                && DissolvedCommits[metabolismIndex].Name != null ? DissolvedCommits[metabolismIndex].Measure(true) : default;
             if (r.Metabolism == MetabolismType.Hydrogenotrophy)
             {
-                CommitHydrogenotrophy(i, state, maxStore, observeAccounting);
+                CommitHydrogenotrophy(i, state, maxStore, observeAccounting, sample);
                 continue;
             }
             if (r.Metabolism == MetabolismType.SulfurChemosynthesis)
             {
-                CommitSulfur(i, state, maxStore, observeAccounting);
+                CommitSulfur(i, state, maxStore, observeAccounting, sample);
                 continue;
             }
-            if (r.Metabolism == MetabolismType.Fermentation) { CommitFermentation(i,state,maxStore,observeAccounting); continue; }
+            if (r.Metabolism == MetabolismType.Fermentation) { CommitFermentation(i,state,maxStore,observeAccounting,sample); continue; }
             if (r.Metabolism == MetabolismType.Saprotrophy)
             {
-                CommitAerobicCarbon(i, state, maxStore, saprotrophyOxygenYield, 0d, saprotrophyEnergyYield, observeAccounting);
+                CommitAerobicCarbon(i, state, maxStore, saprotrophyOxygenYield, 0d, saprotrophyEnergyYield, observeAccounting, sample);
                 continue;
             }
             if (r.Metabolism == MetabolismType.Methanotrophy)
             {
                 CommitAerobicCarbon(i, state, maxStore, MethanotrophyOxygenPerOxidizedCarbon,
-                    MethanotrophyOxygenPerStoredCarbon, methanotrophyEnergyPerOxidizedCarbon, observeAccounting);
+                    MethanotrophyOxygenPerStoredCarbon, methanotrophyEnergyPerOxidizedCarbon, observeAccounting, sample);
                 continue;
             }
             if (r.Metabolism == MetabolismType.Methanogenesis)
             {
-                CommitMethanogenesis(i, state, maxStore, observeAccounting);
+                CommitMethanogenesis(i, state, maxStore, observeAccounting, sample);
                 continue;
             }
             if (r.Metabolism == MetabolismType.Photosynthesis)
             {
-                CommitPhotosynthesis(i, state, maxStore, photoEnergy, observeAccounting);
+                CommitPhotosynthesis(i, state, maxStore, photoEnergy, observeAccounting, sample);
                 continue;
             }
             float energyBefore = state.Energy[i];
@@ -814,12 +852,14 @@ public sealed partial class GeodesicBiologyRuntime
         }
     }
 
-    private void CommitHydrogenotrophy(int index, ReplicatorPopulationState state, float maximumStore, bool observeAccounting)
+    private void CommitHydrogenotrophy(int index, ReplicatorPopulationState state, float maximumStore, bool observeAccounting, bool sample)
     {
         ref Request r = ref requests[index];
         float storeBefore = state.OrganicCStore[index], energyBefore = state.Energy[index];
-        var transfer = resources.CommitHydrogenotrophy(r.Node, r.Actual, r.NeedA, r.NeedB,
-            r.EnergyPerExtent, storeBefore, maximumStore);
+        GeodesicHydrogenotrophyBalance.Transfer transfer;
+        using (DissolvedTransaction.Measure(sample))
+            transfer = resources.CommitHydrogenotrophy(r.Node, r.Actual, r.NeedA, r.NeedB,
+                r.EnergyPerExtent, storeBefore, maximumStore);
         r.Actual = transfer.extent;
         if (transfer.status == GeodesicHydrogenotrophyBalance.CommitStatus.PrecisionRejected) hydrogenPrecisionRejected++;
         if (transfer.status == GeodesicHydrogenotrophyBalance.CommitStatus.Invalid) invalidBiologicalStates++;
@@ -845,8 +885,10 @@ public sealed partial class GeodesicBiologyRuntime
         int maxPopulation, Action<MetabolismType, DeathCause> registerDeathCause, bool recordReactions, bool observeAccounting)
     {
         bool observeEvolution = evolutionDiagnostics.Enabled;
+        int sampleOffset = PerformanceSampleOffset;
         for (int i = state.Count - 1; i >= 0; i--)
         {
+            bool sample = IsPerformanceSample(i, sampleOffset);
             if (observeEvolution)
                 evolutionDiagnostics.Observe(i, agents[i].DiagnosticId, state.Locomotion[i], dt, abSimulationTime);
             if (chemotaxisABDiagnosticsEnabled) ObserveABOrganismTime(i, state, dt);
@@ -856,37 +898,52 @@ public sealed partial class GeodesicBiologyRuntime
             if (preyIndexReady && preyIndex.IsConsumed(i, agents[i].DiagnosticId))
             {
                 // Capture already transferred all tracked prey carbon. Only remove and record this death.
-                CommitLifecycleRemoval(i, DeathCause.Predation, agents, state, observeEvolution, registerDeathCause);
+                using (LifecycleDeath.Measure(sample))
+                    CommitLifecycleRemoval(i, DeathCause.Predation, agents, state, observeEvolution, registerDeathCause);
                 continue;
             }
             ReplicatorVisualGrowth.AdvanceDivision(ref state.VisualGrowth[i], dt);
             state.Age[i] += dt;
-            float temperature = GetBiologicalTemperature(i,state);
-            float performance = CalculateTemperaturePerformance(temperature, state.OptimalTempMin[i],
-                state.OptimalTempMax[i], state.LethalTempMargin[i], temperatureSettings.DormancyFloor);
-            state.CanReplicate[i] = GeodesicBiologyTemperaturePolicy.CanReproduce(performance, temperatureSettings);
-            DeathCause exposureCause = GeodesicBiologyTemperaturePolicy.AdvanceExposure(temperature,
-                state.OptimalTempMin[i], state.OptimalTempMax[i], state.LethalTempMargin[i], dt, temperatureSettings,
-                ref state.ColdTemperatureExposureSeconds[i], ref state.HeatTemperatureExposureSeconds[i]);
-            float paid = Mathf.Max(0f, maintenance * dt) * GeodesicBiologyTemperaturePolicy.MaintenanceMultiplier(performance, temperatureSettings);
-            state.Energy[i] -= paid;
-            maintenancePaid += paid;
+            float temperature, performance;
+            DeathCause exposureCause;
+            using (LifecycleTemperature.Measure(sample)) temperature = GetBiologicalTemperature(i,state);
+            using (LifecycleExposure.Measure(sample))
+            {
+                performance = CalculateTemperaturePerformance(temperature, state.OptimalTempMin[i],
+                    state.OptimalTempMax[i], state.LethalTempMargin[i], temperatureSettings.DormancyFloor);
+                state.CanReplicate[i] = GeodesicBiologyTemperaturePolicy.CanReproduce(performance, temperatureSettings);
+                exposureCause = GeodesicBiologyTemperaturePolicy.AdvanceExposure(temperature,
+                    state.OptimalTempMin[i], state.OptimalTempMax[i], state.LethalTempMargin[i], dt, temperatureSettings,
+                    ref state.ColdTemperatureExposureSeconds[i], ref state.HeatTemperatureExposureSeconds[i]);
+            }
+            using (LifecycleMaintenance.Measure(sample))
+            {
+                float paid = Mathf.Max(0f, maintenance * dt) * GeodesicBiologyTemperaturePolicy.MaintenanceMultiplier(performance, temperatureSettings);
+                state.Energy[i] -= paid;
+                maintenancePaid += paid;
+            }
             if (metabolicColor != null)
                 state.Color[i] = agents[i].color = metabolicColor(state.Age[i], state.MaxLifespan[i] - state.Age[i], state.Energy[i], state.Metabolism[i]);
             DeathCause cause = ClassifyLifecycleDeath(state.Energy[i], state.Age[i], state.MaxLifespan[i]);
             if (cause == DeathCause.Unknown) cause = exposureCause;
             if (cause != DeathCause.Unknown)
             {
+                using var deathProfile = LifecycleDeath.Measure(sample);
                 RecycleDeathInventory(i, agents[i], state, cause);
                 CommitLifecycleRemoval(i, cause, agents, state, observeEvolution, registerDeathCause);
                 continue;
             }
 
-            float energyCost = Mathf.Max(0f, carbon ? divisionCost : replicationCost);
-            bool eligible = state.Energy[i] > energyCost
-                && (!carbon || state.OrganicCStore[i] >= Mathf.Max(1, multiple) * state.BiomassTarget[i]);
-            if (!eligible || !state.CanReplicate[i] || agents.Count >= maxPopulation
-                || reproductionRandom.NextDouble() >= Mathf.Clamp01(rate * dt * performance)) continue;
+            float energyCost;
+            using (LifecycleGrowthGate.Measure(sample))
+            {
+                energyCost = Mathf.Max(0f, carbon ? divisionCost : replicationCost);
+                bool eligible = state.Energy[i] > energyCost
+                    && (!carbon || state.OrganicCStore[i] >= Mathf.Max(1, multiple) * state.BiomassTarget[i]);
+                if (!eligible || !state.CanReplicate[i] || agents.Count >= maxPopulation
+                    || reproductionRandom.NextDouble() >= Mathf.Clamp01(rate * dt * performance)) continue;
+            }
+            using var reproductionProfile = LifecycleReproduction.Measure(sample);
             Replicator parent = agents[i];
             // Capture presentation before the instantaneous biological transfer. No gate or RNG depends on this state.
             bool animatedDivision = state.Locomotion[i] != LocomotionType.Anchored;
@@ -921,7 +978,7 @@ public sealed partial class GeodesicBiologyRuntime
             child.optimalTempMin = state.OptimalTempMin[i];
             child.optimalTempMax = state.OptimalTempMax[i];
             child.lethalTempMargin = state.LethalTempMargin[i];
-            PlaceDaughter(i, child, state);
+            using (DaughterPlacement.Measure(sample)) PlaceDaughter(i, child, state);
             MutateChildMetabolism(child, state.Metabolism[i], carbon ? state.OrganicCStore[i]*Mathf.Clamp01(split) : child.organicCStore);
             TryMutateMethanogenicChild(child, state.Metabolism[i]);
             TryMutateMethanotrophicChild(child, state.Metabolism[i]);
@@ -1171,6 +1228,7 @@ public sealed partial class GeodesicBiologyRuntime
         LastMovementKinematicsSeconds = kinematicsDt;
         Matrix4x4 worldToLocal = planet.transform.worldToLocalMatrix;
         Matrix4x4 localToWorld = planet.transform.localToWorldMatrix;
+        int sampleOffset = PerformanceSampleOffset;
         AccumulateActiveMovementTime(dt, state);
 
         using (MovementWanderRefresh.Auto())
@@ -1206,6 +1264,7 @@ public sealed partial class GeodesicBiologyRuntime
             for (int i = 0; i < state.Count; i++)
             {
                 if (state.Locomotion[i] != LocomotionType.PassiveDrift) continue;
+                bool sample = IsPerformanceSample(i, sampleOffset);
                 movementUpdates++;
                 EnsurePassiveKinematicState(i, state, worldToLocal);
                 Vector3 direction = state.PassiveDriftDirection[i];
@@ -1214,7 +1273,7 @@ public sealed partial class GeodesicBiologyRuntime
                 // Great-circle advection plus a smoothly evolving scheduled curvature. This is
                 // continuous sub-cell transport and has no access to environmental suitability.
                 float wanderRate;
-                using (MovementWanderIntegration.Auto()) wanderRate = EvolvePassiveWanderRate(state.PassiveWanderRate[i],
+                using (PassiveIntegration.Measure(sample)) wanderRate = EvolvePassiveWanderRate(state.PassiveWanderRate[i],
                     state.PassiveTargetWanderRate[i], kinematicsDt);
                 state.PassiveWanderRate[i] = wanderRate;
                 int integrationSteps = Mathf.Clamp(Mathf.CeilToInt(kinematicsDt / PassiveKinematicsIntervalSeconds), 1,
@@ -1223,18 +1282,14 @@ public sealed partial class GeodesicBiologyRuntime
                 Vector3 proposedDirection = direction;
                 for (int integrationStep = 0; integrationStep < integrationSteps; integrationStep++)
                 {
-                using (MovementDirectionUpdate.Auto()) AdvancePassiveKinematics(ref direction, ref tangent, wanderRate, integrationDt);
-                proposedDirection = direction;
-
-                TraverseMovementBoundaries(i, state, ref proposedDirection, ref tangent, false);
-                direction = proposedDirection;
+                    using (PassiveIntegration.Measure(sample)) AdvancePassiveKinematics(ref direction, ref tangent, wanderRate, integrationDt);
+                    proposedDirection = direction;
+                    TraverseMovementBoundaries(i, state, ref proposedDirection, ref tangent, false, sample);
+                    direction = proposedDirection;
                 }
 
-                using (MovementStateWriteback.Auto())
-                {
                 state.PassiveDriftDirection[i] = proposedDirection;
                 state.PassiveDriftTangent[i] = tangent;
-                }
                 continuousKinematicUpdates++;
             }
         }

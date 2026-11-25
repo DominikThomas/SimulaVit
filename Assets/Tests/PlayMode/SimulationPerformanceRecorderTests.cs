@@ -27,12 +27,16 @@ public sealed class SimulationPerformanceRecorderTests
             string header = System.IO.File.ReadAllText(first);
             Assert.That(header, Does.Contain("end_simulated_seconds"));
             Assert.That(header, Does.Contain("methanotrophy_avg"));
+            Assert.That(header, Does.Contain("detailed_slot_stride"));
+            Assert.That(header, Does.Contain("GeodesicBiology.Lifecycle.TemperatureAndVents_estimated_avg_ms"));
+            Assert.That(analyzer.DetailedGeodesicProfilingActive, Is.False);
 
-            analyzer.BeginCapture(true, false, 5f, false);
+            analyzer.BeginCapture(true, false, 5f, false, detailedGeodesicProfiling: true);
             second = analyzer.CsvOutputPath;
             Assert.That(System.IO.Path.GetFileName(second), Is.EqualTo(prefix + "_2.csv"));
             Assert.That(System.IO.File.ReadAllText(second), Is.EqualTo(header));
             Assert.That(System.IO.File.ReadAllText(first), Is.EqualTo(header));
+            Assert.That(analyzer.DetailedGeodesicProfilingActive, Is.True);
 
             analyzer.BeginCapture(false, false, 5f, false);
             Assert.That(analyzer.CsvOutputPath, Is.Null);
@@ -117,6 +121,7 @@ public sealed class SimulationPerformanceRecorderTests
             Assert.That(ReadColumn("population_avg"), Is.EqualTo(population).And.EqualTo(manager.TotalPopulation));
             Assert.That(ReadColumn("end_simulated_seconds"), Is.EqualTo(123.5d));
             Assert.That(ReadColumn("simulated_seconds"), Is.Zero);
+            Assert.That(ReadColumn("detailed_slot_stride"), Is.Zero);
             Assert.That(analyzer.LatestSummary, Does.Contain("end_simulated_seconds=123.5 "));
         }
         finally

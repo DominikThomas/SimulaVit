@@ -12,6 +12,7 @@ public partial class SimulationStartupController
     private readonly Vector2[] tabScrollPositions = new Vector2[6];
     private SetupTab selectedSetupTab;
     private int selectedMetabolism;
+    private bool detailedGeodesicProfiling;
     private GUIStyle setupHelpStyle, setupSectionStyle, setupTabStyle, selectedSetupTabStyle;
     private readonly System.Collections.Generic.Dictionary<string, GUIContent> setupLabelContents = new();
     private sealed class SetupNumericEdit
@@ -543,6 +544,8 @@ public partial class SimulationStartupController
     {
         SetupSection("Performance recording");
         SetupBool("Enable performance recording", ref currentConfig.enablePerformanceRecording);
+        if (IsGeodesicSetup && currentConfig.enablePerformanceRecording)
+            SetupBool("Detailed Geodesic profiling (this session)", ref detailedGeodesicProfiling);
         SetupBool("Write CSV", ref currentConfig.performanceWriteCsv);
         SetupBool("Log periodic summaries to Console", ref currentConfig.performanceLogSummaryToConsole);
         SetupFloat("Summary interval (real seconds)", ref currentConfig.performanceSummaryIntervalSeconds,
