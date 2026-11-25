@@ -271,6 +271,10 @@ public partial class SimulationStartupController
             SetupHelp("Zero disables methanotroph founding. A positive count waits for suitable local methane, oxygen and temperature. Placement resumes when population capacity becomes available.");
             if (!b.geodesicAvailability.AllowsMethanotrophFounders)
                 SetupHelp("Methanotroph founders require Methanotrophy and Passive drift.");
+            SetupInt("Experimental predator founders", ref b.geodesicPredation.founderCount, InitialSpawnMin, InitialSpawnMax);
+            SetupHelp("Zero disables predator founding. Placement waits for suitable live prey, oxygen, temperature and population capacity.");
+            if (!b.geodesicAvailability.AllowsPredatorFounders)
+                SetupHelp("Predator founders require Predation and Passive drift.");
         }
         SetupInt("Maximum population", ref b.maxPopulation, 0, int.MaxValue);
         SetupFloat("Reproduction rate (/sim s)", ref b.reproductionRate);
@@ -314,7 +318,7 @@ public partial class SimulationStartupController
         SetupTemperatureRange("Sulfur chemosynthesis", ref b.sulfurChemoTempRange, true);
         SetupTemperatureRange("Photosynthesis", ref b.photoTempRange, true);
         SetupTemperatureRange("Saprotrophy", ref b.saproTempRange, true);
-        SetupTemperatureRange("Predation", ref b.predatorTempRange, !IsGeodesicSetup);
+        SetupTemperatureRange("Predation", ref b.predatorTempRange, true);
         SetupTemperatureRange("Fermentation", ref b.fermentationTempRange, true);
         SetupTemperatureRange("Methanogenesis", ref b.methanogenesisTempRange, true);
         SetupTemperatureRange("Methanotrophy", ref b.methanotrophyTempRange, true);
@@ -379,7 +383,6 @@ public partial class SimulationStartupController
         GUILayout.EndVertical();
         GUILayout.EndHorizontal();
 
-        SetupHelp("Hydrogenotrophy, sulfur chemosynthesis, fermentation, oxygenic photosynthesis, aerobic saprotrophy, methanogenesis and aerobic methanotrophy can arise in Geodesic mode.");
         SetupHelp(availability.FounderStatus);
     }
 
@@ -413,18 +416,22 @@ public partial class SimulationStartupController
             SetupFloat("Hydrogen → saprotrophy probability", ref b.hydrogenToSaprotrophyMutationChance, 0f, 1f);
             SetupFloat("Saprotrophy mutation chance", ref b.saprotrophyMutationChance, 0f, 1f);
             SetupHelp("Saprotrophy rolls independently after the earlier metabolism choices. The second probability applies to sulfur, fermentation and photosynthesis parents. Acquisition requires the evolution unlock, local oxygen and organic carbon, and a suitable temperature.");
+            SetupFloat("Predator mutation chance", ref b.predatorMutationChance, 0f, 1f);
+            SetupFloat("Predation evolution unlock (sim s)", ref b.geodesicPredation.evolutionUnlockSeconds);
+            SetupBool("Require motile parent for predator evolution", ref b.geodesicPredation.evolutionRequiresMotility);
+            SetupHelp("Saprotroph offspring can acquire Predation after both evolution unlocks. The parent must retain carbon and be within capture range of the daughter. The birth site needs local oxygen and a suitable temperature.");
         }
-        SetupSection("Other metabolic transitions");
-        if (IsGeodesicSetup) SetupHelp("Not yet implemented in geodesic evolution. These settings are inactive here and retained for Legacy Cube Sphere.");
         bool enabled = GUI.enabled;
-        GUI.enabled = enabled && !IsGeodesicSetup;
-        if (!IsGeodesicSetup) SetupFloat("Hydrogen → photosynthesis probability", ref b.hydrogenToPhotosynthesisMutationChance, 0f, 1f);
-        if (!IsGeodesicSetup) SetupFloat("Hydrogen → saprotrophy probability", ref b.hydrogenToSaprotrophyMutationChance, 0f, 1f);
-        if (!IsGeodesicSetup) SetupFloat("Fermentation → methanogenesis probability", ref b.fermentationToMethanogenesisMutationChance, 0f, 1f);
-        if (!IsGeodesicSetup) SetupFloat("Hydrogen → methanotrophy probability", ref b.hydrogenToMethanotrophyMutationChance, 0f, 1f);
-        if (!IsGeodesicSetup) SetupFloat("Saprotrophy mutation chance", ref b.saprotrophyMutationChance, 0f, 1f);
-        SetupFloat("Predator mutation chance", ref b.predatorMutationChance, 0f, 1f);
-        GUI.enabled = enabled;
+        if (!IsGeodesicSetup)
+        {
+            SetupSection("Other metabolic transitions");
+            SetupFloat("Hydrogen → photosynthesis probability", ref b.hydrogenToPhotosynthesisMutationChance, 0f, 1f);
+            SetupFloat("Hydrogen → saprotrophy probability", ref b.hydrogenToSaprotrophyMutationChance, 0f, 1f);
+            SetupFloat("Fermentation → methanogenesis probability", ref b.fermentationToMethanogenesisMutationChance, 0f, 1f);
+            SetupFloat("Hydrogen → methanotrophy probability", ref b.hydrogenToMethanotrophyMutationChance, 0f, 1f);
+            SetupFloat("Saprotrophy mutation chance", ref b.saprotrophyMutationChance, 0f, 1f);
+            SetupFloat("Predator mutation chance", ref b.predatorMutationChance, 0f, 1f);
+        }
 
         SetupSection("Biomass mutation");
         if (IsGeodesicSetup) SetupHelp("Not yet implemented in geodesic biology. Offspring inherit their parent's biomass target; these mutation settings apply only to Legacy Cube Sphere.");
@@ -438,11 +445,6 @@ public partial class SimulationStartupController
     private void DrawMetabolismParameters(SimulationStartupBiologyConfig b)
     {
         selectedMetabolism = GUILayout.SelectionGrid(selectedMetabolism, MetabolismNames, 2, buttonStyle, GUILayout.MinHeight(112f));
-        if (IsGeodesicSetup && selectedMetabolism == 7)
-        {
-            SetupHelp("This reaction is not implemented by geodesic biology. Its parameters remain available in Legacy Cube Sphere. No new reaction or mutation path is added by setup.");
-            return;
-        }
         SetupHelp(IsGeodesicSetup
             ? "Supported geodesic reaction parameters. Per-tick quantities refer to a completed 0.5 simulated-second reference reaction tick; actual uptake remains resource-limited. Normal geodesic founders are hydrogenotrophs."
             : "Legacy reaction quantities use the manager's existing metabolism tick. Fermentation, methanogenesis and methanotrophy energy parameters scale with the catabolized share of substrate. Energy per tick, per CO2 and per carbon unit remain distinct.");
@@ -504,10 +506,25 @@ public partial class SimulationStartupController
                 else SetupFloat("Fallback store respiration carbon / tick", ref b.saproRespireStoreCPerTick);
                 break;
             case 7:
-                SetupFloat("Organic carbon / bite", ref b.predatorBiteOrganicC);
-                SetupFloat("Maximum prey energy taken / bite", ref b.predatorBiteEnergy);
-                SetupFloat("Carbon assimilation fraction", ref b.predatorAssimilationFraction, 0f, 1f);
-                SetupHelp("Predation takes prey energy only when carbon intake falls short, and transfers the existing 50% of that energy to the predator. Predator enablement, motility and attack gates remain on the manager; predatorEnergyPerC is not consumed by the current implementation.");
+                if (IsGeodesicSetup)
+                {
+                    SetupFloat("Organic carbon assimilation fraction", ref b.predatorAssimilationFraction, 0f, 1f);
+                    SetupFloat("Capture distance (world units)", ref b.geodesicPredation.captureDistance);
+                    SetupFloat("Capture probability / attempt", ref b.geodesicPredation.captureProbability, 0f, 1f);
+                    SetupFloat("Capture cooldown (sim s)", ref b.geodesicPredation.captureCooldownSeconds);
+                    SetupInt("Candidate budget / prey search", ref b.geodesicPredation.candidateBudget, 1, GeodesicPredationSettings.MaximumCandidateBudget);
+                    SetupFloat("Aerobic respiration O2 / carbon", ref b.aerobicO2PerC);
+                    SetupFloat("Predation energy / oxidized carbon", ref b.geodesicPredation.energyPerOxidizedCarbon);
+                    SetupBool("Collect predation diagnostics", ref b.geodesicPredation.collectDiagnostics);
+                    SetupHelp("Each capture consumes the prey. The predator stores carbon up to capacity and gains energy from aerobic oxidation. Unused carbon returns to the prey's ocean layer. Assimilation must be below 1 for an oxidative share.");
+                }
+                else
+                {
+                    SetupFloat("Organic carbon / bite", ref b.predatorBiteOrganicC);
+                    SetupFloat("Maximum prey energy taken / bite", ref b.predatorBiteEnergy);
+                    SetupFloat("Carbon assimilation fraction", ref b.predatorAssimilationFraction, 0f, 1f);
+                    SetupHelp("Predation takes prey energy only when carbon intake falls short, and transfers the existing 50% of that energy to the predator. Predator enablement, motility and attack gates remain on the manager; predatorEnergyPerC is not consumed by the current implementation.");
+                }
                 break;
         }
         SetupFloat("Maximum organic carbon store", ref b.maxOrganicCStore);

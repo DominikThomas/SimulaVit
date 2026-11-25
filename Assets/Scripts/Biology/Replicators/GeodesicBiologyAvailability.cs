@@ -10,8 +10,8 @@ public struct GeodesicBiologyAvailability
         | (1 << (int)MetabolismType.SulfurChemosynthesis) | (1 << (int)MetabolismType.Fermentation);
     public const int ImplementedMetabolisms = CoreMetabolisms | (1 << (int)MetabolismType.Photosynthesis)
         | (1 << (int)MetabolismType.Saprotrophy) | (1 << (int)MetabolismType.Methanogenesis)
-        | (1 << (int)MetabolismType.Methanotrophy);
-    public const int AllMetabolisms = ImplementedMetabolisms | (1 << (int)MetabolismType.Predation);
+        | (1 << (int)MetabolismType.Methanotrophy) | (1 << (int)MetabolismType.Predation);
+    public const int AllMetabolisms = ImplementedMetabolisms;
     public const int PassiveLocomotion = 1 << (int)LocomotionType.PassiveDrift;
     public const int AllLocomotions = PassiveLocomotion | (1 << (int)LocomotionType.Amoeboid)
         | (1 << (int)LocomotionType.Flagellum) | (1 << (int)LocomotionType.Anchored);
@@ -47,6 +47,9 @@ public struct GeodesicBiologyAvailability
         && Allows(GeodesicBiologyRuntime.NormalFounderLocomotion);
 
     public bool AllowsMethanotrophFounders => Allows(MetabolismType.Methanotrophy)
+        && Allows(GeodesicBiologyRuntime.NormalFounderLocomotion);
+
+    public bool AllowsPredatorFounders => Allows(MetabolismType.Predation)
         && Allows(GeodesicBiologyRuntime.NormalFounderLocomotion);
 
     public string FounderStatus

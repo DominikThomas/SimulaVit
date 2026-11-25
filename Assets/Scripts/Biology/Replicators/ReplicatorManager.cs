@@ -109,6 +109,7 @@ public class ReplicatorManager : MonoBehaviour
     [HideInInspector] public int geodesicSaprotrophFounderCount;
     [HideInInspector] public int geodesicMethanogenFounderCount;
     [HideInInspector] public int geodesicMethanotrophFounderCount;
+    [HideInInspector] public GeodesicPredationSettings geodesicPredation = GeodesicPredationSettings.Default;
     public int maxPopulation = 50000;
     [Tooltip("When disabled, the manager initializes references but waits for an external startup controller to spawn the initial population.")]
     public bool autoStartOnSceneLoad = true;
@@ -962,6 +963,14 @@ public class ReplicatorManager : MonoBehaviour
                         ? " (pending suitable local CH4/O2 and temperature)"
                         : " (requires Methanotrophy and Passive drift)");
             }
+            if (spawnInitialPopulation && geodesicPredation.founderCount > 0)
+            {
+                geodesicBiology.ConfigurePredatorFounders(geodesicPredation.founderCount);
+                founderSummary += $" | Predator founders: 0/{geodesicPredation.founderCount} placed"
+                    + (enablePredators && availability.AllowsPredatorFounders
+                        ? " (pending suitable live prey, habitat and capacity)"
+                        : " (requires Predation, Passive drift and Enable Predators)");
+            }
             Debug.Log(availability.Describe() + founderSummary, this);
             if (geodesicLocomotion.logDiagnostics)
                 Debug.Log(geodesicBiology.DescribeResolvedLocomotionControls(), this);
@@ -1101,6 +1110,20 @@ public class ReplicatorManager : MonoBehaviour
     [ContextMenu("Biology Diagnostics/Reset Accounting Readouts")]
     private void ResetGeodesicAccountingReadouts() => biologyDiagnostics.Reset();
 
+    [ContextMenu("Biology Diagnostics/Report Geodesic Predation")]
+    private void ReportGeodesicPredation()
+    {
+        if (geodesicBiology == null) return;
+        var stats = geodesicBiology.PredationDiagnostics;
+        double carbonResidual = stats.preyCarbon - stats.assimilatedCarbon - stats.co2Produced - stats.organicCarbonReleased;
+        Debug.Log($"[GeodesicPredation] founders={geodesicBiology.PredatorFoundersPlaced}/{geodesicBiology.PredatorFoundersRequested}"
+            + $" collecting={geodesicPredation.collectDiagnostics} indexBuilds={stats.indexBuilds} searches={stats.searches}"
+            + $" candidates={stats.candidatesExamined} noPrey={stats.searchesWithoutPrey} failed={stats.failedAttempts} captures={stats.captures}"
+            + $" preyC={stats.preyCarbon:G9} assimilatedC={stats.assimilatedCarbon:G9} CO2={stats.co2Produced:G9}"
+            + $" OrganicC={stats.organicCarbonReleased:G9} carbonResidual={carbonResidual:G9}"
+            + $" O2={stats.oxygenConsumed:G9} energy={stats.energyCredited:G9}", this);
+    }
+
     [ContextMenu("Biology Diagnostics/Refresh Latest Division Visuals")]
     private void RefreshLatestDivisionVisuals()
     {
@@ -1133,6 +1156,8 @@ public class ReplicatorManager : MonoBehaviour
         geodesicBiology.SetSaprotrophyControls(saproCPerTick, saproAssimilationFraction, aerobicO2PerC, aerobicEnergyPerC,
             hydrogenToSaprotrophyMutationChance, saprotrophyMutationChance, mutationGateMinO2ForAerobes,
             mutationGateMinOrganicC, saproTempRange, defaultLethalMargin);
+        geodesicBiology.SetPredationControls(geodesicPredation, enablePredators, predatorAssimilationFraction,
+            aerobicO2PerC, predatorMutationChance, mutationGateMinO2ForAerobes, predatorTempRange, defaultLethalMargin);
         geodesicBiology.SetMethanogenesisControls(methanogenesisAssimilationFraction,
             anaerobeO2InhibitionEnabled && anaerobeO2InhibitionAffectsMethanogenesis, anaerobeO2MinEfficiencyMethanogenesis,
             fermentationToMethanogenesisMutationChance, mutationGateMinH2, mutationGateMinCO2,

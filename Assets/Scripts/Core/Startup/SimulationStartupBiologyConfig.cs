@@ -13,6 +13,7 @@ public sealed class SimulationStartupBiologyConfig
     public int geodesicSaprotrophFounderCount;
     public int geodesicMethanogenFounderCount;
     public int geodesicMethanotrophFounderCount;
+    public GeodesicPredationSettings geodesicPredation = GeodesicPredationSettings.Default;
     public int maxPopulation = 50000;
     public float reproductionRate = 0.1f;
     public float moveEnergyCostPerSecond = 0.05f;
@@ -109,6 +110,7 @@ public sealed class SimulationStartupBiologyConfig
         geodesicSaprotrophFounderCount = manager.geodesicSaprotrophFounderCount;
         geodesicMethanogenFounderCount = manager.geodesicMethanogenFounderCount;
         geodesicMethanotrophFounderCount = manager.geodesicMethanotrophFounderCount;
+        geodesicPredation = manager.geodesicPredation;
         maxPopulation = manager.maxPopulation;
         reproductionRate = manager.reproductionRate;
         moveEnergyCostPerSecond = manager.moveEnergyCostPerSecond;
@@ -204,6 +206,7 @@ public sealed class SimulationStartupBiologyConfig
         manager.geodesicSaprotrophFounderCount = geodesicSaprotrophFounderCount;
         manager.geodesicMethanogenFounderCount = geodesicMethanogenFounderCount;
         manager.geodesicMethanotrophFounderCount = geodesicMethanotrophFounderCount;
+        manager.geodesicPredation = geodesicPredation;
         manager.maxPopulation = maxPopulation;
         manager.reproductionRate = reproductionRate;
         manager.moveEnergyCostPerSecond = moveEnergyCostPerSecond;
@@ -302,6 +305,7 @@ public sealed class SimulationStartupBiologyConfig
         geodesicSaprotrophFounderCount = Mathf.Max(0, geodesicSaprotrophFounderCount);
         geodesicMethanogenFounderCount = Mathf.Max(0, geodesicMethanogenFounderCount);
         geodesicMethanotrophFounderCount = Mathf.Max(0, geodesicMethanotrophFounderCount);
+        geodesicPredation = geodesicPredation.Sanitized();
         maxPopulation = Mathf.Max(0, maxPopulation);
         reproductionRate = FiniteClamp(reproductionRate, fallback.reproductionRate, 0f, float.MaxValue);
         moveEnergyCostPerSecond = FiniteClamp(moveEnergyCostPerSecond, fallback.moveEnergyCostPerSecond, 0f, float.MaxValue);

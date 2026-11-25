@@ -22,7 +22,7 @@ public sealed class SimulationStartupEvolutionTests
         ("Fermentation → methanogenesis probability", "fermentationToMethanogenesisMutationChance", true),
         ("Saprotrophy mutation chance", "saprotrophyMutationChance", true),
         ("Hydrogen → methanotrophy probability", "hydrogenToMethanotrophyMutationChance", true),
-        ("Predator mutation chance", "predatorMutationChance", false),
+        ("Predator mutation chance", "predatorMutationChance", true),
         ("Biomass mutation chance", "biomassMutationChance", false),
         ("Biomass mutation scale", "biomassMutationScale", false) };
 
@@ -44,6 +44,20 @@ public sealed class SimulationStartupEvolutionTests
         public void Dispose() { UnityEngine.Object.DestroyImmediate(root); if(File.Exists(Path)) File.Delete(Path); }
     }
 
+    [Test]
+    public void OlderStartupProfileKeepsSavedMutationRatesAndDoesNotRequestPredatorFounders()
+    {
+        var fallback = new SimulationStartupConfig();
+        fallback.biology.geodesicPredation.founderCount = 12;
+        var loaded = SimulationStartupController.DeserializeSavedConfig(
+            "{\"version\":25,\"hydrogenToFermentationMutationChance\":0.02,\"predatorMutationChance\":0.07}", fallback).biology;
+        Assert.That(loaded.hydrogenToFermentationMutationChance, Is.EqualTo(.02f));
+        Assert.That(loaded.predatorMutationChance, Is.EqualTo(.07f));
+        Assert.That(loaded.geodesicPredation.founderCount, Is.Zero);
+        Assert.That(loaded.geodesicPredation.captureDistance, Is.EqualTo(.25f));
+        Assert.That(loaded.geodesicPredation.collectDiagnostics, Is.False);
+    }
+
     [UnityTest]
     [Timeout(15000)]
     public IEnumerator GeodesicFieldsAcceptInputAndActualSaveLoadRestoresThem()
@@ -62,6 +76,7 @@ public sealed class SimulationStartupEvolutionTests
                 yield return Edit(window,"Hydrogen → fermentation probability","0.27");
                 yield return Edit(window,"Fermentation → methanogenesis probability","0.31");
                 yield return Edit(window,"Hydrogen → methanotrophy probability","0.25");
+                yield return Edit(window,"Predator mutation chance","0.35");
                 Assert.That(f.Controller.CurrentConfig.biology.hydrogenToFermentationMutationChance,Is.EqualTo(.27f));
                 Assert.That(f.Controller.CurrentConfig.biology.metabolismMutationChance,Is.EqualTo(.2f));
                 Assert.That(f.Controller.CurrentConfig.biology.hydrogenToSulfurMutationChance,Is.EqualTo(.4f));
@@ -69,6 +84,9 @@ public sealed class SimulationStartupEvolutionTests
                 Assert.That(f.Controller.CurrentConfig.biology.fermentationToMethanogenesisMutationChance,Is.EqualTo(.31f));
                 f.Controller.CurrentConfig.biology.geodesicMethanogenFounderCount = 3;
                 f.Controller.CurrentConfig.biology.geodesicMethanotrophFounderCount = 4;
+                f.Controller.CurrentConfig.biology.geodesicPredation.founderCount = 5;
+                f.Controller.CurrentConfig.biology.geodesicPredation.captureProbability = 0f;
+                f.Controller.CurrentConfig.biology.geodesicPredation.candidateBudget = 11;
                 f.Controller.CurrentConfig.biology.mutationGateMinCH4 = .004f;
                 f.Controller.CurrentConfig.biology.mutationGateMinO2ForAerobes = 0f;
                 f.Controller.SaveCurrentStartupConfig();
@@ -83,6 +101,10 @@ public sealed class SimulationStartupEvolutionTests
                     Assert.That(restarted.Controller.CurrentConfig.biology.geodesicMethanogenFounderCount,Is.EqualTo(3));
                     Assert.That(restarted.Controller.CurrentConfig.biology.hydrogenToMethanotrophyMutationChance,Is.EqualTo(.25f));
                     Assert.That(restarted.Controller.CurrentConfig.biology.geodesicMethanotrophFounderCount,Is.EqualTo(4));
+                    Assert.That(restarted.Controller.CurrentConfig.biology.predatorMutationChance,Is.EqualTo(.35f));
+                    Assert.That(restarted.Controller.CurrentConfig.biology.geodesicPredation.founderCount,Is.EqualTo(5));
+                    Assert.That(restarted.Controller.CurrentConfig.biology.geodesicPredation.captureProbability,Is.Zero);
+                    Assert.That(restarted.Controller.CurrentConfig.biology.geodesicPredation.candidateBudget,Is.EqualTo(11));
                     Assert.That(restarted.Controller.CurrentConfig.biology.mutationGateMinCH4,Is.EqualTo(.004f));
                     Assert.That(restarted.Controller.CurrentConfig.biology.mutationGateMinO2ForAerobes,Is.Zero);
                 }

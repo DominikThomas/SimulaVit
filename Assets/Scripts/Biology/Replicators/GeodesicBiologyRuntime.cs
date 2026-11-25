@@ -527,6 +527,7 @@ public sealed partial class GeodesicBiologyRuntime
             hydrogenotrophyConfigLogged = true;
         }
         biologySteps++;
+        BeginPredationStep();
         lastBiologyStepSeconds = dt;
         LastMovementKinematicsSeconds = 0f;
         if (pendingMethanogenFounders > 0) TrySpawnMethanogenFounders(agents, state, maxPopulation);
@@ -560,10 +561,14 @@ public sealed partial class GeodesicBiologyRuntime
                 if (observeAccounting) PrepareAccountingScratch();
                 CommitRequests(state.Count, state, maxStore, photoEnergy, observeAccounting);
             }
+            if (predationEnabled && predators != null && predators.Count > 0)
+                RunPredation(agents, state, maxStore);
         }
         using (Lifecycle.Auto())
         using (MaintenanceAndLifecycle.Auto()) RunLifecycle(dt, agents, state, maintenance, reproductionRate, carbonDivision, divisionCost, replicationCost, divisionMultiple, childSplit, maxPopulation, registerDeathCause, observeAccounting && reactionDt > 0f, observeAccounting);
         if (pendingSaprotrophFounders > 0) SpawnSaprotrophFounders(agents, state, maxPopulation);
+        if (reactionDt > 0f && predatorFoundersPlaced < predatorFoundersRequested)
+            TrySpawnPredatorFounders(agents, state, maxPopulation);
         MaybeLogDiagnostics(dt, state, agents, carbonDivision, divisionCost, replicationCost,
             divisionMultiple, maxPopulation, reproductionRate, observeAccounting);
     }
@@ -607,6 +612,10 @@ public sealed partial class GeodesicBiologyRuntime
                 if (float.IsFinite(pCo2) && pCo2 > 0f && float.IsFinite(pEnergy) && pEnergy >= 0f)
                     r.NeedA = (double)pCo2 * light;
                 break;
+            case MetabolismType.Predation:
+                TrackPredator(i, state, dt);
+                requests[i] = r;
+                return;
             default: requests[i]=r; return;
         }
         r.Supported = true;
@@ -844,6 +853,12 @@ public sealed partial class GeodesicBiologyRuntime
             // Original request indices still match here, before any reverse-loop swap-back or birth.
             // Fold accounting into this existing pass rather than scanning the population again.
             if (recordReactions) RecordReactionAccounting(i);
+            if (preyIndexReady && preyIndex.IsConsumed(i, agents[i].DiagnosticId))
+            {
+                // Capture already transferred all tracked prey carbon. Only remove and record this death.
+                CommitLifecycleRemoval(i, DeathCause.Predation, agents, state, observeEvolution, registerDeathCause);
+                continue;
+            }
             ReplicatorVisualGrowth.AdvanceDivision(ref state.VisualGrowth[i], dt);
             state.Age[i] += dt;
             float temperature = GetBiologicalTemperature(i,state);
@@ -863,20 +878,7 @@ public sealed partial class GeodesicBiologyRuntime
             if (cause != DeathCause.Unknown)
             {
                 RecycleDeathInventory(i, agents[i], state, cause);
-                RecordLocomotionDeath(state.Metabolism[i], state.Locomotion[i]);
-                if (chemotaxisABDiagnosticsEnabled) RecordABDeath(state.Locomotion[i], cause);
-                if (observeEvolution)
-                    evolutionDiagnostics.Death(i, agents[i].DiagnosticId, state.Locomotion[i], abSimulationTime);
-                RecordFounderDeath(agents[i].DiagnosticId);
-                deaths++;
-                if (state.Metabolism[i] == MetabolismType.SulfurChemosynthesis) sulfurDeaths++;
-                if (state.Metabolism[i] == MetabolismType.Fermentation) fermentationDeaths++;
-                if (cause == DeathCause.EnergyDepletion) starvationDeaths++;
-                else if (cause == DeathCause.OldAge) lifespanDeaths++;
-                if (biologyReportsEnabled) temperatureTelemetry.RecordDeath(cause);
-                registerDeathCause?.Invoke(state.Metabolism[i], cause);
-                if (observeEvolution) evolutionDiagnostics.SwapBackRemoval(i, state.Count - 1);
-                RemoveAgentAtSwapBack(i, agents, state);
+                CommitLifecycleRemoval(i, cause, agents, state, observeEvolution, registerDeathCause);
                 continue;
             }
 
@@ -925,6 +927,7 @@ public sealed partial class GeodesicBiologyRuntime
             TryMutateMethanotrophicChild(child, state.Metabolism[i]);
             // Legacy saprotrophy rolls independently and can supersede an earlier child metabolism.
             TryMutateSaprotrophicChild(child, state.Metabolism[i]);
+            TryMutatePredatoryChild(child, i, state, carbon, split);
             GeodesicBiologyTemperaturePolicy.MutateInheritedTraits(child, temperatureMutationRandom, temperatureSettings);
             SplitDivisionEnergy(state.Energy[i], energyCost, out float parentEnergy, out float childEnergy);
             state.Energy[i] = parentEnergy;
@@ -1070,6 +1073,26 @@ public sealed partial class GeodesicBiologyRuntime
             r.StorePerExtent * (float)r.Actual, r.DiagnosticStoreBefore, r.DiagnosticStoreAfter,
             hydrogen ? r.HydrogenEnergyAwarded : r.EnergyPerExtent * (float)r.Actual, r.DiagnosticEnergyDelta, r.Actual > 0d,
             r.NeedA * r.CompetedActual, r.NeedB * r.CompetedActual);
+    }
+
+    private void CommitLifecycleRemoval(int i, DeathCause cause, List<Replicator> agents,
+        ReplicatorPopulationState state, bool observeEvolution, Action<MetabolismType, DeathCause> registerDeathCause)
+    {
+        RecordLocomotionDeath(state.Metabolism[i], state.Locomotion[i]);
+        if (chemotaxisABDiagnosticsEnabled) RecordABDeath(state.Locomotion[i], cause);
+        if (observeEvolution)
+            evolutionDiagnostics.Death(i, agents[i].DiagnosticId, state.Locomotion[i], abSimulationTime);
+        RecordFounderDeath(agents[i].DiagnosticId);
+        deaths++;
+        if (state.Metabolism[i] == MetabolismType.SulfurChemosynthesis) sulfurDeaths++;
+        if (state.Metabolism[i] == MetabolismType.Fermentation) fermentationDeaths++;
+        if (cause == DeathCause.EnergyDepletion) starvationDeaths++;
+        else if (cause == DeathCause.OldAge) lifespanDeaths++;
+        if (biologyReportsEnabled) temperatureTelemetry.RecordDeath(cause);
+        registerDeathCause?.Invoke(state.Metabolism[i], cause);
+        if (observeEvolution) evolutionDiagnostics.SwapBackRemoval(i, state.Count - 1);
+        if (preyIndexReady) preyIndex.RemoveAtSwapBack(i, state.Count - 1);
+        RemoveAgentAtSwapBack(i, agents, state);
     }
 
     private void RecycleDeathInventory(int index, Replicator companion, ReplicatorPopulationState state, DeathCause cause)
@@ -1703,6 +1726,7 @@ public sealed partial class GeodesicBiologyRuntime
         ClearSaprotrophy();
         ClearMethanogenesis();
         ClearMethanotrophy();
+        ClearPredation();
         ClearFounderEmergence();
         ClearBiologicalThermalCache();
         ClearFounderThermalPlacement();

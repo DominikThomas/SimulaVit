@@ -1215,6 +1215,96 @@ public sealed class GeodesicOceanResourceField : MonoBehaviour
     private static bool MatchesBoundedTransfer(double budget, double actual) => double.IsFinite(budget) && double.IsFinite(actual)
         && actual > 0d && actual <= budget && budget - actual <= GeodesicHydrogenotrophyBalance.RelativeTolerance * budget;
 
+    internal struct PredationTransfer
+    {
+        public double oxygenAfter, co2After, organicAfter;
+        public double oxygenConsumed, co2Produced, organicReleased;
+        public float storeAfter, energyAfter;
+    }
+
+    internal bool TryCommitPredation(int predatorNode, int preyNode, double preyCarbon, float assimilationFraction,
+        float oxygenPerCarbon, float energyPerCarbon, float maximumStore, float store, float energy,
+        out PredationTransfer transfer)
+    {
+        transfer = default;
+        if (!initialized || (uint)predatorNode >= (uint)nodeCapacity || (uint)preyNode >= (uint)nodeCapacity)
+            return false;
+        int oxygen = (int)GeodesicOceanResource.O2 * nodeCapacity + predatorNode;
+        int co2 = (int)GeodesicOceanResource.CO2 * nodeCapacity + predatorNode;
+        int organic = (int)GeodesicOceanResource.OrganicC * nodeCapacity + preyNode;
+        if (!TryPlanPredation(preyCarbon, assimilationFraction, oxygenPerCarbon, energyPerCarbon, maximumStore,
+            store, energy, sourceGrid.PhysicalLayerVolumeKm3[predatorNode], sourceGrid.PhysicalLayerVolumeKm3[preyNode],
+            concentrationsByResourceThenNode[oxygen], concentrationsByResourceThenNode[co2],
+            concentrationsByResourceThenNode[organic], out transfer)) return false;
+
+        concentrationsByResourceThenNode[oxygen] = transfer.oxygenAfter;
+        concentrationsByResourceThenNode[co2] = transfer.co2After;
+        concentrationsByResourceThenNode[organic] = transfer.organicAfter;
+        resourceMayHaveSpatialVariation[(int)GeodesicOceanResource.O2] = true;
+        resourceMayHaveSpatialVariation[(int)GeodesicOceanResource.CO2] = true;
+        if (transfer.organicReleased > 0d) resourceMayHaveSpatialVariation[(int)GeodesicOceanResource.OrganicC] = true;
+        return true;
+    }
+
+    internal static bool TryPlanPredation(double preyCarbon, float assimilationFraction, float oxygenPerCarbon,
+        float energyPerCarbon, float maximumStore, float store, float energy, double predatorVolume, double preyVolume,
+        double oxygen, double co2, double organic, out PredationTransfer transfer)
+    {
+        transfer = default;
+        if (!double.IsFinite(preyCarbon) || !(preyCarbon > 0d) || !float.IsFinite(assimilationFraction)
+            || assimilationFraction < 0f || assimilationFraction >= 1f
+            || !float.IsFinite(oxygenPerCarbon) || !(oxygenPerCarbon > 0f)
+            || !float.IsFinite(energyPerCarbon) || !(energyPerCarbon > 0f)
+            || !float.IsFinite(maximumStore) || maximumStore < 0f || !float.IsFinite(store) || store < 0f
+            || !float.IsFinite(energy) || energy < 0f
+            || !double.IsFinite(predatorVolume) || !(predatorVolume > 0d)
+            || !double.IsFinite(preyVolume) || !(preyVolume > 0d)
+            || !double.IsFinite(oxygen) || !(oxygen > 0d)
+            || !double.IsFinite(co2) || co2 < 0d || !double.IsFinite(organic) || organic < 0d) return false;
+
+        double assimilationBudget = Math.Min(preyCarbon * assimilationFraction, Math.Max(0d, (double)maximumStore - store));
+        float storeAfter = (float)(store + assimilationBudget);
+        if ((double)storeAfter - store > assimilationBudget)
+            storeAfter = BitConverter.Int32BitsToSingle(BitConverter.SingleToInt32Bits(storeAfter) - 1);
+        double assimilated = (double)storeAfter - store;
+        double oxygenBudget = Math.Min(oxygen * predatorVolume, preyCarbon * (1d - assimilationFraction) * oxygenPerCarbon);
+        if (!TryPlanBoundedDebit(oxygen, predatorVolume, oxygenBudget, out double oxygenAfter, out double consumedOxygen))
+            return false;
+
+        double oxidized = Math.Min(preyCarbon - assimilated, consumedOxygen / oxygenPerCarbon);
+        if (!TryPlanPredationCredit(co2, predatorVolume, oxidized, out double co2After, out double producedCO2)
+            || !MatchesBoundedTransfer(consumedOxygen / oxygenPerCarbon, producedCO2)) return false;
+
+        double organicBudget = preyCarbon - assimilated - producedCO2;
+        if (!TryPlanPredationCredit(organic, preyVolume, organicBudget, out double organicAfter, out double releasedOrganic)
+            || organicBudget - releasedOrganic > GeodesicHydrogenotrophyBalance.RelativeTolerance * preyCarbon) return false;
+
+        double energyBudget = producedCO2 * energyPerCarbon;
+        float energyAfter = (float)(energy + energyBudget);
+        if (!float.IsFinite(energyAfter)) return false;
+        if ((double)energyAfter - energy > energyBudget)
+            energyAfter = BitConverter.Int32BitsToSingle(BitConverter.SingleToInt32Bits(energyAfter) - 1);
+
+        transfer = new PredationTransfer
+        {
+            oxygenAfter = oxygenAfter, co2After = co2After, organicAfter = organicAfter,
+            oxygenConsumed = consumedOxygen, co2Produced = producedCO2, organicReleased = releasedOrganic,
+            storeAfter = storeAfter, energyAfter = energyAfter
+        };
+        return true;
+    }
+
+    private static bool TryPlanPredationCredit(double before, double volume, double budget, out double after, out double credited)
+    {
+        credited = 0d;
+        after = before + budget / volume;
+        if (!double.IsFinite(after) || after > float.MaxValue) return false;
+        if ((after - before) * volume > budget)
+            after = BitConverter.Int64BitsToDouble(BitConverter.DoubleToInt64Bits(after) - 1);
+        credited = (after - before) * volume;
+        return credited >= 0d && credited <= budget;
+    }
+
     internal double VentH2Rate => physicalVentH2InventoryRatePerSecond;
     internal GeodesicFermentationBalance.Transfer CommitFermentation(int node, double extent, double need,
         float energy, float assimilation, float store, float maximumStore)

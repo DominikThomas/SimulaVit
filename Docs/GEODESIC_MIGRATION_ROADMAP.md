@@ -2,7 +2,7 @@
 
 **Authority:** the single current roadmap for migration status, priorities and next steps. Reviewed **2026-11-20** against local source at `f0b4b01`, starting from a clean working tree. Concurrent local profiling edits appeared during the audit and were preserved; their presence does not establish performance acceptance. This audit ran no Unity, builds, tests, simulations or benchmarks. Historical results cited below were recorded by earlier work and were not reproduced.
 
-B4 was updated for the B2.5 source implementation on **2026-11-24**. Unity acceptance remains user-run.
+B4 was updated for B2.5 on **2026-11-24** and B5 for the B2.6 source implementation on **2026-11-25**. Unity acceptance remains user-run.
 
 The [implementation plan](GEODESIC_PLANET_IMPLEMENTATION_PLAN.md) retains architectural contracts and development history; its phase lists and embedded next-task prompts are historical. The [documentation inventory and audit](README.md) explains document roles and unresolved evidence. Update this roadmap when a milestone changes; keep detailed implementation and experiment evidence in its subsystem report.
 
@@ -49,7 +49,7 @@ The normal geodesic simulation takes the early-return path in [ReplicatorSimulat
 
 ### All eight metabolisms
 
-All strategies share representation and common lifecycle code. The first seven have founder-to-descendant paths in source. The first three have recorded runtime evidence. Each restored strategy must satisfy the complete B-series contract below.
+All eight strategies share representation and lifecycle code and have normal acquisition paths in source. The first three have recorded runtime evidence. Each restored strategy must satisfy the B-series acceptance criteria below.
 
 | Strategy | Reaction / energy / carbon status | Normal reachability and parity gaps | Next milestone / evidence |
 | --- | --- | --- | --- |
@@ -60,7 +60,7 @@ All strategies share representation and common lifecycle code. The first seven h
 | Saprotrophy | Aerobic feeding, measured OrganicC/O2 transfers, assimilation, local-gated evolution and optional death-site founders. | User-run Unity validation pending. Stored-carbon respiration and saprotrophic taxis remain deferred. | [B2.3 restoration](GeodesicAerobicSaprotrophy.md) |
 | Methanogenesis | Measured CO2/H2 → CH4 with bounded carbon assimilation, anoxic habitat preference, Fermentation → Methanogenesis evolution and optional submarine vent founders. | User-run Unity validation pending. Long-term persistence and measured air–sea transfer remain to be observed. | [B2.4 restoration](GeodesicMethanogenesis.md) |
 | Methanotrophy | Measured aerobic CH4/O2 consumption with CO2 output, bounded assimilation and energy from oxidation. | Hydrogen → Methanotrophy evolution and optional founders in thermally suitable CH4/O2 overlap. User-run Unity validation pending. | [B2.5 restoration and manual validation](GeodesicAerobicMethanotrophy.md) |
-| Predation | Absent geodesic prey-feeding branch/pass. | Legacy predation/scent system is bypassed; no normal Saprotrophy → Predation path. Generic aging/division does not supply prey energy. | B5; [legacy predation](../Assets/Scripts/Biology/Replicators/ReplicatorPredationSystem.cs). |
+| Predation | Bounded continuous-position capture, measured aerobic feeding and single-consumption lifecycle removal. | Saprotrophy → Predation evolution and optional prey-site founders. Prey-directed steering and population balancing are deferred. User-run Unity validation pending. | [B2.6 restoration and manual validation](GeodesicPredation.md). |
 
 ## Migration milestones
 
@@ -90,7 +90,7 @@ For **each B1–B5 milestone**, require: a documented normally reachable mutatio
 | B2 · Saprotrophy | B2.3 aerobic environmental feeding implemented in source. User-run Unity validation pending. | B1 for endogenous O2; A3 death OrganicC | Check local-gated transitions, one-time founders, input limitation and C/O2 balances. Endogenous support of descendants and long-term persistence remain unverified. | [B2.3 restoration and manual validation](GeodesicAerobicSaprotrophy.md) · [recycling](GEODESIC_SETTLING_AND_DEATH_RECYCLING.md) |
 | B3 · Methanogenesis | B2.4 pathway implemented in source. User-run Unity validation pending. | A3, fermentation | Check local-gated evolution, experimental founders, competition and the measured C/H2 ledger. Observe naturally evolved producers and trace dissolved CH4 through transport and atmospheric exchange. | [B2.4 restoration and manual validation](GeodesicMethanogenesis.md) · [Legacy web](CURRENT_MODEL_EVOLUTION_WEB_AUDIT.md) |
 | B4 · Methanotrophy | B2.5 aerobic pathway implemented in source. User-run Unity validation pending. | B1, B3 | Check local-gated evolution, capacity-aware founders, measured C/O2/energy accounting and feeding in darkness. Observe locally available methane and oxygen from biological producers. Methanotrophy-specific habitat seeking and ecological balance remain deferred. | [B2.5 restoration and manual validation](GeodesicAerobicMethanotrophy.md) |
-| B5 · Predation | Absent / P1 | B2, A4; B1–B4 for integrated food web | Add Saprotrophy-derived predator evolution with explicit motility gate, geodesic layer-aware prey finding/contact, bites, assimilation, respiration, prey death and waste. Complete when prey-to-predator C/E transfers and single death recycling reconcile, starvation is real, and search costs remain bounded at representative populations. | [Legacy predation](../Assets/Scripts/Biology/Replicators/ReplicatorPredationSystem.cs), [legacy web](CURRENT_MODEL_EVOLUTION_WEB_AUDIT.md). |
+| B5 · Predation | B2.6 minimal aerobic pathway implemented in source. User-run Unity validation pending. | B2, A4; B1–B4 for integrated food web | Verify Saprotrophy-derived evolution, prey-site founders, continuous range, bounded search, single capture removal and the prey C/O2/energy ledger. Check feeding and division at modest populations. Defer prey-directed steering and ecological balance. B2.6 ends the planned strategy-restoration work before a dedicated performance branch. | [B2.6 restoration and manual validation](GeodesicPredation.md). |
 | B6 · Remaining inherited traits and attachment | Partial / P1 | A4, A6; resolve before C1 | Restore biomass-target mutation or record an accepted replacement; decide reverse metabolic transitions with habitat gates. Explicitly accept inherited lifespan vs legacy per-birth resampling or implement the chosen behavior. Define substrate contact/attachment/release rather than equating a bottom-layer center with seabed. Complete when inheritance/mutation, old-age death, attachment and release have evidence and each deliberate difference is documented. | [Hot-state authority](GEODESIC_BIOLOGY_HOT_STATE_AUDIT.md), [locomotion](GeodesicActiveLocomotion.md), [historical comparison](GeodesicBiologyParityAudit.md). |
 
 ### Phase C — stable geodesic v1 and merge
