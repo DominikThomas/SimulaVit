@@ -74,6 +74,12 @@ public sealed class GeodesicRiverUphillDebugTests
         tin.ExtractNetworks(.25, rejectedUphill: (source, path) => rejected.Add(path));
         Assert.That(rejected.Count, Is.GreaterThan(0));
         Assert.That(rejected.All(p => tin.Height(p.Last(), true) > tin.Height(p[p.Length - 2], true)), Is.True);
+        var diagnostics = tin.Diagnostics.Summary();
+        var replayed = new List<TinPoint[]>();
+        tin.VisitRejectedNetworkTraces((source, path) => replayed.Add(path));
+        Assert.That(replayed.Count, Is.EqualTo(rejected.Count));
+        for (int i = 0; i < rejected.Count; i++) CollectionAssert.AreEqual(rejected[i], replayed[i]);
+        Assert.That(tin.Diagnostics.Summary(), Is.EqualTo(diagnostics));
         CollectionAssert.AreEqual(receivers, tin.TriangleReceiver);
         CollectionAssert.AreEqual(areas, tin.DrainageArea);
         CollectionAssert.AreEqual(runoff, tin.AccumulatedRunoff);

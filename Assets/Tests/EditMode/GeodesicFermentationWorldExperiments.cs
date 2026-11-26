@@ -67,6 +67,7 @@ public sealed class GeodesicFermentationWorldExperiments
     }
 
     [UnityTest]
+    [Explicit("Run in a disposable batch project.")]
     [Timeout(1500000)]
     public IEnumerator CompareSeed283WithOnlyFermentationMutationChanged()
     {

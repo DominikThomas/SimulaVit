@@ -40,6 +40,7 @@ public sealed class GeodesicFoodWorldExperiments
     }
 
     [UnityTest]
+    [Explicit("Run in a disposable batch project.")]
     [Timeout(1200000)]
     public IEnumerator CompareSeed283WithIdenticalFixedStepsAndOnlySteeringChanged()
     {

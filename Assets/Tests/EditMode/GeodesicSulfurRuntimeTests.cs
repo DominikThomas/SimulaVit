@@ -190,7 +190,7 @@ public sealed class GeodesicSulfurRuntimeTests
     internal sealed class Fixture : IDisposable
     {
         private readonly GameObject root;
-        private readonly GeodesicOceanResourceField resources;
+        internal readonly GeodesicOceanResourceField resources;
         internal readonly GeodesicBiologyRuntime runtime = new GeodesicBiologyRuntime();
         private readonly GeodesicBiologyDiagnostics diagnostics = new GeodesicBiologyDiagnostics();
         internal readonly List<Replicator> agents = new List<Replicator>();
@@ -228,7 +228,7 @@ public sealed class GeodesicSulfurRuntimeTests
             Set(runtime, "temperatureMutationRandom", new System.Random(123456));
             Set(runtime, "temperatureSettings", new GeodesicBiologyTemperatureSettings { ReplicationMinEfficiency = .15f, StressMaintenanceMultiplier = 1f });
             var locomotion = GeodesicLocomotionSettings.Default; locomotion.activeSpeedMultiplier = .4f; locomotion.logDiagnostics = false;
-            var steering = (ReplicatorSteeringSystem.Settings)typeof(GeodesicLocomotionEcologyExperiments).GetMethod("Steering", BindingFlags.Static | BindingFlags.NonPublic).Invoke(null,null);
+            var steering = GeodesicLocomotionEcologyExperiments.Steering();
             runtime.SetLocomotionSettings(locomotion, steering, 4f,1.2f,2f,2f,1.5f,0f,.05f,.001f,true,.01f);
             runtime.SetVisualGrowthSettings(new ReplicatorVisualGrowthSettings { daughterSeparationDistance = 0f });
             runtime.SetAccountingDiagnostics(diagnostics);
@@ -266,29 +266,8 @@ public sealed class GeodesicSulfurRuntimeTests
             .01f, .02f, 8f, .8f, false, .02f, .12f, .25f, Co2Need, H2SNeed, Energy,
             0f,0f,0f,0f,0f,0f,0f,0f,MaxStore,rate,true,.2f,.5f,2f,.5f,30000,null,
             new GeodesicBiologyTemperatureSettings { ReplicationMinEfficiency = .15f, StressMaintenanceMultiplier = 1f });
-        public void React(bool observe = true)
-        {
-            Invoke(runtime, "EnsureRequestCapacity", State.Count);
-            Invoke(runtime, "BeginSparseStep");
-            MethodInfo build = typeof(GeodesicBiologyRuntime).GetMethod("BuildRequest", Private);
-            for (int i = 0; i < State.Count; i++)
-            {
-                var args = new object[build.GetParameters().Length];
-                for (int k = 0; k < args.Length; k++)
-                {
-                    string name = build.GetParameters()[k].Name;
-                    args[k] = name == "i" ? (object)i : name == "state" ? State : name == "hO2InhibitionEnabled" ? (object)false
-                        : name == "dt" ? .5f : name == "hCo2" ? .01f : name == "hH2" ? .02f : name == "hEnergy" ? 8f
-                        : name == "hStoreFraction" ? .8f : name == "maximumStore" ? MaxStore : name == "sCo2" ? Co2Need : name == "sH2s" ? H2SNeed : name == "sEnergy" ? Energy : name == "o2ComfortMax" ? .02f : name == "o2StressMax" ? .12f : 0f;
-                }
-                build.Invoke(runtime, args);
-            }
-            Invoke(runtime, "AggregateDemands", State.Count); Invoke(runtime, "ResolveAvailabilityFactors");
-            Invoke(runtime, "ResolveCompetition", State.Count);
-            if (observe) Invoke(runtime, "PrepareAccountingScratch");
-            Invoke(runtime, "CommitRequests", State.Count, State, MaxStore, observe);
-            if (observe) for (int i = 0; i < State.Count; i++) Invoke(runtime, "RecordReactionAccounting", i);
-        }
+        public void React(bool observe = true) =>
+            GeodesicReactionTestPipeline.React(runtime, State, MaxStore, observe, Co2Need, H2SNeed, Energy, .02f, .12f);
 
         public void Lifecycle(float rate, float split) => Invoke(runtime, "RunLifecycle", 1f, agents, State,
             0f, rate, true, .2f, .5f, 2f, split, 10, null, false, false);

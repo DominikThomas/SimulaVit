@@ -30,18 +30,45 @@ public sealed class GeodesicTinSurfaceTests
         var tin = new GeodesicTinHydrology(geometry.UnitVertices, geometry.Triangles, h, h, ocean,
             sea, 8d, .000002d, .002d, completedSurface: surface);
         var terrain = new GeodesicRiverTerrain(geometry, surface, h, true);
+        int crossingFacet = Enumerable.Range(0, geometry.TriangleCount).First(t =>
+            Enumerable.Range(0, 3).Any(k => h[geometry.Triangles[t * 3 + k]] < sea - 1e-6f) &&
+            Enumerable.Range(0, 3).Any(k => h[geometry.Triangles[t * 3 + k]] > sea + 1e-6f));
+        int[] crossingVertices = geometry.Triangles.Skip(crossingFacet * 3).Take(3).ToArray();
+        var dry = tin.BasinPoint(crossingFacet, crossingVertices.First(v => h[v] > sea + 1e-6f));
+        var wet = tin.BasinPoint(crossingFacet, crossingVertices.First(v => h[v] < sea - 1e-6f));
+        Assert.That(tin.TryCoast(dry, wet, out var coast), Is.True);
+        Assert.That(tin.CompletedVisibleRadius(coast), Is.EqualTo(sea).Within(1e-7d));
+
+        bool sawFacetHandoff = false;
         for (int t = 0; t < geometry.TriangleCount; t += 997)
         {
             var source = tin.Centroid(t); if (tin.IsOcean(source)) continue;
             var path = tin.Trace(source, out var termination);
             Assert.That(termination, Is.EqualTo(TinTermination.OceanCoast));
             Assert.That(tin.Validate(path), Is.True);
-            Assert.That(tin.CompletedVisibleRadius(path.Last()), Is.EqualTo(sea).Within(.0000001d));
+            TinPoint end = path.Last();
+            Assert.That(tin.IsRetainedOceanBoundary(end), Is.True);
+            double endpointRadius = tin.CompletedVisibleRadius(end);
+            Assert.That(endpointRadius, Is.EqualTo(terrain.Radius(tin.Direction(end))).Within(5e-6d));
+            if (endpointRadius < sea - 1e-7d)
+            {
+                // A dry facet can meet a retained-ocean facet below sea level.
+                var previous = path[path.Length - 2];
+                Assert.That(previous.Triangle, Is.Not.EqualTo(end.Triangle));
+                Assert.That(tin.IsOcean(previous), Is.False);
+                Assert.That(Vector3.Distance(tin.Direction(previous), tin.Direction(end)), Is.LessThan(1e-7f));
+                sawFacetHandoff = true;
+            }
+            else
+            {
+                Assert.That(endpointRadius, Is.EqualTo(sea).Within(1e-7d));
+            }
             Vector3[] directions = path.Select(tin.Direction).ToArray();
             Assert.That(terrain.IsCentrelineValid(directions, tin.Epsilon, tin.VisibleBumpTolerance), Is.True);
             Vector3[] projected = directions.Select(d => (d * (terrain.Radius(d) + .0003f)).normalized).ToArray();
             Assert.That(terrain.IsCentrelineValid(projected, tin.Epsilon, tin.VisibleBumpTolerance), Is.True);
         }
+        Assert.That(sawFacetHandoff, Is.True);
     }
 
     [Test]

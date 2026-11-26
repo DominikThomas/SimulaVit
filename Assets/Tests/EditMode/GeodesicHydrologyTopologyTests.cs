@@ -6,6 +6,25 @@ using UnityEngine;
 public sealed class GeodesicHydrologyTopologyTests
 {
     [Test]
+    public void GeodesicDirectionLookupMatchesNearestCellIndependentlyOfSearchOrigin()
+    {
+        var topology = GeodesicGridTopology.Build(2);
+        Vector3 direction = new Vector3(.31f, .92f, -.21f).normalized;
+        foreach (var sample in new[] { direction, -direction, Vector3.up, Vector3.right, Vector3.forward })
+        {
+            float closest = topology.CellDirections.Max(cell => Vector3.Dot(cell, sample));
+            int first = GeodesicOceanConnectivity.FindNearestCell(topology, sample);
+            int fromLast = GeodesicOceanConnectivity.FindNearestCell(topology, sample, topology.CellCount - 1);
+            Assert.That(first, Is.InRange(0, topology.CellCount - 1));
+            Assert.That(fromLast, Is.InRange(0, topology.CellCount - 1));
+            Assert.That(Vector3.Dot(topology.CellDirections[first], sample), Is.EqualTo(closest).Within(1e-6f));
+            Assert.That(Vector3.Dot(topology.CellDirections[fromLast], sample), Is.EqualTo(closest).Within(1e-6f));
+        }
+        Assert.That(GeodesicOceanConnectivity.FindNearestCell(topology, direction),
+            Is.Not.EqualTo(GeodesicOceanConnectivity.FindNearestCell(topology, -direction)));
+    }
+
+    [Test]
     public void FilteredVisibleTerrainRemovesVertexSpikeAndKeepsBroadSlope()
     {
         var geometry = IcosphereRenderMeshBuilder.BuildUnitGeometry(3);

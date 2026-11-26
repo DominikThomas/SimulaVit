@@ -172,7 +172,7 @@ public sealed class GeodesicLocomotionEcologyExperiments
         }
 
         internal void WriteHabitat(int cell, int layer, float kelvin, double h2 = .001d, double co2 = 100d,
-            double h2s = 100d, double ch4 = 100d, double o2 = 0d)
+            double h2s = 100d, double ch4 = 100d, double o2 = 0d, double? organicC = null)
         {
             int node = grid.GetNodeIndex(cell, layer); temperatures[node] = kelvin;
             concentrations[(int)GeodesicOceanResource.H2 * grid.NodeCapacity + node] = h2 / grid.PhysicalLayerVolumeKm3[node];
@@ -180,6 +180,8 @@ public sealed class GeodesicLocomotionEcologyExperiments
             concentrations[(int)GeodesicOceanResource.H2S * grid.NodeCapacity + node] = h2s / grid.PhysicalLayerVolumeKm3[node];
             concentrations[(int)GeodesicOceanResource.CH4 * grid.NodeCapacity + node] = ch4 / grid.PhysicalLayerVolumeKm3[node];
             concentrations[(int)GeodesicOceanResource.O2 * grid.NodeCapacity + node] = o2 / grid.PhysicalLayerVolumeKm3[node];
+            if (organicC.HasValue)
+                concentrations[(int)GeodesicOceanResource.OrganicC * grid.NodeCapacity + node] = organicC.Value / grid.PhysicalLayerVolumeKm3[node];
         }
 
         internal GeodesicTaxisObservation ObserveAt(int cell, int layer, MetabolismType metabolism = MetabolismType.Hydrogenotrophy)
@@ -190,6 +192,8 @@ public sealed class GeodesicLocomotionEcologyExperiments
             try { Call("BeginMovementSamples"); return (GeodesicTaxisObservation)CallResult("ObserveSteeringHabitat", 0, state); }
             finally { state.GeodesicCellIndex[0] = previousCell; state.CurrentOceanLayerIndex[0] = previousLayer; state.Metabolism[0] = previousMetabolism; }
         }
+
+        internal void SetAvailability(GeodesicBiologyAvailability availability) => Set(runtime, "availability", availability);
 
         internal bool HasDefinedReaction(MetabolismType metabolism)
         {
@@ -403,7 +407,7 @@ public sealed class GeodesicLocomotionEcologyExperiments
         public void Dispose() => UnityEngine.Object.DestroyImmediate(root);
     }
 
-    private static ReplicatorSteeringSystem.Settings Steering() => new ReplicatorSteeringSystem.Settings {
+    internal static ReplicatorSteeringSystem.Settings Steering() => new ReplicatorSteeringSystem.Settings {
         ActiveMovementMetabolismSuitabilityEnabled = true, BaseTumbleProbability = .2f, MinTumbleProbability = .02f, MaxTumbleProbability = .9f,
         MovementTumbleChanceWhenBetter = .05f, MovementTumbleChanceWhenWorse = .65f, MovementTumbleChanceNeutral = .2f,
         MovementSuitabilityMemoryBlend = .35f, MovementSuitabilityImprovementThreshold = .05f, MovementSuitabilityWorseningThreshold = .05f,

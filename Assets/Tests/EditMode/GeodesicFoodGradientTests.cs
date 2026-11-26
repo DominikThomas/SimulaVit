@@ -59,7 +59,7 @@ public sealed class GeodesicFoodGradientTests
     [TestCase(MetabolismType.Methanogenesis, true)]
     [TestCase(MetabolismType.Methanotrophy, true)]
     [TestCase(MetabolismType.Photosynthesis, true)]
-    [TestCase(MetabolismType.Saprotrophy, false)]
+    [TestCase(MetabolismType.Saprotrophy, true)]
     [TestCase(MetabolismType.Predation, false)]
     public void AuditOtherMetabolismsWithoutPretendingHydrogenSensingSupportsThem(MetabolismType metabolism, bool reactionDefined)
     {
@@ -69,11 +69,16 @@ public sealed class GeodesicFoodGradientTests
                 metabolism == MetabolismType.Methanogenesis ? 0d : 100d,
                 metabolism == MetabolismType.Photosynthesis ? 0d : 100d, 0d, 0d, 0d);
             var empty = f.ObserveAt(f.VentCell, 4, metabolism);
-            f.WriteHabitat(f.VentCell, 4, 338.15f, 100d, 100d, 100d, 100d, 100d);
+            f.WriteHabitat(f.VentCell, 4, 338.15f, 100d, 100d, 100d, 100d, 100d, organicC: 100d);
+            var availability = GeodesicBiologyAvailability.Default;
+            if (metabolism == MetabolismType.Methanotrophy)
+                Assert.That(f.HasDefinedReaction(metabolism), Is.False, "Methanotrophy requires the availability bit.");
+            availability.metabolismMask |= 1 << (int)metabolism;
+            f.SetAvailability(availability);
             var sample = f.ObserveAt(f.VentCell, 4, metabolism);
             bool defined = f.HasDefinedReaction(metabolism);
             Assert.That(defined, Is.EqualTo(reactionDefined));
-            Assert.That(sample.reactionReadiness, Is.Zero, "Known baseline sensing gap: this characterizes the current implementation, not correct food-seeking support.");
+            Assert.That(sample.reactionReadiness, Is.Zero, "These reactions have no dedicated food-taxis observation.");
             Assert.That(empty.reactionReadiness, Is.Zero);
             Save("support-" + metabolism, new Support { metabolism = metabolism.ToString(), reactionDefined = defined,
                 withoutRelevantFood = empty.reactionReadiness, withRelevantFood = sample.reactionReadiness });

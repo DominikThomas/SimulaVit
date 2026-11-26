@@ -1,5 +1,6 @@
 using System.Linq;
 using System.Collections;
+using System.Collections.Generic;
 using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
@@ -25,12 +26,15 @@ public sealed class GeodesicRiverThresholdStartupTests
             planet.geodesicColliderSubdivisionLevel = 2;
             planet.geodesicOceanRenderSubdivisionLevel = 2;
             planet.geodesicAtmosphereRenderSubdivisionLevel = 2;
+            planet.BypassGeodesicCarvingCache = true;
             planet.enableGeodesicRivers = true;
             planet.randomizeOnStart = false;
             typeof(PlanetGenerator).GetMethod("Awake", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(planet, null);
             var controller = obj.AddComponent<SimulationStartupController>();
             typeof(SimulationStartupController).GetField("planetGenerator", BindingFlags.Instance | BindingFlags.NonPublic).SetValue(controller, planet);
-            var apply = typeof(SimulationStartupController).GetMethod("ApplyConfig", BindingFlags.Instance | BindingFlags.NonPublic);
+            var apply = typeof(SimulationStartupController).GetMethod("ApplyConfigStages", BindingFlags.Instance | BindingFlags.NonPublic,
+                null, new[] { typeof(SimulationStartupConfig) }, null);
+            Assert.That(apply, Is.Not.Null, "Expected SimulationStartupController.ApplyConfigStages(SimulationStartupConfig).");
             var config = new SimulationStartupConfig
             {
                 planetSeed = 123456, useRandomSeed = false,
@@ -45,8 +49,10 @@ public sealed class GeodesicRiverThresholdStartupTests
             foreach (float threshold in new[] { 2f, 8f, 32f })
             {
                 config.riverFlowThreshold = threshold;
-                apply.Invoke(controller, new object[] { config });
+                var stages = (IEnumerable<PlanetGenerationProgress>)apply.Invoke(controller, new object[] { config });
+                foreach (var progress in stages) { }
                 var rivers = obj.GetComponent<GeodesicRiverSystem>();
+                Assert.That(rivers, Is.Not.Null);
                 Assert.That(rivers.riverFlowThreshold, Is.EqualTo(threshold));
                 Assert.That(rivers.majorRiverThreshold, Is.EqualTo(90.25f));
                 var tin = rivers.TinDrainage;

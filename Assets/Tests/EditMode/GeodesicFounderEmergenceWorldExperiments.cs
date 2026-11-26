@@ -31,10 +31,12 @@ public sealed class GeodesicFounderEmergenceWorldExperiments
         public double oceanTime;
     }
     [UnityTest] [Timeout(1500000)]
+    [Explicit("Run in a disposable batch project.")]
     public IEnumerator CompareSeed283BatchAndGradualWithIdenticalBiology() =>
         RunModes(new[]{GeodesicFounderEmergenceMode.Batch,GeodesicFounderEmergenceMode.Gradual});
 
     [UnityTest] [Timeout(1500000)]
+    [Explicit("Run in a disposable batch project.")]
     public IEnumerator RunSeed283GradualOnly() => RunModes(new[]{GeodesicFounderEmergenceMode.Gradual});
 
     private IEnumerator RunModes(GeodesicFounderEmergenceMode[] modes)

@@ -37,7 +37,7 @@ If baseline is missing:
 
 ## Intentional baseline update workflow
 
-1. Run play mode tests locally and capture the `[PERF]` logs for `PredatorsOff` and `PredatorsOn`.
+1. In the PlayMode Test Runner, select the two `PerformanceBenchmarks` cases and use **Run Selected**. Capture the `[PERF]` logs for `PredatorsOff` and `PredatorsOn`.
 2. Update values in `PerformanceBaseline.json` for `avgFrameMs`, `p95FrameMs`, and `gcAllocPerFrame`.
 3. Keep `gcAllocMarginBytes` small (for example 64-256 bytes) unless there is a justified allocation model change.
 4. Commit the JSON update together with the code change that caused performance movement.

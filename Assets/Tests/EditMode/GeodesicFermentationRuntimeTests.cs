@@ -120,7 +120,7 @@ public sealed class GeodesicFermentationRuntimeTests
         internal ReplicatorPopulationState State => Raw.State;
         internal readonly GeodesicOceanResourceField Resources;
         internal Fixture(double volume=1d,int layers=1) {
-            Raw=new GeodesicSulfurRuntimeTests.Fixture(1d,1d,volume,layers); Resources=(GeodesicOceanResourceField)Get(Runtime,"resources");
+            Raw=new GeodesicSulfurRuntimeTests.Fixture(1d,1d,volume,layers); Resources=Raw.resources;
             var temperatures=(float[])Get(Runtime,"temperatureByNode"); for(int i=0;i<temperatures.Length;i++) temperatures[i]=300f;
             Configure();
         }

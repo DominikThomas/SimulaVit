@@ -39,6 +39,10 @@ public sealed class GeodesicInlandUpliftIntegrationTests
         SimulationStartupController.CopyAdvancedSettings(defaults, loaded);
         Assert.That(loaded.inlandElevationMagnitude, Is.Zero);
         Assert.That(SimulationStartupController.DeserializeSavedConfig("{\"version\":16,\"inlandElevationMagnitude\":1}", defaults).inlandElevationMagnitude,
+            Is.EqualTo(1f));
+        float aboveLimit = GeodesicInlandUplift.MaximumMagnitude + 1f;
+        string aboveLimitJson = FormattableString.Invariant($"{{\"version\":16,\"inlandElevationMagnitude\":{aboveLimit}}}");
+        Assert.That(SimulationStartupController.DeserializeSavedConfig(aboveLimitJson, defaults).inlandElevationMagnitude,
             Is.EqualTo(GeodesicInlandUplift.MaximumMagnitude));
         Assert.That(SimulationStartupController.DeserializeSavedConfig("{\"version\":16,\"inlandElevationMagnitude\":-1}", defaults).inlandElevationMagnitude, Is.Zero);
     }

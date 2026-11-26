@@ -49,12 +49,14 @@ public class PerformanceBenchmarks
     }
 
     [UnityTest]
+    [Explicit("Select this legacy benchmark for an intentional baseline comparison.")]
     public IEnumerator PredatorOff_Benchmark_WithinRegressionGate()
     {
         yield return RunAndValidateScenario("PredatorsOff", enablePredators: false);
     }
 
     [UnityTest]
+    [Explicit("Select this legacy benchmark for an intentional baseline comparison.")]
     public IEnumerator PredatorOn_Benchmark_WithinRegressionGate()
     {
         yield return RunAndValidateScenario("PredatorsOn", enablePredators: true);

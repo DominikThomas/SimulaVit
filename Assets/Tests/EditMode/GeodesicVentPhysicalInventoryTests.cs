@@ -4,6 +4,38 @@ using UnityEngine;
 public sealed class GeodesicVentPhysicalInventoryTests
 {
     [Test]
+    public void BoundedWithdrawalCannotOverdrawAnActiveNode()
+    {
+        using (var fixture = new GeodesicSulfurRuntimeTests.Fixture(co2: 1d))
+        {
+            var field = fixture.resources;
+            const GeodesicOceanResource resource = GeodesicOceanResource.CO2;
+            Assert.That(field.TryWithdrawInventoryBounded(0, 0, resource, 2d, out double withdrawn), Is.True);
+            Assert.That(withdrawn, Is.EqualTo(1d));
+            Assert.That(field.GetNodeInventory(0, 0, resource), Is.Zero);
+        }
+    }
+
+    [Test]
+    public void InvalidCellAndLayerRejectInventoryReadsAndWrites()
+    {
+        using (var fixture = new GeodesicSulfurRuntimeTests.Fixture(co2: 1d))
+        {
+            var field = fixture.resources;
+            const GeodesicOceanResource resource = GeodesicOceanResource.CO2;
+            foreach (var (cell, layer) in new[] { (-1, 0), (fixture.grid.CellCount, 0), (0, -1), (0, fixture.grid.MaximumLayerCount) })
+            {
+                Assert.That(field.TryGetConcentration(cell, layer, resource, out float concentration), Is.False);
+                Assert.That(concentration, Is.Zero);
+                Assert.That(field.TryAddInventory(cell, layer, resource, 2d), Is.False);
+                Assert.That(field.TryWithdrawInventoryBounded(cell, layer, resource, 2d, out double withdrawn), Is.False);
+                Assert.That(withdrawn, Is.Zero);
+            }
+            Assert.That(field.GetNodeInventory(0, 0, resource), Is.EqualTo(1d));
+        }
+    }
+
+    [Test]
     public void CompactOutletCellMatchesAuthoritativeInjectionNodeCell()
     {
         const int maximumLayers = 5;

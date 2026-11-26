@@ -91,7 +91,7 @@ public class GeodesicOceanIntegrationTests
                 Assert.That(planet.IsDirectionOcean(topology.CellDirections[cell]), Is.False);
                 Assert.That(planet.IsOceanAtDirection(topology.CellDirections[cell]), Is.False);
                 Assert.That(planet.GetGeodesicCellWaterDepth(cell), Is.Zero);
-                Assert.That(planet.GetGeodesicCellBathymetryRegion(cell), Is.EqualTo(GeodesicBathymetryRegion.Land));
+                Assert.That(planet.GetGeodesicCellBathymetryRegion(cell), Is.EqualTo(nameof(GeodesicBathymetryRegion.Land)));
                 Assert.That(planet.GetGeodesicCellOceanClassification(cell), Is.EqualTo("InlandBasin"));
             }
             var grid = new GeodesicOceanLayerGrid(topology, new GeodesicTransportGraph(topology), planet.OceanConnectivity.OceanMask,

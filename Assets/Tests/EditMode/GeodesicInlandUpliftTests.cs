@@ -106,7 +106,9 @@ public sealed class GeodesicInlandUpliftTests
         Assert.That(GeodesicInlandUplift.NormalizeMagnitude(float.NaN), Is.Zero);
         Assert.That(GeodesicInlandUplift.NormalizeMagnitude(float.PositiveInfinity), Is.Zero);
         Assert.That(GeodesicInlandUplift.NormalizeMagnitude(-1f), Is.Zero);
-        Assert.That(GeodesicInlandUplift.NormalizeMagnitude(1f), Is.EqualTo(GeodesicInlandUplift.MaximumMagnitude));
+        Assert.That(GeodesicInlandUplift.NormalizeMagnitude(1f), Is.EqualTo(1f));
+        Assert.That(GeodesicInlandUplift.NormalizeMagnitude(GeodesicInlandUplift.MaximumMagnitude + 1f),
+            Is.EqualTo(GeodesicInlandUplift.MaximumMagnitude));
     }
 
     [Test]

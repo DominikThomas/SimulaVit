@@ -32,7 +32,7 @@ public class ReplicatorManagerLifecycleTests
 
         Assert.That(manager.TotalPopulation, Is.Zero);
         Assert.That(manager.IsInitializedForSimulation, Is.True,
-            "An initialized Legacy runtime must remain active when its population reaches zero.");
+            "An initialized biology manager must remain active when its population reaches zero.");
     }
 
     [Test]
@@ -62,8 +62,15 @@ public class ReplicatorManagerLifecycleTests
     [Test]
     public void WorldClock_RemainsRunnableAcrossRepeatedBiologyDeinitialization()
     {
-        ReplicatorSimulationPipeline pipeline = root.GetComponent<ReplicatorSimulationPipeline>();
-        Assert.That(pipeline, Is.Not.Null);
+        var planet = root.AddComponent<PlanetGenerator>();
+        planet.ApplyStartupGrid(PlanetGridType.GeodesicIcosphere, 10, 2);
+        manager.planetGenerator = planet;
+        var pipeline = root.AddComponent<ReplicatorSimulationPipeline>();
+        // EditMode does not call the manager's runtime Awake that creates and binds the pipeline.
+        var managerField = typeof(ReplicatorSimulationPipeline).GetField("replicatorManager",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.That(managerField, Is.Not.Null);
+        managerField.SetValue(pipeline, manager);
 
         for (int generation = 0; generation < 3; generation++)
         {
@@ -74,12 +81,16 @@ public class ReplicatorManagerLifecycleTests
 
             // ResetClock deliberately discards one rendered delta, just as startup does.
             pipeline.RunFrame();
+            Assert.That(pipeline.SimulationTimeSeconds, Is.Zero);
             pipeline.RunFrame();
 
             Assert.That(manager.IsInitializedForSimulation, Is.False);
             Assert.That(pipeline.ShouldAdvanceSimulation, Is.True,
                 $"World timing stopped after biology cleanup on generation {generation}.");
-            Assert.That(pipeline.SimulationStepsExecutedThisFrame, Is.EqualTo(1));
+            double expectedAdvance = ReplicatorSimulationPipeline.CalculateAuthoritativeFrameAdvance(
+                pipeline.RawRenderedFrameDelta, 1f, pipeline.MaximumSimulationStepDeltaSeconds);
+            Assert.That(pipeline.SimulationTimeSeconds, Is.EqualTo(expectedAdvance).Within(1e-8d));
+            Assert.That(pipeline.SimulationStepsExecutedThisFrame, Is.Zero);
             Assert.That(manager.SimulationStepCount, Is.Zero,
                 "An uninitialized biology runtime must not execute biological steps.");
         }

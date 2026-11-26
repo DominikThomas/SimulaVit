@@ -21,9 +21,13 @@ public sealed class GeodesicRiverGradeTests
     [Test]
     public void DownhillTerracesAndTwoMicroUnitRisesAreAlreadyAccepted()
     {
-        float Height(Vector3 d) => T(d)<.25f?1.2f:T(d)<.5f?1.15f:T(d)<.75f?1.150002f:1.1f;
+        const float lowerTerrace = 1.125f;
+        const float upperTerrace = lowerTerrace + 0.0000019073486328125f; // Exactly 16 float ULPs.
+        const float rise = upperTerrace - lowerTerrace;
+        float Height(Vector3 d) => T(d) < .25f ? 1.2f : T(d) < .5f ? lowerTerrace : T(d) < .75f ? upperTerrace : 1.1f;
         Assert.That(GeodesicRiverPath.Refine(Start,End,Height,12,7,0f,.000002f).Length,Is.EqualTo(13));
-        Assert.That(GeodesicRiverGradeAudit.MinimumCorridorTolerance(Start,End,Height,12,7,0f),Is.EqualTo(.000002f).Within(.00000012f));
+        Assert.That(GeodesicRiverPath.Refine(Start, End, Height, 12, 7, 0f, .0000018f), Is.Empty);
+        Assert.That(GeodesicRiverGradeAudit.MinimumCorridorTolerance(Start, End, Height, 12, 7, 0f), Is.EqualTo((double)rise));
     }
 
     [Test]

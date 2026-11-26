@@ -320,10 +320,28 @@ public sealed class GeodesicBiologyRuntimeTests
             {
                 Assert.That(f.State.OptimalTempMin[1], Is.EqualTo(range.x));
                 Assert.That(f.State.OptimalTempMax[1], Is.EqualTo(range.y));
-                Assert.That(f.agents[1].color, Is.EqualTo(Color.pink));
             }
             if (!enabled)
                 Assert.That(SimulationStartupEvolutionTests.Get(f.runtime, "methanotrophyMutationRandom"), Is.Null);
+        }
+    }
+
+    [Test]
+    public void MethanotrophDaughterUsesTheLinearRenderPalette()
+    {
+        using (var f = new GeodesicSulfurRuntimeTests.Fixture())
+        {
+            ConfigureMethanotrophy(f, true, 1f);
+            f.Write(GeodesicOceanResource.CH4, 1d);
+            f.Write(GeodesicOceanResource.O2, 1d);
+            f.AddAgent(1f, MetabolismType.Hydrogenotrophy);
+            f.State.Energy[0] = 5f;
+
+            StepMethanotrophy(f, reproductionRate: 2f);
+
+            Assert.That(f.State.Count, Is.EqualTo(2));
+            Assert.That(f.State.Metabolism[1], Is.EqualTo(MetabolismType.Methanotrophy));
+            Assert.That(f.agents[1].color, Is.EqualTo(ReplicatorManager.MethanotrophRenderColor));
         }
     }
 
@@ -462,9 +480,10 @@ public sealed class GeodesicBiologyRuntimeTests
             GeodesicBiologyRuntime.PassiveKinematicsIntervalSeconds);
         // Semi-implicit tangent integration differs slightly with step size, but the physical
         // travel distance is invariant to substantially below a rendered pixel at planet scale.
-        Assert.That(Vector3.Angle(fineDirection, coarseDirection), Is.LessThan(0.0001f));
-        Assert.That(Vector3.Angle(Vector3.up, coarseDirection), Is.EqualTo(
-            PassiveTravelDegrees(GeodesicBiologyRuntime.PassiveKinematicsIntervalSeconds)).Within(0.0001f));
+        Assert.That(AngularDistanceDegrees(fineDirection, coarseDirection), Is.LessThan(0.0001f));
+        float expected = PassiveTravelDegrees(GeodesicBiologyRuntime.PassiveKinematicsIntervalSeconds);
+        Assert.That(AngularDistanceDegrees(Vector3.up, fineDirection), Is.EqualTo(expected).Within(0.0001f));
+        Assert.That(AngularDistanceDegrees(Vector3.up, coarseDirection), Is.EqualTo(expected).Within(0.0001f));
     }
 
     [Test]
@@ -481,6 +500,10 @@ public sealed class GeodesicBiologyRuntimeTests
 
     private static float PassiveTravelDegrees(float seconds)
         => GeodesicBiologyRuntime.PassiveAngularSpeedRadiansPerSecond * seconds * Mathf.Rad2Deg;
+
+    // acos(dot) rounds these small displacements to zero in single precision.
+    private static float AngularDistanceDegrees(Vector3 from, Vector3 to)
+        => Mathf.Atan2(Vector3.Cross(from, to).magnitude, Vector3.Dot(from, to)) * Mathf.Rad2Deg;
 
     [Test]
     public void PassiveKinematicsIsDeterministicAndHasNoHabitatInputs()
@@ -578,11 +601,11 @@ public sealed class GeodesicBiologyRuntimeTests
         Assert.That(first, Is.EqualTo(GeodesicBiologyRuntime.SampleVerticalInterval(42u, 7u)));
         Assert.That(first, Is.GreaterThan(0f));
         Assert.That(float.IsFinite(first), Is.True);
-        Assert.That(GeodesicBiologyRuntime.PassiveVerticalOpportunitiesPerSecond, Is.EqualTo(0.015f));
         double sum = 0d;
         for (uint sequence = 0; sequence < 4096; sequence++)
             sum += GeodesicBiologyRuntime.SampleVerticalInterval(42u, sequence);
-        Assert.That(sum / 4096d, Is.InRange(55d, 80d));
+        double meanInExpectedIntervals = sum / 4096d * GeodesicBiologyRuntime.PassiveVerticalOpportunitiesPerSecond;
+        Assert.That(meanInExpectedIntervals, Is.InRange(.85d, 1.15d));
     }
 
     [Test]

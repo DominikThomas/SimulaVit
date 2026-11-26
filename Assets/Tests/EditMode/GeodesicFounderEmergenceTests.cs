@@ -101,6 +101,8 @@ public sealed class GeodesicFounderEmergenceTests
         using(var f=new Fixture(count:1000)) {
             var temperatures=(float[])Get(f.Raw.runtime,"temperatureByNode"); temperatures[0]=100f;
             f.Advance(10000,10000); Assert.That(f.Snapshot.attempts,Is.EqualTo(64)); Assert.That(f.State.Count,Is.Zero);
+            Assert.That(f.Snapshot.thermalCandidateRejections, Is.GreaterThan(0));
+            Assert.That(f.Snapshot.invalidCandidateRejections, Is.Zero);
         }
         using(var f=new Fixture()) { f.Vents(); f.Advance(1000,100); Assert.That(f.Snapshot.rejectedHabitat,Is.EqualTo(1)); }
     }
@@ -123,6 +125,8 @@ public sealed class GeodesicFounderEmergenceTests
             var streams=new System.Random[streamNames.Length];
             for(int k=0;k<streams.Length;k++) { streams[k]=new System.Random(777); Set(a.Raw.runtime,streamNames[k],streams[k]); }
             a.Advance(10000,100); b.Advance(10000,100);
+            Assert.That(a.State.Count, Is.EqualTo(20));
+            Assert.That(b.State.Count, Is.EqualTo(a.State.Count));
             for(int i=0;i<a.State.Count;i++) { Assert.That(a.State.GeodesicCellIndex[i],Is.EqualTo(b.State.GeodesicCellIndex[i]));
                 Assert.That(a.State.Energy[i],Is.EqualTo(b.State.Energy[i])); Assert.That(a.State.MaxLifespan[i],Is.EqualTo(b.State.MaxLifespan[i]));
                 Assert.That(a.State.MovementSeed[i],Is.EqualTo(b.State.MovementSeed[i])); Assert.That(a.State.Position[i],Is.EqualTo(b.State.Position[i])); }
@@ -204,7 +208,9 @@ public sealed class GeodesicFounderEmergenceTests
     public void OriginBirthAndDeathAccountingSurvivesSwapBack()
     {
         using(var f=new Fixture(count:2)) {
-            f.Advance(1000,10); long id=f.Raw.agents[0].DiagnosticId;
+            f.Advance(1000,10);
+            Assert.That(f.State.Count, Is.EqualTo(2));
+            long id=f.Raw.agents[0].DiagnosticId;
             Call(f.Raw.runtime,"RecordFounderParentBirth",id); Call(f.Raw.runtime,"RecordFounderParentBirth",long.MaxValue);
             Call(f.Raw.runtime,"RecordFounderDeath",id); GeodesicBiologyRuntime.RemoveAgentAtSwapBack(0,f.Raw.agents,f.State);
             Assert.That(f.Snapshot.livingFounders,Is.EqualTo(1)); Assert.That(f.Snapshot.founderDeaths,Is.EqualTo(1));
@@ -237,10 +243,18 @@ public sealed class GeodesicFounderEmergenceTests
     private sealed class Fixture:IDisposable
     {
         public readonly GeodesicSulfurRuntimeTests.Fixture Raw;
+        private readonly GeodesicOceanResourceField resources;
+        private readonly GeodesicExperiencedTemperatureField experienced;
         public ReplicatorPopulationState State=>Raw.State;
         public GeodesicBiologyRuntime.FounderEmergenceSnapshot Snapshot=>Raw.runtime.CaptureFounderEmergence(State);
         public Fixture(int count=1,int layerCount=1) {
             Raw=new GeodesicSulfurRuntimeTests.Fixture(layerCount:layerCount);
+            resources = Raw.resources;
+            experienced = resources.gameObject.AddComponent<GeodesicExperiencedTemperatureField>();
+            Set(experienced, "resources", resources);
+            Set(experienced, "generator", resources.GetComponent<PlanetGenerator>());
+            Set(experienced, "ventMicrothermalFalloffDistance", .12f);
+            Set(Raw.runtime, "experiencedTemperature", experienced);
             Set(Raw.runtime,"biologySeed",283); Set(Raw.runtime,"founderMinLife",360f); Set(Raw.runtime,"founderMaxLife",600f);
             Set(Raw.runtime,"founderColor",Color.cyan); Set(Raw.runtime,"founderBiomassTarget",.15f);
             Set(Raw.runtime,"founderHydrogenTemperatureRange",new Vector2(330,390)); Set(Raw.runtime,"founderLethalMargin",20f);
@@ -249,10 +263,26 @@ public sealed class GeodesicFounderEmergenceTests
             Raw.runtime.ConfigureGradualEmergence(count,0,.01f,false,300);
         }
         public void Vents(params (int cell,float weight)[] cells) {
-            var outlets=new GeodesicVentSourceOutlet[cells.Length];
-            for(int i=0;i<cells.Length;i++) outlets[i]=new GeodesicVentSourceOutlet(GeodesicVentHabitat.Submarine,cells[i].cell,
-                Raw.grid.GetNodeIndex(cells[i].cell,Raw.grid.GetBottomLayerIndex(cells[i].cell)),i,1f,cells[i].weight,1f);
-            Set(Get(Raw.runtime,"resources"),"ventOutlets",outlets);
+            var outlets = new GeodesicVentSourceOutlet[cells.Length];
+            var thermalOutlets = new GeodesicVentOutlet[cells.Length];
+            for (int i = 0; i < cells.Length; i++)
+            {
+                int cell = cells[i].cell;
+                int layer = Raw.grid.GetBottomLayerIndex(cell);
+                int node = Raw.grid.GetNodeIndex(cell, layer);
+                var direction = Raw.grid.SourceTopology.CellDirections[cell];
+                outlets[i] = new GeodesicVentSourceOutlet(GeodesicVentHabitat.Submarine, cell, node, i, 1f, cells[i].weight, 1f);
+                // The local disc fits inside this coarse cell. A weak thermal anomaly keeps the
+                // 350 K background viable and leaves the deliberately cold habitat unsuitable.
+                thermalOutlets[i] = new GeodesicVentOutlet(GeodesicVentHabitat.Submarine, cell, layer, i,
+                    direction * 7.5f, direction, .01f, .02f);
+            }
+            Set(resources, "ventOutlets", outlets);
+            Set(experienced, "outlets", thermalOutlets);
+            Call(experienced, "BuildLookup");
+            foreach (var outlet in outlets)
+                Assert.That(experienced.TryGetSubmarineOutletForNode(outlet.SourceNode, out _, out _), Is.True,
+                    $"Missing thermal outlet for injection node {outlet.SourceNode}.");
         }
         public void Advance(double time,int cap)=>Raw.runtime.AdvanceFounderEmergence(time,cap,.01f,.02f,false,.02f,.12f,.25f,Raw.agents,State);
         public void Dispose()=>Raw.Dispose();

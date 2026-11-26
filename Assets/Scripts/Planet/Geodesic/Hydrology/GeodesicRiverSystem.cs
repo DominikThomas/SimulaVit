@@ -774,8 +774,13 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
                 if (showRejectedUphillRiverSegments) CaptureRejectedTinPath(source, samples);
             }
         }
-        if (restoredTin != null && showRejectedUphillRiverSegments)
-            foreach (var reach in restoredTin.Rejected) CaptureRejectedTinPath(reach.Source, reach.Samples);
+        if (showRejectedUphillRiverSegments)
+        {
+            if (restoredTin != null)
+                foreach (var reach in restoredTin.Rejected) CaptureRejectedTinPath(reach.Source, reach.Samples);
+            else if (reuseRawNetworks)
+                TinDrainage.VisitRejectedNetworkTraces(CaptureRejectedTinPath);
+        }
 
         SnapshotRecord lakeRecord = planet.generateHydrologicalLakes && tinRecord?.Digest != null ? LakeRecord(tinRecord) : null;
         RestoredLakes restoredLakes = null;

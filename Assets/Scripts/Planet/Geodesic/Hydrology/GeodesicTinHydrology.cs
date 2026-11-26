@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using UnityEngine;
 
 public enum TinTermination
@@ -820,6 +821,23 @@ public sealed partial class GeodesicTinHydrology
     }
 
     private struct ChannelSegment { public int Network; public TinPoint Start, End; }
+
+    internal void VisitRejectedNetworkTraces(Action<int, TinPoint[]> visit)
+    {
+        var samples = new List<TinPoint>(128);
+        var candidates = new List<int>(8);
+        var rejected = new List<TinPoint[]>(1);
+        foreach (var network in networks)
+        {
+            if (network.Termination != TinTermination.RoutingFailure) continue;
+            rejected.Clear();
+            TraceInto(Centroid(network.SourceTriangle), samples, candidates, 32768, rejected, observe: false);
+            // Presentation can relabel a confluence as a failure. Its published prefix
+            // is shorter than the original trace and must not inherit that trace's rejection.
+            if (rejected.Count > 0 && samples.SequenceEqual(network.Samples))
+                visit(network.SourceTriangle, rejected[0]);
+        }
+    }
 
     /// <summary>Start whole streams at threshold crossings. A tributary can merge only by
     /// constructing an accepted continuous downhill segment inside the same facet to the

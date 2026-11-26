@@ -132,6 +132,7 @@ The former implementation plan is about 207 KB and mixes architectural contracts
 | [Geodesic performance roadmap](GEODESIC_PERFORMANCE_ROADMAP.md) | Authoritative sequence, acceptance gates, and evidence for P0–P6 on the performance branch. |
 | [Geodesic P0 manual benchmarks](GEODESIC_PERFORMANCE_BENCHMARKS.md) | Fixed-seed A–D profiles, matched measurement windows, timing scope definitions, and observer overhead checks. |
 | [Geodesic P1 lifecycle thermal sampling](GeodesicLifecycleThermalOptimization.md) | Reference and optimized paths, cache and numerical equivalence, and user-run acceptance procedure. |
+| [Geodesic test-suite maintenance](GeodesicTestSuiteMaintenance.md) | 813-case EditMode baseline, failure dispositions, retired legacy coverage, and manual rerun instructions. |
 | [Geodesic scalability architecture assessment](GEODESIC_SCALABILITY_ARCHITECTURE_ASSESSMENT.md) | Starting architecture assessment for milestone A7. Covers execution dependencies and historical projections through 100,000 organisms. |
 | [Geodesic performance baseline](GeodesicPerformanceBaseline.md) | Original analyzer’s metrics, capture behavior, and historical timing and validation context. |
 | [Geodesic environmental CPU optimization](GeodesicEnvironmentalCpuOptimization.md) | Earlier transport and thermal optimization report, with historical measurements and attribution limits. |

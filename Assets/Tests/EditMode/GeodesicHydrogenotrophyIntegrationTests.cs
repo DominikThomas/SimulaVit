@@ -405,29 +405,8 @@ public sealed class GeodesicHydrogenotrophyIntegrationTests
             }
         }
 
-        public void React(bool observe = true)
-        {
-            Invoke(runtime, "EnsureRequestCapacity", State.Count);
-            Invoke(runtime, "BeginSparseStep");
-            MethodInfo build = typeof(GeodesicBiologyRuntime).GetMethod("BuildRequest", Private);
-            for (int i = 0; i < State.Count; i++)
-            {
-                var args = new object[build.GetParameters().Length];
-                for (int k = 0; k < args.Length; k++)
-                {
-                    string name = build.GetParameters()[k].Name;
-                    args[k] = name == "i" ? (object)i : name == "state" ? State : name == "hO2InhibitionEnabled" ? (object)false
-                        : name == "dt" ? .5f : name == "hCo2" ? .01f : name == "hH2" ? .02f : name == "hEnergy" ? 8f
-                        : name == "hStoreFraction" ? .8f : name == "maximumStore" ? 10f : 0f;
-                }
-                build.Invoke(runtime, args);
-            }
-            Invoke(runtime, "AggregateDemands", State.Count); Invoke(runtime, "ResolveAvailabilityFactors");
-            Invoke(runtime, "ResolveCompetition", State.Count);
-            if (observe) Invoke(runtime, "PrepareAccountingScratch");
-            Invoke(runtime, "CommitRequests", State.Count, State, 10f, observe);
-            if (observe) for (int i = 0; i < State.Count; i++) Invoke(runtime, "RecordReactionAccounting", i);
-        }
+        public void React(bool observe = true) =>
+            GeodesicReactionTestPipeline.React(runtime, State, 10f, observe);
 
         public void Lifecycle(float rate, float split) => Invoke(runtime, "RunLifecycle", 1f, agents, State,
             0f, rate, true, .2f, .5f, 2f, split, 10, null, false, false);
