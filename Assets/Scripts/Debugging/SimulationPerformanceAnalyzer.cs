@@ -509,6 +509,7 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
         {
             string stem = captureNumber == 1 ? fileStem : fileStem + "_" + captureNumber.ToString(CultureInfo.InvariantCulture);
             string path = Path.Combine(directory, stem + ".csv");
+            if (File.Exists(SimulationStartupController.StartupCaptureSnapshotPath(path))) continue;
             FileStream file;
             try { file = new FileStream(path, FileMode.CreateNew, FileAccess.Write); }
             catch (IOException) when (File.Exists(path)) { continue; }

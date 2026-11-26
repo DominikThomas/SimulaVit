@@ -1,0 +1,28 @@
+{
+    "scenario": "mixed-death-recycling-only",
+    "phenotype": "anchored",
+    "seconds": 160.0,
+    "founders": 24,
+    "survivors": 480,
+    "hydrogen": 9,
+    "sulfur": 289,
+    "fermenters": 182,
+    "births": 190,
+    "deaths": 16,
+    "parentBirths": [
+        0,
+        0,
+        0,
+        190
+    ],
+    "consumed": 113.2910435944788,
+    "assimilated": 45.31627056002617,
+    "co2": 67.9747730344523,
+    "h2": 67.97477303445496,
+    "energy": 2379.1170766837313,
+    "deathDissolvedCarbon": 113.29104359447956,
+    "remainingOrganic": 9.22005527481673e-16,
+    "carbonResidual": 0.0,
+    "meanTemperaturePerformance": 1.0,
+    "meanLocalOrganicC": 2.5103518626253296
+}

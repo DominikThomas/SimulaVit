@@ -3,14 +3,14 @@ using UnityEngine;
 
 public partial class SimulationStartupController
 {
-    private enum SetupTab { Planet, Ocean, Atmosphere, Biology, Advanced, Debug }
-    private static readonly string[] SetupTabNames = { "Planet", "Ocean", "Atmosphere", "Biology", "Advanced", "Debug" };
+    private enum SetupTab { Planet, Ocean, Atmosphere, Biology, Advanced, Debug, Profiles }
+    private static readonly string[] SetupTabNames = { "Planet", "Ocean", "Atmosphere", "Biology", "Advanced", "Debug", "Profiles" };
     private static readonly string[] GridNames = { "Cube Sphere (Legacy)", "Geodesic Icosphere" };
     private static readonly string[] SeaLevelNames = { "Manual offset", "Target area coverage", "Ocean World" };
     private static readonly string[] HydrologyNames = { "Visible terrain", "Fine detail removed (full ridges)", "Reduced ridge + fine detail (reference)" };
     private static readonly string[] LifecycleThermalSamplingNames = { "Reference", "Optimized" };
     private static readonly string[] MetabolismNames = { "Hydrogenotrophy", "Sulfur chemosynthesis", "Fermentation", "Methanogenesis", "Methanotrophy", "Photosynthesis", "Saprotrophy", "Predation" };
-    private readonly Vector2[] tabScrollPositions = new Vector2[6];
+    private readonly Vector2[] tabScrollPositions = new Vector2[SetupTabNames.Length];
     private SetupTab selectedSetupTab;
     private int selectedMetabolism;
     private bool detailedGeodesicProfiling;
@@ -43,7 +43,7 @@ public partial class SimulationStartupController
     private void DrawBuiltInConfigScreen()
     {
         EnsureSetupStyles();
-        // Keep six readable tabs on small displays. Scale the entire setup uniformly;
+        // Keep the tabs readable on small displays. Scale the entire setup uniformly;
         // GUILayout still measures its content, so no content-height estimates are needed.
         float scale = Mathf.Min(1f, Mathf.Min(Screen.width / 760f, Screen.height / 520f));
         scale = Mathf.Max(0.01f, scale);
@@ -92,6 +92,10 @@ public partial class SimulationStartupController
                 case SetupTab.Biology: DrawBiologyTab(); break;
                 case SetupTab.Advanced: DrawAdvancedTab(); break;
                 case SetupTab.Debug: DrawDebugTab(); break;
+                case SetupTab.Profiles:
+                    if (GUI.changed) profileModified = HasProfileChanges(currentConfig);
+                    DrawProfilesTab();
+                    break;
             }
             GUILayout.Space(8f);
             GUILayout.EndVertical();
@@ -108,12 +112,14 @@ public partial class SimulationStartupController
             GUILayout.EndArea();
         }
         finally { GUI.matrix = previousMatrix; }
+        RunPendingProfileAction();
         if (nextTab != (int)selectedSetupTab)
         {
             // Every tab keeps its own scroll position, including after changing a setting.
             GUI.FocusControl(null);
             NormalizeAdditionalSettings(currentConfig, defaults);
             selectedSetupTab = (SetupTab)nextTab;
+            if (selectedSetupTab == SetupTab.Profiles) EnterProfilesTab();
             GUIUtility.ExitGUI();
         }
     }

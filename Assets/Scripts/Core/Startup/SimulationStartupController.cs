@@ -275,6 +275,7 @@ public partial class SimulationStartupController : MonoBehaviour
         startScreenStatusMessage = null;
         ShowSetupScreen(true);
         RefreshStartupPanels();
+        if (startupScreenRoot == null && selectedSetupTab == SetupTab.Profiles) EnterProfilesTab();
     }
 
     private void ShowMainMenu()
@@ -420,6 +421,7 @@ public partial class SimulationStartupController : MonoBehaviour
         numericFieldEdits.Clear();
         integerFieldEdits.Clear();
         RefreshStartupPanels();
+        if (selectedSetupTab == SetupTab.Profiles) profileModified = HasProfileChanges(currentConfig);
     }
 
     public void ResetAdvancedToDefaults()
@@ -607,7 +609,7 @@ public partial class SimulationStartupController : MonoBehaviour
         }
     }
 
-    private void CompleteGeneratedStartup(bool keepPaused)
+    private void CompleteGeneratedStartup(bool keepPaused, int configuredSeed, bool configuredUseRandomSeed, bool modifiedSinceProfile)
     {
         int targetSteps = keepPaused ? 0 : Mathf.Max(1, resumeStepsPerFrame);
         replicatorManager?.SetSimulationTiming(targetSteps);
@@ -621,6 +623,21 @@ public partial class SimulationStartupController : MonoBehaviour
         setupCurtainOrOverlay?.HideImmediate();
         loadingOverlay.HideImmediate();
         BeginPerformanceCapture();
+        string csvPath = currentConfig.enablePerformanceRecording ? performanceAnalyzer?.ActiveCsvOutputPath : null;
+        if (!string.IsNullOrEmpty(csvPath))
+        {
+            var experiments = new SimulationStartupProfiles.ExperimentSettings(performanceAnalyzer.DetailedGeodesicProfilingActive,
+                replicatorManager?.GeodesicLifecycleThermalMode ?? LifecycleThermalSamplingMode.Reference);
+            try
+            {
+                WriteStartupCaptureSnapshot(csvPath, currentConfig, configuredSeed, configuredUseRandomSeed, sourceProfileName, modifiedSinceProfile,
+                    experiments, planetGenerator);
+            }
+            catch (Exception exception) when (IsProfileFileError(exception))
+            {
+                Debug.LogWarning($"[SimulationPerformanceAnalyzer] Could not write startup configuration snapshot. {exception.Message}", this);
+            }
+        }
         Debug.Log("[StartupLifecycle] Simulation started.", this);
     }
 
@@ -641,16 +658,16 @@ public partial class SimulationStartupController : MonoBehaviour
     private IEnumerable<PlanetGenerationProgress> ApplyStartupStages(bool keepPaused)
     {
         ClampLoadedConfig(currentConfig);
+        int configuredSeed = currentConfig.planetSeed;
+        bool configuredUseRandomSeed = currentConfig.useRandomSeed;
+        bool modifiedSinceProfile = HasProfileChanges(currentConfig);
         foreach (var progress in ApplyConfigStages(currentConfig)) yield return progress;
 
-        if (saveStartupConfigOnStart)
-        {
-            SaveStartupConfig(currentConfig);
-        }
+        SaveLastUsedStartupConfig();
 
         if (logAppliedStartupConfig)
         {
-            LogStartupConfigApplied(currentConfig, keepPaused);
+            LogStartupConfigApplied(currentConfig, keepPaused, modifiedSinceProfile);
         }
 
         yield return new PlanetGenerationProgress(PlanetGenerationStage.PreparingPrimordialWorld);
@@ -681,7 +698,7 @@ public partial class SimulationStartupController : MonoBehaviour
         yield return new PlanetGenerationProgress(PlanetGenerationStage.AlmostReady);
         if (planetGenerator != null)
             foreach (var progress in planetGenerator.PublishGeodesicSnapshotStages()) yield return progress;
-        CompleteGeneratedStartup(keepPaused);
+        CompleteGeneratedStartup(keepPaused, configuredSeed, configuredUseRandomSeed, modifiedSinceProfile);
     }
 
     private void ShowGenerationFailure(Exception exception)
@@ -865,6 +882,7 @@ public partial class SimulationStartupController : MonoBehaviour
         string path = SavedStartupConfigPath;
         try
         {
+            RejectNamedProfilePath(path);
             if (File.Exists(path))
             {
                 File.Delete(path);
@@ -899,17 +917,16 @@ public partial class SimulationStartupController : MonoBehaviour
     private bool LoadSavedStartupConfig()
     {
         string path = SavedStartupConfigPath;
-        if (!File.Exists(path))
-        {
-            if (logAppliedStartupConfig)
-            {
-                Debug.Log($"[SimulationStartupController] No saved startup config found at: {path}");
-            }
-            return false;
-        }
-
         try
         {
+            RejectNamedProfilePath(path);
+            if (!File.Exists(path))
+            {
+                if (logAppliedStartupConfig)
+                    Debug.Log($"[SimulationStartupController] No saved startup config found at: {path}");
+                return false;
+            }
+
             string json = File.ReadAllText(path);
             if (string.IsNullOrWhiteSpace(json))
             {
@@ -917,9 +934,9 @@ public partial class SimulationStartupController : MonoBehaviour
                 return false;
             }
 
-            currentConfig = DeserializeSavedConfig(json, defaults);
-            ClampLoadedConfig(currentConfig);
-            ApplyVentVisualSettings();
+            ApplyLoadedStartupConfig(DeserializeSavedConfig(json, defaults));
+            sourceProfileName = profileBaseline = null;
+            profileModified = false;
 
             if (logAppliedStartupConfig)
             {
@@ -935,6 +952,20 @@ public partial class SimulationStartupController : MonoBehaviour
         }
     }
 
+    private void ApplyLoadedStartupConfig(SimulationStartupConfig config)
+    {
+        currentConfig = config;
+        ClampLoadedConfig(config);
+        ApplyVentVisualSettings();
+        numericFieldEdits.Clear();
+        integerFieldEdits.Clear();
+    }
+
+    private void RejectNamedProfilePath(string path)
+    {
+        if (ProfileStore.OwnsPath(path)) throw new IOException("The ordinary startup file must be outside the named profiles folder.");
+    }
+
     private void SaveStartupConfig(SimulationStartupConfig config)
     {
         if (config == null)
@@ -945,15 +976,14 @@ public partial class SimulationStartupController : MonoBehaviour
         string path = SavedStartupConfigPath;
         try
         {
+            RejectNamedProfilePath(path);
             string directory = Path.GetDirectoryName(path);
             if (!string.IsNullOrEmpty(directory))
             {
                 Directory.CreateDirectory(directory);
             }
 
-            SavedStartupConfig savedConfig = SavedStartupConfig.FromConfig(config);
-            string json = JsonUtility.ToJson(savedConfig, true);
-            File.WriteAllText(path, json);
+            File.WriteAllText(path, SerializeSavedConfig(config, prettyPrint: true));
 
             if (logAppliedStartupConfig)
             {
@@ -1098,7 +1128,7 @@ public partial class SimulationStartupController : MonoBehaviour
         }
     }
 
-    private void LogStartupConfigApplied(SimulationStartupConfig config, bool startPaused)
+    private void LogStartupConfigApplied(SimulationStartupConfig config, bool startPaused, bool modifiedSinceProfile)
     {
         if (config == null)
         {
@@ -1107,6 +1137,8 @@ public partial class SimulationStartupController : MonoBehaviour
 
         StringBuilder builder = new StringBuilder();
         builder.AppendLine("[Startup Config Applied]");
+        builder.AppendLine($"Source Profile: {sourceProfileName ?? "(none)"}");
+        if (sourceProfileName != null) builder.AppendLine($"Startup Settings Modified Since Profile: {modifiedSinceProfile}");
         builder.AppendLine($"Planet Seed: {config.planetSeed}");
         builder.AppendLine($"Use Random Seed: {config.useRandomSeed}");
         builder.AppendLine($"Planet Grid: {config.gridType}");
@@ -1152,6 +1184,25 @@ public partial class SimulationStartupController : MonoBehaviour
         builder.AppendLine($"Start Paused: {startPaused}");
         builder.AppendLine($"Saved Config Path: {SavedStartupConfigPath}");
         Debug.Log(builder.ToString());
+    }
+
+    internal static string SerializeSavedConfig(SimulationStartupConfig config, bool prettyPrint = false) =>
+        JsonUtility.ToJson(SavedStartupConfig.FromConfig(config), prettyPrint);
+
+    [Serializable]
+    private sealed class SavedStartupConfigHeader
+    {
+        public int version = 0;
+    }
+
+    internal static SimulationStartupConfig DeserializeProfileConfiguration(string json, SimulationStartupConfig fallback)
+    {
+        var header = JsonUtility.FromJson<SavedStartupConfigHeader>(json);
+        if (header == null || header.version < 1)
+            throw new InvalidDataException("This profile is missing a valid startup configuration version.");
+        if (header.version > SavedStartupConfigVersion)
+            throw new InvalidDataException("This profile contains a newer startup configuration version.");
+        return DeserializeSavedConfig(json, fallback);
     }
 
     public static SimulationStartupConfig DeserializeSavedConfig(string json, SimulationStartupConfig fallback)

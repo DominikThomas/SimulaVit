@@ -1,0 +1,28 @@
+{
+    "scenario": "finite-organic-rich",
+    "phenotype": "Flagellum",
+    "seconds": 80.0,
+    "founders": 8,
+    "survivors": 16,
+    "hydrogen": 0,
+    "sulfur": 0,
+    "fermenters": 16,
+    "births": 8,
+    "deaths": 0,
+    "parentBirths": [
+        0,
+        0,
+        8,
+        0
+    ],
+    "consumed": 3.200000000000002,
+    "assimilated": 1.2799962759017945,
+    "co2": 1.9200037240982076,
+    "h2": 1.9200037240982076,
+    "energy": 67.20013090968132,
+    "deathDissolvedCarbon": 0.0,
+    "remainingOrganic": 1.214306433183765e-17,
+    "carbonResidual": 1.7763568394002506e-15,
+    "meanTemperaturePerformance": 1.0,
+    "meanLocalOrganicC": 0.10969912463147622
+}

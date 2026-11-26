@@ -1,0 +1,28 @@
+{
+    "scenario": "organic-poor",
+    "phenotype": "Amoeboid",
+    "seconds": 80.0,
+    "founders": 8,
+    "survivors": 0,
+    "hydrogen": 0,
+    "sulfur": 0,
+    "fermenters": 0,
+    "births": 0,
+    "deaths": 8,
+    "parentBirths": [
+        0,
+        0,
+        0,
+        0
+    ],
+    "consumed": 0.0,
+    "assimilated": 0.0,
+    "co2": 0.0,
+    "h2": 0.0,
+    "energy": 0.0,
+    "deathDissolvedCarbon": 1.2000000476837159,
+    "remainingOrganic": 1.2000000476837159,
+    "carbonResidual": 0.0,
+    "meanTemperaturePerformance": 1.0,
+    "meanLocalOrganicC": 0.0
+}

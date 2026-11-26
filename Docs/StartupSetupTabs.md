@@ -3,7 +3,7 @@
 > **UI implementation checkpoint.** The tables below describe the original setup release. Later milestones extend the Biology controls with metabolic availability, fermentation, photosynthesis, saprotrophy, methanogenesis, methanotrophy and gradual founders. [Current Biology controls](StartupBiologyEvolution.md) · [Saprotrophy controls](GeodesicAerobicSaprotrophy.md) · [Methanogenesis controls](GeodesicMethanogenesis.md) · [Methanotrophy controls](GeodesicAerobicMethanotrophy.md) · [Vent VFX persistence](HydrothermalVentVfx.md) · [Roadmap](GEODESIC_MIGRATION_ROADMAP.md)
 
 
-The built-in setup remains Unity IMGUI. Its common header contains the title, random-seed toggle, editable seed, Randomize button and grid selector. Six tabs share a fixed bottom action row (Start, Start Paused, Reset Defaults, Back). Each tab retains its own scroll position and uses automatic GUILayout sizing. Setup uses a responsive panel, at least 900 logical pixels wide when space permits, with uniform scaling below a 760 × 520 logical viewport. The main menu, save picker and loading presentation are unchanged.
+The built-in setup uses Unity IMGUI. Its common header contains the title, random-seed toggle, editable seed, Randomize button and grid selector. Seven tabs share a fixed bottom action row (Start, Start Paused, Reset Defaults, Back). Each tab retains its own scroll position and uses automatic GUILayout sizing. Setup uses a responsive panel, at least 900 logical pixels wide when space permits, with uniform scaling below a 760 × 520 logical viewport.
 
 ## Controls
 
@@ -15,10 +15,29 @@ The built-in setup remains Unity IMGUI. Its common header contains the title, ra
 | Biology | Population, founder delay, reproduction/division, maintenance/movement costs, evolution, eight temperature templates, thermal settings and a metabolism parameter selector. Controls reflect the selected mode's actual consumers. |
 | Advanced | Performance recording, Geodesic geometry and sea level, terrain and hydrology, basin infill, environment and telemetry intervals, atmosphere inventory scaling, and Reset Advanced. |
 | Debug | River destination colours, rejected/uphill reaches, visible-terrain grade, termination reasons, carving gizmos and the existing geodesic chemotaxis steering/A/B diagnostic switches. |
+| Profiles | Select, load, save, rename and delete named configurations. Control automatic last-used saving and opt in to saving or loading session-only experiment settings. |
 
 Unsupported geodesic planet/environment controls are hidden with explanations in legacy mode. All previously editable built-in startup fields remain represented. No runtime searches occur while drawing the tabs; static labels/styles and float input formatting are cached. Numeric inputs accept a decimal point or comma without interpreting thousands separators. Partial input stays visible while focused; only finite, validated values enter configuration.
 
-### Performance recording
+## Configuration profiles
+
+Open **New Game → Profiles**. The list highlights the selected profile. **Current setup** shows the profile last loaded or saved and flags edits to its saved setup values. The flag excludes the session-only settings and the Start/Start Paused choice. While random-seed mode is on, it also ignores the displayed seed.
+
+- **Save As** prompts for a name and creates a profile from the current setup. Names can contain spaces and Unicode characters. Names are compared without regard to case or equivalent Unicode spellings. Use an intermediate name for a capitalization-only rename.
+- **Save** explicitly replaces the selected profile shown above the buttons. With no selection it opens **Save As**.
+- **Load** applies the selected profile and refreshes setup controls. Choose **Start** or **Start Paused** separately when ready to generate a world.
+- **Rename** moves the selected file under the new name and retains its contents. **Delete** requires **Confirm Delete**.
+- **Refresh** updates the list after external file changes. **Open Profiles Folder** opens the storage location through the operating system.
+
+Named files live in `Application.persistentDataPath/StartupProfiles/` as `<name>.profile.json`. Profiles use the same versioned startup configuration and migration rules as the ordinary `startup_config.json`. The profile wrapper holds the existing startup JSON payload and optional experiment metadata. This covers the persisted planet, environment, biology, visualization and basic recording settings, including hidden and inactive values in the startup schema and explicit empty biology availability selections. Scene-only component settings, such as the render and collider subdivision inputs on PlanetGenerator, still come from the scene.
+
+The **Save last-used configuration automatically** toggle controls the existing ordinary startup file for this session. When enabled, Start saves it and Back or quitting can save the setup draft. Disable it before a benchmark to keep the ordinary file intact. The initial toggle value comes from the startup controller's Inspector setting. Named profiles change only through explicit profile actions. Loading one leaves the ordinary file alone until a later save of the ordinary configuration. Explicit profile saving works with automatic saving off. A full running-world save is a separate operation that can contain simulation state.
+
+**Include session-only experiment settings when saving** captures the current detailed Geodesic profiling toggle and Reference/Optimized thermal sampling mode. It starts off. Saving with it off stores only the ordinary startup settings. To use those two settings from a profile, select **Apply saved session-only experiment settings on Load** before clicking Load. Each successful load resets this opt-in. A profile without experiment metadata preserves the current runtime choices. Fresh sessions use **Reference** for thermal sampling and detailed profiling off.
+
+Conflicting, reserved and invalid names are rejected. Malformed or unsupported profiles report an error without replacing the setup draft. An unreadable profile can still be renamed or removed with confirmation. Saves stage the JSON before creating or replacing the destination file.
+
+## Performance recording
 
 In **New Game → Advanced → Performance recording**, configure the existing scene analyzer for either grid.
 
@@ -34,7 +53,9 @@ In **New Game → Advanced → Performance recording**, configure the existing s
 
 Startup saves the basic recording options with the other settings. The detailed toggle appears when recording is enabled for a Geodesic world and applies to this session. **Reset Advanced to Defaults** restores the recording options. **Start** and **Start Paused** begin a fresh capture once the world is ready. The runtime **Esc** menu displays the active CSV path and can copy it to the clipboard. Returning to the main menu stops recording and flushes the completed samples. [Performance recording and CSV details](GeodesicPerformanceBaseline.md) · [Detailed attribution and capture modes](GEODESIC_PERFORMANCE_BENCHMARKS.md#profiling-modes-and-overhead)
 
-**Lifecycle thermal sampling** selects **Reference** or **Optimized** for the next Geodesic world, even with recording off. The choice is held by the setup controller for the current Unity session. **Reset Advanced to Defaults** restores Reference. Saved profiles retain their existing settings, and each capture records the selected mode. [Lifecycle thermal sampling pilot](GeodesicLifecycleThermalOptimization.md)
+**Lifecycle thermal sampling** selects **Reference** or **Optimized** for the next Geodesic world, even with recording off. The choice is held by the setup controller for the current Unity session. **Reset Advanced to Defaults** restores Reference. [Lifecycle thermal sampling pilot](GeodesicLifecycleThermalOptimization.md)
+
+When a newly generated world opens a performance CSV, startup writes a companion `<csv stem>.config.json` beside it. It records the effective startup settings, configured seed and random-seed choice, resolved world seed, active experiment settings, Geodesic geometry where applicable, and the source profile and modified flag. Keep it with the CSV. CSV capture continues if writing the companion file fails, with a Console warning. [Matched Reference and Optimized procedure](GEODESIC_PERFORMANCE_BENCHMARKS.md#matched-reference-and-optimized-runs)
 
 ## Newly connected configuration
 
@@ -101,7 +122,7 @@ No modular evolution, extra metabolism ownership, missing reaction, oxygen-stres
 
 ## Persistence and reset behavior
 
-- Saved startup schema is **23**. Existing atmosphere, hydrology and historical migrations are retained.
+- The current saved startup schema is **25**. The original setup release introduced schema **23** and retained the earlier atmosphere and hydrology migrations.
 - New fields are stored flat in the existing saved-config wrapper. Before JSON overwrite, every field is seeded from the scene-backed defaults. Missing new fields in v22/older files, or in partial current files, do not become zero temperatures, energy yields, mutation rates or ocean coverage. Explicit zero values remain valid.
 - Biology defaults and current values have independent clones. Existing saves containing no biology parameters follow the captured manager values. Newly connected planet fields follow PlanetGenerator.
 - Applying config writes the planet fields before generation and manager fields before biology initialization. The applied config log includes sea-level settings, river enablement and all biology startup values, with the selected grid mode.
@@ -134,7 +155,7 @@ Static verification only: Roslyn syntax parsing, source binding/field coverage i
 
 Manual checks for Unity:
 
-1. Open New Game at common window sizes, narrow aspect ratios and a short viewport. Check all six tabs, visible header/footer, selection highlight and independent scrolling, including the bottom of Biology and expanded infill settings.
+1. Open New Game at common window sizes, narrow aspect ratios and a short viewport. Check all seven tabs, visible header/footer, selection highlight and independent scrolling, including the Profiles confirmation controls, the bottom of Biology and expanded infill settings.
 2. Type partial, negative and decimal-comma values; switch tabs/grids. Verify valid edits persist, invalid/nonfinite text does not enter config, and reversed temperature endpoints are ordered. Check 0 °C corresponds to 273.15 K and viewing untouched ranges does not alter stored values.
 3. Use Back → New Game, then restart the application. Check saved v23 values restore. Compare an old v22 startup file with customized Inspector biology/sea-level values: newly missing fields should use those scene defaults. Check deliberate zero mutation/energy/coverage/rate values survive saving.
 4. In geodesic mode, compare target coverage, manual offset and Ocean World selections; inspect the generator values before generation and retained coverage afterward. Toggle rivers, lakes and inland-sea filtering, including their dependent controls. Check unsupported controls are explained in legacy mode.

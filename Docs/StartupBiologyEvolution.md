@@ -10,6 +10,8 @@ Availability leaves the current division, habitat, resource, and temperature req
 
 Fresh configurations use the scene's startup defaults, which in the supplied scene enable Hydrogenotrophy, Sulfur chemosynthesis, Fermentation and all four locomotion types. Startup JSON files missing the new fields get those same availability defaults. Explicit empty selections are saved and restored. Availability is stored in two optional fields in the existing startup JSON format. Mutation probabilities, reaction rates and temperatures remain separately saved, including the configured Hydrogen → Fermentation probability of **0.02**.
 
+Use **New Game → Profiles → Save As** to keep an experimental setup with its current biology settings and availability selections. Use **Load** to restore it before starting a fresh world. Named profiles use the same migration behavior and preserve deliberate zero values and hidden settings. [Configuration profiles](StartupSetupTabs.md#configuration-profiles)
+
 | Preset | Availability selected |
 |---|---|
 | All implemented pathways | Hydrogenotrophy, Sulfur chemosynthesis, Fermentation, Oxygenic photosynthesis, Aerobic saprotrophy, Methanogenesis and Methanotrophy. Enables all four locomotion types. |

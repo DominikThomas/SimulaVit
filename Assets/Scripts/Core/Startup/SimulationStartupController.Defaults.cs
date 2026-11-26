@@ -68,7 +68,12 @@ public partial class SimulationStartupController
         if (startupScreenRoot != null)
             foreach (var panel in startupScreenRoot.GetComponentsInChildren<SimulationStartupPanel>(true)) panel.PushToConfig();
         ClampLoadedConfig(currentConfig);
-        SaveStartupConfig(currentConfig);
+        SaveLastUsedStartupConfig();
+    }
+
+    private void SaveLastUsedStartupConfig()
+    {
+        if (saveStartupConfigOnStart) SaveStartupConfig(currentConfig);
     }
 
     private void OnApplicationQuit() => SaveSetupDraft();
