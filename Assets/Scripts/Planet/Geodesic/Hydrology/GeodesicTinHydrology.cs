@@ -635,7 +635,8 @@ public sealed partial class GeodesicTinHydrology
     }
 
     private TinTermination TraceInto(TinPoint source, List<TinPoint> samples, List<int> candidates, int maximumSteps, List<TinPoint[]> rejected = null,
-        bool observe = true, Func<TinPoint, TinPoint, bool> departure = null, Action<TraceFailure> failure = null, Action observeCoastHandoff = null)
+        bool observe = true, Func<TinPoint, TinPoint, bool> departure = null, Action<TraceFailure> failure = null,
+        Action observeCoastHandoff = null, Action<TinPoint, TinPoint, TinPoint, bool> observeSelection = null)
     {
         samples.Clear(); samples.Add(source);
         TinPoint p = source;
@@ -644,7 +645,8 @@ public sealed partial class GeodesicTinHydrology
         for (int step = 0; step < maximumSteps; step++)
         {
             if (IsOcean(p) || Boundary(p, candidates)) return TinTermination.OceanCoast;
-            if (!DownhillStep(p, candidates, out TinPoint start, out TinPoint next, step == 0 ? departure : null) && !FlatStep(p, candidates, out start, out next))
+            bool downhill = DownhillStep(p, candidates, out TinPoint start, out TinPoint next, step == 0 ? departure : null);
+            if (!downhill && !FlatStep(p, candidates, out start, out next))
             {
                 ContainingFaces(p, candidates);
                 foreach (int t in candidates) if (faces[t].Flat) return TinTermination.FlatRequiringRouting;
@@ -666,6 +668,9 @@ public sealed partial class GeodesicTinHydrology
                 foreach (int t in candidates) depth = Math.Min(depth, faces[t].Max - lowestH);
                 return depth <= VisibleBumpTolerance ? TinTermination.TinyNoiseDepression : TinTermination.TrueClosedBasin;
             }
+#if UNITY_EDITOR
+            observeSelection?.Invoke(p, start, next, !downhill);
+#endif
             if (step == 0 && departure != null && !departure(start, next))
                 return Fail(TraceFailureKind.DepartureRejected, start, next);
             // A sub-sea route may first acquire retained authority at a shared edge
@@ -750,10 +755,11 @@ public sealed partial class GeodesicTinHydrology
     internal double ParcelRunoff(int triangle) => localRunoff[triangle];
     internal TinPoint TransferLakePoint(TinPoint point, int triangle) => Transfer(point, triangle);
     internal TinPoint[] TraceLakeOutlet(TinPoint spill, Func<TinPoint, TinPoint, bool> departure, out TinTermination termination,
-        int maximumSteps = 32768, Action<TraceFailure> failure = null)
+        int maximumSteps = 32768, Action<TraceFailure> failure = null, Action<TinPoint, TinPoint, TinPoint, bool> observeSelection = null)
     {
         var samples = new List<TinPoint>(128); var candidates = new List<int>(8);
-        termination = TraceInto(spill, samples, candidates, maximumSteps, observe: false, departure: departure, failure: failure);
+        termination = TraceInto(spill, samples, candidates, maximumSteps, observe: false, departure: departure, failure: failure,
+            observeSelection: observeSelection);
         return samples.ToArray();
     }
     internal bool ValidateLakePath(TinPoint[] path)

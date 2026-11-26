@@ -102,7 +102,8 @@ public sealed partial class GeodesicTinLakeRouting
         return null;
     }
 
-    private TinPoint[] TraceSpillOutlet(TinLakeFlowNode node, out TinTermination termination)
+    private TinPoint[] TraceSpillOutlet(TinLakeFlowNode node, out TinTermination termination,
+        Func<TinBasinDescriptor, string> describeSpillWorld)
     {
         var basin = node.Basin; var spill = basin.Spill.Value;
         int facet = basin.DownstreamTriangle, vertex = basin.DownstreamVertex;
@@ -134,8 +135,7 @@ public sealed partial class GeodesicTinLakeRouting
         if (!hasWitness || !node.DownstreamSample.HasValue || Inside(node.DownstreamSample.Value, basin.Id))
         {
 #if UNITY_EDITOR
-            if (SpillTraceEnabled)
-                LogSpillTrace(basin, spill, hasWitness, Departure);
+            LogSpillTrace(node, path, hasWitness, Departure, describeSpillWorld);
 #endif
             string report = "[GeodesicTinLakeRouting] unresolved overflowing outlet; refusing invented terminal storage. " +
                 $"validSpillWitness={hasWitness} traceTermination={termination} " + DescribeOutlet(node);
@@ -180,7 +180,10 @@ public sealed partial class GeodesicTinLakeRouting
     }
 
     public static GeodesicTinLakeRouting Build(GeodesicTinHydrology tin, GeodesicTinBasins topology, GeodesicTinLakeGeometry geometry,
-        double minimumVisibleDischarge = 0)
+        double minimumVisibleDischarge = 0) => Build(tin, topology, geometry, minimumVisibleDischarge, null);
+
+    internal static GeodesicTinLakeRouting Build(GeodesicTinHydrology tin, GeodesicTinBasins topology, GeodesicTinLakeGeometry geometry,
+        double minimumVisibleDischarge, Func<TinBasinDescriptor, string> describeSpillWorld)
     {
         if (tin == null || topology == null || geometry == null) throw new ArgumentNullException();
         var watch = Stopwatch.StartNew(); var result = new GeodesicTinLakeRouting(tin, topology, geometry);
@@ -224,7 +227,7 @@ public sealed partial class GeodesicTinLakeRouting
         {
             var basin = node.Basin;
             if (!basin.HasEscape) continue;
-            var path = result.TraceSpillOutlet(node, out var termination);
+            var path = result.TraceSpillOutlet(node, out var termination, describeSpillWorld);
             if (result.FirstEntry(path, out var hit))
             {
                 path = ClipAtEntry(path, hit); node.DownstreamLakeId = hit.BasinId;

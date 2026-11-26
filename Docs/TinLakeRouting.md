@@ -9,7 +9,7 @@
 
 Each emitted body's terrain-point carriers identify its wet facets. A path segment in a facet enters water where its linear TIN scalar height crosses that body's spill elevation. Barycentric interpolation produces the exact endpoint, including partial-facet shorelines. A source already inside water emits no inlet ribbon. Touching the rim without entering is not an inlet. Inlet ribbons end at the crossing, with their final banks collapsed to the shoreline point.
 
-An outlet starts at the descriptor's exact `TinPoint` spill witness. The first normal TIN descent is restricted to the dry downstream side of that lake; it is not moved to a centroid or nudged over the saddle. Remaining steps use the existing continuous gradient, flat routing, coast intersection and grade constraints. An exact, validated same-facet connection can join an existing dry channel. Its downstream lake is resolved through the original confluence links. Otherwise the outlet follows TIN tracing to the next rendered lake, ocean, or an existing termination. A node without a valid departing path holds its flow and creates no outlet.
+An outlet starts at the descriptor's exact `TinPoint` spill witness. The first normal TIN descent uses the recorded downstream facet and a midpoint outside the source lake. Remaining steps use the continuous gradient, flat routing, coast intersection and grade constraints. An exact, validated same-facet connection can join an existing dry channel. Its downstream lake is resolved through the original confluence links. Otherwise the outlet follows TIN tracing to the next routing lake, ocean, or an existing termination. An unresolved overflowing outlet throws unless the tracer proves an ocean contact at the spill. A terminal basin can hold its flow.
 
 At most one outlet reach is published per body. The existing discharge threshold determines its visibility, and existing material/width rules use the resolved discharge. A subthreshold outlet still transfers hydrological contribution downstream. Raw source selection and thresholds are unchanged.
 
@@ -26,6 +26,14 @@ This is static transport at existing spill levels. There is no filling simulatio
 ## Validation and capture
 
 `GeodesicTinLakeRoutingTests` covers exact entry/spill geometry, multiple tributaries and one outlet, independent and overlapping contributors, terminal storage, cycle rejection, a geometrically traced two-lake cascade, misses, excluded bodies, unchanged raw state and deterministic output. The existing shared coastal-vertex regression is retained. The four reference unmatched endpoints must continue to be excluded from freshwater topology.
+
+### Unresolved lake outlet capture
+
+On a spherical TIN, scalar hydrology and visible radii are linear in the direction-facet barycentrics. The actual terrain radius is measured at the intersection of the corresponding ray with the completed planar facet. The resulting radial minimum can occur inside the segment even when its scalar heights decrease. The existing grade check uses that minimum and the route's running low. The downstream witness supplies lower-star topology, while this check tests the geometry of a candidate continuous path.
+
+In the Editor, an unresolved spill emits `[GeodesicOutletTrace]` before throwing. The trace records world settings, lake eligibility, the spill fan and witness, candidate and selected transitions, their geometry and receiving ownership, and the failure reason. The bounded replay uses the original routing rules with diagnostic state updates disabled. Run the four generated-world EditMode cases listed in the maintenance report and save the XML or full matching Console messages. [Manual outlet capture](GeodesicTestSuiteMaintenance.md#manual-outlet-capture)
+
+### Historical reference capture
 
 Run managed checks with `Tools/ValidateTinHydrology.py` and the installed Unity Data directory. The broader suite has a previously reproduced failure in `DownhillTerracesAndTwoMicroUnitRisesAreAlreadyAccepted` (expected 13, actual 0); this milestone does not change that test or the historical grade planner.
 

@@ -2,12 +2,23 @@
 
 ## Baseline and verification status
 
-Both EditMode exports are from user runs on 26 November 2026. The original failure ledger at the end preserves the case names and arguments from `SimulaVit.EditModeTests.dll`. The [follow-up failure dispositions](#a-full-world-experiment-context) cover the ten remaining cases from the second export.
+The EditMode exports are from user runs on 26 November 2026. The original failure ledger preserves the case names and arguments from `SimulaVit.EditModeTests.dll`. The [follow-up failure dispositions](#a-full-world-experiment-context) cover the ten cases remaining after the first repair.
 
 | Export | Total | Passed | Failed | Skipped |
 | --- | ---: | ---: | ---: | ---: |
 | Original `TestResults.xml` | 813 | 735 | 74 across 22 fixtures | 4 |
 | Verified `TestResults(4).xml` after the first repair | **806** | **792** | **10** | **4** |
+| Authoritative pre-change baseline for the lake outlet investigation, `TestResults(8).xml` | **808** | **795** | **4** | **9** |
+
+The full `TestResults(8).xml` run took **15.71 seconds**. `FixedPassiveTickPreservesDisplacementWithinDocumentedTolerance` passed. The nine intentional skips comprise five full-world experiments and four environmental parity cases. The targeted `TestResults(5).xml` rerun discovered the same 808 EditMode cases and ran four. Its four exception messages and failing stack frames match the full baseline. The four failures all occur in `GeodesicTinLakeRouting.TraceSpillOutlet` during `Build`.
+
+| Hydrology fixture in `TestResults(8).xml` | Passed |
+| --- | ---: |
+| `GeodesicTinLakeRoutingTests` | 10/10 |
+| `GeodesicTinLakeGeometryTests` | 10/10 |
+| `GeodesicDrainageDeliveryTests` | 16/16 |
+| `GeodesicBasinOverflowAuditTests` | 22/22 |
+| `GeodesicRiverGradeTests` | 6/6 |
 
 | Fixture | Verified passes |
 | --- | ---: |
@@ -19,7 +30,7 @@ Both EditMode exports are from user runs on 26 November 2026. The original failu
 | `SimulationStartupProfilesTests` | 23/23 |
 | `GeodesicRiverGradeTests`, `GeodesicRiverThresholdStartupTests`, `GeodesicRiverUphillDebugIntegrationTests`, `GeodesicRiverUphillDebugTests`, `GeodesicTinSurfaceTests` | 6/6, 1/1, 3/3, 6/6, 3/3 |
 
-The latest changes on `codex/geodesic-performance` have static review only. The four overflow failures are still open. P1 and its default mode, startup profile persistence, the effective configuration snapshot, biological reaction parameters and the selected Hydrogen → Fermentation mutation probability of 0.02 are preserved. The verified export covers EditMode. The five existing PlayMode recorder cases are outside that count.
+The current outlet diagnostics on `codex/geodesic-performance` have static review only. The four overflow failures remain open. Post-retirement PlayMode verification by the user reports five recorder cases passed in both the Editor and standalone Windows Player, with zero failures or skips. The GPU shutdown warning remains deferred and its opt-in diagnostics remain available. The maintenance preserves P1 and its default mode, startup profile persistence, the effective configuration snapshot, biological reaction parameters, and the selected Hydrogen → Fermentation mutation probability of 0.02.
 
 ## PlayMode results
 
@@ -132,11 +143,28 @@ The 11 failures share missing fixture setup. The resource catalog supplied real 
 
 ### Overflow follow-up
 
-The lower-star sweep records a downstream facet and vertex in the winning component before union. That supplies a topological witness at or below the spill. It does not establish a usable first segment across the completed terrain. Runtime lake routing uses zero depth and area thresholds to build its logical geometry, with ocean exclusions and hierarchy suppression, then filters visible lake geometry separately. An accepted outlet must depart through the recorded facet without reentering its source lake. The tracer compares both linear hydrology and visible heights and the **minimum radius along the completed planar facet**. A segment can descend at both endpoints yet rise from an interior chord minimum. The current trace selects its steepest feasible descent before applying those grade checks. The failed exports show no accepted downstream sample, but do not identify the rejected step or establish whether a different allowed departure would pass.
+#### What the previous changes verified
 
-Basin 122 is about 0.00176 units deep, far above the roughly two-micro-unit routing epsilon. Basin 0 is consistent with float roundoff on the synthetic bowl's nominal 8.2-unit shelf. The fixture scales float unit directions and final routing recomputes their magnitudes, and the XML gives a maximum of 8.20000076. The lower-star sweep compares float heights exactly, and the flat-face rule uses one quarter of routing epsilon, smaller than one ULP at 8.2. This explains why such relief can enter lake qualification, but it does not prove basin 0's rejected-step type or establish that discarding it would preserve parcel delivery.
+`47a8a59` restored rejected raw-river diagnostics when reusing extracted networks and adjusted the tests for the existing grade and retained-ocean contracts. `f007e27` added the opt-in spill replay and two synthetic spherical grade cases. Neither change altered the spill chooser, basin qualification, or the facet geometry used by the grade checks. Both XML exports report `validSpillWitness=True`, `traceTermination=RoutingFailure`, and no downstream sample for all four cases. Neither contains the previous opt-in spill trace.
 
-The sidecar can already carry logical flow without a visible ribbon through a verified same-shoreline lake edge, a retained-ocean spill contact, or a below-threshold outlet. Neither failed trace supplies the corresponding downstream proof. This follow-up adds an Editor-only, session-scoped diagnostic that replays only failed spill traces, with observation disabled. It logs the exact failure kind, accepted sample count, barycentrics, running minima, rim ULP, retained-ocean authority, and the witness and descent candidates with their first-step grades. Routing, terrain, qualification, conservation, and the existing exception remain unchanged. `GeodesicTinLakeRoutingTests.DownhillSpillEdgeCanFailCompletedFacetGrade` adds two synthetic cases that exercise chord-grade rejection with one-ULP and larger drops and check that the diagnostic probes leave trace counters unchanged. These are source-reviewed examples of a possible mechanism, while the two real witnesses still need capture. [Basin topology](TinBasins.md) · [Lake geometry](TinLakes.md) · [TIN lake routing](TinLakeRouting.md)
+#### Shared coordinates and different height profiles
+
+The lower-star sweep uses authoritative scalar vertex heights and records a downstream facet and vertex on the winning component before union. The witness proves the recorded vertex is at or below the spill. A continuous first step also has to leave through the recorded facet with its midpoint outside the source lake. The tracer transfers barycentric weights across shared vertices and edges, chooses the steepest feasible scalar descent, and then grades it. A steepest descent can fail this grade even if another candidate was geometrically feasible.
+
+Both grade checks use the same `TinPoint` endpoints. The downhill gradient comes from barycentric interpolation of hydrology heights on the unit-direction chord plane. The linear visible check interpolates the visible vertex radii using those same weights. The physical visible check projects the ray through the direction chord onto the completed terrain plane and measures the resulting radius. If the rendered vertices have different radii, intersecting that ray can also give a different point from directly interpolating the rendered Cartesian vertices with the direction weights. The physical grade includes the segment's analytic radial minimum. The radial maximum for a valid projected segment is at one of its endpoints.
+
+For equal-radius endpoints of radius `R` at angular separation `θ`, the rendered chord's midpoint has radius `R cos(θ/2)`. The rise back to an endpoint scales as `R θ²/8` for small `θ`, so finer subdivision reduces this geometric effect. The scalar endpoints and running scalar minimum are checked with the routing epsilon, approximately `2e-6` in basin 122. Linear visible heights and completed radius are checked against their own running minima with the same epsilon plus the visible bump allowance, approximately `0.000100586419` in that fixture. The bump depends on the visible height range, while the epsilon is capped by an absolute and a radius-scaled term. Neither term measures facet angular span.
+
+#### Two reproductions
+
+- **Basin 122.** The intermediate carving logs record 502 networks, 2 ocean terminations, 500 unexpected broken networks and inland breaks, 1,000 visible-grade rejections and zero hydrology-grade rejections. The published segments include nine hydrology descents, eight visible descents and one minor visible bump. The visible and hydrology vertex arrays match, and adaptive filtering is zero. This makes the completed radius a plausible source of those visible rejections. Both carving passes accepted zero modifications, and the 13 candidate coastal paths failed the separate coastal depth limit. These aggregates cover raw accumulation and network tracing. They do not identify the first failed transition from the final lake spill on facet 770. The basin is approximately 0.00176 units deep.
+- **Basin 0.** The 2,562-sample fixture uses simulation subdivision 3 and hydrology subdivision 4. Its synthetic shelf multiplies float unit directions by the nominal radius 8.2 and reads back their float magnitudes, with a logged maximum of 8.20000076. The exact scalar sweep preserves positive-depth depressions and the flat-face cutoff is `epsilon / 4`, less than one float ULP at that radius. Routing builds logical lake geometry with zero depth and area thresholds, plus ocean exclusions and hierarchy suppression. The visible lake mesh uses separate thresholds. This explains how a one-ULP depression can qualify. The actual rejecting check and the safety of changing that qualification are still unverified.
+
+#### Diagnostic outcome
+
+**Outcome B.** The Editor emits `[GeodesicOutletTrace]` automatically on the existing unresolved-outlet exception path. It replays the outlet with observation of hydrology state disabled and records whether the replay matches the original. The report includes world and effective TIN settings, qualification and ULP, incident facet geometry, first-step candidates and departure eligibility, selected transitions, accepted sample prefix, ownership and the exact terminal rejection. Scalar and actual radial extrema and grade checks distinguish geometry from witness or footprint rejection. The replay prints at most three selected transitions, up to six accepted samples and the terminal failure. The two existing `DownhillSpillEdgeCanFailCompletedFacetGrade` cases now check that the instrumentation records the selected step, reproduces the path and reason, and leaves the trace counters and disagreement flag intact. No runtime result is available for the new capture or test assertions.
+
+The two active witnesses need the [manual outlet capture](#manual-outlet-capture) before selecting a correction. Logical delivery without a visible ribbon already has explicit paths via a verified shoreline transfer, retained-ocean spill contact or subthreshold outlet. The existing exception preserves the requirement for downstream proof. [Basin topology](TinBasins.md) · [Lake geometry](TinLakes.md) · [TIN lake routing](TinLakeRouting.md)
 
 ## Legacy retirement
 
@@ -166,17 +194,16 @@ The five full-world cases remain NUnit `Explicit`. If the interactive runner sel
 
 The runner reports the process ID, XML, and log path under `Temp/SulfurAudit`. Archive each `filtered-results.xml` and log before invoking another filter, which uses the same filenames. Parity remains gated by the existing phase and workspace ownership checks. Run `./Tools/ValidateEnvironmentalCpu.ps1 -Phase reference` followed by `./Tools/ValidateEnvironmentalCpu.ps1 -Phase optimized` in the applicable reference and optimized source revisions, respectively, with the same owned workspace. Its reference input revision, results locations, and procedure are documented in the environmental CPU report. [Environmental parity procedure](GeodesicEnvironmentalCpuOptimization.md)
 
-## Manual validation
+## Manual outlet capture
 
-1. In a blank scene on this branch, open **Window → General → Test Runner → EditMode**. Select `GeodesicFermentationWorldExperiments`, `GeodesicFoodWorldExperiments`, `GeodesicFounderEmergenceWorldExperiments`, and `GeodesicSulfurWorldExperiments` individually and use **Run Selected** to verify that all five cases report a skip in the interactive Editor.
-2. Run `GeodesicBiologyRuntimeTests` and `GeodesicTinLakeRoutingTests`. The former includes the passive displacement case and the latter includes the two new chord-grade tests and existing conservation and logical-delivery coverage.
-3. In Unity, check **Tools → Hydrology → Trace Failed TIN Lake Spills**. Run these two EditMode cases individually. With informational messages visible in the Console, copy each full entry matching **`TIN-LAKE-SPILL-TRACE`**.
-   - `GeodesicHydrologyTerrainIntegrationTests.RiverOnlyTogglePreservesMeshOceanSeaLevelAndPausedLakesAndRestoresOff(FineDetailRemoved)` for the shared basin 122 reproduction.
-   - `GeodesicLakeIntegrationTests.TinRenderDrainageUsesActiveTopologyWithoutChangingTerrain` for basin 0.
-4. Turn the trace menu off. Clear Test Runner filters, use **EditMode → Run All**, and export the XML separately from `TestResults(4).xml`. The full suite includes the other basin 122 cases in `GeodesicDrainageDeliveryIntegrationTests` and `GeodesicHydrologyTerrainIntegrationTests`. If the runner includes the explicit world experiments, expect five interactive skips alongside the four environmental parity skips.
-5. For the separate recorder baseline, use the [PlayMode verification procedure](#manual-playmode-verification).
+In **Window → General → Test Runner → EditMode**, select these four cases and use **Run Selected**. The fixtures supply their own geometry and settings. The trace is automatic.
 
-Expected inventory after this follow-up is **808 discovered EditMode cases**, including the two new chord-grade cases. Five are explicit and four reach the environmental parity skip, leaving **799 ordinary executable cases**. The XML may omit unselected explicit cases or record them as skipped. The four unresolved overflow cases are still among the executable cases. These are source counts pending the manual rerun.
+- `GeodesicDrainageDeliveryIntegrationTests.DiagnosticsRunOnceAfterFinalPassAndDoNotChangeHydrologyOrMeshes`
+- `GeodesicHydrologyTerrainIntegrationTests.RiverOnlyTogglePreservesMeshOceanSeaLevelAndPausedLakesAndRestoresOff(ReducedRidgeAndFineDetail)`
+- `GeodesicHydrologyTerrainIntegrationTests.RiverOnlyTogglePreservesMeshOceanSeaLevelAndPausedLakesAndRestoresOff(FineDetailRemoved)`
+- `GeodesicLakeIntegrationTests.TinRenderDrainageUsesActiveTopologyWithoutChangingTerrain`
+
+Export the targeted XML or copy the full multiline Console messages matching `GeodesicOutletTrace` with informational messages enabled. For the diagnostic assertions on known spherical cases, run both parameters of `GeodesicTinLakeRoutingTests.DownhillSpillEdgeCanFailCompletedFacetGrade`. After a routing correction, compare an EditMode **Run All** export against `TestResults(8).xml`.
 
 ## XML failure ledger
 

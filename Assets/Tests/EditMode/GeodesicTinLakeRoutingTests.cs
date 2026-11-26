@@ -56,8 +56,8 @@ public sealed class GeodesicTinLakeRoutingTests
 
         var before = tin.Diagnostics.Summary();
         var failure = default(GeodesicTinHydrology.TraceFailure);
-        var path = tin.TraceLakeOutlet(spill, (a, b) => a.Equals(spill) && b.Equals(witness),
-            out var termination, failure: value => failure = value);
+        bool Departure(TinPoint a, TinPoint b) => a.Equals(spill) && b.Equals(witness);
+        var path = tin.TraceLakeOutlet(spill, Departure, out var termination, failure: value => failure = value);
 
         Assert.That(termination, Is.EqualTo(TinTermination.RoutingFailure));
         Assert.That(failure.Kind, Is.EqualTo(GeodesicTinHydrology.TraceFailureKind.VisibleGrade));
@@ -65,6 +65,23 @@ public sealed class GeodesicTinLakeRoutingTests
         Assert.That(failure.End, Is.EqualTo(witness));
         CollectionAssert.AreEqual(new[] { spill }, path);
 #if UNITY_EDITOR
+        int selections = 0;
+        var observed = default(GeodesicTinHydrology.TraceFailure);
+        var replay = tin.TraceLakeOutlet(spill, Departure, out var replayTermination,
+            failure: value => observed = value, observeSelection: (from, start, end, flat) =>
+            {
+                selections++;
+                Assert.That(from, Is.EqualTo(spill));
+                Assert.That(start, Is.EqualTo(spill));
+                Assert.That(end, Is.EqualTo(witness));
+                Assert.That(flat, Is.False);
+            });
+        Assert.That(selections, Is.EqualTo(1));
+        Assert.That(replayTermination, Is.EqualTo(termination));
+        Assert.That(observed.Kind, Is.EqualTo(failure.Kind));
+        CollectionAssert.AreEqual(path, replay);
+        Assert.That(tin.DescribeOutletGradeChecks(observed), Does.Contain("visibleLinearPass=True").And.Contain("radialEndPass=False"));
+
         bool foundWitness = false;
         tin.VisitSpillDescentCandidates(spill, (a, b) =>
         {

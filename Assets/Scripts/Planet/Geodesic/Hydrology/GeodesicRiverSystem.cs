@@ -802,7 +802,12 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
             if (TinLakeRouting == null)
             {
                 yield return new PlanetGenerationProgress(PlanetGenerationStage.RoutingLakes);
+#if UNITY_EDITOR
+                TinLakeRouting = GeodesicTinLakeRouting.Build(TinDrainage, routingLakeBasins, routingLakeGeometry,
+                    ResolvedDrainageAreaThreshold, DescribeOutletWorld);
+#else
                 TinLakeRouting = GeodesicTinLakeRouting.Build(TinDrainage, routingLakeBasins, routingLakeGeometry, ResolvedDrainageAreaThreshold);
+#endif
             }
         }
         else TinLakeRouting = null;
@@ -1351,6 +1356,24 @@ public sealed partial class GeodesicRiverSystem : MonoBehaviour
         routingLakeBasins = GeodesicTinBasins.Build(TinDrainage, 0, 0);
         routingLakeGeometry = GeodesicTinLakeGeometry.Build(TinDrainage, routingLakeBasins);
     }
+
+#if UNITY_EDITOR
+    private string DescribeOutletWorld(TinBasinDescriptor basin)
+    {
+        double visibleMinimumArea = TinDrainage.LocalArea.Sum() * planet.minimumLakeBasinAreaFraction;
+        var visible = basin.WithVisibility(visibleMinimumArea, planet.minimumLakeDepth);
+        return FormattableString.Invariant(
+            $"seed={planet.randomSeed} terrainSeed={planet.DerivedTerrainSeed} baseRadius={planet.BasePlanetRadius:R} simulationSubdivision={planet.GeodesicTopology.SubdivisionLevel} configuredRenderSubdivision={planet.geodesicRenderSubdivisionLevel}") +
+            Environment.NewLine + FormattableString.Invariant(
+            $"terrainMode={planet.hydrologyTerrainMode} terrainDisplacement={planet.enableGeodesicTerrainDisplacement} filterStrength={TinDrainage.Diagnostics.FilterStrength:R} lakesEnabled={planet.generateHydrologicalLakes} integrateLakeRivers={integrateTinLakeRivers}") +
+            Environment.NewLine + FormattableString.Invariant(
+            $"logicalMinimumDepth=0 logicalMinimumArea=0 visibleMinimumDepth={planet.minimumLakeDepth:R} visibleMinimumAreaFraction={planet.minimumLakeBasinAreaFraction:R} visibleMinimumArea={visibleMinimumArea:R}") +
+            Environment.NewLine + FormattableString.Invariant(
+            $"meetsVisibleThresholds={visible.QualifiesForVisibleLake} visibleBelowMinimumDepth={visible.BelowMinimumDepth} visibleBelowMinimumArea={visible.BelowMinimumArea}") +
+            Environment.NewLine + FormattableString.Invariant(
+            $"minimumRibbonDischarge={ResolvedDrainageAreaThreshold:R} configuredUphillTolerance={uphillTolerance:R} configuredMicroBumpFraction={visibleMicroBumpFraction:R}");
+    }
+#endif
 
     private void RefreshSedimentSurface()
     {
