@@ -13,6 +13,12 @@ public static class GeodesicVentThermalModel
     {
         if (!float.IsFinite(distance) || !float.IsFinite(coreRadius) || !float.IsFinite(falloffDistance) || !float.IsFinite(strength) || coreRadius < 0f || falloffDistance <= 0f) return 0f;
         float boundedStrength = Mathf.Sqrt(Mathf.Clamp01(strength));
+        return EvaluateBoundedInfluence(distance, coreRadius, falloffDistance, boundedStrength);
+    }
+
+    // The caller has validated the model inputs and bounded the outlet strength.
+    internal static float EvaluateBoundedInfluence(float distance, float coreRadius, float falloffDistance, float boundedStrength)
+    {
         if (distance <= coreRadius) return boundedStrength;
         if (distance >= coreRadius + falloffDistance) return 0f;
         float x = Mathf.Clamp01((distance - coreRadius) / falloffDistance);
@@ -231,7 +237,7 @@ public sealed partial class GeodesicExperiencedTemperatureField : MonoBehaviour
         if(!HasLocalInfluenceCandidates(cell,layer)) return true;
         Vector3 local=transform.InverseTransformPoint(worldPosition);
         if(!float.IsFinite(local.x)||!float.IsFinite(local.y)||!float.IsFinite(local.z)) return false;
-        int selected = SelectOutlet(cell, layer, bottom, isOcean, local, out float strongest);
+        int selected = SelectOutlet(cell, layer, bottom, isOcean, local, false, out float strongest, out _);
         if(selected>=0)
         {
             var outlet=outlets[selected]; float axial=Vector3.Dot(local,outlet.PlanetLocalNormal);
@@ -253,26 +259,36 @@ public sealed partial class GeodesicExperiencedTemperatureField : MonoBehaviour
 
     // The caller has already checked the ocean node, candidate index and world position.
     // Shares outlet selection with inspection while omitting its distance readouts.
-    internal float SampleKnownOceanTemperature(int cell, int layer, Vector3 worldPosition, float coarseKelvin)
+    internal float SampleKnownOceanTemperature(int cell, int layer, Vector3 worldPosition, float coarseKelvin,
+        bool countWork, out int candidates, out int evaluations)
     {
+        candidates = evaluations = 0;
         if (!float.IsFinite(coarseKelvin)) return coarseKelvin;
         Vector3 local = transform.InverseTransformPoint(worldPosition);
         if (!float.IsFinite(local.x) || !float.IsFinite(local.y) || !float.IsFinite(local.z)) return coarseKelvin;
         int bottom = resources.SourceGrid.GetBottomLayerIndex(cell);
-        int selected = SelectOutlet(cell, layer, bottom, true, local, out float strongest);
-        if (selected < 0) return coarseKelvin;
-        float kelvin = GeodesicVentThermalModel.BlendKelvin(coarseKelvin, SourceTemperatureC + 273.15f, strongest);
+        if (countWork) candidates = cellOffsets[cell + 1] - cellOffsets[cell];
+        int selected = SelectOutlet(cell, layer, bottom, true, local, countWork, out float strongest, out evaluations);
+        return selected < 0 ? coarseKelvin : BlendOceanTemperature(coarseKelvin, strongest);
+    }
+
+    private float BlendOceanTemperature(float coarseKelvin, float influence)
+    {
+        float kelvin = GeodesicVentThermalModel.BlendKelvin(coarseKelvin, SourceTemperatureC + 273.15f, influence);
         return float.IsFinite(kelvin) ? kelvin : coarseKelvin;
     }
 
-    private int SelectOutlet(int cell, int layer, int bottom, bool isOcean, Vector3 local, out float strongest)
+    private int SelectOutlet(int cell, int layer, int bottom, bool isOcean, Vector3 local, bool countWork,
+        out float strongest, out int evaluations)
     {
         int selected=-1,nearest=-1; float nearestDistance=float.PositiveInfinity;
         strongest = 0f;
+        evaluations = 0;
         for(int cursor=cellOffsets[cell];cursor<cellOffsets[cell+1];cursor++)
         {
             int index=outletIndices[cursor]; var outlet=outlets[index];
             if(!GeodesicVentThermalModel.IsHabitatEligible(outlet.Habitat,isOcean,layer,bottom)) continue;
+            if (countWork) evaluations++;
             // Submarine source extends through its unresolved seafloor-to-bottom-center segment.
             // Above/below that segment the actual radial offset attenuates normally.
             float axial=Vector3.Dot(local,outlet.PlanetLocalNormal);
@@ -287,6 +303,22 @@ public sealed partial class GeodesicExperiencedTemperatureField : MonoBehaviour
     }
 
     public bool TryGetOutlet(int index, out GeodesicVentOutlet outlet) { if (index < 0 || index >= outlets.Length) { outlet = default; return false; } outlet = outlets[index]; return true; }
-    public void Clear() { generator = null; resources = null; surface = null; ocean = null; outlets = Array.Empty<GeodesicVentOutlet>(); cellOffsets = outletIndices = outletBySourceNode = Array.Empty<int>(); outletColumnTopRadius = Array.Empty<float>(); outletCount = indexedCellCount = minimumNearbyOutlets = maximumNearbyOutlets = 0; meanNearbyOutlets = 0f; lookupMemoryBytes = 0; }
+
+    public void Clear()
+    {
+        lifecycleOceanVents = null;
+        LifecycleOceanLookupSetupMilliseconds = 0d;
+        generator = null;
+        resources = null;
+        surface = null;
+        ocean = null;
+        outlets = Array.Empty<GeodesicVentOutlet>();
+        cellOffsets = outletIndices = outletBySourceNode = Array.Empty<int>();
+        outletColumnTopRadius = Array.Empty<float>();
+        outletCount = indexedCellCount = minimumNearbyOutlets = maximumNearbyOutlets = 0;
+        meanNearbyOutlets = 0f;
+        lookupMemoryBytes = 0;
+    }
+
     private void OnDestroy() => Clear();
 }

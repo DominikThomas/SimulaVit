@@ -284,6 +284,11 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
         double cpuTotal = 0d;
         for (int i = 0; i < cpuSamples; i++) cpuTotal += cpuFrames[i];
         double cpuP95 = Percentile95(cpuFrames, cpuSamples);
+        var thermalMode = replicatorManager != null ? replicatorManager.GeodesicLifecycleThermalMode : null;
+        string thermalModeName = thermalMode?.ToString() ?? "n/a";
+        double thermalSetupMilliseconds = thermalMode.HasValue
+            ? replicatorManager.GeodesicLifecycleThermalLookupSetupMilliseconds : 0d;
+        var thermalWork = biologyWork.LifecycleThermal;
         summary.Clear().Append("[SimulationPerformanceAnalyzer] frames=").Append(frames);
         summary.Append(" real_s="); AppendNumber(summary, windowSeconds);
         summary.Append(" FPS="); AppendNumber(summary, frames / windowSeconds);
@@ -308,12 +313,22 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
         for (int i = 0; i < aggregates.Length; i++) { summary.Append(' ').Append(AggregateNames[i]).Append("_ms="); AppendNumber(summary, aggregates[i] / frames); }
         summary.Append(" simulation_cpu_ms_per_step="); AppendOptional(summary, aggregates[0], steps);
         summary.Append(" lifecycle_births/deaths=").Append(biologyWork.Births).Append('/').Append(biologyWork.Deaths);
+        summary.Append(" lifecycle_thermal_sampling_mode=").Append(thermalModeName);
+        if (thermalMode.HasValue)
+        {
+            summary.Append(" lifecycle_thermal_lookup_setup_ms=");
+            AppendNumber(summary, thermalSetupMilliseconds);
+        }
         if (detailedGeodesicProfiling)
         {
             summary.Append(" detailed_slot_stride=").Append(GeodesicPerformanceMarkers.SlotSampleStride);
             summary.Append(" prey_searches/candidates/attempts/captures=").Append(biologyWork.PreySearches)
                 .Append('/').Append(biologyWork.PreyCandidates).Append('/').Append(biologyWork.CaptureAttempts)
                 .Append('/').Append(biologyWork.PreyCaptures);
+            summary.Append(" thermal_sampled_hits/misses/key_invalidations/candidates/evaluations=")
+                .Append(thermalWork.CacheHits).Append('/').Append(thermalWork.CacheMisses).Append('/')
+                .Append(thermalWork.CacheKeyInvalidations).Append('/').Append(thermalWork.Candidates)
+                .Append('/').Append(thermalWork.InfluenceEvaluations);
             AppendDetailedTimings(summary, csv: false);
         }
         if (capacityReached) summary.Append(" window_capacity_reached=true");
@@ -362,6 +377,14 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
             else
                 csvBuffer.Append(",n/a,n/a,n/a,n/a");
             AppendDetailedTimings(csvBuffer, csv: true);
+            csvBuffer.Append(',').Append(thermalModeName).Append(',');
+            if (thermalMode.HasValue) AppendNumber(csvBuffer, thermalSetupMilliseconds); else csvBuffer.Append("n/a");
+            if (detailedGeodesicProfiling)
+                csvBuffer.Append(',').Append(thermalWork.CacheHits).Append(',').Append(thermalWork.CacheMisses)
+                    .Append(',').Append(thermalWork.CacheKeyInvalidations).Append(',').Append(thermalWork.Candidates)
+                    .Append(',').Append(thermalWork.InfluenceEvaluations);
+            else
+                csvBuffer.Append(",n/a,n/a,n/a,n/a,n/a");
             csvBuffer.AppendLine();
             if (++csvSamplesPending >= Math.Max(1, flushCsvEveryNSamples)) FlushCsvBuffer();
         }
@@ -451,6 +474,9 @@ public sealed class SimulationPerformanceAnalyzer : MonoBehaviour
             csvBuffer.Append(",simulation_cpu_ms_per_step,lifecycle_births,lifecycle_deaths,detailed_slot_stride,predation_searches,predation_candidates_examined,predation_capture_attempts,predation_captures");
             foreach (var stage in GeodesicPerformanceMarkers.RecordedStages)
                 csvBuffer.Append(',').Append(stage.Name).Append(DetailTimingSuffix(stage)).Append(',').Append(stage.Name).Append("_samples");
+            csvBuffer.Append(",lifecycle_thermal_sampling_mode,lifecycle_thermal_lookup_setup_ms")
+                .Append(",lifecycle_thermal_cache_hits_sampled,lifecycle_thermal_cache_misses_sampled,lifecycle_thermal_cache_key_invalidations_sampled")
+                .Append(",lifecycle_thermal_candidates_sampled,lifecycle_thermal_influence_evaluations_sampled");
             if (useNewCsvFile)
             {
                 csvBuffer.AppendLine();

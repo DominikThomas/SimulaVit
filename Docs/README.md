@@ -28,7 +28,7 @@ The former implementation plan is about 207 KB and mixes architectural contracts
 
 ### Uncertainty and known contradictions retained explicitly
 
-- The latest position-dependent temperature integration and initial founder system/outlet balancing have source-review evidence only. Historical seed-283 ecology, timing and performance results predate those changes. `GeodesicVentThermalModelTests.HabitatEligibilityIsBottomOnlyAndCrossHabitatSafe` and some founder fixtures reflect an older model; do not silently reinterpret them as current acceptance.
+- Historical seed-283 ecology results predate position-dependent temperature integration and initial founder system/outlet balancing. The vent thermal model fixture now checks eligibility throughout the active ocean layers. Older founder fixtures still include placement assumptions from the earlier model. P0 timings and P1 acceptance status are tracked in the performance roadmap. [Position-dependent vent temperature](GeodesicPositionDependentVentTemperature.md) · [Performance roadmap](GEODESIC_PERFORMANCE_ROADMAP.md)
 - Sulfur and fermentation reports record the same **17 baseline failures** in broad native suites. Focused passes do not erase those failures. Their disposition remains C1 work; no fresh run was performed.
 - B2.2 makes oxygenic photosynthesis reachable and uses measured atomic transactions. [Photosynthesis and manual Unity validation](GeodesicOxygenicPhotosynthesis.md)
 - B2.3 adds aerobic OrganicC feeding, local-gated evolution and optional founders at suitable death-recycling sites. [Saprotrophy and manual Unity validation](GeodesicAerobicSaprotrophy.md)
@@ -131,6 +131,7 @@ The former implementation plan is about 207 KB and mixes architectural contracts
 | --- | --- |
 | [Geodesic performance roadmap](GEODESIC_PERFORMANCE_ROADMAP.md) | Authoritative sequence, acceptance gates, and evidence for P0–P6 on the performance branch. |
 | [Geodesic P0 manual benchmarks](GEODESIC_PERFORMANCE_BENCHMARKS.md) | Fixed-seed A–D profiles, matched measurement windows, timing scope definitions, and observer overhead checks. |
+| [Geodesic P1 lifecycle thermal sampling](GeodesicLifecycleThermalOptimization.md) | Reference and optimized paths, cache and numerical equivalence, and user-run acceptance procedure. |
 | [Geodesic scalability architecture assessment](GEODESIC_SCALABILITY_ARCHITECTURE_ASSESSMENT.md) | Starting architecture assessment for milestone A7. Covers execution dependencies and historical projections through 100,000 organisms. |
 | [Geodesic performance baseline](GeodesicPerformanceBaseline.md) | Original analyzer’s metrics, capture behavior, and historical timing and validation context. |
 | [Geodesic environmental CPU optimization](GeodesicEnvironmentalCpuOptimization.md) | Earlier transport and thermal optimization report, with historical measurements and attribution limits. |

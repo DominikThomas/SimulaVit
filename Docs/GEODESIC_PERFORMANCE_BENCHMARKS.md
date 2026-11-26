@@ -2,6 +2,8 @@
 
 These reference configurations are for user-run measurements on the merged B2 performance branch. Population targets and observation windows are proposed from source. [Performance roadmap and branch point](GEODESIC_PERFORMANCE_ROADMAP.md)
 
+For P1, load the saved A, D2 and C profiles and follow the matched Reference and Optimized procedure. The setup below records how the P0 profiles were defined. [P1 manual acceptance](GeodesicLifecycleThermalOptimization.md#manual-acceptance)
+
 ## Keep benchmark settings separate
 
 1. Keep a copy of the ordinary saved startup JSON. On Windows the default is `%USERPROFILE%\AppData\LocalLow\DominikThomas\SimulaVit\startup_config.json`. In Unity Play Mode on `PlanetScene`, find the **Simulation Startup** object. Before editing setup, disable **Save Startup Config On Start**. This also disables automatic draft saves on Back and quit.

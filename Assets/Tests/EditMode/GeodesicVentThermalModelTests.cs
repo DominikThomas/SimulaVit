@@ -57,10 +57,13 @@ public sealed class GeodesicVentThermalModelTests
         Assert.Less(GeodesicVentThermalModel.EvaluateInfluence(0.14f, 0.08f, 0.12f, 1f), 1f);
         Assert.AreEqual(0f, GeodesicVentThermalModel.EvaluateInfluence(0.20f, 0.08f, 0.12f, 1f));
     }
-    [Test] public void HabitatEligibilityIsBottomOnlyAndCrossHabitatSafe()
+    [Test] public void SubmarineCandidatesAreEligibleInAllActiveLayersAndCrossHabitatSafe()
     {
         Assert.IsTrue(GeodesicVentThermalModel.IsHabitatEligible(GeodesicVentHabitat.Submarine, true, 4, 4));
-        Assert.IsFalse(GeodesicVentThermalModel.IsHabitatEligible(GeodesicVentHabitat.Submarine, true, 3, 4));
+        Assert.IsTrue(GeodesicVentThermalModel.IsHabitatEligible(GeodesicVentHabitat.Submarine, true, 3, 4));
+        Assert.IsTrue(GeodesicVentThermalModel.IsHabitatEligible(GeodesicVentHabitat.Submarine, true, 0, 4));
+        Assert.IsFalse(GeodesicVentThermalModel.IsHabitatEligible(GeodesicVentHabitat.Submarine, true, 5, 4));
+        Assert.IsFalse(GeodesicVentThermalModel.IsHabitatEligible(GeodesicVentHabitat.Submarine, true, -1, 4));
         Assert.IsFalse(GeodesicVentThermalModel.IsHabitatEligible(GeodesicVentHabitat.Submarine, false, 0, -1));
         Assert.IsTrue(GeodesicVentThermalModel.IsHabitatEligible(GeodesicVentHabitat.Terrestrial, false, 0, -1));
         Assert.IsFalse(GeodesicVentThermalModel.IsHabitatEligible(GeodesicVentHabitat.Terrestrial, true, 4, 4));

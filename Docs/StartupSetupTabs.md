@@ -26,12 +26,15 @@ In **New Game → Advanced → Performance recording**, configure the existing s
 | --- | --- |
 | Enable performance recording | Off |
 | Detailed Geodesic profiling (this session) | Off |
+| Lifecycle thermal sampling (Geodesic) | Reference |
 | Write CSV | On |
 | Log periodic summaries to Console | Off |
 | Summary interval (real seconds) | 5 seconds, minimum 1 |
 | Append timestamp to CSV filename | On |
 
 Startup saves the basic recording options with the other settings. The detailed toggle appears when recording is enabled for a Geodesic world and applies to this session. **Reset Advanced to Defaults** restores the recording options. **Start** and **Start Paused** begin a fresh capture once the world is ready. The runtime **Esc** menu displays the active CSV path and can copy it to the clipboard. Returning to the main menu stops recording and flushes the completed samples. [Performance recording and CSV details](GeodesicPerformanceBaseline.md) · [Detailed attribution and capture modes](GEODESIC_PERFORMANCE_BENCHMARKS.md#profiling-modes-and-overhead)
+
+**Lifecycle thermal sampling** selects **Reference** or **Optimized** for the next Geodesic world, even with recording off. The choice is held by the setup controller for the current Unity session. **Reset Advanced to Defaults** restores Reference. Saved profiles retain their existing settings, and each capture records the selected mode. [Lifecycle thermal sampling pilot](GeodesicLifecycleThermalOptimization.md)
 
 ## Newly connected configuration
 

@@ -427,6 +427,7 @@ public partial class SimulationStartupController : MonoBehaviour
         if (currentConfig == null) currentConfig = new SimulationStartupConfig();
         CopyAdvancedSettings(defaults ?? new SimulationStartupConfig(), currentConfig);
         detailedGeodesicProfiling = false;
+        lifecycleThermalSampling = LifecycleThermalSamplingMode.Reference;
         ApplyVentVisualSettings();
         numericFieldEdits.Clear();
         integerFieldEdits.Clear();
@@ -668,6 +669,7 @@ public partial class SimulationStartupController : MonoBehaviour
             {
                 throw new InvalidOperationException("Geodesic biology initialization failed.");
             }
+            replicatorManager?.SetLifecycleThermalSamplingMode(lifecycleThermalSampling);
         }
         Debug.Log(FormattableString.Invariant($"[StartupLifecycle] biologyInitializationMs={biologyWatch.Elapsed.TotalMilliseconds:F2}"), this);
 

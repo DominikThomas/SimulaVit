@@ -4,9 +4,11 @@ Implemented from the clean local `eb46f65` founder-emergence commit on the exist
 
 Saved startup settings were not written. The saved Hydrogen → Fermentation probability remains **0.02**, along with the current gradual mode, 10-second mean interval, 300-second initial delay, ongoing emergence off, population cap, metabolism and movement parameters. Startup schema stays v24. No new configuration toggle or tuning controls were introduced.
 
+This report records the original model integration. The later P1 report describes the optional lifecycle sampler and current parity fixtures. [Lifecycle thermal sampling pilot](GeodesicLifecycleThermalOptimization.md)
+
 ## Biological temperature authority
 
-`GeodesicBiologyRuntime.GetBiologicalTemperature(index, state)` now resolves an organism's authoritative cell/layer **and packed world position** through `GetAgentTemperatureSample` → `SampleBiologicalTemperature` → `GeodesicExperiencedTemperatureField.TrySampleTemperature`.
+`GeodesicBiologyRuntime.GetBiologicalTemperature` reads the organism's active cell and layer and its packed world position. The Reference path uses `SampleKnownOceanTemperature` on vent cache misses. Full observations, founder placement and daughter initialization use `SampleBiologicalTemperature` → `TrySampleTemperature`. The optional P1 lifecycle path uses the same model and a prepared ocean vent lookup. [P1 implementation and runtime selection](GeodesicLifecycleThermalOptimization.md)
 
 The original `GetHabitatTemperature(cell, layer)` and `temperatureByNode` remain **coarse ocean background caches only**. Experienced temperature is never written into that node cache. Near indexed vents, a separate reusable value-type cache is keyed by biology step, coarse-temperature epoch, node and exact position. Organisms sharing a node cannot reuse each other's result unless they occupy the same position. Movement invalidates a result through its changed position; swap-back is safe because temperature depends on position/habitat rather than organism identity. Outside indexed influence candidates, sampling returns the coarse background without a transform or outlet search.
 

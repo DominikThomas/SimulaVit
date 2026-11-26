@@ -150,6 +150,7 @@ public sealed partial class GeodesicBiologyRuntime
     internal struct PerformanceWork
     {
         internal long Births, Deaths, PreySearches, PreyCandidates, CaptureAttempts, PreyCaptures;
+        internal LifecycleThermalWork LifecycleThermal;
 
         internal void AddSince(in PerformanceWork current, in PerformanceWork previous)
         {
@@ -159,6 +160,7 @@ public sealed partial class GeodesicBiologyRuntime
             PreyCandidates += Math.Max(0L, current.PreyCandidates - previous.PreyCandidates);
             CaptureAttempts += Math.Max(0L, current.CaptureAttempts - previous.CaptureAttempts);
             PreyCaptures += Math.Max(0L, current.PreyCaptures - previous.PreyCaptures);
+            LifecycleThermal.AddSince(current.LifecycleThermal, previous.LifecycleThermal);
         }
     }
 
@@ -166,7 +168,8 @@ public sealed partial class GeodesicBiologyRuntime
     {
         Births = births, Deaths = deaths,
         PreySearches = performancePreySearches, PreyCandidates = performancePreyCandidates,
-        CaptureAttempts = performanceCaptureAttempts, PreyCaptures = performancePreyCaptures
+        CaptureAttempts = performanceCaptureAttempts, PreyCaptures = performancePreyCaptures,
+        LifecycleThermal = lifecycleThermalWork
     };
 
     private GeodesicBiologyAvailability availability = GeodesicBiologyAvailability.Default;
@@ -886,6 +889,8 @@ public sealed partial class GeodesicBiologyRuntime
     {
         bool observeEvolution = evolutionDiagnostics.Enabled;
         int sampleOffset = PerformanceSampleOffset;
+        var preparedVents = ThermalSamplingMode == LifecycleThermalSamplingMode.Optimized && experiencedTemperature != null
+            ? experiencedTemperature.GetLifecycleOceanVentLookup(grid) : null;
         for (int i = state.Count - 1; i >= 0; i--)
         {
             bool sample = IsPerformanceSample(i, sampleOffset);
@@ -906,7 +911,8 @@ public sealed partial class GeodesicBiologyRuntime
             state.Age[i] += dt;
             float temperature, performance;
             DeathCause exposureCause;
-            using (LifecycleTemperature.Measure(sample)) temperature = GetBiologicalTemperature(i,state);
+            using (LifecycleTemperature.Measure(sample))
+                temperature = GetBiologicalTemperature(i, state, preparedVents, countWork: sample);
             using (LifecycleExposure.Measure(sample))
             {
                 performance = CalculateTemperaturePerformance(temperature, state.OptimalTempMin[i],

@@ -29,6 +29,8 @@ public sealed class SimulationPerformanceRecorderTests
             Assert.That(header, Does.Contain("methanotrophy_avg"));
             Assert.That(header, Does.Contain("detailed_slot_stride"));
             Assert.That(header, Does.Contain("GeodesicBiology.Lifecycle.TemperatureAndVents_estimated_avg_ms"));
+            Assert.That(header, Does.Contain("lifecycle_thermal_sampling_mode,lifecycle_thermal_lookup_setup_ms"));
+            Assert.That(header, Does.Contain("lifecycle_thermal_influence_evaluations_sampled"));
             Assert.That(analyzer.DetailedGeodesicProfilingActive, Is.False);
 
             analyzer.BeginCapture(true, false, 5f, false, detailedGeodesicProfiling: true);
@@ -64,6 +66,8 @@ public sealed class SimulationPerformanceRecorderTests
             var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
             var manager = populationFixture.AddComponent<ReplicatorManager>();
             typeof(ReplicatorManager).GetField("simulationTimeSeconds", flags).SetValue(manager, 123.5d);
+            typeof(ReplicatorManager).GetField("geodesicBiology", flags).SetValue(manager, new GeodesicBiologyRuntime());
+            manager.SetLifecycleThermalSamplingMode(LifecycleThermalSamplingMode.Optimized);
             var state = (ReplicatorPopulationState)typeof(ReplicatorManager).GetField("populationState", flags).GetValue(manager);
             var agents = (List<Replicator>)typeof(ReplicatorManager).GetField("agents", flags).GetValue(manager);
             var metabolisms = new[]
@@ -122,6 +126,8 @@ public sealed class SimulationPerformanceRecorderTests
             Assert.That(ReadColumn("end_simulated_seconds"), Is.EqualTo(123.5d));
             Assert.That(ReadColumn("simulated_seconds"), Is.Zero);
             Assert.That(ReadColumn("detailed_slot_stride"), Is.Zero);
+            Assert.That(row[System.Array.IndexOf(header, "lifecycle_thermal_sampling_mode")], Is.EqualTo("Optimized"));
+            Assert.That(row[System.Array.IndexOf(header, "lifecycle_thermal_cache_hits_sampled")], Is.EqualTo("n/a"));
             Assert.That(analyzer.LatestSummary, Does.Contain("end_simulated_seconds=123.5 "));
         }
         finally

@@ -1181,6 +1181,13 @@ public class ReplicatorManager : MonoBehaviour
     internal GeodesicBiologyRuntime.PerformanceWork GeodesicPerformanceWork =>
         geodesicBiology?.PerformanceWorkTotals ?? default;
 
+    internal LifecycleThermalSamplingMode? GeodesicLifecycleThermalMode => geodesicBiology?.ThermalSamplingMode;
+    internal double GeodesicLifecycleThermalLookupSetupMilliseconds =>
+        geodesicBiology?.LifecycleThermalLookupSetupMilliseconds ?? 0d;
+
+    internal void SetLifecycleThermalSamplingMode(LifecycleThermalSamplingMode mode) =>
+        geodesicBiology?.SetLifecycleThermalSamplingMode(mode);
+
     internal bool RunGeodesicBiologyStep(float stepDeltaTime)
     {
         if (geodesicBiology == null) return false;
