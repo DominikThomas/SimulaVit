@@ -133,6 +133,10 @@ public sealed partial class GeodesicTinLakeRouting
         }
         if (!hasWitness || !node.DownstreamSample.HasValue || Inside(node.DownstreamSample.Value, basin.Id))
         {
+#if UNITY_EDITOR
+            if (SpillTraceEnabled)
+                LogSpillTrace(basin, spill, hasWitness, Departure);
+#endif
             string report = "[GeodesicTinLakeRouting] unresolved overflowing outlet; refusing invented terminal storage. " +
                 $"validSpillWitness={hasWitness} traceTermination={termination} " + DescribeOutlet(node);
             UnityEngine.Debug.LogError(report);

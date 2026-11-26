@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using NUnit.Framework;
+using UnityEngine;
 
 public sealed class GeodesicTinLakeRoutingTests
 {
@@ -32,6 +33,51 @@ public sealed class GeodesicTinLakeRoutingTests
         Assert.That(lake.InletDischarges.Count, Is.GreaterThan(1));
         Assert.That(routing.Lakes.Count(n => n.OutletReachId >= 0), Is.EqualTo(1));
     }
+
+    [TestCase(true)]
+    [TestCase(false)]
+    public void DownhillSpillEdgeCanFailCompletedFacetGrade(bool oneUlpDrop)
+    {
+        const float rim = 8.2f;
+        float downstream = oneUlpDrop
+            ? BitConverter.Int32BitsToSingle(BitConverter.SingleToInt32Bits(rim) - 1)
+            : 8.198f;
+        var directions = new[] { Vector3.right, new Vector3(1f, .1f, 0f).normalized, new Vector3(1f, 0f, .1f).normalized };
+        var heights = new[] { rim, downstream, rim + .02f };
+        var surface = directions.Select((direction, index) => direction * heights[index]).ToArray();
+        var tin = new GeodesicTinHydrology(directions, new[] { 0, 1, 2 }, heights, heights,
+            radius: 8d, epsilon: .000002d, visibleBumpTolerance: .0001d, completedSurface: surface);
+        var spill = tin.BasinPoint(0, 0);
+        var witness = tin.BasinPoint(0, 1);
+        Assert.That(tin.OutletSlope(spill, witness), Is.GreaterThan(0d));
+        Assert.That(tin.CompletedVisibleRadius(witness), Is.LessThan(tin.CompletedVisibleRadius(spill)));
+        Assert.That(tin.CompletedVisibleRadius(witness) - tin.MinimumOutletSegmentRadius(spill, witness),
+            Is.GreaterThan(tin.VisibleBumpTolerance + tin.Epsilon));
+
+        var before = tin.Diagnostics.Summary();
+        var failure = default(GeodesicTinHydrology.TraceFailure);
+        var path = tin.TraceLakeOutlet(spill, (a, b) => a.Equals(spill) && b.Equals(witness),
+            out var termination, failure: value => failure = value);
+
+        Assert.That(termination, Is.EqualTo(TinTermination.RoutingFailure));
+        Assert.That(failure.Kind, Is.EqualTo(GeodesicTinHydrology.TraceFailureKind.VisibleGrade));
+        Assert.That(failure.Start, Is.EqualTo(spill));
+        Assert.That(failure.End, Is.EqualTo(witness));
+        CollectionAssert.AreEqual(new[] { spill }, path);
+#if UNITY_EDITOR
+        bool foundWitness = false;
+        tin.VisitSpillDescentCandidates(spill, (a, b) =>
+        {
+            if (!a.Equals(spill) || !b.Equals(witness)) return;
+            foundWitness = true;
+            Assert.That(tin.PreviewSpillGrade(spill, a, b), Is.EqualTo(failure.Kind));
+        });
+        Assert.That(foundWitness, Is.True);
+#endif
+        Assert.That(tin.Diagnostics.Summary(), Is.EqualTo(before));
+        Assert.That(tin.HasVisibleDisagreement, Is.False);
+    }
+
     [Test] public void IndependentTributariesCombineOnceAndTerminalHoldsTheirDischarge()
     {
         var a = new TinLakeFlowNode(1) { DownstreamLakeId = 3 };

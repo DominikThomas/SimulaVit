@@ -17,7 +17,7 @@ using UnityEngine.TestTools;
 public sealed class GeodesicSulfurWorldExperiments
 {
     private const BindingFlags Fields = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-    private static readonly string Output = Path.GetFullPath(Path.Combine(Application.dataPath, "../Artifacts/SulfurAudit"));
+    private static string Output => Path.GetFullPath(Path.Combine(Application.dataPath, "../Artifacts/SulfurAudit"));
     [Serializable] private sealed class Report
     {
         public string mode, protocol = "fixed 1/30s: biology; sun; surface-temperature (ocean event); resource transport/chemistry";
@@ -56,8 +56,7 @@ public sealed class GeodesicSulfurWorldExperiments
         // Normal planet startup owns deferred Destroy calls. Run this fixture in
         // Play Mode in the disposable project rather than changing generation code
         // or suppressing EditMode destruction errors.
-        Assert.That(Application.isBatchMode && Application.dataPath.Replace('\\', '/').Contains("/Temp/FoodTaxisAudit/UnityValidation-"),
-            Is.True, "Full-world trials must use the disposable batch project, never the user's open Editor.");
+        GeodesicWorldExperimentContext.RequireDisposableBatchProject();
         foreach (var startup in SceneManager.GetActiveScene().GetRootGameObjects().SelectMany(r => r.GetComponentsInChildren<SimulationStartupController>(true)))
             Assert.That((bool)Get(startup, "saveStartupConfigOnStart"), Is.False, "Use Tools/ValidateSulfur.ps1 to disable the quit-time draft writer in the disposable scene.");
         yield return new EnterPlayMode();

@@ -14,7 +14,7 @@ using UnityEngine.TestTools;
 public sealed class GeodesicFounderEmergenceWorldExperiments
 {
     private const BindingFlags Fields=BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic;
-    private static readonly string Output=Path.GetFullPath(Path.Combine(Application.dataPath,"../Artifacts/FounderEmergenceAudit"));
+    private static string Output => Path.GetFullPath(Path.Combine(Application.dataPath, "../Artifacts/FounderEmergenceAudit"));
     [Serializable] private sealed class Sample {
         public double time;
         public int population;
@@ -41,7 +41,7 @@ public sealed class GeodesicFounderEmergenceWorldExperiments
 
     private IEnumerator RunModes(GeodesicFounderEmergenceMode[] modes)
     {
-        Assert.That(Application.isBatchMode && Application.dataPath.Replace('\\','/').Contains("/Temp/FoodTaxisAudit/UnityValidation-"),Is.True);
+        GeodesicWorldExperimentContext.RequireDisposableBatchProject();
         foreach(var startup in SceneManager.GetActiveScene().GetRootGameObjects().SelectMany(r=>r.GetComponentsInChildren<SimulationStartupController>(true)))
             Assert.That((bool)Get(startup,"saveStartupConfigOnStart"),Is.False);
         yield return new EnterPlayMode();

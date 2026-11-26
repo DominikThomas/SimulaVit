@@ -17,7 +17,7 @@ using UnityEngine.TestTools;
 public sealed class GeodesicFoodWorldExperiments
 {
     private const BindingFlags Fields = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-    private static readonly string Output = Path.GetFullPath(Path.Combine(Application.dataPath, "../Artifacts/FoodTaxisAudit"));
+    private static string Output => Path.GetFullPath(Path.Combine(Application.dataPath, "../Artifacts/FoodTaxisAudit"));
     [Serializable] private sealed class Report
     {
         public string mode, protocol = "fixed 1/30s: biology; sun; surface-temperature (ocean event); resource transport/chemistry";
@@ -47,8 +47,7 @@ public sealed class GeodesicFoodWorldExperiments
         // Normal planet startup owns deferred Destroy calls. Run this fixture in
         // Play Mode in the disposable project rather than changing generation code
         // or suppressing EditMode destruction errors.
-        Assert.That(Application.isBatchMode && Application.dataPath.Replace('\\', '/').Contains("/Temp/FoodTaxisAudit/UnityValidation-"),
-            Is.True, "Full-world trials must use the disposable batch project, never the user's open Editor.");
+        GeodesicWorldExperimentContext.RequireDisposableBatchProject();
         yield return new EnterPlayMode();
         Directory.CreateDirectory(Output);
         string saved = File.ReadAllText(Path.Combine(Application.persistentDataPath, "startup_config.json"));

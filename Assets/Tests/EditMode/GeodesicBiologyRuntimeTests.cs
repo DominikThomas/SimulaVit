@@ -2,6 +2,7 @@ using NUnit.Framework;
 using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
+using Math = System.Math;
 
 public sealed class GeodesicBiologyRuntimeTests
 {
@@ -472,18 +473,49 @@ public sealed class GeodesicBiologyRuntimeTests
     [Test]
     public void FixedPassiveTickPreservesDisplacementWithinDocumentedTolerance()
     {
-        Vector3 fineDirection = Vector3.up, coarseDirection = Vector3.up;
-        Vector3 fineTangent = Vector3.right, coarseTangent = Vector3.right;
-        for (int i = 0; i < 20; i++)
-            GeodesicBiologyRuntime.AdvancePassiveKinematics(ref fineDirection, ref fineTangent, 0.35f, 0.005f);
-        GeodesicBiologyRuntime.AdvancePassiveKinematics(ref coarseDirection, ref coarseTangent, 0.35f,
-            GeodesicBiologyRuntime.PassiveKinematicsIntervalSeconds);
-        // Semi-implicit tangent integration differs slightly with step size, but the physical
-        // travel distance is invariant to substantially below a rendered pixel at planet scale.
-        Assert.That(AngularDistanceDegrees(fineDirection, coarseDirection), Is.LessThan(0.0001f));
-        float expected = PassiveTravelDegrees(GeodesicBiologyRuntime.PassiveKinematicsIntervalSeconds);
-        Assert.That(AngularDistanceDegrees(Vector3.up, fineDirection), Is.EqualTo(expected).Within(0.0001f));
-        Assert.That(AngularDistanceDegrees(Vector3.up, coarseDirection), Is.EqualTo(expected).Within(0.0001f));
+        const int substeps = 20;
+        float tick = GeodesicBiologyRuntime.PassiveKinematicsIntervalSeconds;
+        float substep = tick / substeps;
+        double speed = GeodesicBiologyRuntime.PassiveAngularSpeedRadiansPerSecond;
+        const double degreesPerRadian = 180d / Math.PI;
+        Vector3 radial = Vector3.up, forward = Vector3.right;
+        Vector3 side = Vector3.Cross(radial, forward);
+
+        // Hold curvature constant to isolate kinematics from the separate wander clock and random stream.
+        foreach (float wanderRate in new[] { 0f, .35f, -.35f })
+        {
+            Vector3 fineDirection = radial, coarseDirection = radial;
+            Vector3 fineTangent = forward, coarseTangent = forward;
+            for (int i = 0; i < substeps; i++)
+                GeodesicBiologyRuntime.AdvancePassiveKinematics(ref fineDirection, ref fineTangent, wanderRate, substep);
+            GeodesicBiologyRuntime.AdvancePassiveKinematics(ref coarseDirection, ref coarseTangent, wanderRate, tick);
+
+            double expectedTravel = speed * tick * degreesPerRadian;
+            foreach (Vector3 direction in new[] { fineDirection, coarseDirection })
+            {
+                double travel = AngularDistanceDegrees(radial, direction);
+                Assert.That(travel, Is.GreaterThan(0d));
+                Assert.That(travel, Is.EqualTo(expectedTravel).Within(.0001d));
+                Assert.That(direction.magnitude, Is.EqualTo(1f).Within(1e-6f));
+                Assert.That(Vector3.Dot(direction, forward), Is.GreaterThan(0f));
+            }
+
+            double gap = AngularDistanceDegrees(fineDirection, coarseDirection);
+            if (wanderRate == 0f)
+            {
+                Assert.That(gap, Is.LessThan(.0001d));
+                Assert.That(Vector3.Dot(coarseDirection, side), Is.Zero.Within(1e-7f));
+                Assert.That(Vector3.Dot(fineDirection, side), Is.Zero.Within(1e-7f));
+                continue;
+            }
+
+            // The integrator turns before moving. The single step applies the final heading
+            // throughout the tick. For the subdivided path, the mean heading is w*(tick+substep)/2.
+            double expectedGap = speed * Math.Abs(wanderRate) * tick * (tick - substep) / 2d * degreesPerRadian;
+            Assert.That(gap, Is.EqualTo(expectedGap).Within(.000002d));
+            Assert.That(Math.Sign(Vector3.Dot(coarseDirection - fineDirection, side)), Is.EqualTo(Math.Sign(wanderRate)));
+            Assert.That(Math.Sign(Vector3.Dot(fineDirection, side)), Is.EqualTo(Math.Sign(wanderRate)));
+        }
     }
 
     [Test]
@@ -498,12 +530,14 @@ public sealed class GeodesicBiologyRuntimeTests
         Assert.That(accumulator, Is.EqualTo(0.05f).Within(1e-5f));
     }
 
-    private static float PassiveTravelDegrees(float seconds)
-        => GeodesicBiologyRuntime.PassiveAngularSpeedRadiansPerSecond * seconds * Mathf.Rad2Deg;
-
-    // acos(dot) rounds these small displacements to zero in single precision.
-    private static float AngularDistanceDegrees(Vector3 from, Vector3 to)
-        => Mathf.Atan2(Vector3.Cross(from, to).magnitude, Vector3.Dot(from, to)) * Mathf.Rad2Deg;
+    private static double AngularDistanceDegrees(Vector3 from, Vector3 to)
+    {
+        double x = (double)from.y * to.z - (double)from.z * to.y;
+        double y = (double)from.z * to.x - (double)from.x * to.z;
+        double z = (double)from.x * to.y - (double)from.y * to.x;
+        double dot = (double)from.x * to.x + (double)from.y * to.y + (double)from.z * to.z;
+        return Math.Atan2(Math.Sqrt(x * x + y * y + z * z), dot) * (180d / Math.PI);
+    }
 
     [Test]
     public void PassiveKinematicsIsDeterministicAndHasNoHabitatInputs()

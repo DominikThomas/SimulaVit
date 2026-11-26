@@ -145,7 +145,7 @@ The former implementation plan is about 207 KB and mixes architectural contracts
 | [StartupSetupTabs](StartupSetupTabs.md) | Setup UI/reference with later biology/founder/vent-controls scope note. |
 | [StartupBiologyEvolution](StartupBiologyEvolution.md) | Evolution UI implementation report; earlier disabled fermentation superseded, later founder controls linked. |
 | [PlanetGenerationLoadingScreen](PlanetGenerationLoadingScreen.md) | Generation progress/loading UI reference; not a simulation save feature. |
-| [Performance README](../Assets/Tests/Performance/README.md) | Existing legacy benchmark instructions/gates; does not establish geodesic performance or authorize running tests. |
+| [Legacy PlayMode benchmark retirement](GeodesicTestSuiteMaintenance.md#playmode-benchmark-retirement) | Retired CubeSphere fixture and baseline data, with the Git revision and current Geodesic coverage. |
 
 ## Cleanup record and maintenance
 

@@ -588,11 +588,12 @@ public sealed partial class GeodesicTinHydrology
     {
         internal readonly TraceFailureKind Kind;
         internal readonly TinPoint Start, End;
-        internal readonly double LowestHydrology, LowestVisibleRadius;
-        internal TraceFailure(TraceFailureKind kind, TinPoint start, TinPoint end, double lowestHydrology, double lowestVisibleRadius)
+        internal readonly double LowestHydrology, LowestVisibleHeight, LowestVisibleRadius;
+        internal TraceFailure(TraceFailureKind kind, TinPoint start, TinPoint end,
+            double lowestHydrology, double lowestVisibleHeight, double lowestVisibleRadius)
         {
             Kind = kind; Start = start; End = end;
-            LowestHydrology = lowestHydrology; LowestVisibleRadius = lowestVisibleRadius;
+            LowestHydrology = lowestHydrology; LowestVisibleHeight = lowestVisibleHeight; LowestVisibleRadius = lowestVisibleRadius;
         }
     }
 
@@ -718,7 +719,7 @@ public sealed partial class GeodesicTinHydrology
 
         TinTermination Fail(TraceFailureKind reason, TinPoint start, TinPoint end)
         {
-            failure?.Invoke(new TraceFailure(reason, start, end, lowestH, lowestR));
+            failure?.Invoke(new TraceFailure(reason, start, end, lowestH, lowestV, lowestR));
             return TinTermination.RoutingFailure;
         }
     }
@@ -749,10 +750,10 @@ public sealed partial class GeodesicTinHydrology
     internal double ParcelRunoff(int triangle) => localRunoff[triangle];
     internal TinPoint TransferLakePoint(TinPoint point, int triangle) => Transfer(point, triangle);
     internal TinPoint[] TraceLakeOutlet(TinPoint spill, Func<TinPoint, TinPoint, bool> departure, out TinTermination termination,
-        int maximumSteps = 32768)
+        int maximumSteps = 32768, Action<TraceFailure> failure = null)
     {
         var samples = new List<TinPoint>(128); var candidates = new List<int>(8);
-        termination = TraceInto(spill, samples, candidates, maximumSteps, observe: false, departure: departure);
+        termination = TraceInto(spill, samples, candidates, maximumSteps, observe: false, departure: departure, failure: failure);
         return samples.ToArray();
     }
     internal bool ValidateLakePath(TinPoint[] path)
