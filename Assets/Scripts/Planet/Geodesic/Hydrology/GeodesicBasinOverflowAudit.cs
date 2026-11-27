@@ -574,6 +574,7 @@ internal sealed class GeodesicBasinOverflowAudit
             return "AmbiguousRetainedOceanEndpoint";
         if (legacy)
         {
+            if (!tin.ValidateCompletedVisibleGrade(path)) return "OutletRoutingFailureOrTraceLimit";
             foreach (var point in path)
             {
                 if (InWater(point)) return "OutletReentersCompoundWater";

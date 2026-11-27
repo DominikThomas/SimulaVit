@@ -51,10 +51,11 @@ public sealed class GeodesicTinLakeSediment
     {
         if (byFacet.Count == 0) return null;
         var source = original.vertices;
+        var sourceNormals = original.normals;
         var uv = original.uv;
         var sourceColors = original.colors;
         var vertices = new List<Vector3>(source);
-        var normals = new List<Vector3>(original.normals);
+        var normals = new List<Vector3>(sourceNormals);
         var uvs = new List<Vector2>(uv);
         var colors = new List<Color>(sourceColors);
         var indices = new List<int>(tin.TriangleCount * 3);
@@ -70,7 +71,9 @@ public sealed class GeodesicTinLakeSediment
             Vector3 direction = tin.Direction(point);
             int index = vertices.Count;
             vertices.Add(level.HasValue ? direction * level.Value : source[a] * x + source[b] * y + source[c] * z);
-            normals.Add(normal ?? (level.HasValue ? direction : (normals[a] * x + normals[b] * y + normals[c] * z).normalized));
+            if (sourceNormals.Length > 0)
+                normals.Add(normal ?? (level.HasValue ? direction :
+                    (sourceNormals[a] * x + sourceNormals[b] * y + sourceNormals[c] * z).normalized));
             if (uv.Length > 0) uvs.Add(uv[a] * x + uv[b] * y + uv[c] * z);
             if (sourceColors.Length > 0) colors.Add(sourceColors[a] * x + sourceColors[b] * y + sourceColors[c] * z);
             return index;
@@ -109,7 +112,8 @@ public sealed class GeodesicTinLakeSediment
             }
         }
         var mesh = new Mesh { name = "Geodesic Terrain with Lake Sediment", indexFormat = IndexFormat.UInt32 };
-        mesh.SetVertices(vertices); mesh.SetNormals(normals); mesh.SetTriangles(indices, 0);
+        mesh.SetVertices(vertices); mesh.SetTriangles(indices, 0);
+        if (sourceNormals.Length > 0) mesh.SetNormals(normals);
         if (uv.Length > 0) mesh.SetUVs(0, uvs);
         if (sourceColors.Length > 0) mesh.SetColors(colors);
         return mesh;

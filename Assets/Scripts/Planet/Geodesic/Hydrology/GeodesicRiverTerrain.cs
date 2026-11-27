@@ -78,12 +78,11 @@ public sealed class GeodesicRiverTerrain
     public double MaximumCompletedVisibleUphillExcursion(Vector3[] path)
         => MaximumUphillExcursion(path, false, true);
 
-    /// <summary>All crossed facet extrema, in double precision. This guards interpolation,
-    /// optional smoothing, and projection; endpoint-only tests can miss a narrow ridge.</summary>
+    /// <summary>Grade the two elevation fields at every crossed facet boundary, and
+    /// require a valid completed-plane intersection for draping the centreline.</summary>
     public bool IsCentrelineValid(Vector3[] path, double epsilon, double visibleBumpTolerance) =>
         MaximumHydrologicalUphillExcursion(path) <= epsilon &&
-        MaximumUphillExcursion(path, false) <= visibleBumpTolerance + epsilon &&
-        MaximumCompletedVisibleUphillExcursion(path) <= visibleBumpTolerance + epsilon;
+        MaximumUphillExcursion(path, false, requireSurfaceIntersection: true) <= visibleBumpTolerance + epsilon;
 
     public void MeasureRejectedPath(RiverUphillDebugReach reach, double radius, double epsilon)
     {
@@ -104,7 +103,7 @@ public sealed class GeodesicRiverTerrain
         => MaximumUphillExcursion(path, false, true, points, heights);
 
     private double MaximumUphillExcursion(Vector3[] path, bool hydrological, bool completedVisible = false,
-        List<Vector3> debugPoints = null, List<double> debugHeights = null)
+        List<Vector3> debugPoints = null, List<double> debugHeights = null, bool requireSurfaceIntersection = false)
     {
         if (path == null || path.Length < 2) return float.PositiveInfinity;
         double lowest = completedVisible ? ExactRadius(path[0]) : InterpolationReference(path[0], !hydrological), rise = 0d;
@@ -141,6 +140,11 @@ public sealed class GeodesicRiverTerrain
             foreach (double t in crossings)
             {
                 Vector3 sample = Vector3.Lerp(start, end, (float)t).normalized;
+                if (requireSurfaceIntersection)
+                {
+                    double radius = ExactRadius(sample);
+                    if (!double.IsFinite(radius) || radius <= 0d) return double.PositiveInfinity;
+                }
                 double height = completedVisible ? ExactRadius(sample) : InterpolationReference(sample, !hydrological);
                 if (double.IsNaN(height) || double.IsInfinity(height)) return double.PositiveInfinity;
                 if (debugPoints != null && (debugPoints.Count == 0 || !debugPoints[debugPoints.Count - 1].Equals(sample)))

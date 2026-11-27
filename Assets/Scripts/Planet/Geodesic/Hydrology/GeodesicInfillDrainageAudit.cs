@@ -112,7 +112,7 @@ internal static class GeodesicInfillDrainageAudit
             if (!failure && emittedLegacy++ >= 20) continue;
             var rejection = replay.Failure;
             string failedStep = rejection.Kind == GeodesicTinHydrology.TraceFailureKind.None ? "-" :
-                FormattableString.Invariant($"{Point(rejection.Start)}>{Point(rejection.End)},lowH:{rejection.LowestHydrology:R},lowRadius:{rejection.LowestVisibleRadius:R}");
+                FormattableString.Invariant($"{Point(rejection.Start)}>{Point(rejection.End)},lowH:{rejection.LowestHydrology:R},lowVisibleElevation:{rejection.LowestVisibleHeight:R}");
             var finalPath = adjusted?.Samples ?? raw.Samples;
             yield return $"[GeodesicInfillNetwork] network={network} sourceFacet={raw.SourceTriangle} raw={raw.Termination} adjusted={adjusted?.Termination ?? raw.Termination} resolved={end.Type} lake={adjusted?.ReceivingLakeId ?? -1} join={adjusted?.JunctionNetwork ?? raw.JunctionNetwork} replay={replay.Termination} failure={rejection.Kind} failedStep={failedStep} previousCoast={replay.PreviousCoast ?? "-"} previousEndpoint={(replay.PreviousEndpoint.HasValue ? Point(replay.PreviousEndpoint.Value) : "-")} resolvedPoint={(end.Point.HasValue ? Point(end.Point.Value) : "-")}";
             var relevantFacets = new HashSet<int> { replay.Path[replay.Path.Length - 1].Triangle };

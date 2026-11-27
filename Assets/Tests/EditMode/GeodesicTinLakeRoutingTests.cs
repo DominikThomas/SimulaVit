@@ -1,7 +1,9 @@
 using System;
 using System.Linq;
+using System.Text.RegularExpressions;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.TestTools;
 
 public sealed class GeodesicTinLakeRoutingTests
 {
@@ -57,18 +59,21 @@ public sealed class GeodesicTinLakeRoutingTests
         var before = tin.Diagnostics.Summary();
         var failure = default(GeodesicTinHydrology.TraceFailure);
         bool Departure(TinPoint a, TinPoint b) => a.Equals(spill) && b.Equals(witness);
-        var path = tin.TraceLakeOutlet(spill, Departure, out var termination, failure: value => failure = value);
+        var path = tin.TraceLakeOutlet(spill, Departure, out var termination, maximumSteps: 1);
+        CollectionAssert.AreEqual(new[] { spill, witness }, path);
+        Assert.That(tin.ValidateLakePath(path), Is.True);
+        Assert.That(tin.ValidateCompletedVisibleGrade(path), Is.False);
+        Assert.That(tin.VerifyExposedOutlet(path), Is.False);
 
-        Assert.That(termination, Is.EqualTo(TinTermination.RoutingFailure));
-        Assert.That(failure.Kind, Is.EqualTo(GeodesicTinHydrology.TraceFailureKind.VisibleGrade));
-        Assert.That(failure.Start, Is.EqualTo(spill));
-        Assert.That(failure.End, Is.EqualTo(witness));
-        CollectionAssert.AreEqual(new[] { spill }, path);
+        var physical = tin.TraceLakeOutlet(spill, Departure, out var physicalTermination, maximumSteps: 1,
+            failure: value => failure = value, requireCompletedGrade: true);
+        Assert.That(physicalTermination, Is.EqualTo(TinTermination.RoutingFailure));
+        Assert.That(failure.Kind, Is.EqualTo(GeodesicTinHydrology.TraceFailureKind.CompletedVisibleGrade));
+        CollectionAssert.AreEqual(new[] { spill }, physical);
 #if UNITY_EDITOR
         int selections = 0;
-        var observed = default(GeodesicTinHydrology.TraceFailure);
-        var replay = tin.TraceLakeOutlet(spill, Departure, out var replayTermination,
-            failure: value => observed = value, observeSelection: (from, start, end, flat) =>
+        var replay = tin.TraceLakeOutlet(spill, Departure, out var replayTermination, maximumSteps: 1,
+            observeSelection: (from, start, end, flat) =>
             {
                 selections++;
                 Assert.That(from, Is.EqualTo(spill));
@@ -78,21 +83,190 @@ public sealed class GeodesicTinLakeRoutingTests
             });
         Assert.That(selections, Is.EqualTo(1));
         Assert.That(replayTermination, Is.EqualTo(termination));
-        Assert.That(observed.Kind, Is.EqualTo(failure.Kind));
         CollectionAssert.AreEqual(path, replay);
-        Assert.That(tin.DescribeOutletGradeChecks(observed), Does.Contain("visibleLinearPass=True").And.Contain("radialEndPass=False"));
 
         bool foundWitness = false;
         tin.VisitSpillDescentCandidates(spill, (a, b) =>
         {
             if (!a.Equals(spill) || !b.Equals(witness)) return;
             foundWitness = true;
-            Assert.That(tin.PreviewSpillGrade(spill, a, b), Is.EqualTo(failure.Kind));
+            Assert.That(tin.PreviewSpillGrade(spill, a, b), Is.EqualTo(GeodesicTinHydrology.TraceFailureKind.None));
         });
         Assert.That(foundWitness, Is.True);
 #endif
         Assert.That(tin.Diagnostics.Summary(), Is.EqualTo(before));
         Assert.That(tin.HasVisibleDisagreement, Is.False);
+    }
+
+    [TestCase(3, .14)]
+    [TestCase(4, .07)]
+    [TestCase(6, .018)]
+    [TestCase(7, .009)]
+    public void EqualRadiiHaveAnAnalyticMeshMinimumButNoLogicalRise(int subdivision, double angle)
+    {
+        const float radius = 8f;
+        var directions = new[] { Vector3.right, new Vector3((float)Math.Cos(angle), (float)Math.Sin(angle), 0f),
+            new Vector3(1f, 0f, .1f).normalized };
+        var heights = new[] { radius, radius, radius };
+        var tin = new GeodesicTinHydrology(directions, new[] { 0, 1, 2 }, heights, heights, subdivisionLevel: subdivision);
+        var a = tin.BasinPoint(0, 0); var b = tin.BasinPoint(0, 1);
+        Assert.That(tin.MinimumOutletSegmentRadius(a, b), Is.EqualTo(radius * Math.Cos(angle * .5)).Within(1e-6d));
+        Assert.That(tin.Validate(new[] { a, b }), Is.True);
+        Assert.That(tin.ValidateCompletedVisibleGrade(new[] { a, b }), Is.False);
+    }
+
+    [Test]
+    public void VisibleElevationObstacleStillStopsSphericalFilteredDescent()
+    {
+        var directions = new[] { Vector3.right, new Vector3(1f, .1f, 0f).normalized, new Vector3(1f, 0f, .1f).normalized };
+        var hydro = new[] { 8f, 7.998f, 8.02f };
+        var visible = new[] { 8f, 8.02f, 8.02f };
+        var tin = new GeodesicTinHydrology(directions, new[] { 0, 1, 2 }, visible, hydro, visibleBumpTolerance: .0001d);
+        var spill = tin.BasinPoint(0, 0); var side = tin.BasinPoint(0, 1);
+        var failure = default(GeodesicTinHydrology.TraceFailure);
+        var path = tin.TraceLakeOutlet(spill, (_, b) => b.Equals(side), out var termination, failure: value => failure = value);
+        Assert.That(tin.OutletSlope(spill, side), Is.Positive);
+        Assert.That(failure.Kind, Is.EqualTo(GeodesicTinHydrology.TraceFailureKind.VisibleGrade));
+        Assert.That(termination, Is.EqualTo(TinTermination.RoutingFailure));
+        CollectionAssert.AreEqual(new[] { spill }, path);
+#if UNITY_EDITOR
+        Assert.That(tin.DescribeOutletGradeChecks(failure), Does.Contain("hydrologyEndPass=True").And.Contain("visibleLinearPass=False"));
+#endif
+    }
+
+    [TestCase(true)]
+    [TestCase(false)]
+    public void FlatDepartureUsesTheWitnessOrRejectsTheTransition(bool allowWitness)
+    {
+        var vertices = new[] { Vector3.zero, Vector3.right, Vector3.up, new Vector3(1f, -1f, 0f), new Vector3(2f, -1f, 0f) };
+        var heights = new[] { 2f, 2f, 2f, 2f, 1f };
+        var tin = new GeodesicTinHydrology(vertices, new[] { 0, 1, 2, 0, 3, 1, 1, 3, 4 }, heights, heights,
+            new[] { false, false, false, false, true }, 1.5f, onSphere: false);
+        var spill = tin.BasinPoint(0, 0);
+        var unconstrained = tin.Trace(spill, out var unconstrainedEnd);
+        Assert.That(unconstrained[1].Triangle, Is.EqualTo(1), "The shortest plateau exit starts in the other facet.");
+        Assert.That(unconstrainedEnd, Is.EqualTo(TinTermination.OceanCoast));
+
+        var failure = default(GeodesicTinHydrology.TraceFailure);
+        var path = tin.TraceLakeOutlet(spill, (a, _) => allowWitness && a.Triangle == 0, out var end,
+            failure: value => failure = value);
+        if (allowWitness)
+        {
+            Assert.That(path[1], Is.EqualTo(new TinPoint(0, .5d, .5d, 0d)));
+            Assert.That(end, Is.EqualTo(TinTermination.OceanCoast));
+            Assert.That(tin.IsRetainedOceanBoundary(path.Last()), Is.True);
+            Assert.That(tin.ValidateLakePath(path), Is.True);
+        }
+        else
+        {
+            Assert.That(end, Is.EqualTo(TinTermination.RoutingFailure));
+            Assert.That(failure.Kind, Is.EqualTo(GeodesicTinHydrology.TraceFailureKind.DepartureRejected));
+            CollectionAssert.AreEqual(new[] { spill }, path);
+        }
+    }
+
+    [Test]
+    public void OverflowWithoutAScalarDepartureStillThrows()
+    {
+        var f = Overflow();
+        var visible = f.Heights.Select((h, i) => f.Vertices[i].x > 0f && h > 0f ? h + 20f : h).ToArray();
+        var tin = new GeodesicTinHydrology(f.Vertices, f.Triangles, visible, f.Heights,
+            f.Heights.Select(h => h <= 0f).ToArray(), onSphere: false);
+        var basins = GeodesicTinBasins.Build(tin, 0, 0);
+        var geometry = GeodesicTinLakeGeometry.Build(tin, basins);
+        Assert.That(geometry.Bodies.Count, Is.EqualTo(1));
+        LogAssert.Expect(LogType.Error, new Regex("unresolved overflowing outlet"));
+        var error = Assert.Throws<InvalidOperationException>(() => GeodesicTinLakeRouting.Build(tin, basins, geometry));
+        Assert.That(error.Message, Does.Contain("validSpillWitness=True").And.Contain("downstreamSample=[none]"));
+    }
+
+    [Test]
+    public void MeshGradeRejectionKeepsProvenLakeDeliveryAndIndependentRunoff()
+    {
+        var f = Overflow();
+        var directions = f.Vertices.Select(v => new Vector3(1f, v.x, v.y - 1f).normalized).ToArray();
+        var heights = f.Heights.Select(h => 8f + .002f * h).ToArray();
+        var tin = new GeodesicTinHydrology(directions, f.Triangles, heights, heights,
+            f.Heights.Select(h => h <= 0f).ToArray(), 8f, radius: 8d, visibleBumpTolerance: .0001d);
+        tin.CaptureParcelDestinations = true;
+        tin.Accumulate();
+        var basins = GeodesicTinBasins.Build(tin, 0, 0);
+        var routing = GeodesicTinLakeRouting.Build(tin, basins, GeodesicTinLakeGeometry.Build(tin, basins));
+        var lake = routing.Lakes.Single();
+        Assert.That(lake.OutletTermination, Is.EqualTo(TinTermination.OceanCoast));
+        Assert.That(tin.IsRetainedOceanBoundary(lake.OutletPath.Last()), Is.True);
+        Assert.That(tin.ValidateCompletedVisibleGrade(lake.OutletPath), Is.False);
+        var delivery = GeodesicDrainageDelivery.Analyze(tin, basins, routing.Lakes, routing.RiverReaches);
+        Assert.That(lake.Discharge, Is.Positive);
+        Assert.That(delivery.ViaLakesOcean, Is.EqualTo(lake.Discharge).Within(delivery.Tolerance));
+        Assert.That(Math.Abs(delivery.Residual), Is.LessThanOrEqualTo(delivery.Tolerance));
+        Assert.That(delivery.DuplicateMemberships + routing.FlowConservationErrors, Is.Zero);
+    }
+
+    [Test]
+    public void RoundedSphericalShelfKeepsIndependentRunoffWithoutCreatingLakeOwners()
+    {
+        var tin = SphericalShelf(out _);
+        tin.CaptureParcelDestinations = true;
+        tin.Accumulate();
+        var originalDestinations = tin.ParcelDestinations.ToArray();
+        var basins = GeodesicTinBasins.Build(tin, 0, 0);
+        var rounded = basins.Basins.Where(b => b.NumericalShelf).Select(b => b.Id).ToArray();
+        Assert.That(rounded.Length, Is.GreaterThan(1));
+        CollectionAssert.AreEqual(rounded, GeodesicTinBasins.Build(tin, 0, 0).Basins
+            .Where(b => b.NumericalShelf).Select(b => b.Id));
+        var originalDelivery = GeodesicDrainageDelivery.Analyze(tin, basins);
+        var geometry = GeodesicTinLakeGeometry.Build(tin, basins);
+        Assert.That(geometry.Bodies, Is.Empty);
+        var routing = GeodesicTinLakeRouting.Build(tin, basins, geometry);
+        var delivery = GeodesicDrainageDelivery.Analyze(tin, basins, routing.Lakes, routing.RiverReaches);
+        CollectionAssert.AreEqual(originalDestinations, tin.ParcelDestinations);
+        Assert.That(delivery.IndependentParcels, Is.EqualTo(originalDelivery.IndependentParcels));
+        Assert.That(delivery.TotalRunoff, Is.EqualTo(originalDelivery.TotalRunoff));
+        Assert.That(delivery.DirectOcean, Is.EqualTo(originalDelivery.DirectOcean));
+        Assert.That(delivery.ViaLakesOcean, Is.Zero);
+        Assert.That(delivery.InlandClosed, Is.EqualTo(originalDelivery.InlandClosed));
+        Assert.That(delivery.Unresolved, Is.EqualTo(originalDelivery.Unresolved));
+        Assert.That(Math.Abs(delivery.Residual), Is.LessThanOrEqualTo(delivery.Tolerance));
+    }
+
+    [Test]
+    public void DistinctShallowSphericalDepressionStillQualifiesOnTheSameShelf()
+    {
+        var tin = SphericalShelf(out int depression, withDepression: true);
+        var basins = GeodesicTinBasins.Build(tin, 0, 0);
+        var basin = basins.Basins.Single(b => b.Id == depression);
+        Assert.That(basin.HasEscape, Is.True);
+        Assert.That(basin.MaximumDepth, Is.InRange(.00001d, .00003d));
+        Assert.That(basin.NumericalShelf, Is.False);
+        Assert.That(GeodesicTinLakeGeometry.Build(tin, basins).Bodies.Any(b => b.BasinId == depression), Is.True);
+    }
+
+    [Test]
+    public void AdjacentAuthoredFloatRadiiAreNotASharedShelf()
+    {
+        const float floor = 8f;
+        float rim = BitConverter.Int32BitsToSingle(BitConverter.SingleToInt32Bits(floor) + 1);
+        var directions = new[] { Vector3.right, Vector3.up, Vector3.forward };
+        var surface = new[] { directions[0] * floor, directions[1] * rim, directions[2] * rim };
+        var heights = surface.Select(p => p.magnitude).ToArray();
+        var tin = new GeodesicTinHydrology(directions, new[] { 0, 1, 2 }, heights, heights, completedSurface: surface);
+        Assert.That(heights[1] - heights[0], Is.InRange(float.Epsilon, (float)tin.Epsilon));
+        Assert.That(tin.CommonRoundedShelfRadius(0, 1), Is.Zero);
+    }
+
+    private static GeodesicTinHydrology SphericalShelf(out int depression, bool withDepression = false)
+    {
+        var geometry = IcosphereRenderGeometryCache.GetOrBuild(4);
+        int north = Array.FindIndex(geometry.UnitVertices, d => d.z > .9999f);
+        Assert.That(north, Is.GreaterThanOrEqualTo(0));
+        depression = north;
+        bool[] retained = geometry.UnitVertices.Select(d => d.z < -.3f).ToArray();
+        var surface = geometry.UnitVertices.Select((d, i) =>
+            d * (retained[i] ? 7.9f : withDepression && i == north ? 8.19998f : 8.2f)).ToArray();
+        var heights = surface.Select(p => p.magnitude).ToArray();
+        return new GeodesicTinHydrology(geometry.UnitVertices, geometry.Triangles, heights, heights,
+            retained, 8f, radius: 8d, visibleBumpTolerance: .0003d, completedSurface: surface);
     }
 
     [Test] public void IndependentTributariesCombineOnceAndTerminalHoldsTheirDischarge()

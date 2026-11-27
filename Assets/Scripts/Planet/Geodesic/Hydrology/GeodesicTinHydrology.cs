@@ -36,6 +36,7 @@ public sealed class TinHydrologyDiagnostics
     public int UnexpectedBrokenNetworks, UnexpectedInlandBreaks;
     public int HydrologyDownhillSegments, HydrologyFlatSegments, HydrologyUphillSegments;
     public int VisibleDownhillSegments, VisibleMinorBumpSegments, VisibleMaterialUphillSegments, VisibleRidgeCrossings;
+    public int CompletedRadialRiseSegments, RadialOnlyRiseSegments;
     public int RejectedHydrologySteps, RejectedVisibleSteps, RejectedPostProcessing;
     public double MeanNetworkLength, MaxNetworkLength;
     public double FilteringMilliseconds, AdjacencyMilliseconds, GradientMilliseconds, TopologyMilliseconds, AccumulationMilliseconds;
@@ -50,6 +51,7 @@ public sealed class TinHydrologyDiagnostics
         $"hydrologyDownhillSegments={HydrologyDownhillSegments} hydrologyFlatSegments={HydrologyFlatSegments} " +
         $"hydrologyUphillSegments={HydrologyUphillSegments} visibleDownhillSegments={VisibleDownhillSegments} " +
         $"visibleMinorBumpSegments={VisibleMinorBumpSegments} visibleMaterialUphillSegments={VisibleMaterialUphillSegments} " +
+        $"completedRadialRiseSegments={CompletedRadialRiseSegments} radialOnlyRiseSegments={RadialOnlyRiseSegments} " +
         $"visibleRidgeCrossings={VisibleRidgeCrossings} rejectedHydrologySteps={RejectedHydrologySteps} " +
         $"rejectedVisibleSteps={RejectedVisibleSteps} rejectedPostProcessing={RejectedPostProcessing} " +
         $"meanNetworkLength={MeanNetworkLength:G6} maxNetworkLength={MaxNetworkLength:G6} " +
@@ -196,6 +198,32 @@ public sealed partial class GeodesicTinHydrology
     internal int BasinVertexCount => vertices.Length;
     internal bool BasinOnSphere => spherical;
 
+    // The production visible field reads float magnitudes of rounded direction * radius
+    // positions. A shared authored scale is stronger evidence than a depth tolerance.
+    internal float CommonRoundedShelfRadius(int floor, int saddle)
+    {
+        if (!spherical || completedVertices == null || HydrologyHeight[saddle] - (double)HydrologyHeight[floor] > Epsilon)
+            return 0f;
+        Vector3 unit = vertices[floor], position = completedVertices[floor];
+        float x = Math.Abs(unit.x), y = Math.Abs(unit.y), z = Math.Abs(unit.z);
+        // Divide by the dominant component, then verify the full rounded products.
+        float scale = x >= y && x >= z ? position.x / unit.x : y >= z ? position.y / unit.y : position.z / unit.z;
+        if (scale <= 0f || float.IsNaN(scale) || float.IsInfinity(scale)) return 0f;
+        int bits = BitConverter.SingleToInt32Bits(scale);
+        for (int offset = -1; offset <= 1; offset++)
+        {
+            float candidate = BitConverter.Int32BitsToSingle(bits + offset);
+            if (MatchesRoundedShelfVertex(floor, candidate) && MatchesRoundedShelfVertex(saddle, candidate))
+                return candidate;
+        }
+        return 0f;
+    }
+
+    internal bool MatchesRoundedShelfVertex(int vertex, float scale) =>
+        scale > 0f && HydrologyHeight[vertex] == VisibleHeight[vertex] &&
+        VisibleHeight[vertex] == completedVertices[vertex].magnitude &&
+        (vertices[vertex] * scale).Equals(completedVertices[vertex]);
+
     // Exact minimum radius of the completed facet (vertices, edges, and interior).
     // Rejecting a facet that intersects retained ocean is conservative at the coast;
     // it cannot emit freshwater across a sub-triangle ocean patch.
@@ -320,10 +348,19 @@ public sealed partial class GeodesicTinHydrology
 
     internal bool VerifyExposedOutlet(TinPoint[] path) => !FindExposedOutletRise(path, out _, out _);
 
-    internal bool FindExposedOutletRise(TinPoint[] path, out int failedIndex, out double lowestRadius)
+    internal bool FindExposedOutletRise(TinPoint[] path, out int failedIndex, out double lowestRadius) =>
+        FindCompletedVisibleRise(path, Epsilon, out failedIndex, out lowestRadius);
+
+    internal bool ValidateCompletedVisibleGrade(TinPoint[] path) =>
+        !FindCompletedVisibleGradeRise(path, out _);
+
+    internal bool FindCompletedVisibleGradeRise(TinPoint[] path, out int failedIndex) =>
+        FindCompletedVisibleRise(path, VisibleBumpTolerance + Epsilon, out failedIndex, out _);
+
+    private bool FindCompletedVisibleRise(TinPoint[] path, double tolerance, out int failedIndex, out double lowestRadius)
     {
-        // TraceLakeOutlet allows small visible bumps for rendered rivers. The
-        // overflow certificate allows only numerical tolerance on exposed runs.
+        // Physical callers opt into the actual facet profile. Exposed overflow
+        // certification uses numerical tolerance only, while ribbons allow micro bumps.
         double low = CompletedVisibleRadius(path[0]);
         for (int i = 1; i < path.Length; i++)
         {
@@ -331,7 +368,7 @@ public sealed partial class GeodesicTinHydrology
             var b = path[i];
             double radius = CompletedVisibleRadius(b);
             low = Math.Min(low, a.Triangle == b.Triangle ? MinimumVisibleRadius(a, b) : radius);
-            if (!Finite(low) || !Finite(radius) || radius > low + Epsilon)
+            if (!Finite(low) || !Finite(radius) || radius > low + tolerance)
             {
                 failedIndex = i;
                 lowestRadius = low;
@@ -341,6 +378,18 @@ public sealed partial class GeodesicTinHydrology
         failedIndex = -1;
         lowestRadius = low;
         return false;
+    }
+
+    private bool AcceptCompletedVisibleStep(TinPoint start, TinPoint end, ref double low)
+    {
+        double startRadius = CompletedVisibleRadius(start), endRadius = CompletedVisibleRadius(end);
+        double segmentLow = Math.Min(low, MinimumVisibleRadius(start, end));
+        double tolerance = VisibleBumpTolerance + Epsilon;
+        if (!Finite(startRadius) || !Finite(endRadius) || !Finite(segmentLow) ||
+            startRadius > low + tolerance || endRadius > segmentLow + tolerance)
+            return false;
+        low = segmentLow;
+        return true;
     }
 
     private void BuildFace(int t, double radius)
@@ -501,15 +550,38 @@ public sealed partial class GeodesicTinHydrology
         }
     }
 
-    private bool FlatStep(TinPoint p, List<int> candidates, out TinPoint start, out TinPoint next)
+    private bool FlatStep(TinPoint p, List<int> candidates, Func<TinPoint, TinPoint, bool> permitted,
+        out TinPoint start, out TinPoint next, out bool departureBlocked)
     {
         start = next = p;
+        departureBlocked = false;
         ContainingFaces(p, candidates); int best = -1;
         foreach (int candidate in candidates)
-            if (flatDistance[candidate] >= 0 && (best < 0 || flatDistance[candidate] < flatDistance[best] ||
-                (flatDistance[candidate] == flatDistance[best] && candidate < best))) best = candidate;
+        {
+            if (flatDistance[candidate] < 0 || (best >= 0 && (flatDistance[candidate] > flatDistance[best] ||
+                (flatDistance[candidate] == flatDistance[best] && candidate >= best)))) continue;
+            if (permitted != null)
+            {
+                if (!TryFlatExit(p, candidate, out var from, out var to)) continue;
+                // Check the actual carrier after any zero-length edge handoff.
+                if (!permitted(from, to))
+                {
+                    if (best < 0 && !departureBlocked) { start = from; next = to; }
+                    departureBlocked = true;
+                    continue;
+                }
+                start = from; next = to;
+            }
+            best = candidate;
+        }
         if (best < 0) return false;
-        p = Transfer(p, best); int t = best;
+        return permitted != null || TryFlatExit(p, best, out start, out next);
+    }
+
+    private bool TryFlatExit(TinPoint p, int t, out TinPoint start, out TinPoint next)
+    {
+        start = next = p;
+        p = Transfer(p, t);
         for (int attempt = 0; attempt < 2; attempt++)
         {
             if (flatNextEdge[t] < 0) return false;
@@ -550,7 +622,7 @@ public sealed partial class GeodesicTinHydrology
     }
 
     private TraceFailureKind AcceptStep(TinPoint start, TinPoint next, ref double lowestH, ref double lowestVisible,
-        ref double lowestRadius, bool countRejection, bool recordDisagreement = true)
+        bool countRejection, bool recordDisagreement = true)
     {
         // On a linear facet, H's extrema on this segment occur at its endpoints.
         // Comparing against the running minimum also prevents epsilon staircases on flats.
@@ -558,20 +630,17 @@ public sealed partial class GeodesicTinHydrology
         double hydrologyLow = Math.Min(lowestH, startH);
         if (!Finite(startH) || !Finite(h) || startH > lowestH + Epsilon || h > hydrologyLow + Epsilon)
         { if (countRejection) Diagnostics.RejectedHydrologySteps++; return TraceFailureKind.HydrologyGrade; }
-        double va = Height(start, true), vb = Height(next, true), ra = CompletedVisibleRadius(start), rb = CompletedVisibleRadius(next);
-        double visibleLow = Math.Min(lowestVisible, Math.Min(va, vb));
-        double radiusLow = Math.Min(lowestRadius, MinimumVisibleRadius(start, next));
-        // The facet's visible altitude is linear. Its exact radial surface can also have
-        // an interior minimum; include that analytic extremum before allowing any rise.
-        if (!Finite(va) || !Finite(vb) || !Finite(ra) || !Finite(rb) || !Finite(radiusLow) ||
-            Math.Max(va, vb) > lowestVisible + VisibleBumpTolerance + Epsilon ||
-            ra > lowestRadius + VisibleBumpTolerance + Epsilon || rb > radiusLow + VisibleBumpTolerance + Epsilon)
+        // Visible elevation uses the completed vertex radii with the same affine weights.
+        // Its extrema are the endpoints even when their radii differ. The ray-intersection
+        // radius also contains tessellation sag and belongs to physical surface checks.
+        double va = Height(start, true), vb = Height(next, true);
+        if (!Finite(va) || !Finite(vb) || Math.Max(va, vb) > lowestVisible + VisibleBumpTolerance + Epsilon)
         {
             if (recordDisagreement) HasVisibleDisagreement = true;
             if (countRejection) Diagnostics.RejectedVisibleSteps++;
             return TraceFailureKind.VisibleGrade;
         }
-        lowestH = Math.Min(hydrologyLow, h); lowestVisible = visibleLow; lowestRadius = radiusLow;
+        lowestH = Math.Min(hydrologyLow, h); lowestVisible = Math.Min(lowestVisible, Math.Min(va, vb));
         return TraceFailureKind.None;
     }
 
@@ -582,18 +651,18 @@ public sealed partial class GeodesicTinHydrology
         return samples.ToArray();
     }
 
-    internal enum TraceFailureKind { None, InvalidSource, DepartureRejected, HydrologyGrade, VisibleGrade, InvalidCoastHandoff, SeaSphereCrossingMissing, ZeroLengthStep, StepLimit }
+    internal enum TraceFailureKind { None, InvalidSource, DepartureRejected, HydrologyGrade, VisibleGrade, CompletedVisibleGrade, InvalidCoastHandoff, SeaSphereCrossingMissing, ZeroLengthStep, StepLimit }
 
     internal readonly struct TraceFailure
     {
         internal readonly TraceFailureKind Kind;
         internal readonly TinPoint Start, End;
-        internal readonly double LowestHydrology, LowestVisibleHeight, LowestVisibleRadius;
+        internal readonly double LowestHydrology, LowestVisibleHeight;
         internal TraceFailure(TraceFailureKind kind, TinPoint start, TinPoint end,
-            double lowestHydrology, double lowestVisibleHeight, double lowestVisibleRadius)
+            double lowestHydrology, double lowestVisibleHeight)
         {
             Kind = kind; Start = start; End = end;
-            LowestHydrology = lowestHydrology; LowestVisibleHeight = lowestVisibleHeight; LowestVisibleRadius = lowestVisibleRadius;
+            LowestHydrology = lowestHydrology; LowestVisibleHeight = lowestVisibleHeight;
         }
     }
 
@@ -636,18 +705,22 @@ public sealed partial class GeodesicTinHydrology
 
     private TinTermination TraceInto(TinPoint source, List<TinPoint> samples, List<int> candidates, int maximumSteps, List<TinPoint[]> rejected = null,
         bool observe = true, Func<TinPoint, TinPoint, bool> departure = null, Action<TraceFailure> failure = null,
-        Action observeCoastHandoff = null, Action<TinPoint, TinPoint, TinPoint, bool> observeSelection = null)
+        Action observeCoastHandoff = null, Action<TinPoint, TinPoint, TinPoint, bool> observeSelection = null,
+        bool requireCompletedGrade = false)
     {
         samples.Clear(); samples.Add(source);
         TinPoint p = source;
-        double lowestH = Height(p), lowestV = Height(p, true), lowestR = CompletedVisibleRadius(p);
+        double lowestH = Height(p), lowestV = Height(p, true);
+        double lowestRadius = requireCompletedGrade ? CompletedVisibleRadius(p) : 0d;
         if (!Finite(lowestH) || !Finite(lowestV) || !faces[p.Triangle].Valid) return Fail(TraceFailureKind.InvalidSource, p, p);
         for (int step = 0; step < maximumSteps; step++)
         {
             if (IsOcean(p) || Boundary(p, candidates)) return TinTermination.OceanCoast;
-            bool downhill = DownhillStep(p, candidates, out TinPoint start, out TinPoint next, step == 0 ? departure : null);
-            if (!downhill && !FlatStep(p, candidates, out start, out next))
+            var firstDeparture = step == 0 ? departure : null;
+            bool downhill = DownhillStep(p, candidates, out TinPoint start, out TinPoint next, firstDeparture);
+            if (!downhill && !FlatStep(p, candidates, firstDeparture, out start, out next, out bool departureBlocked))
             {
+                if (departureBlocked) return Fail(TraceFailureKind.DepartureRejected, start, next);
                 ContainingFaces(p, candidates);
                 foreach (int t in candidates) if (faces[t].Flat) return TinTermination.FlatRequiringRouting;
                 // A level valley gutter can be flat even when neither adjacent facet is.
@@ -671,8 +744,6 @@ public sealed partial class GeodesicTinHydrology
 #if UNITY_EDITOR
             observeSelection?.Invoke(p, start, next, !downhill);
 #endif
-            if (step == 0 && departure != null && !departure(start, next))
-                return Fail(TraceFailureKind.DepartureRejected, start, next);
             // A sub-sea route may first acquire retained authority at a shared edge
             // or vertex. Preserve that exact point on the retained carrier; an
             // earlier sea-sphere crossing on inland terrain was not ocean contact.
@@ -692,14 +763,19 @@ public sealed partial class GeodesicTinHydrology
                 }
                 if ((Position(start) - Position(p)).Length > 1e-10)
                     return Fail(TraceFailureKind.InvalidCoastHandoff, p, start);
-                var handoff = AcceptStep(start, start, ref lowestH, ref lowestV, ref lowestR, observe, observe);
+                var handoff = AcceptStep(start, start, ref lowestH, ref lowestV, observe, observe);
                 if (handoff != TraceFailureKind.None) return Fail(handoff, p, start);
+                if (requireCompletedGrade && !AcceptCompletedVisibleStep(start, start, ref lowestRadius))
+                    return Fail(TraceFailureKind.CompletedVisibleGrade, p, start);
                 if (start.Triangle != p.Triangle) samples.Add(start);
                 return TinTermination.OceanCoast;
             }
             bool reachedCoast = IsOcean(next);
             if (reachedCoast) next = Coast(start, next);
-            var rejection = AcceptStep(start, next, ref lowestH, ref lowestV, ref lowestR, observe, observe);
+            var rejection = AcceptStep(start, next, ref lowestH, ref lowestV, observe, observe);
+            if (rejection == TraceFailureKind.None && requireCompletedGrade &&
+                !AcceptCompletedVisibleStep(start, next, ref lowestRadius))
+                rejection = TraceFailureKind.CompletedVisibleGrade;
             if (rejection != TraceFailureKind.None)
             {
                 if (rejected != null && Finite(Height(start)) && Finite(Height(next)) &&
@@ -724,7 +800,7 @@ public sealed partial class GeodesicTinHydrology
 
         TinTermination Fail(TraceFailureKind reason, TinPoint start, TinPoint end)
         {
-            failure?.Invoke(new TraceFailure(reason, start, end, lowestH, lowestV, lowestR));
+            failure?.Invoke(new TraceFailure(reason, start, end, lowestH, lowestV));
             return TinTermination.RoutingFailure;
         }
     }
@@ -755,17 +831,18 @@ public sealed partial class GeodesicTinHydrology
     internal double ParcelRunoff(int triangle) => localRunoff[triangle];
     internal TinPoint TransferLakePoint(TinPoint point, int triangle) => Transfer(point, triangle);
     internal TinPoint[] TraceLakeOutlet(TinPoint spill, Func<TinPoint, TinPoint, bool> departure, out TinTermination termination,
-        int maximumSteps = 32768, Action<TraceFailure> failure = null, Action<TinPoint, TinPoint, TinPoint, bool> observeSelection = null)
+        int maximumSteps = 32768, Action<TraceFailure> failure = null, Action<TinPoint, TinPoint, TinPoint, bool> observeSelection = null,
+        bool requireCompletedGrade = false)
     {
         var samples = new List<TinPoint>(128); var candidates = new List<int>(8);
         termination = TraceInto(spill, samples, candidates, maximumSteps, observe: false, departure: departure, failure: failure,
-            observeSelection: observeSelection);
+            observeSelection: observeSelection, requireCompletedGrade: requireCompletedGrade);
         return samples.ToArray();
     }
     internal bool ValidateLakePath(TinPoint[] path)
     {
         if (path == null || path.Length < 2) return false;
-        double h = Height(path[0]), v = Height(path[0], true), r = CompletedVisibleRadius(path[0]);
+        double h = Height(path[0]), v = Height(path[0], true);
         for (int i = 1; i < path.Length; i++)
         {
             var a = path[i - 1]; var b = path[i];
@@ -775,7 +852,7 @@ public sealed partial class GeodesicTinHydrology
                 if (Math.Abs(transferred.A + transferred.B + transferred.C - 1) > 1e-9 || (Position(a) - Position(b)).Length > 1e-10) return false;
                 a = b;
             }
-            if (AcceptStep(a, b, ref h, ref v, ref r, false, false) != TraceFailureKind.None) return false;
+            if (AcceptStep(a, b, ref h, ref v, false, false) != TraceFailureKind.None) return false;
         }
         return true;
     }
@@ -839,8 +916,8 @@ public sealed partial class GeodesicTinHydrology
             if (network.Termination != TinTermination.RoutingFailure) continue;
             rejected.Clear();
             TraceInto(Centroid(network.SourceTriangle), samples, candidates, 32768, rejected, observe: false);
-            // Presentation can relabel a confluence as a failure. Its published prefix
-            // is shorter than the original trace and must not inherit that trace's rejection.
+            // A published prefix can be shorter than a replay after network extraction.
+            // Only attribute a rejection to the same path.
             if (rejected.Count > 0 && samples.SequenceEqual(network.Samples))
                 visit(network.SourceTriangle, rejected[0]);
         }
@@ -858,6 +935,7 @@ public sealed partial class GeodesicTinHydrology
         Diagnostics.RiverTriangles = 0;
         Diagnostics.HydrologyDownhillSegments = Diagnostics.HydrologyFlatSegments = Diagnostics.HydrologyUphillSegments = 0;
         Diagnostics.VisibleDownhillSegments = Diagnostics.VisibleMinorBumpSegments = Diagnostics.VisibleMaterialUphillSegments = Diagnostics.VisibleRidgeCrossings = 0;
+        Diagnostics.CompletedRadialRiseSegments = Diagnostics.RadialOnlyRiseSegments = 0;
         Diagnostics.OceanTerminations = Diagnostics.ClosedBasinTerminations = Diagnostics.NoiseDepressionTerminations = Diagnostics.FlatTerminations = 0;
         Diagnostics.UnexpectedBrokenNetworks = Diagnostics.UnexpectedInlandBreaks = Diagnostics.Confluences = 0;
         Diagnostics.MeanNetworkLength = Diagnostics.MaxNetworkLength = 0d;
@@ -878,7 +956,7 @@ public sealed partial class GeodesicTinHydrology
             TinTermination termination = TraceInto(Centroid(source), samples, candidates, 32768,
                 rejectedPaths);
             int junction = -1;
-            double lowH = Height(samples[0]), lowV = Height(samples[0], true), lowR = CompletedVisibleRadius(samples[0]);
+            double lowH = Height(samples[0]), lowV = Height(samples[0], true);
             var accepted = new List<TinPoint>(samples.Count) { samples[0] };
             for (int i = 1; i < samples.Count; i++)
             {
@@ -891,16 +969,16 @@ public sealed partial class GeodesicTinHydrology
                     {
                         TinPoint target = entry.End;
                         if (Height(target) > Height(p)) continue;
-                        double h = lowH, v = lowV, r = lowR;
-                        if (AcceptStep(p, target, ref h, ref v, ref r, false) != TraceFailureKind.None) continue;
-                        if (!ValidateDownstreamJoin(entry.Network, target, h, v, r)) continue;
+                        double h = lowH, v = lowV;
+                        if (AcceptStep(p, target, ref h, ref v, false) != TraceFailureKind.None) continue;
+                        if (!ValidateDownstreamJoin(entry.Network, target, h, v)) continue;
                         accepted.Add(target); junction = entry.Network; termination = TinTermination.Confluence;
                         break; // target is already an exact sample on the existing trunk
                     }
                 }
                 if (junction >= 0) break;
                 accepted.Add(q);
-                lowH = Math.Min(lowH, Height(q)); lowV = Math.Min(lowV, Height(q, true)); lowR = Math.Min(lowR, CompletedVisibleRadius(q));
+                lowH = Math.Min(lowH, Height(q)); lowV = Math.Min(lowV, Height(q, true));
             }
             if (junction < 0 && rejectedPaths != null && rejectedPaths.Count > 0) rejectedUphill(source, rejectedPaths[0]);
             var network = new TinRiverNetwork { SourceTriangle = source, Samples = accepted.ToArray(), Termination = termination, JunctionNetwork = junction };
@@ -914,11 +992,18 @@ public sealed partial class GeodesicTinHydrology
                 if (!channels.TryGetValue(p.Triangle, out var list)) channels.Add(p.Triangle, list = new List<ChannelSegment>(2));
                 list.Add(new ChannelSegment { Network = id, Start = p, End = q });
                 double dh = Height(q) - Height(p);
-                double visibleRise = Math.Max(0d, CompletedVisibleRadius(q) - MinimumVisibleRadius(p, q));
+                double visibleRise = Height(q, true) - Height(p, true);
+                double radialRise = CompletedVisibleRadius(q) - MinimumVisibleRadius(p, q);
+                double visibleTolerance = VisibleBumpTolerance + Epsilon;
                 if (dh < -Epsilon) Diagnostics.HydrologyDownhillSegments++; else if (dh <= Epsilon) Diagnostics.HydrologyFlatSegments++; else Diagnostics.HydrologyUphillSegments++;
                 if (visibleRise <= Epsilon) Diagnostics.VisibleDownhillSegments++;
-                else if (visibleRise <= VisibleBumpTolerance + Epsilon) Diagnostics.VisibleMinorBumpSegments++;
+                else if (visibleRise <= visibleTolerance) Diagnostics.VisibleMinorBumpSegments++;
                 else { Diagnostics.VisibleMaterialUphillSegments++; Diagnostics.VisibleRidgeCrossings++; }
+                if (radialRise > visibleTolerance)
+                {
+                    Diagnostics.CompletedRadialRiseSegments++;
+                    if (visibleRise <= visibleTolerance) Diagnostics.RadialOnlyRiseSegments++;
+                }
                 network.Length += spherical ? radius * Math.Acos(Math.Max(-1d, Math.Min(1d, D3.Dot(Position(p), Position(q)) / (Position(p).Length * Position(q).Length)))) : (Position(q) - Position(p)).Length;
             }
             Diagnostics.MeanNetworkLength += network.Length; Diagnostics.MaxNetworkLength = Math.Max(Diagnostics.MaxNetworkLength, network.Length);
@@ -955,7 +1040,7 @@ public sealed partial class GeodesicTinHydrology
         return result.ToArray();
     }
 
-    private bool ValidateDownstreamJoin(int networkId, TinPoint target, double h, double v, double r)
+    private bool ValidateDownstreamJoin(int networkId, TinPoint target, double h, double v)
     {
         for (int depth = 0; depth <= networks.Count; depth++)
         {
@@ -967,7 +1052,7 @@ public sealed partial class GeodesicTinHydrology
             for (int i = at + 1; i < network.Samples.Length; i++)
             {
                 TinPoint a = network.Samples[i - 1], b = network.Samples[i];
-                if (AcceptStep(a.Triangle == b.Triangle ? a : b, b, ref h, ref v, ref r, false) != TraceFailureKind.None) return false;
+                if (AcceptStep(a.Triangle == b.Triangle ? a : b, b, ref h, ref v, false) != TraceFailureKind.None) return false;
             }
             if (network.JunctionNetwork < 0) return true;
             target = network.Samples[network.Samples.Length - 1]; networkId = network.JunctionNetwork;
@@ -981,16 +1066,19 @@ public sealed partial class GeodesicTinHydrology
     {
         if (candidate == null || candidate.Length < 2 || original == null || original.Length < 2 ||
             (Position(candidate[0]) - Position(original[0])).Length > 1e-12 ||
-            (Position(candidate[candidate.Length - 1]) - Position(original[original.Length - 1])).Length > 1e-12 || !Validate(candidate))
+            (Position(candidate[candidate.Length - 1]) - Position(original[original.Length - 1])).Length > 1e-12 ||
+            !Validate(candidate) || !ValidateCompletedVisibleGrade(candidate))
         { Diagnostics.RejectedPostProcessing++; return original; }
         return candidate;
     }
 
+    /// <summary>Validate facet handoffs and logical grade. Physical callers also check
+    /// completed surface grade before using the path as exposed or rendered geometry.</summary>
     public bool Validate(TinPoint[] path)
     {
         if (path == null || path.Length < 2) return false;
-        double h = Height(path[0]), v = Height(path[0], true), r = CompletedVisibleRadius(path[0]);
-        if (!Finite(h) || !Finite(v) || !Finite(r)) return false;
+        double h = Height(path[0]), v = Height(path[0], true);
+        if (!Finite(h) || !Finite(v)) return false;
         for (int i = 1; i < path.Length; i++)
         {
             TinPoint start = path[i - 1], end = path[i];
@@ -1001,11 +1089,11 @@ public sealed partial class GeodesicTinHydrology
                 TinPoint transferred = Transfer(start, end.Triangle);
                 if (Math.Abs(transferred.A + transferred.B + transferred.C - 1d) > 1e-9 ||
                     (Position(start) - Position(end)).Length > 1e-10) return false;
-                if (AcceptStep(end, end, ref h, ref v, ref r, false) != TraceFailureKind.None) return false;
+                if (AcceptStep(end, end, ref h, ref v, false) != TraceFailureKind.None) return false;
                 continue;
             }
             if (start.A < -1e-10 || start.B < -1e-10 || start.C < -1e-10 || end.A < -1e-10 || end.B < -1e-10 || end.C < -1e-10 ||
-                AcceptStep(start, end, ref h, ref v, ref r, false) != TraceFailureKind.None) return false;
+                AcceptStep(start, end, ref h, ref v, false) != TraceFailureKind.None) return false;
         }
         return true;
     }

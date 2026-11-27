@@ -306,10 +306,11 @@ public sealed partial class GeodesicDrainageDelivery
         else if (end.Type == "RoutingFailure" || end.Type == "MissingDirectedConnection" || end.Type == "DirectedCycle") LogicalDisconnected++;
         else UnknownBreaks++;
     }
-    // Called exactly where the old visual code increments unexpectedBrokenNetworks.
+    // Omitted geometry is an observation. Only the logical analysis classifies a
+    // network as disconnected or unknown.
     public void ObserveVisualBreak(int network, string cause)
     {
-        CountBreak(networkOutcomes[network]);
+        if (networkOutcomes[network].Destination != Destination.Unresolved) VisualOnlyBreaks++;
         if (cause == "centreline") CentrelineRejected++;
         else if (cause == "projection") ProjectionRejected++;
         else if (cause == "missing-trunk") MissingTrunkRibbons++;

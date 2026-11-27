@@ -353,7 +353,7 @@ public sealed class GeodesicValleyCarving
     {
         int vertex = c.Vertices[c.Vertices.Length - 1];
         int carrier = tin.BasinIncidentTriangle(tin.BasinIncidentStart(vertex));
-        var path = tin.TraceLakeOutlet(tin.BasinPoint(carrier, vertex), null, out var termination);
+        var path = tin.TraceLakeOutlet(tin.BasinPoint(carrier, vertex), null, out var termination, requireCompletedGrade: true);
         if (path.Length == 0) return GeodesicOceanDrainagePlan.Unresolved;
         var end = path[path.Length - 1];
         if (GeodesicOceanDrainagePlan.ConfirmedOcean(tin, new TinParcelDestination(end, termination))) return GeodesicOceanDrainagePlan.Ocean;
@@ -466,7 +466,7 @@ public sealed class GeodesicValleyCarving
         // A lower basin is only a provisional graph edge. Selection must prove its chain
         // reaches ocean; every chosen cut then passes the combined proposed-TIN check.
         double downstreamLimit = Angle(spill, side) * radius * 8;
-        var trace = tin.TraceLakeOutlet(tin.BasinPoint(triangle, side), null, out _, maximumSteps: 64);
+        var trace = tin.TraceLakeOutlet(tin.BasinPoint(triangle, side), null, out _, maximumSteps: 64, requireCompletedGrade: true);
         var corridor = new HashSet<int> { side };
         double tracedLength = Angle(spill, side) * radius;
         for (int i = 0; i < trace.Length; i++)
@@ -485,7 +485,7 @@ public sealed class GeodesicValleyCarving
         var chain = SetPath(c, end);
         // Preserve the existing continuation as evidence for graph construction/retracing.
         int carrier = tin.BasinIncidentTriangle(tin.BasinIncidentStart(end.Vertex));
-        var continuation = tin.TraceLakeOutlet(tin.BasinPoint(carrier, end.Vertex), null, out _, maximumSteps: 64);
+        var continuation = tin.TraceLakeOutlet(tin.BasinPoint(carrier, end.Vertex), null, out _, maximumSteps: 64, requireCompletedGrade: true);
         BuildProfile(c, chain, new Escape { Kind = Target.DownstreamBasin, Path = continuation });
 
         return c;
@@ -630,7 +630,7 @@ public sealed class GeodesicValleyCarving
     {
         int triangle = tin.BasinIncidentTriangle(tin.BasinIncidentStart(vertex));
         // The existing observational outlet tracer does not alter receivers, runoff or diagnostics.
-        var path = tin.TraceLakeOutlet(tin.BasinPoint(triangle, vertex), null, out var termination);
+        var path = tin.TraceLakeOutlet(tin.BasinPoint(triangle, vertex), null, out var termination, requireCompletedGrade: true);
         if (path.Length < 2) return new Escape { Kind = Target.None };
         bool lakeEscape = lakes != null && lakes.FirstEntry(path, out var entry) && LakeEscapes(entry.BasinId, new HashSet<int>());
         if (!lakeEscape && termination != TinTermination.OceanCoast) return new Escape { Kind = Target.None };
@@ -790,7 +790,7 @@ public sealed class GeodesicValleyCarving
             {
                 bool Connected(TinPoint source, string kind)
                 {
-                    var path = proposed.TraceLakeOutlet(source, null, out var termination);
+                    var path = proposed.TraceLakeOutlet(source, null, out var termination, requireCompletedGrade: true);
                     bool ok = path.Length > 0 && GeodesicOceanDrainagePlan.ConfirmedOcean(proposed,
                         new TinParcelDestination(path[path.Length - 1], termination));
                     if (!ok) c.VerificationFailure = kind + ":" + termination + ":source=" + source.Triangle;

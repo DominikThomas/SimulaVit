@@ -35,30 +35,32 @@ public sealed class TinBasinDescriptor
     public bool BelowMinimumDepth { get; }
     public bool BelowMinimumArea { get; }
     public bool SubseaUnclassified { get; }
-    public bool QualifiesForVisibleLake => HasEscape && !BelowMinimumDepth && !BelowMinimumArea && !SubseaUnclassified;
+    public bool NumericalShelf { get; }
+    public bool QualifiesForVisibleLake => HasEscape && !BelowMinimumDepth && !BelowMinimumArea && !SubseaUnclassified && !NumericalShelf;
 
     internal TinBasinDescriptor(int id, TinPoint floor, double floorHeight, double spillHeight,
         TinPoint? spill, int downstreamTriangle, int downstreamVertex, int parent, IReadOnlyList<int> members,
         double area, bool ocean, bool subsea, double minimumDepth, double minimumArea,
-        TinBasinExternalSource externalSource = TinBasinExternalSource.None)
+        TinBasinExternalSource externalSource = TinBasinExternalSource.None, bool numericalShelf = false)
     {
         Id = id; Floor = floor; FloorElevation = floorHeight; SpillElevation = spillHeight;
         Spill = spill; DownstreamTriangle = downstreamTriangle; DownstreamVertex = downstreamVertex;
         ParentBasinId = parent; MemberTriangles = members; Area = area;
         ExternalSource = externalSource;
+        NumericalShelf = numericalShelf;
         TouchesRetainedOcean = ocean; SubseaUnclassified = subsea;
         BelowMinimumDepth = HasEscape && MaximumDepth < minimumDepth;
         BelowMinimumArea = area < minimumArea;
     }
     internal TinBasinDescriptor WithVisibility(double area, double depth) => new TinBasinDescriptor(Id, Floor,
         FloorElevation, SpillElevation, Spill, DownstreamTriangle, DownstreamVertex, ParentBasinId, MemberTriangles,
-        Area, TouchesRetainedOcean, SubseaUnclassified, depth, area, ExternalSource);
+        Area, TouchesRetainedOcean, SubseaUnclassified, depth, area, ExternalSource, NumericalShelf);
     public override string ToString() => $"[GeodesicTinBasins] id={Id} floor={FloorElevation:G9} spill={SpillElevation:G9} depth={MaximumDepth:G9} area={Area:G9} terminal={Terminal} parent={ParentBasinId} downstreamTriangle={DownstreamTriangle} ocean={TouchesRetainedOcean} candidate={QualifiesForVisibleLake}";
 }
 
 /// <summary>Optional topology-only sweep of the active piecewise-linear field. No graph-dependent
 /// lake code, route changes, terrain edits or automatic execution. Exact height ties use vertex ID;
-/// zero-persistence components are suppressed, but no positive-depth depression is filtered.</summary>
+/// positive-depth descriptors remain available to audit even when a shelf is ineligible for water geometry.</summary>
 public sealed class GeodesicTinBasins
 {
     public IReadOnlyList<TinBasinDescriptor> Basins { get; }
@@ -100,6 +102,7 @@ public sealed class GeodesicTinBasins
             w.Write(basin.TouchesRetainedOcean);
             w.Write(basin.SubseaUnclassified);
             w.Write((byte)basin.ExternalSource);
+            w.Write(basin.NumericalShelf);
         }
     }
 
@@ -125,10 +128,11 @@ public sealed class GeodesicTinBasins
             double area = S.Double(r);
             bool ocean = S.Flag(r), subsea = S.Flag(r);
             int source = S.IdByte(r, 4);
+            bool numericalShelf = S.Flag(r);
             S.Require(parent != id && area >= 0 && totalArea >= 0, "Invalid basin relationship.");
             basins.Add(new TinBasinDescriptor(id, floor, floorHeight, spillHeight, spill,
                 downstreamTriangle, downstreamVertex, parent, Array.AsReadOnly(members), area, ocean, subsea, 0, 0,
-                (TinBasinExternalSource)source));
+                (TinBasinExternalSource)source, numericalShelf));
         }
         return new GeodesicTinBasins(tin, basins, totalArea);
     }
@@ -174,10 +178,13 @@ public sealed class GeodesicTinBasins
         {
             double level = saddle < 0 ? double.NaN : tin.HydrologyHeight[saddle];
             if (external[r] || (saddle >= 0 && level <= tin.HydrologyHeight[floor[r]])) return;
+            int f = floor[r];
+            float shelfRadius = saddle >= 0 ? tin.CommonRoundedShelfRadius(f, saddle) : 0f;
             var members = new HashSet<int>(); bool touches = saddle >= 0 && tin.IsOcean(tin.BasinPoint(sideTriangle, saddle));
             for (int v = head[r]; v >= 0; v = next[v])
             {
                 if (saddle >= 0 && tin.HydrologyHeight[v] >= level) continue;
+                if (shelfRadius > 0f && !tin.MatchesRoundedShelfVertex(v, shelfRadius)) shelfRadius = 0f;
                 for (int i = tin.BasinIncidentStart(v); i < tin.BasinIncidentEnd(v); i++)
                 {
                     int t = tin.BasinIncidentTriangle(i);
@@ -189,12 +196,11 @@ public sealed class GeodesicTinBasins
             }
             int[] footprint = members.OrderBy(t => t).ToArray(); double area = 0;
             foreach (int t in footprint) area += tin.LocalArea[t];
-            int f = floor[r];
             result.Add(new TinBasinDescriptor(f, point[f], tin.HydrologyHeight[f], level,
                 saddle < 0 ? (TinPoint?)null : tin.BasinPoint(sideTriangle, saddle), sideVertex == saddle ? -1 : sideTriangle, sideVertex,
                 target >= 0 && !external[target] ? floor[target] : -1, Array.AsReadOnly(footprint), area, touches,
                 tin.VisibleHeight[f] <= tin.BasinSeaLevel && !ocean[f], minimumDepth, totalArea * minimumAreaFraction,
-                target >= 0 && external[target] ? externalSource[target] : TinBasinExternalSource.None));
+                target >= 0 && external[target] ? externalSource[target] : TinBasinExternalSource.None, shelfRadius > 0f));
         }
         foreach (int v in order)
         {

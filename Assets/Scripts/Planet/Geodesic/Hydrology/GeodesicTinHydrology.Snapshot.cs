@@ -57,6 +57,8 @@ public sealed partial class GeodesicTinHydrology
             w.Write(d.VisibleMinorBumpSegments);
             w.Write(d.VisibleMaterialUphillSegments);
             w.Write(d.VisibleRidgeCrossings);
+            w.Write(d.CompletedRadialRiseSegments);
+            w.Write(d.RadialOnlyRiseSegments);
             w.Write(d.RejectedHydrologySteps);
             w.Write(d.RejectedVisibleSteps);
             w.Write(d.RejectedPostProcessing);
@@ -130,6 +132,8 @@ public sealed partial class GeodesicTinHydrology
         d.VisibleMinorBumpSegments = r.ReadInt32();
         d.VisibleMaterialUphillSegments = r.ReadInt32();
         d.VisibleRidgeCrossings = r.ReadInt32();
+        d.CompletedRadialRiseSegments = r.ReadInt32();
+        d.RadialOnlyRiseSegments = r.ReadInt32();
         d.RejectedHydrologySteps = r.ReadInt32();
         d.RejectedVisibleSteps = r.ReadInt32();
         d.RejectedPostProcessing = r.ReadInt32();

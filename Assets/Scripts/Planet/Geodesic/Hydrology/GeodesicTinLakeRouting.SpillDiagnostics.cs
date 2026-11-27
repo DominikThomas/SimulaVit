@@ -27,7 +27,7 @@ public sealed partial class GeodesicTinLakeRouting
         report.AppendLine().Append(FormattableString.Invariant(
             $"floor={basin.FloorElevation:R} rim={basin.SpillElevation:R} depth={basin.MaximumDepth:R} rimFloatUlp={rimUlp:R} depthInRimUlps={basin.MaximumDepth / rimUlp:R} area={basin.Area:R} footprintFacetCount={basin.MemberTriangles.Count}"));
         report.AppendLine().Append(FormattableString.Invariant(
-            $"logicalBody=true logicalDescriptorQualified={basin.QualifiesForVisibleLake} logicalBelowMinimumDepth={basin.BelowMinimumDepth} logicalBelowMinimumArea={basin.BelowMinimumArea} subseaUnclassified={basin.SubseaUnclassified}"));
+            $"logicalBody=true logicalDescriptorQualified={basin.QualifiesForVisibleLake} logicalBelowMinimumDepth={basin.BelowMinimumDepth} logicalBelowMinimumArea={basin.BelowMinimumArea} subseaUnclassified={basin.SubseaUnclassified} numericalShelf={basin.NumericalShelf}"));
         report.AppendLine().Append(FormattableString.Invariant(
             $"spillVertex={SpillVertex(basin)} validWitness={hasWitness} downstreamFacet={facet} downstreamVertex={vertex} parentBasin={basin.ParentBasinId} externalAuthority={basin.ExternalSource} basinTouchesRetainedOcean={basin.TouchesRetainedOcean} seaLevel={tin.BasinSeaLevel:R}"));
         report.AppendLine().Append(FormattableString.Invariant(
@@ -78,6 +78,8 @@ public sealed partial class GeodesicTinLakeRouting
             report.AppendLine().Append("acceptedSample=").Append(i).Append(' ').Append(Point(replay[i]));
 
         bool replayMatches = node.OutletTermination == replayTermination && original.SequenceEqual(replay);
+        string summary = FormattableString.Invariant(
+            $"[GeodesicOutletTrace] summary basin={basin.Id} subdivision={tin.SubdivisionLevel} witness={facet}/{vertex} validWitness={hasWitness} termination={replayTermination} failure={failure.Kind} replayMatches={replayMatches} failsBeforeFirstDownstreamStep={!node.DownstreamSample.HasValue}");
         report.AppendLine().Append(FormattableString.Invariant(
             $"termination={node.OutletTermination} replayTermination={replayTermination} replayMatches={replayMatches} selectedTransitions={selections} acceptedSamples={replay.Length} failure={failure.Kind}"));
         report.AppendLine().Append(FormattableString.Invariant(
@@ -85,13 +87,20 @@ public sealed partial class GeodesicTinLakeRouting
         if (failure.Kind != GeodesicTinHydrology.TraceFailureKind.None)
         {
             report.AppendLine().Append(FormattableString.Invariant(
-                $"runningLowHydrology={failure.LowestHydrology:R} runningLowVisible={failure.LowestVisibleHeight:R} runningLowRadius={failure.LowestVisibleRadius:R}"));
+                $"runningLowHydrology={failure.LowestHydrology:R} runningLowVisible={failure.LowestVisibleHeight:R}"));
             report.AppendLine().Append("failed transition ").Append(Segment(failure.Start, failure.End));
             if (failure.Kind == GeodesicTinHydrology.TraceFailureKind.DepartureRejected)
+            {
                 report.AppendLine().Append(Departure(failure.Start, failure.End));
+                summary += $" rejectedFacet={failure.Start.Triangle} " + Departure(failure.Start, failure.End);
+            }
             if (failure.Kind == GeodesicTinHydrology.TraceFailureKind.HydrologyGrade ||
                 failure.Kind == GeodesicTinHydrology.TraceFailureKind.VisibleGrade)
-                report.AppendLine().Append(tin.DescribeOutletGradeChecks(failure));
+            {
+                string grades = tin.DescribeOutletGradeChecks(failure);
+                report.AppendLine().Append(grades);
+                summary += " " + grades;
+            }
         }
         else if (replay.Length != 0)
         {
@@ -101,6 +110,7 @@ public sealed partial class GeodesicTinLakeRouting
             report.AppendLine().Append("first downstream sample ").Append(Point(node.DownstreamSample.Value));
         if (FirstEntry(replay, out var entry))
             report.AppendLine().Append("first wet entry basin=").Append(entry.BasinId).Append(' ').Append(Point(entry.Point));
+        Debug.Log(summary);
         Debug.Log(report.ToString());
 
         string Point(TinPoint p) => tin.DescribeOutletPoint(p) + " " + Owners(p);
@@ -122,7 +132,7 @@ public sealed partial class GeodesicTinLakeRouting
             $"departureAllowed={departure(a, b)} hasWitness={hasWitness} onWitnessFacet={a.Triangle == facet} sourceLakeContainsMidpoint={Inside(Mix(a, b, .5), basin.Id)} {Owners(Mix(a, b, .5))}");
 
         string Candidate(TinPoint a, TinPoint b) => FormattableString.Invariant(
-            $"{Departure(a, b)} scalarSlope={tin.OutletSlope(a, b):R} previewGrade={tin.PreviewSpillGrade(spill, a, b)} {Segment(a, b)}");
+            $"{Departure(a, b)} scalarSlope={tin.OutletSlope(a, b):R} previewLogicalGrade={tin.PreviewSpillGrade(spill, a, b)} previewMeshGrade={tin.ValidateCompletedVisibleGrade(new[] { a, b })} {Segment(a, b)}");
     }
 }
 
@@ -147,12 +157,12 @@ public sealed partial class GeodesicTinHydrology
 
     internal TraceFailureKind PreviewSpillGrade(TinPoint spill, TinPoint start, TinPoint end)
     {
-        double lowH = Height(spill), lowV = Height(spill, true), lowR = CompletedVisibleRadius(spill);
+        double lowH = Height(spill), lowV = Height(spill, true);
         if (IsOcean(start))
             end = start;
         else if (IsOcean(end))
             end = Coast(start, end);
-        return AcceptStep(start, end, ref lowH, ref lowV, ref lowR, false, false);
+        return AcceptStep(start, end, ref lowH, ref lowV, false, false);
     }
 
     internal string DescribeOutletFacet(int facet)
@@ -200,16 +210,12 @@ public sealed partial class GeodesicTinHydrology
         // minima. The failure records both sides so the carrier change is also visible.
         TinPoint b = failure.End, a = failure.Start.Triangle == b.Triangle ? failure.Start : b;
         double ha = Height(a), hb = Height(b), va = Height(a, true), vb = Height(b, true);
-        double ra = CompletedVisibleRadius(a), rb = CompletedVisibleRadius(b);
-        double lowH = failure.LowestHydrology, lowV = failure.LowestVisibleHeight, lowR = failure.LowestVisibleRadius;
-        double radiusLow = Math.Min(lowR, MinimumVisibleRadius(a, b));
+        double lowH = failure.LowestHydrology, lowV = failure.LowestVisibleHeight;
         double tolerance = VisibleBumpTolerance + Epsilon;
         return FormattableString.Invariant(
             $"gradeChecks hydrologyFinite={Finite(ha) && Finite(hb)} hydrologyStartPass={ha <= lowH + Epsilon} hydrologyEndPass={hb <= Math.Min(lowH, ha) + Epsilon}") +
             FormattableString.Invariant(
-            $" visibleFinite={Finite(va) && Finite(vb) && Finite(ra) && Finite(rb) && Finite(radiusLow)} visibleLinearPass={Math.Max(va, vb) <= lowV + tolerance}") +
-            FormattableString.Invariant(
-            $" radialStartPass={ra <= lowR + tolerance} radialEndPass={rb <= radiusLow + tolerance} radialRunningLowWithSegment={radiusLow:R} radialEndRise={rb - radiusLow:R}");
+            $" visibleFinite={Finite(va) && Finite(vb)} visibleLinearPass={Math.Max(va, vb) <= lowV + tolerance}");
     }
 
     private static string Cartesian(D3 v) => FormattableString.Invariant($"({v.X:R},{v.Y:R},{v.Z:R})");

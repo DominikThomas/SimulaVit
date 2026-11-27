@@ -174,7 +174,11 @@ public sealed class GeodesicTinLakeSedimentTests
         Assert.That(sediment.Lakes.Values.Single().Level, Is.EqualTo(6));
     }
 
-    [Test] public void SedimentMeshLevelsTheWetPolygonsAndKeepsUntouchedFacets()
+    [Test] public void SedimentMeshLevelsTheWetPolygonsAndKeepsUntouchedFacets() => CheckSedimentMesh(true);
+
+    [Test] public void SedimentMeshSupportsPositionsAndIndicesOnly() => CheckSedimentMesh(false);
+
+    private static void CheckSedimentMesh(bool withAttributes)
     {
         var f = GeodesicTinHydrologyTests.Grid((x, y) => 8 + x * x + (y - 1) * (y - 1), size: 8);
         var directions = f.Vertices.Select(v => new Vector3(v.x * .1f, (v.y - 1) * .1f, 1).normalized).ToArray();
@@ -182,7 +186,12 @@ public sealed class GeodesicTinLakeSedimentTests
         Mesh surface = null;
         try
         {
-            original.RecalculateNormals();
+            if (withAttributes)
+            {
+                original.RecalculateNormals();
+                original.uv = f.Vertices.Select(v => new Vector2(v.x, v.y)).ToArray();
+                original.colors = f.Vertices.Select(v => new Color(v.x * .25f + .5f, v.y * .25f, .25f)).ToArray();
+            }
             var tin = new GeodesicTinHydrology(directions, f.Triangles, f.Heights, f.Heights, allowBoundaryOutflow: true);
             var sediment = Sediment(tin, GeodesicTinBasins.Build(tin, 0, 0));
             var lake = sediment.Lakes.Values.Single();
@@ -193,6 +202,14 @@ public sealed class GeodesicTinLakeSedimentTests
             for (int i = 0; i < triangles.Length; i += 3)
                 faces.Add((positions[triangles[i]], positions[triangles[i + 1]], positions[triangles[i + 2]]));
             var originalPositions = original.vertices;
+            CollectionAssert.AreEqual(originalPositions, positions.Take(originalPositions.Length));
+            CollectionAssert.AreEqual(original.normals, surface.normals.Take(originalPositions.Length));
+            CollectionAssert.AreEqual(original.uv, surface.uv.Take(originalPositions.Length));
+            CollectionAssert.AreEqual(original.colors, surface.colors.Take(originalPositions.Length));
+            int attributeCount = withAttributes ? positions.Length : 0;
+            Assert.That(surface.normals.Length, Is.EqualTo(attributeCount));
+            Assert.That(surface.uv.Length, Is.EqualTo(attributeCount));
+            Assert.That(surface.colors.Length, Is.EqualTo(attributeCount));
             for (int t = 0; t < tin.TriangleCount; t++)
             {
                 if (!lake.Facets.TryGetValue(t, out var facet))

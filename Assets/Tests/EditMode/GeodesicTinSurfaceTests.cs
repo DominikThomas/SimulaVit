@@ -72,6 +72,38 @@ public sealed class GeodesicTinSurfaceTests
     }
 
     [Test]
+    public void PresentedSphericalDescentConformsToTheFacetDespiteRadialRise()
+    {
+        var geometry = IcosphereRenderGeometryCache.GetOrBuild(3);
+        int a = geometry.Triangles[0], b = geometry.Triangles[1];
+        var h = geometry.UnitVertices.Select((_, i) => i == a ? 8.001f : 8f).ToArray();
+        var surface = geometry.UnitVertices.Select((d, i) => d * h[i]).ToArray();
+        var terrain = new GeodesicRiverTerrain(geometry, surface, h);
+        var path = new[] { geometry.UnitVertices[a], geometry.UnitVertices[b] };
+        Assert.That(terrain.MaximumCompletedVisibleUphillExcursion(path), Is.GreaterThan(.001d));
+        Assert.That(terrain.IsCentrelineValid(path, .000002d, .0001d), Is.True);
+        const float offset = .0003f;
+        var projected = path.Select(d => d * (terrain.Radius(d) + offset)).ToArray();
+        Vector3 midpoint = (projected[0] + projected[1]) * .5f;
+        Assert.That(midpoint.magnitude - terrain.Radius(midpoint), Is.EqualTo(offset).Within(.000005f));
+        Assert.That(terrain.IsCentrelineValid(projected.Select(p => p.normalized).ToArray(), .000002d, .0001d), Is.True);
+    }
+
+    [Test]
+    public void PresentationStillRejectsARealVisibleObstacleOnAFilteredDownhillPath()
+    {
+        var geometry = IcosphereRenderGeometryCache.GetOrBuild(3);
+        int a = geometry.Triangles[0], b = geometry.Triangles[1];
+        var hydro = geometry.UnitVertices.Select((_, i) => i == a ? 8.01f : 8f).ToArray();
+        var surface = geometry.UnitVertices.Select((d, i) => d * (i == b ? 8.01f : 8f)).ToArray();
+        var terrain = new GeodesicRiverTerrain(geometry, surface, hydro);
+        var path = new[] { geometry.UnitVertices[a], geometry.UnitVertices[b] };
+        Assert.That(terrain.MaximumHydrologicalUphillExcursion(path), Is.LessThanOrEqualTo(.000002d));
+        Assert.That(terrain.MaximumVisibleUphillExcursion(path), Is.GreaterThan(.009f));
+        Assert.That(terrain.IsCentrelineValid(path, .000002d, .0001d), Is.False);
+    }
+
+    [Test]
     public void AdaptiveFilterReducesFilteringInsteadOfIncreasingUphillTolerance()
     {
         var f = GeodesicTinHydrologyTests.Grid((x, y) => 2f - y + .3f * (float)Math.Cos(x * 20f + y * 13f), size: 16);

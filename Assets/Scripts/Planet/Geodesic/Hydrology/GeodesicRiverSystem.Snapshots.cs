@@ -9,9 +9,9 @@ using Debug = UnityEngine.Debug;
 public sealed partial class GeodesicRiverSystem
 {
     private const int TinStage = 3, LakeStage = 4;
-    private const int TinSchema = 2, LakeSchema = 1;
+    private const int TinSchema = 3, LakeSchema = 2;
     // Increment the relevant algorithm stamp when drainage or routing mathematics change.
-    private const int TinAlgorithm = 1, LakeAlgorithm = 1;
+    private const int TinAlgorithm = 2, LakeAlgorithm = 3;
     private const int OceanDeliveryStage = 5, OceanDeliverySchema = 1, OceanDeliveryAlgorithm = 1;
 
     private sealed class SnapshotRecord

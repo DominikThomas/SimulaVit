@@ -230,6 +230,8 @@ public sealed partial class GeodesicTinLakeRouting
             var path = result.TraceSpillOutlet(node, out var termination, describeSpillWorld);
             if (result.FirstEntry(path, out var hit))
             {
+                if (hit.BasinId == node.BasinId)
+                    node.CycleContext = result.DescribeSelfEntry(path, hit);
                 path = ClipAtEntry(path, hit); node.DownstreamLakeId = hit.BasinId;
                 node.DownstreamLakeEntry = hit.Point;
             }
@@ -272,7 +274,7 @@ public sealed partial class GeodesicTinLakeRouting
             foreach (var p in path) if (result.rawContributors.TryGetValue(p.Triangle, out var contributors)) contributors.Add(id);
             if (result.FirstEntry(path, out var hit)) result.nodes[hit.BasinId].DirectParcels.Add(id);
         });
-        foreach (var node in result.Lakes) node.CycleContext = result.DescribeOutlet(node);
+        foreach (var node in result.Lakes) node.CycleContext = result.DescribeOutlet(node) + node.CycleContext;
         result.DuplicateParcelSuppression = ResolveDischarge(result.Lakes, id => tin.ParcelRunoff(id));
         int outletId = reaches.Count;
         foreach (var node in result.Lakes)
@@ -360,6 +362,19 @@ public sealed partial class GeodesicTinLakeRouting
             $"insideUnrelated={owners.Any(id => Classify(id) == "unrelated")} owners=[{string.Join(",", owners.Select(id => id + ":" + Classify(id)))}] " +
             $"survivedHierarchySuppression=True suppressedSourceBasins=[{string.Join(",", suppressed)}] " +
             $"topologyTerminal={b.Terminal} terminalOrBlocked={node.Terminal} exitsAtSpill={node.ExitsAtSpill} visibleOutletSamples={node.OutletPath.Length}";
+    }
+
+    private string DescribeSelfEntry(TinPoint[] path, TinLakeEntry entry)
+    {
+        // Include the below-rim endpoint before clipping replaces it with the rim.
+        // Retain both ends of a long trace, with the decisive approach also recorded separately.
+        const int sampleLimit = 24;
+        int end = entry.SegmentEnd;
+        var approach = path.Take(end + 1);
+        var samples = end < sampleLimit ? approach : approach.Take(8).Concat(approach.Skip(end - 15));
+        string Point(TinPoint p) => FormattableString.Invariant($"{p.Triangle}:{p.A:R}/{p.B:R}/{p.C:R}@{tin.Height(p):R}");
+        return $" selfEntry={Point(entry.Point)} selfEntryFrom={Point(path[Math.Max(0, end - 1)])} " +
+            $"selfEntryTo={Point(path[end])} selfEntrySegment={end} selfEntryTrace=[{string.Join(",", samples.Select(Point))}]";
     }
 
     private static string DescribeCycles(Dictionary<int, TinLakeFlowNode> graph)

@@ -11,7 +11,7 @@ internal sealed class GeodesicCarvingCheckpoint
     private const int Stage = 1;
     private const int Schema = 1;
     // Bump for changes to ordinary carving, its intermediate TIN/basin rules or surface application.
-    private const int AlgorithmVersion = 1;
+    private const int AlgorithmVersion = 2;
     private const int MaximumEvidenceStringBytes = 16384;
 
     internal Vector3[] Positions;

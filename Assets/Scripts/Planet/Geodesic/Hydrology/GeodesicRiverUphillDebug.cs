@@ -4,7 +4,7 @@ using System.Globalization;
 using System.Linq;
 using UnityEngine;
 
-public enum RiverDebugRejection { HydrologyGrade, VisibleGrade, CentrelineGrade, ProjectionGrade }
+public enum RiverDebugRejection { HydrologyGrade, VisibleGrade, CentrelineGrade, ProjectionGrade, AcceptedRadialVariation }
 
 /// <summary>Observation only. Never inserted into networks, mouths or accumulation.</summary>
 public sealed class RiverUphillDebugReach
@@ -61,8 +61,10 @@ public static class GeodesicRiverUphillDebug
         double[] slopes = reaches.Select(r => r.MaximumSlope).OrderBy(v => v).ToArray();
         double Median(double[] v) => v.Length == 0 ? 0 : (v[(v.Length - 1) / 2] + v[v.Length / 2]) * .5;
         return string.Format(CultureInfo.InvariantCulture,
-            "[GeodesicRiverUphillDebug] enabled=True rejectedUphillReaches={0} yellow={1} orange={2} red={3} maxUphillDelta={4:G9} medianUphillDelta={5:G9} maxUphillSlope={6:G9} medianUphillSlope={7:G9} debugVertices={8} overlayMs={9:F2} maxAccumulatedUphillRise={10:G9} retainedPathPoints={11} slopeAnchors=0.0001/0.01/0.1 bins=<0.001/<0.0316228/remaining",
-            reaches.Count, slopes.Count(s => s < .001), slopes.Count(s => s >= .001 && s < Math.Sqrt(OrangeSlope * RedSlope)),
-            slopes.Count(s => s >= Math.Sqrt(OrangeSlope * RedSlope)), deltas.LastOrDefault(), Median(deltas), slopes.LastOrDefault(), Median(slopes), vertices, milliseconds, reaches.Count == 0 ? 0 : reaches.Max(r => r.TotalRise), reaches.Sum(r => r.Path.Length));
+            "[GeodesicRiverUphillDebug] enabled=True rejectedUphillReaches={0} yellow={1} orange={2} red={3} maxUphillDelta={4:G9} medianUphillDelta={5:G9} maxUphillSlope={6:G9} medianUphillSlope={7:G9} debugVertices={8} overlayMs={9:F2} maxAccumulatedUphillRise={10:G9} retainedPathPoints={11} acceptedRadialVariationReaches={12} slopeAnchors=0.0001/0.01/0.1 bins=<0.001/<0.0316228/remaining",
+            reaches.Count(r => r.Reason != RiverDebugRejection.AcceptedRadialVariation), slopes.Count(s => s < .001), slopes.Count(s => s >= .001 && s < Math.Sqrt(OrangeSlope * RedSlope)),
+            slopes.Count(s => s >= Math.Sqrt(OrangeSlope * RedSlope)), deltas.LastOrDefault(), Median(deltas), slopes.LastOrDefault(), Median(slopes), vertices, milliseconds,
+            reaches.Count == 0 ? 0 : reaches.Max(r => r.TotalRise), reaches.Sum(r => r.Path.Length),
+            reaches.Count(r => r.Reason == RiverDebugRejection.AcceptedRadialVariation));
     }
 }

@@ -77,7 +77,7 @@ public static class GeodesicOceanDrainagePlan
 
     public static bool TraceToOcean(GeodesicTinHydrology tin, TinPoint source)
     {
-        var path = tin.TraceLakeOutlet(source, null, out var termination);
+        var path = tin.TraceLakeOutlet(source, null, out var termination, requireCompletedGrade: true);
         return path.Length > 0 && ConfirmedOcean(tin, new TinParcelDestination(path[path.Length - 1], termination));
     }
 

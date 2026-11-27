@@ -242,6 +242,8 @@ public sealed class GeodesicBasinInfillTests
         Assert.That(final.Networks.Count, Is.GreaterThan(0));
         Assert.That(final.Diagnostics.VisibleMaterialUphillSegments, Is.Zero);
         Assert.That(final.Diagnostics.HydrologyUphillSegments, Is.Zero);
+        Assert.That(final.Diagnostics.CompletedRadialRiseSegments, Is.Positive);
+        Assert.That(final.Diagnostics.RadialOnlyRiseSegments, Is.EqualTo(final.Diagnostics.CompletedRadialRiseSegments));
     }
 
     [Test]

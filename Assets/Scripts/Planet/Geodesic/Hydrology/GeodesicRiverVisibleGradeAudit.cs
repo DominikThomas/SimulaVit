@@ -10,7 +10,7 @@ public sealed class RiverVisibleGradeSample
 {
     public int SourceTriangle, RenderedSegment;
     public Vector3 Start, End;
-    public double RoutingDeltaH, VisibleDeltaH, Distance;
+    public double RoutingDeltaH, VisibleDeltaH, CompletedRadialDeltaH, Distance;
     public double RoutingSlope => Distance > 0 ? RoutingDeltaH / Distance : 0;
     public double VisibleSlope => Distance > 0 ? VisibleDeltaH / Distance : 0;
     public RiverVisibleGrade Grade;
@@ -82,7 +82,8 @@ public sealed class GeodesicRiverVisibleGradeAudit
                 samplingNoise.Add(Math.Abs(terrain.Radius(points[j]) - heights[j]));
                 if (j == 0) continue;
                 Samples.Add(new RiverVisibleGradeSample { SourceTriangle = source, RenderedSegment = Segments.Count,
-                    Start = points[j - 1], End = points[j], VisibleDeltaH = heights[j] - heights[j - 1],
+                    Start = points[j - 1], End = points[j], CompletedRadialDeltaH = heights[j] - heights[j - 1],
+                    VisibleDeltaH = terrain.InterpolationReference(points[j], true) - terrain.InterpolationReference(points[j - 1], true),
                     RoutingDeltaH = terrain.InterpolationReference(points[j], false) - terrain.InterpolationReference(points[j - 1], false),
                     Distance = SurfaceDistance(points[j - 1], points[j], radius) });
             }
@@ -152,11 +153,13 @@ public sealed class GeodesicRiverVisibleGradeAudit
     }
 
     public string Summary() => string.Format(CultureInfo.InvariantCulture,
-        "[GeodesicRiverVisibleGradeAudit] renderedSegments={0} sampledIntervals={1} visibleDownhill={2} visibleFlat={3} visibleSlightUphill={4} visibleModerateUphill={5} visibleStrongUphill={6} maxVisibleUphillSlope={7:G9} maxVisibleUphillDelta={8:G9} routingValidButVisibleUphill={9} uphillRenderedLengthPercent={10:F6} epsilon={11:G9} samplingNoiseP95={12:G9} closedBasinTerminations={13} unexpectedTerminations={14} closedBasinMarkers={15} unexpectedMarkers={16} routingDownhillVisibleSlight={17} routingDownhillVisibleStrong={18} routingFlatVisibleUphill={19}",
+        "[GeodesicRiverVisibleGradeAudit] renderedSegments={0} sampledIntervals={1} visibleDownhill={2} visibleFlat={3} visibleSlightUphill={4} visibleModerateUphill={5} visibleStrongUphill={6} maxVisibleUphillSlope={7:G9} maxVisibleUphillDelta={8:G9} routingValidButVisibleUphill={9} uphillRenderedLengthPercent={10:F6} epsilon={11:G9} samplingNoiseP95={12:G9} closedBasinTerminations={13} unexpectedTerminations={14} closedBasinMarkers={15} unexpectedMarkers={16} routingDownhillVisibleSlight={17} routingDownhillVisibleStrong={18} routingFlatVisibleUphill={19} completedRadialRiseIntervals={20} radialOnlyRiseIntervals={21}",
         Segments.Count, Samples.Count, Segments.Count(s => s.Grade == RiverVisibleGrade.Downhill), Segments.Count(s => s.Grade == RiverVisibleGrade.Flat),
         Segments.Count(s => s.Grade == RiverVisibleGrade.SlightUphill), Segments.Count(s => s.Grade == RiverVisibleGrade.ModerateUphill),
         Segments.Count(s => s.Grade == RiverVisibleGrade.StrongUphill), Segments.Count == 0 ? 0 : Segments.Max(s => s.MaximumUphillSlope),
         Samples.Count == 0 ? 0 : Samples.Max(s => Math.Max(0, s.VisibleDeltaH)), RoutingValidButVisibleUphill, UphillLengthPercent, Epsilon,
         SamplingNoiseP95, ClosedBasinTerminations, UnexpectedTerminations, ClosedBasinMarkers, UnexpectedMarkers,
-        RoutingDownhillVisibleSlight, RoutingDownhillVisibleStrong, RoutingFlatVisibleUphill);
+        RoutingDownhillVisibleSlight, RoutingDownhillVisibleStrong, RoutingFlatVisibleUphill,
+        Samples.Count(s => s.CompletedRadialDeltaH > Epsilon),
+        Samples.Count(s => s.CompletedRadialDeltaH > Epsilon && s.VisibleDeltaH <= Epsilon));
 }

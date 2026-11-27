@@ -12,7 +12,7 @@ public sealed partial class GeodesicRiverSystem
 {
     // Independent of Milestone 2. Bump the algorithm for ribbon/draping/outlet
     // mathematics, and the schema for payload changes. No assembly MVID in keys.
-    private const int RiverPresentationStage = 6, RiverPresentationSchema = 1, RiverPresentationAlgorithm = 1;
+    private const int RiverPresentationStage = 6, RiverPresentationSchema = 2, RiverPresentationAlgorithm = 3;
     private const int MaximumPresentationVertices = 4_000_000, MaximumPresentationIndices = 24_000_000;
     private SnapshotRecord presentationAuthority;
     private GeodesicTinHydrology presentationTin;
@@ -58,7 +58,6 @@ public sealed partial class GeodesicRiverSystem
 
     private PresentationRecord RiverPresentationRecord()
     {
-        // Unintegrated historical rendering can mutate raw termination fields.
         // Only a verified completed authority record is a safe parent proof.
         if (presentationAuthority?.Digest == null || DrainageDelivery == null || !planet.enableGeodesicRivers ||
             showRejectedUphillRiverSegments || TinLakeRouting == null || lakeSediment == null)
@@ -167,7 +166,7 @@ public sealed partial class GeodesicRiverSystem
         return true;
     }
 
-    private void SaveRiverPresentation(PresentationRecord record, int[] diagnosticBase)
+    private void SaveRiverPresentation(PresentationRecord record, int rejectedBeforePresentation)
     {
         if (record == null || riverMesh == null || OutletAudit == null || presentationBuildBands == null) return;
         var watch = Stopwatch.StartNew();
@@ -180,7 +179,8 @@ public sealed partial class GeodesicRiverSystem
         data.GeometryHash = PlanetGenerationCache.HashBinaryKey(data.MeshBody);
         using (var stream = new MemoryStream())
         {
-            using (var writer = new BinaryWriter(stream, System.Text.Encoding.UTF8, true)) WritePresentationMetadata(writer, diagnosticBase);
+            using (var writer = new BinaryWriter(stream, System.Text.Encoding.UTF8, true))
+                WritePresentationMetadata(writer, rejectedBeforePresentation);
             data.Metadata = stream.ToArray();
         }
         bool comparable = lastPresentationKey != null && record.Key.AsSpan().SequenceEqual(lastPresentationKey);
@@ -303,11 +303,10 @@ public sealed partial class GeodesicRiverSystem
         riverMesh.RecalculateBounds();
     }
 
-    private void WritePresentationMetadata(BinaryWriter w, int[] before)
+    private void WritePresentationMetadata(BinaryWriter w, int rejectedBeforePresentation)
     {
         w.Write(visibleReaches); w.Write(riverMouths);
-        w.Write(TinDiagnostics.RejectedPostProcessing - before[0]); w.Write(TinDiagnostics.UnexpectedBrokenNetworks - before[1]);
-        w.Write(TinDiagnostics.UnexpectedInlandBreaks - before[2]); w.Write(TinDiagnostics.Confluences - before[3]);
+        w.Write(TinDiagnostics.RejectedPostProcessing - rejectedBeforePresentation);
         S.Write(w, mouths, (b, p) =>
         {
             b.Write(p.UpstreamCell); b.Write(p.OceanCell); b.Write(p.DrainageArea); b.Write(p.AccumulatedRunoff);
@@ -341,7 +340,7 @@ public sealed partial class GeodesicRiverSystem
     private sealed class PresentationMetadata
     {
         internal int Visible, MouthCount;
-        internal int[] Delta;
+        internal int RejectedPostProcessing;
         internal GeodesicRiverMouth[] Mouths;
         internal (int Source, Vector3[] Points)[] Paths;
         internal (string Route, int Start, int End, RiverGeometryKind Kind, GeodesicTinLakeCrossings.Crossing Crossing)[] Spans;
@@ -356,9 +355,10 @@ public sealed partial class GeodesicRiverSystem
         {
             int triangles = owner.TinDrainage.TriangleCount, networks = owner.TinDrainage.Networks.Count;
             int cells = owner.planet.GeodesicTopology.CellCount;
-            var m = new PresentationMetadata { Visible = S.Id(r, vertices + 1), MouthCount = S.Id(r, networks + 1), Delta = new int[4] };
-            for (int i = 0; i < m.Delta.Length; i++)
-            { m.Delta[i] = r.ReadInt32(); S.Require(Math.Abs((long)m.Delta[i]) <= (long)networks * 4, "Invalid presentation observation delta."); }
+            var m = new PresentationMetadata { Visible = S.Id(r, vertices + 1), MouthCount = S.Id(r, networks + 1),
+                RejectedPostProcessing = r.ReadInt32() };
+            S.Require(m.RejectedPostProcessing >= 0 && m.RejectedPostProcessing <= (long)networks * 4,
+                "Invalid presentation rejection count.");
             m.Mouths = S.Read(r, networks, 37, b => new GeodesicRiverMouth
             {
                 UpstreamCell = S.Id(b, cells, -1), OceanCell = S.Id(b, cells, -1), DrainageArea = S.Double(b), AccumulatedRunoff = S.Double(b),
@@ -422,8 +422,7 @@ public sealed partial class GeodesicRiverSystem
         internal void Apply(GeodesicRiverSystem owner, GeodesicDrainageDelivery observationDelivery)
         {
             owner.visibleReaches = Visible; owner.riverMouths = MouthCount;
-            owner.TinDiagnostics.RejectedPostProcessing += Delta[0]; owner.TinDiagnostics.UnexpectedBrokenNetworks += Delta[1];
-            owner.TinDiagnostics.UnexpectedInlandBreaks += Delta[2]; owner.TinDiagnostics.Confluences += Delta[3];
+            owner.TinDiagnostics.RejectedPostProcessing += RejectedPostProcessing;
             owner.mouths.AddRange(Mouths);
             foreach (var path in Paths) owner.paths.Add(path.Source, path.Points);
             owner.riverColourSpans.AddRange(Spans); owner.meanderDiagnosticSpans.AddRange(Diagnostics);

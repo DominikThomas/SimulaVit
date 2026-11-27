@@ -59,6 +59,7 @@ public sealed class GeodesicRiverUphillDebugIntegrationTests
                 if (enabled)
                 {
                     Assert.That(rivers.UphillDebugVertexCount, Is.GreaterThan(0));
+                    Assert.That(rivers.RejectedUphillDebug.Any(r => r.Reason == RiverDebugRejection.AcceptedRadialVariation), Is.True);
                     var debugMesh = (Mesh)typeof(GeodesicRiverSystem).GetField("uphillDebugMesh", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(rivers);
                     CollectionAssert.AreEqual(rivers.RejectedUphillDebug.SelectMany(r => Enumerable.Repeat(
                         GeodesicRiverUphillDebug.SeverityColor(r.MaximumSlope), r.Path.Length * (raw ? 1 : 3))), debugMesh.colors);

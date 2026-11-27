@@ -102,6 +102,19 @@ public sealed class GeodesicDrainageDeliveryTests
         Assert.That(r.VisualOnlyBreaks, Is.EqualTo(1)); Assert.That(r.LogicalDisconnected, Is.Zero);
         Assert.That(r.DirectOcean, Is.EqualTo(direct)); Accounted(r);
     }
+    [Test] public void RejectedRibbonDoesNotCountAnExistingLogicalFailureAgain()
+    {
+        var tin = Plane();
+        tin.Networks[0].Termination = TinTermination.RoutingFailure;
+        var delivery = GeodesicDrainageDelivery.Analyze(tin);
+        int disconnected = delivery.LogicalDisconnected, unknown = delivery.UnknownBreaks;
+        Assert.That(disconnected, Is.Positive);
+        delivery.ObserveVisualBreak(0, "centreline");
+        Assert.That(delivery.CentrelineRejected, Is.EqualTo(1));
+        Assert.That(delivery.LogicalDisconnected, Is.EqualTo(disconnected));
+        Assert.That(delivery.UnknownBreaks, Is.EqualTo(unknown));
+        Accounted(delivery);
+    }
     [Test] public void SharedSaddleLogicalTransferNeedsNoRibbonAndNeverAddsReciprocalEdge()
     {
         var tin = Plane(); int parcel = Enumerable.Range(0, tin.TriangleCount).First(t => tin.ParcelRunoff(t) > 0);
